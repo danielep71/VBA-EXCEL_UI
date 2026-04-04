@@ -18,6 +18,7 @@ The project is intended for workbook-driven solutions that need a constrained, k
 /README.md
 /src/M_EXCEL_UI.bas
 /demo/M_EXCEL_UI_DEMO.bas
+/demo/EXCEL_UI_DEMO.xlsm
 /test/M_EXCEL_UI_REGRESSION_TESTS.bas
 ```
 
