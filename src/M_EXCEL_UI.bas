@@ -1,3 +1,4 @@
+Attribute VB_Name = "M_EXCEL_UI"
 Option Explicit
 
 '
@@ -78,6 +79,12 @@ Option Explicit
 '
 ' UPDATED
 '   2026-04-04
+'
+' AUTHOR
+'   Daniele Penza
+'
+' VERSION
+'   1.0.0
 '==============================================================================
 '
 
@@ -167,6 +174,17 @@ End Enum
         ByVal dwErrCode As Long)
 
 #End If
+
+Private Const WS_THICKFRAME          As Long = &H40000  'Resizable sizing frame
+
+#If VBA7 Then
+    Private m_OriginalMainWindowStyle As LongPtr        'Snapshotted original Excel window style
+#Else
+    Private m_OriginalMainWindowStyle As Long           'Snapshotted original Excel window style
+#End If
+
+Private m_HasOriginalMainWindowStyle As Boolean         'TRUE when original style has been captured
+
 
 '------------------------------------------------------------------------------
 ' DECLARE: CONSTANTS
@@ -380,7 +398,7 @@ Public Sub K_SetExcelUI( _
 
                             'Attempt headings update and log element failure without stopping
                                 If Not K_TrySetBooleanProperty(W, "DisplayHeadings", ShowFlag, Msg) Then
-                                    K_LogFailure PROC, "Headings [" & W.caption & "]", Msg
+                                    K_LogFailure PROC, "Headings [" & W.Caption & "]", Msg
                                 End If
 
                         End If
@@ -393,7 +411,7 @@ Public Sub K_SetExcelUI( _
 
                             'Attempt workbook-tabs update and log element failure without stopping
                                 If Not K_TrySetBooleanProperty(W, "DisplayWorkbookTabs", ShowFlag, Msg) Then
-                                    K_LogFailure PROC, "WorkbookTabs [" & W.caption & "]", Msg
+                                    K_LogFailure PROC, "WorkbookTabs [" & W.Caption & "]", Msg
                                 End If
 
                         End If
@@ -406,7 +424,7 @@ Public Sub K_SetExcelUI( _
 
                             'Attempt gridlines update and log element failure without stopping
                                 If Not K_TrySetBooleanProperty(W, "DisplayGridlines", ShowFlag, Msg) Then
-                                    K_LogFailure PROC, "Gridlines [" & W.caption & "]", Msg
+                                    K_LogFailure PROC, "Gridlines [" & W.Caption & "]", Msg
                                 End If
 
                         End If
@@ -650,10 +668,14 @@ Private Function K_TrySetTitleBarVisible( _
 '   Excel does not expose direct title-bar visibility control in the object
 '   model, so the project must update the underlying window style via WinAPI.
 '
+'   To improve the visual result when hiding, this routine also removes the
+'   sizing frame (WS_THICKFRAME). The original window style is snapshotted and
+'   restored exactly when showing again.
+'
 ' INPUTS
 '   IsVisible
-'     TRUE  => show title bar / system menu / min-max buttons
-'     FALSE => hide title bar / system menu / min-max buttons
+'     TRUE  => restore the original snapshotted Excel window style
+'     FALSE => hide title bar / system controls / sizing frame
 '
 '   FailMsg
 '     Receives a diagnostic reason when the function returns FALSE.
@@ -662,24 +684,10 @@ Private Function K_TrySetTitleBarVisible( _
 '   TRUE  => title-bar update succeeded
 '   FALSE => title-bar update failed
 '
-' BEHAVIOR
-'   - Reads the Excel window handle from Application.Hwnd.
-'   - Reads the current GWL_STYLE value using the bitness-safe helper.
-'   - Updates the style bits controlling caption and standard system controls.
-'   - Forces a non-client frame refresh via SetWindowPos using the canonical
-'     no-move / no-size frame-change pattern.
-'
-' ERROR POLICY
-'   - Does NOT raise to callers.
-'   - Returns FALSE and populates FailMsg on failure.
-'
-' DEPENDENCIES
-'   - K_TryGetWindowStyle
-'   - K_TrySetWindowStyle
-'   - K_TryRefreshWindowFrame
-'
 ' NOTES
 '   - Windows-only.
+'   - While hidden, the Excel window is intentionally less frame-like and may
+'     not be user-resizable in the normal way.
 '   - This routine intentionally does NOT toggle Application.DisplayFullScreen.
 '
 ' UPDATED
@@ -727,29 +735,49 @@ Private Function K_TrySetTitleBarVisible( _
             GoTo SafeExit
         End If
 
+    'Snapshot the original window style once so SHOW can restore it exactly
+        If Not m_HasOriginalMainWindowStyle Then
+            m_OriginalMainWindowStyle = CurrentStyle
+            m_HasOriginalMainWindowStyle = True
+        End If
+
 '------------------------------------------------------------------------------
 ' COMPUTE UPDATED WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Initialize updated style from current style
-        NewStyle = CurrentStyle
-
-    'Apply title-bar-related style bits
+    'Restore the exact original snapshotted style when showing
         If IsVisible Then
 
-            'Restore caption / system menu / min-max buttons
-                NewStyle = NewStyle Or WS_SYSMENU
-                NewStyle = NewStyle Or WS_MAXIMIZEBOX
-                NewStyle = NewStyle Or WS_MINIMIZEBOX
-                NewStyle = NewStyle Or WS_CAPTION
+            'Use the original captured style when available
+                If m_HasOriginalMainWindowStyle Then
+                    NewStyle = m_OriginalMainWindowStyle
+                Else
+                    NewStyle = CurrentStyle
+                    NewStyle = NewStyle Or WS_SYSMENU
+                    NewStyle = NewStyle Or WS_MAXIMIZEBOX
+                    NewStyle = NewStyle Or WS_MINIMIZEBOX
+                    NewStyle = NewStyle Or WS_CAPTION
+                    NewStyle = NewStyle Or WS_THICKFRAME
+                End If
 
         Else
 
-            'Remove caption / system menu / min-max buttons
+            'Start from the current style and remove frame-related bits
+                NewStyle = CurrentStyle
                 NewStyle = NewStyle And Not WS_SYSMENU
                 NewStyle = NewStyle And Not WS_MAXIMIZEBOX
                 NewStyle = NewStyle And Not WS_MINIMIZEBOX
                 NewStyle = NewStyle And Not WS_CAPTION
+                NewStyle = NewStyle And Not WS_THICKFRAME
 
+        End If
+
+'------------------------------------------------------------------------------
+' SHORT-CIRCUIT NO-OP
+'------------------------------------------------------------------------------
+    'Skip the write when no style change is required
+        If NewStyle = CurrentStyle Then
+            K_TrySetTitleBarVisible = True
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
