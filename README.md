@@ -4,9 +4,12 @@ VBA utilities for controlling the Excel UI shell on Windows, including Ribbon, s
 
 ## Overview
 
-This repository provides a small VBA toolkit for Excel UI control and validation. It currently includes:
+This repository provides a compact VBA toolkit for Excel UI control, demonstration, and regression validation on Excel for Windows.
+
+It currently includes:
 
 - a **core module** for applying UI visibility changes through a safe tri-state API
+- a **structured result class** for callers that want diagnostics as data rather than only Immediate Window logging
 - a **demo module** for building and driving a worksheet-based showcase of the UI features
 - a **regression test module** for validating the public behavior of the toolkit
 
@@ -17,12 +20,13 @@ The project is intended for workbook-driven solutions that need a constrained, k
 ```text
 /README.md
 /src/M_EXCEL_UI.bas
+/src/C_UIResult.cls
 /demo/M_EXCEL_UI_DEMO.bas
 /demo/EXCEL_UI_DEMO.xlsm
 /test/M_EXCEL_UI_REGRESSION_TESTS.bas
 ```
 
-## Modules
+## Components
 
 ### `M_EXCEL_UI.bas`
 
@@ -32,6 +36,7 @@ It exposes:
 
 - `K_UIVisibility`
 - `K_SetExcelUI`
+- `K_SetExcelUI_WithResult`
 - `K_HideExcelUI`
 - `K_ShowExcelUI`
 
@@ -53,6 +58,19 @@ Window-level:
 Window-frame:
 
 - Title Bar (via WinAPI on the Excel window represented by `Application.Hwnd`)
+
+### `C_UIResult.cls`
+
+Lightweight structured result object used by `K_SetExcelUI_WithResult`.
+
+It provides:
+
+- `Succeeded`
+- `FailureCount`
+- `Failure(Index)`
+- `AddFailure`
+
+This allows callers to inspect whether a best-effort UI operation completed cleanly and, if not, enumerate the element-level failures that were recorded.
 
 ### `M_EXCEL_UI_DEMO.bas`
 
@@ -102,6 +120,8 @@ The test harness validates:
 - leave-unchanged / no-op semantics
 - convenience wrappers
 - title-bar hide / show round-trip
+- structured-result clean success path
+- structured-result no-op / leave-unchanged success path
 
 It also snapshots current UI state before test execution and attempts to restore it afterward.
 
@@ -123,7 +143,19 @@ This avoids the ambiguity of omitted Boolean arguments and makes caller intent e
 
 ### Best-effort processing
 
-`K_SetExcelUI` is designed so that one failed UI element does not prevent the rest of the requested changes from being attempted.
+`K_SetExcelUI` and `K_SetExcelUI_WithResult` are designed so that one failed UI element does not prevent the rest of the requested changes from being attempted.
+
+### Fire-and-forget vs structured diagnostics
+
+The toolkit provides two complementary entry points:
+
+- `K_SetExcelUI`  
+  Best-effort, fail-soft application with diagnostics written to the Immediate Window.
+
+- `K_SetExcelUI_WithResult`  
+  Best-effort, fail-soft application that returns a `C_UIResult` object containing any recorded failures.
+
+This allows callers to choose between a simple procedural API and a structured inspection model.
 
 ### Title-bar control
 
@@ -147,6 +179,31 @@ K_SetExcelUI _
     WorkbookTabs:=K_UI_Hide, _
     Gridlines:=K_UI_Hide, _
     TitleBar:=K_UI_Hide
+```
+
+### `K_SetExcelUI_WithResult`
+
+Selective UI control entry point returning structured diagnostics.
+
+Example:
+
+```vb
+Dim R As C_UIResult
+
+Set R = K_SetExcelUI_WithResult( _
+            Ribbon:=K_UI_Hide, _
+            StatusBar:=K_UI_Show, _
+            ScrollBars:=K_UI_Hide, _
+            FormulaBar:=K_UI_LeaveUnchanged, _
+            Headings:=K_UI_Hide, _
+            WorkbookTabs:=K_UI_Hide, _
+            Gridlines:=K_UI_Hide, _
+            TitleBar:=K_UI_Hide)
+
+If Not R.Succeeded Then
+    Debug.Print "Failure count: " & R.FailureCount
+    Debug.Print R.Failure(1)
+End If
 ```
 
 ### `K_HideExcelUI`
@@ -185,8 +242,9 @@ Demo_CreateExcelUISheet
 ## Regression Test Quick Start
 
 1. Import `M_EXCEL_UI.bas`.
-2. Import `M_EXCEL_UI_REGRESSION_TESTS.bas`.
-3. Run one of:
+2. Import `C_UIResult.cls`.
+3. Import `M_EXCEL_UI_REGRESSION_TESTS.bas`.
+4. Run one of:
 
 ```vb
 Test_EXCEL_UI_RunCore
@@ -213,12 +271,14 @@ Suggested order for manual validation:
 Import:
 
 - `M_EXCEL_UI.bas`
+- `C_UIResult.cls`
 
 ### Core + demo
 
 Import:
 
 - `M_EXCEL_UI.bas`
+- `C_UIResult.cls`
 - `M_EXCEL_UI_DEMO.bas`
 
 ### Core + tests
@@ -226,6 +286,7 @@ Import:
 Import:
 
 - `M_EXCEL_UI.bas`
+- `C_UIResult.cls`
 - `M_EXCEL_UI_REGRESSION_TESTS.bas`
 
 ### Full repository behavior
@@ -233,6 +294,7 @@ Import:
 Import:
 
 - `M_EXCEL_UI.bas`
+- `C_UIResult.cls`
 - `M_EXCEL_UI_DEMO.bas`
 - `M_EXCEL_UI_REGRESSION_TESTS.bas`
 
@@ -257,6 +319,7 @@ Import:
 
 - Ribbon control relies on `Application.ExecuteExcel4Macro`
 - title-bar control targets the Excel window represented by `Application.Hwnd`
+- `K_SetExcelUI_WithResult` depends on `C_UIResult.cls`
 - the toolkit is designed for practical workbook UI control, demos, and regression validation rather than for persistent per-user shell personalization
 
 ## Suggested Use Cases
@@ -266,6 +329,7 @@ Import:
 - controlled presentation environments
 - reducing visible Excel chrome in client-facing solutions
 - regression validation after refactoring WinAPI/UI code
+- higher-level orchestration that needs structured UI-operation diagnostics
 
 ## Status
 
