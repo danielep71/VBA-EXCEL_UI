@@ -59,19 +59,6 @@ Window-frame:
 
 - Title Bar (via WinAPI on the Excel window represented by `Application.Hwnd`)
 
-### `C_UIResult.cls`
-
-Lightweight structured result object used by `K_SetExcelUI_WithResult`.
-
-It provides:
-
-- `Succeeded`
-- `FailureCount`
-- `Failure(Index)`
-- `AddFailure`
-
-This allows callers to inspect whether a best-effort UI operation completed cleanly and, if not, enumerate the element-level failures that were recorded.
-
 ### `M_EXCEL_UI_DEMO.bas`
 
 Worksheet-based demo and demo-sheet builder.
@@ -124,6 +111,19 @@ The test harness validates:
 - structured-result no-op / leave-unchanged success path
 
 It also snapshots current UI state before test execution and attempts to restore it afterward.
+
+### `C_UIResult.cls`
+
+Lightweight structured result object used by `K_SetExcelUI_WithResult`.
+
+It provides:
+
+- `Succeeded`
+- `FailureCount`
+- `Failure(Index)`
+- `AddFailure`
+
+This allows callers to inspect whether a best-effort UI operation completed cleanly and, if not, enumerate the element-level failures that were recorded.
 
 ## Core Design
 
