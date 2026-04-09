@@ -3,14 +3,14 @@ Option Explicit
 
 '
 '==============================================================================
-'                         MODULE: EXCEL UI / SHELL CONTROL
+'                    MODULE: K_UI_EXCEL_SHELL_CONTROL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Centralize visibility control for the Excel UI elements managed by this
 '   module, combining:
 '     - Excel object-model UI elements
-'     - WinAPI-based title-bar control for the Excel window represented by
-'       Application.Hwnd
+'     - WinAPI-based title-bar control for the Excel main window represented
+'       by Application.Hwnd
 '
 ' WHY THIS EXISTS
 '   Some workbook-driven solutions need to present Excel in a constrained,
@@ -33,10 +33,11 @@ Option Explicit
 '   - K_TrySetTitleBarVisible
 '   - K_TrySetRibbonVisible
 '   - K_TrySetBooleanProperty
-'   - K_TrySetWindowStyle
 '   - K_TryGetWindowStyle
+'   - K_TrySetWindowStyle
 '   - K_TryRefreshWindowFrame
 '   - K_VisibilityToBoolean
+'   - K_BuildRuntimeErrorText
 '   - K_LogFailure
 '   - WinAPI declarations / constants
 '
@@ -53,8 +54,8 @@ Option Explicit
 '       * Gridlines
 '
 '   - Title bar:
-'       * applied to the Excel window represented by Application.Hwnd through
-'         WinAPI style update + non-client frame refresh
+'       * applied to the Excel main window represented by Application.Hwnd
+'         through WinAPI style update + non-client frame refresh
 '
 ' ERROR POLICY
 '   - Public entry points are fail-soft.
@@ -70,15 +71,18 @@ Option Explicit
 '     and bitness-safe WinAPI wrappers.
 '
 ' NOTES
-'   - This module does NOT snapshot and restore prior UI state.
+'   - This module does NOT snapshot and restore prior Excel object-model UI
+'     state.
 '   - K_ShowExcelUI means "show all managed UI", not "restore previous state".
 '   - K_SetExcelUI is the preferred entry point for selective control.
 '   - Ribbon control relies on Application.ExecuteExcel4Macro.
 '   - Title-bar control affects the Excel window represented by
 '     Application.Hwnd, not a user-specific saved UI state.
+'   - The original main-window style is snapshotted once, on first title-bar
+'     manipulation, so it can later be restored exactly.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '
 ' AUTHOR
 '   Daniele Penza
@@ -175,32 +179,33 @@ End Enum
 
 #End If
 
-Private Const WS_THICKFRAME          As Long = &H40000  'Resizable sizing frame
+'------------------------------------------------------------------------------
+' DECLARE: PRIVATE CONSTANTS
+'------------------------------------------------------------------------------
+Private Const GWL_STYLE          As Long = -16       'Window style index
 
+Private Const WS_CAPTION         As Long = &HC00000  'Caption / title bar
+Private Const WS_SYSMENU         As Long = &H80000   'System menu
+Private Const WS_THICKFRAME      As Long = &H40000   'Resizable sizing frame
+Private Const WS_MINIMIZEBOX     As Long = &H20000   'Minimize button
+Private Const WS_MAXIMIZEBOX     As Long = &H10000   'Maximize button
+
+Private Const SWP_NOSIZE         As Long = &H1       'Preserve current size
+Private Const SWP_NOMOVE         As Long = &H2       'Preserve current position
+Private Const SWP_NOZORDER       As Long = &H4       'Do not change Z order
+Private Const SWP_FRAMECHANGED   As Long = &H20      'Repaint non-client frame
+Private Const SWP_NOOWNERZORDER  As Long = &H200     'Do not change owner Z order
+
+'------------------------------------------------------------------------------
+' DECLARE: PRIVATE MODULE STATE
+'------------------------------------------------------------------------------
 #If VBA7 Then
-    Private m_OriginalMainWindowStyle As LongPtr        'Snapshotted original Excel window style
+    Private m_OriginalMainWindowStyle As LongPtr      'Snapshotted original Excel main-window style
 #Else
-    Private m_OriginalMainWindowStyle As Long           'Snapshotted original Excel window style
+    Private m_OriginalMainWindowStyle As Long         'Snapshotted original Excel main-window style
 #End If
 
-Private m_HasOriginalMainWindowStyle As Boolean         'TRUE when original style has been captured
-
-
-'------------------------------------------------------------------------------
-' DECLARE: CONSTANTS
-'------------------------------------------------------------------------------
-Private Const GWL_STYLE              As Long = -16       'Window style index
-
-Private Const WS_CAPTION             As Long = &HC00000  'Caption / title bar
-Private Const WS_SYSMENU             As Long = &H80000   'System menu
-Private Const WS_MAXIMIZEBOX         As Long = &H10000   'Maximize button
-Private Const WS_MINIMIZEBOX         As Long = &H20000   'Minimize button
-
-Private Const SWP_NOSIZE             As Long = &H1       'Preserve current size
-Private Const SWP_NOMOVE             As Long = &H2       'Preserve current position
-Private Const SWP_NOZORDER           As Long = &H4       'Do not change Z order
-Private Const SWP_FRAMECHANGED       As Long = &H20      'Repaint non-client frame
-Private Const SWP_NOOWNERZORDER      As Long = &H200     'Do not change owner Z order
+Private m_HasOriginalMainWindowStyle As Boolean       'TRUE when original style has been captured
 
 Public Sub K_SetExcelUI( _
     Optional ByVal Ribbon As K_UIVisibility = K_UI_LeaveUnchanged, _
@@ -221,7 +226,7 @@ Public Sub K_SetExcelUI( _
 '   this module.
 '
 ' WHY THIS EXISTS
-'   A Boolean-based "hide" routine is error-prone because omitted optional
+'   A Boolean-based "hide/show" routine is error-prone because omitted optional
 '   arguments can accidentally imply FALSE / hidden.
 '
 '   This routine uses an explicit tri-state API:
@@ -269,9 +274,9 @@ Public Sub K_SetExcelUI( _
 '     K_UI_LeaveUnchanged   => do not touch gridlines
 '
 '   TitleBar (optional)
-'     K_UI_Show             => show the title bar of the Excel window
+'     K_UI_Show             => show the title bar of the Excel main window
 '                               represented by Application.Hwnd
-'     K_UI_Hide             => hide the title bar of the Excel window
+'     K_UI_Hide             => hide the title bar of the Excel main window
 '                               represented by Application.Hwnd
 '     K_UI_LeaveUnchanged   => do not touch title bar
 '
@@ -283,7 +288,7 @@ Public Sub K_SetExcelUI( _
 '     level.
 '   - Applies headings / workbook tabs / gridlines to every open Excel window
 '     in the current Excel instance.
-'   - Applies title-bar visibility to the Excel window represented by
+'   - Applies title-bar visibility to the Excel main window represented by
 '     Application.Hwnd via WinAPI.
 '   - Uses best-effort processing: one failed UI element does not prevent
 '     subsequent UI elements from being attempted.
@@ -305,7 +310,7 @@ Public Sub K_SetExcelUI( _
 '   - Changes affect the current Excel instance, not only the active workbook.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -314,64 +319,72 @@ Public Sub K_SetExcelUI( _
 '------------------------------------------------------------------------------
     Dim W                   As Window    'Workbook window in current Excel instance
     Dim ShowFlag            As Boolean   'Converted Boolean visibility target
-    Dim Msg                 As String    'Immediate Window diagnostic message
-    Const PROC As String = "K_SetExcelUI"    'Procedure name for diagnostics
+    Dim Msg                 As String    'Element-level diagnostic message
+    Const PROC As String = "K_SetExcelUI"   'Procedure name for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
-' APPLY APPLICATION-LEVEL UI STATE
+' APPLY: APPLICATION-LEVEL UI STATE
 '------------------------------------------------------------------------------
-    'Apply Ribbon visibility when requested
+    'Apply Ribbon visibility when requested.
         If Ribbon <> K_UI_LeaveUnchanged Then
 
-            'Convert tri-state enum to explicit Boolean visible state
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
                 ShowFlag = K_VisibilityToBoolean(Ribbon)
 
-            'Attempt Ribbon update and log element failure without stopping
+            'Attempt the Ribbon update and log any element-level failure
+            'without interrupting later operations.
                 If Not K_TrySetRibbonVisible(ShowFlag, Msg) Then
                     K_LogFailure PROC, "Ribbon", Msg
                 End If
 
         End If
 
-    'Apply status-bar visibility when requested
+    'Apply status-bar visibility when requested.
         If StatusBar <> K_UI_LeaveUnchanged Then
 
-            'Convert tri-state enum to explicit Boolean visible state
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
                 ShowFlag = K_VisibilityToBoolean(StatusBar)
 
-            'Attempt status-bar update and log element failure without stopping
+            'Attempt the property write and log any element-level failure
+            'without interrupting later operations.
                 If Not K_TrySetBooleanProperty(Application, "DisplayStatusBar", ShowFlag, Msg) Then
                     K_LogFailure PROC, "StatusBar", Msg
                 End If
 
         End If
 
-    'Apply scroll-bar visibility when requested
+    'Apply scroll-bar visibility when requested.
         If ScrollBars <> K_UI_LeaveUnchanged Then
 
-            'Convert tri-state enum to explicit Boolean visible state
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
                 ShowFlag = K_VisibilityToBoolean(ScrollBars)
 
-            'Attempt scroll-bar update and log element failure without stopping
+            'Attempt the property write and log any element-level failure
+            'without interrupting later operations.
                 If Not K_TrySetBooleanProperty(Application, "DisplayScrollBars", ShowFlag, Msg) Then
                     K_LogFailure PROC, "ScrollBars", Msg
                 End If
 
         End If
 
-    'Apply formula-bar visibility when requested
+    'Apply formula-bar visibility when requested.
         If FormulaBar <> K_UI_LeaveUnchanged Then
 
-            'Convert tri-state enum to explicit Boolean visible state
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
                 ShowFlag = K_VisibilityToBoolean(FormulaBar)
 
-            'Attempt formula-bar update and log element failure without stopping
+            'Attempt the property write and log any element-level failure
+            'without interrupting later operations.
                 If Not K_TrySetBooleanProperty(Application, "DisplayFormulaBar", ShowFlag, Msg) Then
                     K_LogFailure PROC, "FormulaBar", Msg
                 End If
@@ -379,50 +392,57 @@ Public Sub K_SetExcelUI( _
         End If
 
 '------------------------------------------------------------------------------
-' APPLY WINDOW-LEVEL UI STATE
+' APPLY: WINDOW-LEVEL UI STATE
 '------------------------------------------------------------------------------
-    'Apply window-scoped settings only when at least one such element is
-    'requested for change
+    'Process window-scoped UI only when at least one window-level element has
+    'been requested for change.
         If Headings <> K_UI_LeaveUnchanged _
         Or WorkbookTabs <> K_UI_LeaveUnchanged _
         Or Gridlines <> K_UI_LeaveUnchanged Then
 
-            'Apply requested visibility states to each open Excel window
+            'Apply the requested window-level visibility state to each open
+            'Excel window in the current instance.
                 For Each W In Application.Windows
 
-                    'Apply headings visibility when requested
+                    'Apply headings visibility when requested.
                         If Headings <> K_UI_LeaveUnchanged Then
 
-                            'Convert tri-state enum to explicit Boolean visible state
+                            'Convert the tri-state enum to the explicit Boolean
+                            'state expected by the lower-level helper.
                                 ShowFlag = K_VisibilityToBoolean(Headings)
 
-                            'Attempt headings update and log element failure without stopping
+                            'Attempt the property write and log any element-
+                            'level failure without interrupting later operations.
                                 If Not K_TrySetBooleanProperty(W, "DisplayHeadings", ShowFlag, Msg) Then
                                     K_LogFailure PROC, "Headings [" & W.Caption & "]", Msg
                                 End If
 
                         End If
 
-                    'Apply workbook-tabs visibility when requested
+                    'Apply workbook-tabs visibility when requested.
                         If WorkbookTabs <> K_UI_LeaveUnchanged Then
 
-                            'Convert tri-state enum to explicit Boolean visible state
+                            'Convert the tri-state enum to the explicit Boolean
+                            'state expected by the lower-level helper.
                                 ShowFlag = K_VisibilityToBoolean(WorkbookTabs)
 
-                            'Attempt workbook-tabs update and log element failure without stopping
+                            'Attempt the property write and log any element-
+                            'level failure without interrupting later operations.
                                 If Not K_TrySetBooleanProperty(W, "DisplayWorkbookTabs", ShowFlag, Msg) Then
                                     K_LogFailure PROC, "WorkbookTabs [" & W.Caption & "]", Msg
                                 End If
 
                         End If
 
-                    'Apply gridlines visibility when requested
+                    'Apply gridlines visibility when requested.
                         If Gridlines <> K_UI_LeaveUnchanged Then
 
-                            'Convert tri-state enum to explicit Boolean visible state
+                            'Convert the tri-state enum to the explicit Boolean
+                            'state expected by the lower-level helper.
                                 ShowFlag = K_VisibilityToBoolean(Gridlines)
 
-                            'Attempt gridlines update and log element failure without stopping
+                            'Attempt the property write and log any element-
+                            'level failure without interrupting later operations.
                                 If Not K_TrySetBooleanProperty(W, "DisplayGridlines", ShowFlag, Msg) Then
                                     K_LogFailure PROC, "Gridlines [" & W.Caption & "]", Msg
                                 End If
@@ -434,15 +454,17 @@ Public Sub K_SetExcelUI( _
         End If
 
 '------------------------------------------------------------------------------
-' APPLY TITLE-BAR STATE
+' APPLY: TITLE-BAR STATE
 '------------------------------------------------------------------------------
-    'Apply title-bar visibility when requested
+    'Apply title-bar visibility when requested.
         If TitleBar <> K_UI_LeaveUnchanged Then
 
-            'Convert tri-state enum to explicit Boolean visible state
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
                 ShowFlag = K_VisibilityToBoolean(TitleBar)
 
-            'Attempt title-bar update and log element failure without stopping
+            'Attempt the title-bar update and log any element-level failure
+            'without interrupting the caller.
                 If Not K_TrySetTitleBarVisible(ShowFlag, Msg) Then
                     K_LogFailure PROC, "TitleBar", Msg
                 End If
@@ -453,20 +475,18 @@ Public Sub K_SetExcelUI( _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave quietly through the normal termination path.
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write a diagnostic line without interrupting callers
-        K_LogFailure PROC, "Unexpected", _
-            CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Write an unexpected-procedure-level diagnostic line without interrupting
+    'the caller.
+        K_LogFailure PROC, "Unexpected", K_BuildRuntimeErrorText
 
-    'Exit quietly after logging
+    'Exit quietly after logging.
         Resume SafeExit
 
 End Sub
@@ -481,8 +501,8 @@ Public Sub K_HideExcelUI()
 '   Hide all Excel UI elements managed by this module.
 '
 ' WHY THIS EXISTS
-'   Some workbook solutions want a simple one-call way to suppress the managed
-'   Excel shell elements without specifying each element individually.
+'   Some workbook-driven solutions want a simple one-call way to suppress the
+'   managed Excel shell elements without specifying each element individually.
 '
 ' RETURNS
 '   None
@@ -511,20 +531,20 @@ Public Sub K_HideExcelUI()
 '   - For selective control, use K_SetExcelUI directly.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
-' APPLY HIDE-ALL STATE
+' APPLY: HIDE-ALL STATE
 '------------------------------------------------------------------------------
-    'Hide all managed UI elements
+    'Hide all managed UI elements through the central tri-state entry point.
         K_SetExcelUI _
             Ribbon:=K_UI_Hide, _
             StatusBar:=K_UI_Hide, _
@@ -539,20 +559,18 @@ Public Sub K_HideExcelUI()
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave quietly through the normal termination path.
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write a diagnostic line without interrupting callers
-        K_LogFailure "K_HideExcelUI", "Unexpected", _
-            CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Write an unexpected-procedure-level diagnostic line without interrupting
+    'the caller.
+        K_LogFailure "K_HideExcelUI", "Unexpected", K_BuildRuntimeErrorText
 
-    'Exit quietly after logging
+    'Exit quietly after logging.
         Resume SafeExit
 
 End Sub
@@ -595,24 +613,25 @@ Public Sub K_ShowExcelUI()
 '
 ' NOTES
 '   - This means "show all managed UI".
-'   - It does NOT restore a previously captured user-specific state.
+'   - It does NOT restore a previously captured user-specific object-model UI
+'     state.
 '   - For selective control, use K_SetExcelUI directly.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
-' APPLY SHOW-ALL STATE
+' APPLY: SHOW-ALL STATE
 '------------------------------------------------------------------------------
-    'Show all managed UI elements
+    'Show all managed UI elements through the central tri-state entry point.
         K_SetExcelUI _
             Ribbon:=K_UI_Show, _
             StatusBar:=K_UI_Show, _
@@ -627,23 +646,326 @@ Public Sub K_ShowExcelUI()
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave quietly through the normal termination path
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write a diagnostic line without interrupting callers
-        K_LogFailure "K_ShowExcelUI", "Unexpected", _
-            CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
-
+    'Write an unexpected-procedure-level diagnostic line without interrupting
+    'the caller.
+        K_LogFailure "K_ShowExcelUI", "Unexpected", K_BuildRuntimeErrorText
     'Exit quietly after logging
         Resume SafeExit
 
 End Sub
+
+Public Function K_SetExcelUI_WithResult( _
+    Optional ByVal Ribbon As K_UIVisibility = K_UI_LeaveUnchanged, _
+    Optional ByVal StatusBar As K_UIVisibility = K_UI_LeaveUnchanged, _
+    Optional ByVal ScrollBars As K_UIVisibility = K_UI_LeaveUnchanged, _
+    Optional ByVal FormulaBar As K_UIVisibility = K_UI_LeaveUnchanged, _
+    Optional ByVal Headings As K_UIVisibility = K_UI_LeaveUnchanged, _
+    Optional ByVal WorkbookTabs As K_UIVisibility = K_UI_LeaveUnchanged, _
+    Optional ByVal Gridlines As K_UIVisibility = K_UI_LeaveUnchanged, _
+    Optional ByVal TitleBar As K_UIVisibility = K_UI_LeaveUnchanged) As C_UIResult
+
+'
+'==============================================================================
+'                         K_SetExcelUI_WithResult
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Apply the requested visibility state to the Excel UI elements managed by
+'   this module and return a structured result object describing whether any
+'   element-level failures occurred.
+'
+' WHY THIS EXISTS
+'   K_SetExcelUI is the preferred fire-and-forget, fail-soft entry point for
+'   callers that only need best-effort application plus Immediate Window
+'   diagnostics.
+'
+'   Some callers, however, need structured feedback so they can:
+'     - inspect whether the full operation succeeded
+'     - enumerate element-level failures
+'     - surface diagnostics to higher-level orchestration or test logic
+'
+'   This routine provides the same best-effort behavior as K_SetExcelUI, but
+'   returns a C_UIResult instance containing any recorded failures.
+'
+' INPUTS
+'   Ribbon (optional)
+'     K_UI_Show             => show Ribbon
+'     K_UI_Hide             => hide Ribbon
+'     K_UI_LeaveUnchanged   => do not touch Ribbon
+'
+'   StatusBar (optional)
+'     K_UI_Show             => show status bar
+'     K_UI_Hide             => hide status bar
+'     K_UI_LeaveUnchanged   => do not touch status bar
+'
+'   ScrollBars (optional)
+'     K_UI_Show             => show scroll bars
+'     K_UI_Hide             => hide scroll bars
+'     K_UI_LeaveUnchanged   => do not touch scroll bars
+'
+'   FormulaBar (optional)
+'     K_UI_Show             => show formula bar
+'     K_UI_Hide             => hide formula bar
+'     K_UI_LeaveUnchanged   => do not touch formula bar
+'
+'   Headings (optional)
+'     K_UI_Show             => show row / column headings in each window
+'     K_UI_Hide             => hide row / column headings in each window
+'     K_UI_LeaveUnchanged   => do not touch headings
+'
+'   WorkbookTabs (optional)
+'     K_UI_Show             => show workbook tabs in each window
+'     K_UI_Hide             => hide workbook tabs in each window
+'     K_UI_LeaveUnchanged   => do not touch workbook tabs
+'
+'   Gridlines (optional)
+'     K_UI_Show             => show gridlines in each window
+'     K_UI_Hide             => hide gridlines in each window
+'     K_UI_LeaveUnchanged   => do not touch gridlines
+'
+'   TitleBar (optional)
+'     K_UI_Show             => show the title bar of the Excel main window
+'                               represented by Application.Hwnd
+'     K_UI_Hide             => hide the title bar of the Excel main window
+'                               represented by Application.Hwnd
+'     K_UI_LeaveUnchanged   => do not touch title bar
+'
+' RETURNS
+'   C_UIResult
+'     Result object describing:
+'       - whether the overall operation remained fully successful
+'       - each recorded element-level failure, if any
+'
+' BEHAVIOR
+'   - Applies Ribbon / status bar / scroll bars / formula bar at Application
+'     level.
+'   - Applies headings / workbook tabs / gridlines to every open Excel window
+'     in the current Excel instance.
+'   - Applies title-bar visibility to the Excel main window represented by
+'     Application.Hwnd via WinAPI.
+'   - Uses best-effort processing: one failed UI element does not prevent
+'     subsequent UI elements from being attempted.
+'   - Records failures into the returned C_UIResult object instead of relying
+'     only on Immediate Window diagnostics.
+'
+' ERROR POLICY
+'   - Does NOT raise to callers for ordinary element-level failures.
+'   - Returns a populated C_UIResult object even when failures occur.
+'   - Unexpected procedure-level failures are captured as an "Unexpected"
+'     failure entry in the returned result object.
+'
+' DEPENDENCIES
+'   - C_UIResult
+'   - K_TrySetRibbonVisible
+'   - K_TrySetBooleanProperty
+'   - K_TrySetTitleBarVisible
+'   - K_VisibilityToBoolean
+'   - K_BuildRuntimeErrorText
+'
+' NOTES
+'   - This routine mirrors the best-effort semantics of K_SetExcelUI.
+'   - The returned object preserves failure order.
+'   - This routine does not write to the Immediate Window unless the lower-
+'     level helpers themselves do so elsewhere.
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim R                   As C_UIResult 'Structured result object returned to the caller
+    Dim W                   As Window     'Workbook window in current Excel instance
+    Dim ShowFlag            As Boolean    'Converted Boolean visibility target
+    Dim Msg                 As String     'Element-level diagnostic message
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Create the structured result object in its default successful state.
+        Set R = New C_UIResult
+
+    'Route unexpected runtime errors to the local failure handler.
+        On Error GoTo Fail
+
+'------------------------------------------------------------------------------
+' APPLY: APPLICATION-LEVEL UI STATE
+'------------------------------------------------------------------------------
+    'Apply Ribbon visibility when requested.
+        If Ribbon <> K_UI_LeaveUnchanged Then
+
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
+                ShowFlag = K_VisibilityToBoolean(Ribbon)
+
+            'Attempt the Ribbon update and record any element-level failure
+            'without interrupting later operations.
+                If Not K_TrySetRibbonVisible(ShowFlag, Msg) Then
+                    R.AddFailure "Ribbon", Msg
+                End If
+
+        End If
+
+    'Apply status-bar visibility when requested.
+        If StatusBar <> K_UI_LeaveUnchanged Then
+
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
+                ShowFlag = K_VisibilityToBoolean(StatusBar)
+
+            'Attempt the property write and record any element-level failure
+            'without interrupting later operations.
+                If Not K_TrySetBooleanProperty(Application, "DisplayStatusBar", ShowFlag, Msg) Then
+                    R.AddFailure "StatusBar", Msg
+                End If
+
+        End If
+
+    'Apply scroll-bar visibility when requested.
+        If ScrollBars <> K_UI_LeaveUnchanged Then
+
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
+                ShowFlag = K_VisibilityToBoolean(ScrollBars)
+
+            'Attempt the property write and record any element-level failure
+            'without interrupting later operations.
+                If Not K_TrySetBooleanProperty(Application, "DisplayScrollBars", ShowFlag, Msg) Then
+                    R.AddFailure "ScrollBars", Msg
+                End If
+
+        End If
+
+    'Apply formula-bar visibility when requested.
+        If FormulaBar <> K_UI_LeaveUnchanged Then
+
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
+                ShowFlag = K_VisibilityToBoolean(FormulaBar)
+
+            'Attempt the property write and record any element-level failure
+            'without interrupting later operations.
+                If Not K_TrySetBooleanProperty(Application, "DisplayFormulaBar", ShowFlag, Msg) Then
+                    R.AddFailure "FormulaBar", Msg
+                End If
+
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY: WINDOW-LEVEL UI STATE
+'------------------------------------------------------------------------------
+    'Process window-scoped UI only when at least one window-level element has
+    'been requested for change.
+        If Headings <> K_UI_LeaveUnchanged _
+        Or WorkbookTabs <> K_UI_LeaveUnchanged _
+        Or Gridlines <> K_UI_LeaveUnchanged Then
+
+            'Apply the requested window-level visibility state to each open
+            'Excel window in the current instance.
+                For Each W In Application.Windows
+
+                    'Apply headings visibility when requested.
+                        If Headings <> K_UI_LeaveUnchanged Then
+
+                            'Convert the tri-state enum to the explicit Boolean
+                            'state expected by the lower-level helper.
+                                ShowFlag = K_VisibilityToBoolean(Headings)
+
+                            'Attempt the property write and record any element-
+                            'level failure without interrupting later operations.
+                                If Not K_TrySetBooleanProperty(W, "DisplayHeadings", ShowFlag, Msg) Then
+                                    R.AddFailure "Headings [" & W.Caption & "]", Msg
+                                End If
+
+                        End If
+
+                    'Apply workbook-tabs visibility when requested.
+                        If WorkbookTabs <> K_UI_LeaveUnchanged Then
+
+                            'Convert the tri-state enum to the explicit Boolean
+                            'state expected by the lower-level helper.
+                                ShowFlag = K_VisibilityToBoolean(WorkbookTabs)
+
+                            'Attempt the property write and record any element-
+                            'level failure without interrupting later operations.
+                                If Not K_TrySetBooleanProperty(W, "DisplayWorkbookTabs", ShowFlag, Msg) Then
+                                    R.AddFailure "WorkbookTabs [" & W.Caption & "]", Msg
+                                End If
+
+                        End If
+
+                    'Apply gridlines visibility when requested.
+                        If Gridlines <> K_UI_LeaveUnchanged Then
+
+                            'Convert the tri-state enum to the explicit Boolean
+                            'state expected by the lower-level helper.
+                                ShowFlag = K_VisibilityToBoolean(Gridlines)
+
+                            'Attempt the property write and record any element-
+                            'level failure without interrupting later operations.
+                                If Not K_TrySetBooleanProperty(W, "DisplayGridlines", ShowFlag, Msg) Then
+                                    R.AddFailure "Gridlines [" & W.Caption & "]", Msg
+                                End If
+
+                        End If
+
+                Next W
+
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY: TITLE-BAR STATE
+'------------------------------------------------------------------------------
+    'Apply title-bar visibility when requested.
+        If TitleBar <> K_UI_LeaveUnchanged Then
+
+            'Convert the tri-state enum to the explicit Boolean state expected
+            'by the lower-level helper.
+                ShowFlag = K_VisibilityToBoolean(TitleBar)
+
+            'Attempt the title-bar update and record any element-level failure
+            'without interrupting later operations.
+                If Not K_TrySetTitleBarVisible(ShowFlag, Msg) Then
+                    R.AddFailure "TitleBar", Msg
+                End If
+
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN RESULT
+'------------------------------------------------------------------------------
+    'Return the structured result object to the caller.
+        Set K_SetExcelUI_WithResult = R
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Normal termination point.
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+    'Capture the unexpected procedure-level failure in the structured result.
+        R.AddFailure "Unexpected", K_BuildRuntimeErrorText
+
+    'Return the result object after recording the unexpected failure.
+        Set K_SetExcelUI_WithResult = R
+
+    'Leave quietly through the normal termination path.
+        Resume SafeExit
+
+End Function
 
 #If VBA7 Then
 Private Function K_TrySetTitleBarVisible( _
@@ -660,8 +982,8 @@ Private Function K_TrySetTitleBarVisible( _
 '                           K_TrySetTitleBarVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Attempt to show or hide the title bar of the Excel window represented by
-'   Application.Hwnd by updating the window style and refreshing the
+'   Attempt to show or hide the title bar of the Excel main window represented
+'   by Application.Hwnd by updating the window style and refreshing the
 '   non-client frame.
 '
 ' WHY THIS EXISTS
@@ -674,8 +996,8 @@ Private Function K_TrySetTitleBarVisible( _
 '
 ' INPUTS
 '   IsVisible
-'     TRUE  => restore the original snapshotted Excel window style
-'     FALSE => hide title bar / system controls / sizing frame
+'     TRUE  => restore the original snapshotted Excel main-window style
+'     FALSE => hide title bar / frame-related controls
 '
 '   FailMsg
 '     Receives a diagnostic reason when the function returns FALSE.
@@ -684,14 +1006,25 @@ Private Function K_TrySetTitleBarVisible( _
 '   TRUE  => title-bar update succeeded
 '   FALSE => title-bar update failed
 '
+' BEHAVIOR
+'   - Reads the current main-window style.
+'   - Snapshots the original style once, on first use.
+'   - Restores the exact original style when showing again.
+'   - Refreshes the non-client frame after a style change.
+'
+' ERROR POLICY
+'   - Does NOT raise to callers.
+'   - Returns FALSE and populates FailMsg on failure.
+'
 ' NOTES
-'   - Windows-only.
+'   - Windows only.
 '   - While hidden, the Excel window is intentionally less frame-like and may
 '     not be user-resizable in the normal way.
-'   - This routine intentionally does NOT toggle Application.DisplayFullScreen.
+'   - This routine intentionally does NOT toggle
+'     Application.DisplayFullScreen.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -699,11 +1032,11 @@ Private Function K_TrySetTitleBarVisible( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim xlHnd               As LongPtr   'Excel window handle from Application.Hwnd
+    Dim xlHnd               As LongPtr   'Excel main-window handle from Application.Hwnd
     Dim CurrentStyle        As LongPtr   'Current main-window style
     Dim NewStyle            As LongPtr   'Updated main-window style
 #Else
-    Dim xlHnd               As Long      'Excel window handle from Application.Hwnd
+    Dim xlHnd               As Long      'Excel main-window handle from Application.Hwnd
     Dim CurrentStyle        As Long      'Current main-window style
     Dim NewStyle            As Long      'Updated main-window style
 #End If
@@ -711,112 +1044,113 @@ Private Function K_TrySetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize default failure result
+    'Initialize the default result state.
         K_TrySetTitleBarVisible = False
         FailMsg = vbNullString
 
-    'Read the Excel window handle
+    'Read the Excel main-window handle.
         xlHnd = Application.hWnd
 
-    'Reject invalid window handle deterministically
+    'Reject an invalid window handle deterministically.
         If xlHnd = 0 Then
             FailMsg = "invalid Excel window handle"
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' READ CURRENT WINDOW STYLE
+' READ: CURRENT WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Read the current window style using the bitness-safe helper
+    'Read the current main-window style using the bitness-safe wrapper.
         If Not K_TryGetWindowStyle(xlHnd, CurrentStyle, FailMsg) Then
             GoTo SafeExit
         End If
 
-    'Snapshot the original window style once so SHOW can restore it exactly
+    'Snapshot the original main-window style once so SHOW can restore it
+    'exactly later.
         If Not m_HasOriginalMainWindowStyle Then
             m_OriginalMainWindowStyle = CurrentStyle
             m_HasOriginalMainWindowStyle = True
         End If
 
 '------------------------------------------------------------------------------
-' COMPUTE UPDATED WINDOW STYLE
+' COMPUTE: UPDATED WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Restore the exact original snapshotted style when showing
+    'Restore the exact original snapshotted style when the caller requests a
+    'visible title bar.
         If IsVisible Then
 
-            'Use the original captured style when available
+            'Use the exact captured original style whenever it is available.
                 If m_HasOriginalMainWindowStyle Then
                     NewStyle = m_OriginalMainWindowStyle
+
+            'Fall back to a conservative "visible frame" composition only if
+            'the original style has not somehow been captured.
                 Else
                     NewStyle = CurrentStyle
                     NewStyle = NewStyle Or WS_SYSMENU
-                    NewStyle = NewStyle Or WS_MAXIMIZEBOX
                     NewStyle = NewStyle Or WS_MINIMIZEBOX
+                    NewStyle = NewStyle Or WS_MAXIMIZEBOX
                     NewStyle = NewStyle Or WS_CAPTION
                     NewStyle = NewStyle Or WS_THICKFRAME
                 End If
 
+    'Remove the frame-related bits when the caller requests a hidden title bar.
         Else
-
-            'Start from the current style and remove frame-related bits
-                NewStyle = CurrentStyle
-                NewStyle = NewStyle And Not WS_SYSMENU
-                NewStyle = NewStyle And Not WS_MAXIMIZEBOX
-                NewStyle = NewStyle And Not WS_MINIMIZEBOX
-                NewStyle = NewStyle And Not WS_CAPTION
-                NewStyle = NewStyle And Not WS_THICKFRAME
-
+            NewStyle = CurrentStyle
+            NewStyle = NewStyle And Not WS_SYSMENU
+            NewStyle = NewStyle And Not WS_MINIMIZEBOX
+            NewStyle = NewStyle And Not WS_MAXIMIZEBOX
+            NewStyle = NewStyle And Not WS_CAPTION
+            NewStyle = NewStyle And Not WS_THICKFRAME
         End If
 
 '------------------------------------------------------------------------------
-' SHORT-CIRCUIT NO-OP
+' SHORT-CIRCUIT: NO-OP
 '------------------------------------------------------------------------------
-    'Skip the write when no style change is required
+    'Skip the write path entirely when no style change is required.
         If NewStyle = CurrentStyle Then
             K_TrySetTitleBarVisible = True
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' WRITE UPDATED WINDOW STYLE
+' APPLY: UPDATED WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Write the updated style using the bitness-safe helper
+    'Write the updated main-window style using the bitness-safe wrapper.
         If Not K_TrySetWindowStyle(xlHnd, NewStyle, FailMsg) Then
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' REFRESH NON-CLIENT FRAME
+' REFRESH: NON-CLIENT FRAME
 '------------------------------------------------------------------------------
-    'Force Windows to repaint the frame without moving or resizing the window
+    'Force Windows to recalculate and repaint the frame after the style change.
         If Not K_TryRefreshWindowFrame(xlHnd, FailMsg) Then
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after all operations complete
+    'Mark the operation as successful only after all required steps complete.
         K_TrySetTitleBarVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave through the normal termination path.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure message without raising.
+        FailMsg = K_BuildRuntimeErrorText
 
 End Function
 
@@ -858,29 +1192,29 @@ Private Function K_TrySetRibbonVisible( _
 '   - Availability may vary by Excel host / configuration.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim MacroText           As String    'Excel4 macro text for Ribbon visibility
+    Dim MacroText           As String    'Excel4 macro text controlling Ribbon visibility
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize default failure result
+    'Initialize the default result state.
         K_TrySetRibbonVisible = False
         FailMsg = vbNullString
 
 '------------------------------------------------------------------------------
-' BUILD MACRO
+' BUILD: EXCEL4 MACRO TEXT
 '------------------------------------------------------------------------------
-    'Build the Ribbon visibility macro text explicitly
+    'Build the exact macro text required to show or hide the Ribbon.
         If IsVisible Then
             MacroText = "Show.TOOLBAR(""Ribbon"",True)"
         Else
@@ -888,32 +1222,30 @@ Private Function K_TrySetRibbonVisible( _
         End If
 
 '------------------------------------------------------------------------------
-' EXECUTE MACRO
+' APPLY: RIBBON VISIBILITY
 '------------------------------------------------------------------------------
-    'Execute the Ribbon visibility macro
+    'Execute the Ribbon visibility macro through Excel's legacy macro engine.
         Application.ExecuteExcel4Macro MacroText
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after macro execution completes
+    'Mark the operation as successful after macro execution completes.
         K_TrySetRibbonVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave through the normal termination path.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure message without raising.
+        FailMsg = K_BuildRuntimeErrorText
 
 End Function
 
@@ -964,59 +1296,57 @@ Private Function K_TrySetBooleanProperty( _
 '   - Intended for Application / Window Boolean property writes in this module.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize default failure result
+    'Initialize the default result state.
         K_TrySetBooleanProperty = False
         FailMsg = vbNullString
 
-    'Reject invalid object input deterministically
+    'Reject a missing target object deterministically.
         If Target Is Nothing Then
             FailMsg = "target object is Nothing"
             GoTo SafeExit
         End If
 
-    'Reject empty property name deterministically
+    'Reject an empty property name deterministically.
         If Len(PropertyName) = 0 Then
             FailMsg = "property name is empty"
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' APPLY PROPERTY WRITE
+' APPLY: PROPERTY WRITE
 '------------------------------------------------------------------------------
-    'Assign the requested Boolean value using late-bound property assignment
+    'Assign the requested Boolean value using late-bound property assignment.
         CallByName Target, PropertyName, VbLet, NewValue
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after property assignment completes
+    'Mark the operation as successful after the property write completes.
         K_TrySetBooleanProperty = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave through the normal termination path.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure message without raising.
+        FailMsg = K_BuildRuntimeErrorText
 
 End Function
 
@@ -1068,87 +1398,86 @@ Private Function K_TryGetWindowStyle( _
 '   - SetLastError
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LastErr             As Long      'Last Win32 error after API call
+    Dim LastErr             As Long      'Win32 last-error value read after the API call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize outputs and default result
+    'Initialize the outputs and default result state.
         StyleOut = 0
         FailMsg = vbNullString
         K_TryGetWindowStyle = False
 
-    'Reject invalid input deterministically
+    'Reject an invalid window handle deterministically.
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' READ STYLE
+' READ: WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Clear last-error state before the API call
+    'Clear the Win32 last-error state before calling the API so a valid zero
+    'return can later be distinguished from failure.
         SetLastError 0
 
 #If VBA7 Then
     #If Win64 Then
 
-        'Read the window style using the 64-bit API
+        'Read the style with the 64-bit API in 64-bit Office / VBA.
             StyleOut = GetWindowLongPtr(hWnd, GWL_STYLE)
 
     #Else
 
-        'Read the window style using the 32-bit API under VBA7
+        'Read the style with the 32-bit API in VBA7 32-bit Office.
             StyleOut = GetWindowLong(hWnd, GWL_STYLE)
 
     #End If
 #Else
 
-    'Read the window style using the legacy 32-bit API
+    'Read the style with the legacy 32-bit API.
         StyleOut = GetWindowLong(hWnd, GWL_STYLE)
 
 #End If
 
-    'Read the Win32 last-error value immediately after the API call
+    'Read the Win32 last-error value immediately after the API call.
         LastErr = GetLastError
 
-    'Treat zero + nonzero last error as failure
+    'Treat zero + nonzero last error as an API failure.
         If StyleOut = 0 And LastErr <> 0 Then
             FailMsg = "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & CStr(LastErr)
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after a valid style read
+    'Mark the operation as successful after a valid style read.
         K_TryGetWindowStyle = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave through the normal termination path.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure message without raising.
+        FailMsg = K_BuildRuntimeErrorText
 
 End Function
 
@@ -1201,7 +1530,7 @@ Private Function K_TrySetWindowStyle( _
 '   - SetLastError
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1209,83 +1538,82 @@ Private Function K_TrySetWindowStyle( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim PrevStyle           As LongPtr   'Previous style returned by API
+    Dim PrevStyle           As LongPtr   'Previous style returned by the API
 #Else
-    Dim PrevStyle           As Long      'Previous style returned by API
+    Dim PrevStyle           As Long      'Previous style returned by the API
 #End If
-    Dim LastErr             As Long      'Last Win32 error after API call
+    Dim LastErr             As Long      'Win32 last-error value read after the API call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize default result
+    'Initialize the default result state.
         FailMsg = vbNullString
         K_TrySetWindowStyle = False
 
-    'Reject invalid input deterministically
+    'Reject an invalid window handle deterministically.
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' WRITE STYLE
+' WRITE: WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Clear last-error state before the API call
+    'Clear the Win32 last-error state before calling the API so a valid zero
+    'return can later be distinguished from failure.
         SetLastError 0
 
 #If VBA7 Then
     #If Win64 Then
 
-        'Write the window style using the 64-bit API
+        'Write the style with the 64-bit API in 64-bit Office / VBA.
             PrevStyle = SetWindowLongPtr(hWnd, GWL_STYLE, NewStyle)
 
     #Else
 
-        'Write the window style using the 32-bit API under VBA7
+        'Write the style with the 32-bit API in VBA7 32-bit Office.
             PrevStyle = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
 
     #End If
 #Else
 
-    'Write the window style using the legacy 32-bit API
+    'Write the style with the legacy 32-bit API.
         PrevStyle = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
 
 #End If
 
-    'Read the Win32 last-error value immediately after the API call
+    'Read the Win32 last-error value immediately after the API call.
         LastErr = GetLastError
 
-    'Treat zero + nonzero last error as failure
+    'Treat zero + nonzero last error as an API failure.
         If PrevStyle = 0 And LastErr <> 0 Then
             FailMsg = "SetWindowLong/SetWindowLongPtr failed; GetLastError=" & CStr(LastErr)
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after a valid style write
+    'Mark the operation as successful after a valid style write.
         K_TrySetWindowStyle = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave through the normal termination path.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure message without raising.
+        FailMsg = K_BuildRuntimeErrorText
 
 End Function
 
@@ -1336,7 +1664,7 @@ Private Function K_TryRefreshWindowFrame( _
 '   - SetLastError
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1344,32 +1672,32 @@ Private Function K_TryRefreshWindowFrame( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim ApiOK               As Long      'WinAPI success flag / return code
-    Dim LastErr             As Long      'Last Win32 error after API call
+    Dim LastErr             As Long      'Win32 last-error value read after the API call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize default result
+    'Initialize the default result state.
         FailMsg = vbNullString
         K_TryRefreshWindowFrame = False
 
-    'Reject invalid input deterministically
+    'Reject an invalid window handle deterministically.
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' REFRESH FRAME
+' REFRESH: NON-CLIENT FRAME
 '------------------------------------------------------------------------------
-    'Clear last-error state before the API call
+    'Clear the Win32 last-error state before calling the API.
         SetLastError 0
 
     'Force Windows to recalculate and repaint the non-client frame without
-    'moving, resizing, or reordering the window
+    'moving, resizing, or reordering the target window.
         ApiOK = SetWindowPos( _
                     hWnd, _
                     0, _
@@ -1379,36 +1707,34 @@ Private Function K_TryRefreshWindowFrame( _
                     0, _
                     SWP_NOMOVE Or SWP_NOSIZE Or SWP_NOZORDER Or SWP_NOOWNERZORDER Or SWP_FRAMECHANGED)
 
-    'Read the Win32 last-error value immediately after the API call
+    'Read the Win32 last-error value immediately after the API call.
         LastErr = GetLastError
 
-    'Reject API failure deterministically and include the Win32 error code
+    'Reject API failure deterministically and include the Win32 error code.
         If ApiOK = 0 Then
             FailMsg = "SetWindowPos failed; GetLastError=" & CStr(LastErr)
             GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after a valid frame refresh
+    'Mark the operation as successful after a valid frame refresh.
         K_TryRefreshWindowFrame = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Leave through the normal termination path.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure message without raising.
+        FailMsg = K_BuildRuntimeErrorText
 
 End Function
 
@@ -1424,7 +1750,7 @@ Private Function K_VisibilityToBoolean(ByVal Visibility As K_UIVisibility) As Bo
 '
 ' WHY THIS EXISTS
 '   Public callers use K_UIVisibility values, while Excel object-model
-'   properties require a Boolean visible / hidden state.
+'   properties and internal helpers require a Boolean visible / hidden state.
 '
 ' INPUTS
 '   Visibility
@@ -1448,15 +1774,62 @@ Private Function K_VisibilityToBoolean(ByVal Visibility As K_UIVisibility) As Bo
 '     K_UI_LeaveUnchanged.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
-' RETURN BOOLEAN VISIBILITY
+' RETURN: BOOLEAN VISIBILITY
 '------------------------------------------------------------------------------
-    'Convert explicit "show" to TRUE; otherwise return FALSE
+    'Convert explicit SHOW to TRUE; otherwise return FALSE.
         K_VisibilityToBoolean = (Visibility = K_UI_Show)
+
+End Function
+
+Private Function K_BuildRuntimeErrorText() As String
+
+'
+'==============================================================================
+'                           K_BuildRuntimeErrorText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Build a consistent runtime diagnostic string from the active Err object.
+'
+' WHY THIS EXISTS
+'   Several procedures in this module use identical failure-text construction.
+'   A shared helper avoids duplicated formatting logic and keeps diagnostics
+'   consistent.
+'
+' RETURNS
+'   A formatted diagnostic string including:
+'     - Err.Number
+'     - Err.Description
+'     - Err.Source, when available
+'     - Erl, when available
+'
+' ERROR POLICY
+'   - Does NOT raise.
+'   - Returns best-effort text.
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Protect callers from any unexpected issue while formatting the diagnostic.
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' BUILD: RUNTIME ERROR TEXT
+'------------------------------------------------------------------------------
+    'Build a consistent diagnostic string from the current Err state.
+        K_BuildRuntimeErrorText = _
+            CStr(Err.Number) & ": " & Err.Description & _
+            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
+            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
 End Function
 
@@ -1493,20 +1866,20 @@ Private Sub K_LogFailure( _
 '   - Suppresses any unexpected logging failure locally.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Protect callers from any unexpected logging failure
+    'Protect callers from any unexpected logging failure.
         On Error Resume Next
 
 '------------------------------------------------------------------------------
-' WRITE DIAGNOSTIC LINE
+' WRITE: DIAGNOSTIC LINE
 '------------------------------------------------------------------------------
-    'Write a consistent diagnostic line to the Immediate Window
+    'Write a consistent fail-soft diagnostic line to the Immediate Window.
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub

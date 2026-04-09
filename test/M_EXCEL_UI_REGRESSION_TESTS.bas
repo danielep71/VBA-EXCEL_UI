@@ -3,7 +3,7 @@ Option Explicit
 
 '
 '==============================================================================
-'                        MODULE: EXCEL_UI_REGRESSION_TESTS
+'                    MODULE: EXCEL_UI_REGRESSION_TESTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Provide a regression-test harness for the EXCEL_UI module.
@@ -36,6 +36,9 @@ Option Explicit
 '     - selective show
 '     - no-op / leave-unchanged
 '     - convenience wrappers
+'   Structured-result tests
+'     - clean success path
+'     - no-op / leave-unchanged success path
 '
 '   Title-bar tests
 '     - hide / show round-trip
@@ -56,7 +59,7 @@ Option Explicit
 '   - Assumes the EXCEL_UI module is present in the same VBA project.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '
 ' AUTHOR
 '   Daniele Penza
@@ -69,8 +72,9 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' DECLARE: TEST CONFIGURATION
 '------------------------------------------------------------------------------
-Private Const TEST_WAIT_SECONDS        As Double = 0.15   'Small UI settle delay after each state change
-Private Const TEST_ERR_BASE            As Long = vbObjectError + 4700   'Base custom error number for test assertions
+Private Const TEST_WAIT_SECONDS        As Double = 0.15                 'Small UI settle delay after each state change
+Private Const TEST_ERR_BASE            As Long = vbObjectError + 4700  'Base custom error number for test assertions
+Private Const TST_SECONDS_PER_DAY      As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
 ' DECLARE: WINAPI SUPPORT FOR TITLE-BAR STATE READ
@@ -147,14 +151,14 @@ Public Sub Test_EXCEL_UI_RunAll()
 '   - TST_RunRegressionPack
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY FULL PACK
 '------------------------------------------------------------------------------
-    'Run the full regression pack including title-bar tests
+    'Run the full regression pack including title-bar tests.
         TST_RunRegressionPack IncludeTitleBarTests:=True, CallerProc:="Test_EXCEL_UI_RunAll"
 
 End Sub
@@ -189,14 +193,14 @@ Public Sub Test_EXCEL_UI_RunCore()
 '   - TST_RunRegressionPack
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY CORE PACK
 '------------------------------------------------------------------------------
-    'Run the core regression pack without the dedicated title-bar case
+    'Run the core regression pack without the dedicated title-bar case.
         TST_RunRegressionPack IncludeTitleBarTests:=False, CallerProc:="Test_EXCEL_UI_RunCore"
 
 End Sub
@@ -229,14 +233,14 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '   - TST_RunTitleBarOnlyPack
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY TITLE-BAR-ONLY PACK
 '------------------------------------------------------------------------------
-    'Run the title-bar-only regression pack
+    'Run the title-bar-only regression pack.
         TST_RunTitleBarOnlyPack CallerProc:="Test_EXCEL_UI_RunTitleBarOnly"
 
 End Sub
@@ -283,7 +287,7 @@ Private Sub TST_RunRegressionPack( _
 '   - TST_Log
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -313,20 +317,20 @@ Private Sub TST_RunRegressionPack( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Cache and suppress screen updates during the regression run
+    'Cache and suppress screen updates during the regression run.
         OldScreenUpdating = Application.ScreenUpdating
         Application.ScreenUpdating = False
 
-    'Log the start of the requested regression pack
+    'Log the start of the requested regression pack.
         TST_Log CallerProc, "START", "Regression pack started"
 
 '------------------------------------------------------------------------------
 ' SNAPSHOT CURRENT STATE
 '------------------------------------------------------------------------------
-    'Snapshot the current Excel UI state before the tests mutate it
+    'Snapshot the current Excel UI state before the tests mutate it.
         TST_SnapshotState _
             RibbonKnown:=SavedRibbonKnown, _
             RibbonVisible:=SavedRibbonVisible, _
@@ -343,34 +347,40 @@ Private Sub TST_RunRegressionPack( _
 '------------------------------------------------------------------------------
 ' RUN REGRESSION CASES
 '------------------------------------------------------------------------------
-    'Run the show-all baseline case
+    'Run the show-all baseline case.
         TST_Case_ShowAllBaseline IncludeTitleBarTests
 
-    'Run the selective-hide case
+    'Run the selective-hide case.
         TST_Case_SelectiveHide IncludeTitleBarTests
 
-    'Run the selective-show case
+    'Run the selective-show case.
         TST_Case_SelectiveShow IncludeTitleBarTests
 
-    'Run the no-op / leave-unchanged case
+    'Run the no-op / leave-unchanged case.
         TST_Case_NoOpLeaveUnchanged IncludeTitleBarTests
 
-    'Run the convenience-wrapper case
+    'Run the convenience-wrapper case.
         TST_Case_ConvenienceWrappers IncludeTitleBarTests
+        
+    'Run the structured-result success case
+        TST_Case_WithResult_AllSuccess IncludeTitleBarTests
 
-    'Run the dedicated title-bar case when requested
+    'Run the structured-result no-op case
+        TST_Case_WithResult_NoOpSuccess IncludeTitleBarTests
+
+    'Run the dedicated title-bar case when requested.
         If IncludeTitleBarTests Then
             TST_Case_TitleBarRoundTrip
         End If
 
-    'Log successful completion before restoration
+    'Log successful completion before restoration.
         TST_Log CallerProc, "PASS", "All requested regression cases passed"
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Attempt to restore the original pre-test UI state
+    'Attempt to restore the original pre-test UI state.
         On Error Resume Next
             TST_RestoreState _
                 RibbonKnown:=SavedRibbonKnown, _
@@ -386,35 +396,32 @@ SafeExit:
                 TitleBarVisible:=SavedTitleBarVisible
         On Error GoTo 0
 
-    'Restore ScreenUpdating before leaving the harness
+    'Restore ScreenUpdating before leaving the harness.
         Application.ScreenUpdating = OldScreenUpdating
 
-    'Raise the captured failure after restoration when needed
+    'Raise the captured failure after restoration when needed.
         If HasFailure Then
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-    'Normal termination point
+    'Normal termination point.
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Capture failure information so it can be re-raised after restoration
+    'Capture failure information so it can be re-raised after restoration.
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description & _
                           IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
-    'Log the failure immediately
-        TST_Log CallerProc, "FAIL", _
-            CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Log the failure immediately.
+        TST_Log CallerProc, "FAIL", TST_BuildRuntimeErrorText
 
-    'Proceed to restoration / re-raise path
+    'Proceed to restoration / re-raise path.
         Resume SafeExit
 
 End Sub
@@ -449,7 +456,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarRoundTrip
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -479,20 +486,20 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Cache and suppress screen updates during the regression run
+    'Cache and suppress screen updates during the regression run.
         OldScreenUpdating = Application.ScreenUpdating
         Application.ScreenUpdating = False
 
-    'Log the start of the requested regression pack
+    'Log the start of the requested regression pack.
         TST_Log CallerProc, "START", "Title-bar-only regression pack started"
 
 '------------------------------------------------------------------------------
 ' SNAPSHOT CURRENT STATE
 '------------------------------------------------------------------------------
-    'Snapshot the current Excel UI state before the test mutates it
+    'Snapshot the current Excel UI state before the test mutates it.
         TST_SnapshotState _
             RibbonKnown:=SavedRibbonKnown, _
             RibbonVisible:=SavedRibbonVisible, _
@@ -509,17 +516,17 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '------------------------------------------------------------------------------
 ' RUN REGRESSION CASE
 '------------------------------------------------------------------------------
-    'Run the dedicated title-bar round-trip case
+    'Run the dedicated title-bar round-trip case.
         TST_Case_TitleBarRoundTrip
 
-    'Log successful completion before restoration
+    'Log successful completion before restoration.
         TST_Log CallerProc, "PASS", "Title-bar round-trip case passed"
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Attempt to restore the original pre-test UI state
+    'Attempt to restore the original pre-test UI state.
         On Error Resume Next
             TST_RestoreState _
                 RibbonKnown:=SavedRibbonKnown, _
@@ -535,35 +542,32 @@ SafeExit:
                 TitleBarVisible:=SavedTitleBarVisible
         On Error GoTo 0
 
-    'Restore ScreenUpdating before leaving the harness
+    'Restore ScreenUpdating before leaving the harness.
         Application.ScreenUpdating = OldScreenUpdating
 
-    'Raise the captured failure after restoration when needed
+    'Raise the captured failure after restoration when needed.
         If HasFailure Then
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-    'Normal termination point
+    'Normal termination point.
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Capture failure information so it can be re-raised after restoration
+    'Capture failure information so it can be re-raised after restoration.
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description & _
                           IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
-    'Log the failure immediately
-        TST_Log CallerProc, "FAIL", _
-            CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Log the failure immediately.
+        TST_Log CallerProc, "FAIL", TST_BuildRuntimeErrorText
 
-    'Proceed to restoration / re-raise path
+    'Proceed to restoration / re-raise path.
         Resume SafeExit
 
 End Sub
@@ -590,20 +594,20 @@ Private Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
+    'Log the start of the case.
         TST_Log "TST_Case_ShowAllBaseline", "START", "Setting all managed UI visible"
 
 '------------------------------------------------------------------------------
 ' APPLY SHOW-ALL BASELINE
 '------------------------------------------------------------------------------
-    'Drive all application- and window-level UI elements to visible state
+    'Drive all application- and window-level UI elements to visible state.
         K_SetExcelUI _
             Ribbon:=K_UI_Show, _
             StatusBar:=K_UI_Show, _
@@ -612,42 +616,42 @@ Private Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
             Headings:=K_UI_Show, _
             WorkbookTabs:=K_UI_Show, _
             Gridlines:=K_UI_Show, _
-            TitleBar:=IIf(IncludeTitleBarTests, K_UI_Show, K_UI_LeaveUnchanged)
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' ASSERT APPLICATION-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Assert Ribbon visible
+    'Assert Ribbon visible.
         TST_AssertRibbonVisible True, "ShowAllBaseline.Ribbon"
 
-    'Assert StatusBar visible
+    'Assert StatusBar visible.
         TST_AssertApplicationProperty True, "DisplayStatusBar", "ShowAllBaseline.StatusBar"
 
-    'Assert ScrollBars visible
+    'Assert ScrollBars visible.
         TST_AssertApplicationProperty True, "DisplayScrollBars", "ShowAllBaseline.ScrollBars"
 
-    'Assert FormulaBar visible
+    'Assert FormulaBar visible.
         TST_AssertApplicationProperty True, "DisplayFormulaBar", "ShowAllBaseline.FormulaBar"
 
 '------------------------------------------------------------------------------
 ' ASSERT WINDOW-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Assert Headings visible across all open Excel windows
+    'Assert Headings visible across all open Excel windows.
         TST_AssertAllWindowsProperty True, "DisplayHeadings", "ShowAllBaseline.Headings"
 
-    'Assert WorkbookTabs visible across all open Excel windows
+    'Assert WorkbookTabs visible across all open Excel windows.
         TST_AssertAllWindowsProperty True, "DisplayWorkbookTabs", "ShowAllBaseline.WorkbookTabs"
 
-    'Assert Gridlines visible across all open Excel windows
+    'Assert Gridlines visible across all open Excel windows.
         TST_AssertAllWindowsProperty True, "DisplayGridlines", "ShowAllBaseline.Gridlines"
 
 '------------------------------------------------------------------------------
 ' ASSERT TITLE-BAR STATE
 '------------------------------------------------------------------------------
-    'Assert TitleBar visible when title-bar testing is enabled
+    'Assert TitleBar visible when title-bar testing is enabled.
         If IncludeTitleBarTests Then
             TST_AssertTitleBarVisible True, "ShowAllBaseline.TitleBar"
         End If
@@ -655,7 +659,7 @@ Private Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
+    'Log successful completion of the case.
         TST_Log "TST_Case_ShowAllBaseline", "PASS", "All requested elements are visible"
 
 End Sub
@@ -683,20 +687,20 @@ Private Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
+    'Log the start of the case.
         TST_Log "TST_Case_SelectiveHide", "START", "Hiding only selected elements"
 
 '------------------------------------------------------------------------------
 ' ESTABLISH VISIBLE BASELINE
 '------------------------------------------------------------------------------
-    'Start from a known visible baseline
+    'Start from a known visible baseline.
         K_SetExcelUI _
             Ribbon:=K_UI_Show, _
             StatusBar:=K_UI_Show, _
@@ -705,47 +709,47 @@ Private Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
             Headings:=K_UI_Show, _
             WorkbookTabs:=K_UI_Show, _
             Gridlines:=K_UI_Show, _
-            TitleBar:=IIf(IncludeTitleBarTests, K_UI_Show, K_UI_LeaveUnchanged)
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' APPLY SELECTIVE HIDE
 '------------------------------------------------------------------------------
-    'Hide only StatusBar and Gridlines while leaving the rest unchanged
+    'Hide only StatusBar and Gridlines while leaving the rest unchanged.
         K_SetExcelUI _
             StatusBar:=K_UI_Hide, _
             Gridlines:=K_UI_Hide
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' ASSERT SELECTIVE RESULT
 '------------------------------------------------------------------------------
-    'Assert Ribbon remained visible
+    'Assert Ribbon remained visible.
         TST_AssertRibbonVisible True, "SelectiveHide.Ribbon"
 
-    'Assert StatusBar is hidden
+    'Assert StatusBar is hidden.
         TST_AssertApplicationProperty False, "DisplayStatusBar", "SelectiveHide.StatusBar"
 
-    'Assert ScrollBars remained visible
+    'Assert ScrollBars remained visible.
         TST_AssertApplicationProperty True, "DisplayScrollBars", "SelectiveHide.ScrollBars"
 
-    'Assert FormulaBar remained visible
+    'Assert FormulaBar remained visible.
         TST_AssertApplicationProperty True, "DisplayFormulaBar", "SelectiveHide.FormulaBar"
 
-    'Assert Headings remained visible across all windows
+    'Assert Headings remained visible across all windows.
         TST_AssertAllWindowsProperty True, "DisplayHeadings", "SelectiveHide.Headings"
 
-    'Assert WorkbookTabs remained visible across all windows
+    'Assert WorkbookTabs remained visible across all windows.
         TST_AssertAllWindowsProperty True, "DisplayWorkbookTabs", "SelectiveHide.WorkbookTabs"
 
-    'Assert Gridlines are hidden across all windows
+    'Assert Gridlines are hidden across all windows.
         TST_AssertAllWindowsProperty False, "DisplayGridlines", "SelectiveHide.Gridlines"
 
-    'Assert TitleBar remained visible / unchanged when requested
+    'Assert TitleBar remained visible / unchanged when requested.
         If IncludeTitleBarTests Then
             TST_AssertTitleBarVisible True, "SelectiveHide.TitleBar"
         End If
@@ -753,7 +757,7 @@ Private Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
+    'Log successful completion of the case.
         TST_Log "TST_Case_SelectiveHide", "PASS", "Selective hide behaved as expected"
 
 End Sub
@@ -781,21 +785,21 @@ Private Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
+    'Log the start of the case.
         TST_Log "TST_Case_SelectiveShow", "START", "Showing only selected elements"
 
 '------------------------------------------------------------------------------
 ' ESTABLISH HIDDEN BASELINE
 '------------------------------------------------------------------------------
     'Drive application- and window-level elements hidden while keeping TitleBar
-    'unchanged or visible according to test scope
+    'unchanged or visible according to test scope.
         K_SetExcelUI _
             Ribbon:=K_UI_Hide, _
             StatusBar:=K_UI_Hide, _
@@ -804,47 +808,47 @@ Private Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
             Headings:=K_UI_Hide, _
             WorkbookTabs:=K_UI_Hide, _
             Gridlines:=K_UI_Hide, _
-            TitleBar:=IIf(IncludeTitleBarTests, K_UI_Show, K_UI_LeaveUnchanged)
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' APPLY SELECTIVE SHOW
 '------------------------------------------------------------------------------
-    'Show only StatusBar and WorkbookTabs while leaving the rest unchanged
+    'Show only StatusBar and WorkbookTabs while leaving the rest unchanged.
         K_SetExcelUI _
             StatusBar:=K_UI_Show, _
             WorkbookTabs:=K_UI_Show
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' ASSERT SELECTIVE RESULT
 '------------------------------------------------------------------------------
-    'Assert Ribbon remained hidden
+    'Assert Ribbon remained hidden.
         TST_AssertRibbonVisible False, "SelectiveShow.Ribbon"
 
-    'Assert StatusBar is visible
+    'Assert StatusBar is visible.
         TST_AssertApplicationProperty True, "DisplayStatusBar", "SelectiveShow.StatusBar"
 
-    'Assert ScrollBars remained hidden
+    'Assert ScrollBars remained hidden.
         TST_AssertApplicationProperty False, "DisplayScrollBars", "SelectiveShow.ScrollBars"
 
-    'Assert FormulaBar remained hidden
+    'Assert FormulaBar remained hidden.
         TST_AssertApplicationProperty False, "DisplayFormulaBar", "SelectiveShow.FormulaBar"
 
-    'Assert Headings remained hidden across all windows
+    'Assert Headings remained hidden across all windows.
         TST_AssertAllWindowsProperty False, "DisplayHeadings", "SelectiveShow.Headings"
 
-    'Assert WorkbookTabs are visible across all windows
+    'Assert WorkbookTabs are visible across all windows.
         TST_AssertAllWindowsProperty True, "DisplayWorkbookTabs", "SelectiveShow.WorkbookTabs"
 
-    'Assert Gridlines remained hidden across all windows
+    'Assert Gridlines remained hidden across all windows.
         TST_AssertAllWindowsProperty False, "DisplayGridlines", "SelectiveShow.Gridlines"
 
-    'Assert TitleBar remained visible / unchanged when requested
+    'Assert TitleBar remained visible / unchanged when requested.
         If IncludeTitleBarTests Then
             TST_AssertTitleBarVisible True, "SelectiveShow.TitleBar"
         End If
@@ -852,7 +856,7 @@ Private Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
+    'Log successful completion of the case.
         TST_Log "TST_Case_SelectiveShow", "PASS", "Selective show behaved as expected"
 
 End Sub
@@ -879,20 +883,20 @@ Private Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
+    'Log the start of the case.
         TST_Log "TST_Case_NoOpLeaveUnchanged", "START", "Validating no-op / leave-unchanged behavior"
 
 '------------------------------------------------------------------------------
 ' ESTABLISH MIXED BASELINE
 '------------------------------------------------------------------------------
-    'Establish a mixed baseline that should remain unchanged
+    'Establish a mixed baseline that should remain unchanged.
         K_SetExcelUI _
             Ribbon:=K_UI_Show, _
             StatusBar:=K_UI_Hide, _
@@ -901,45 +905,45 @@ Private Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
             Headings:=K_UI_Show, _
             WorkbookTabs:=K_UI_Hide, _
             Gridlines:=K_UI_Show, _
-            TitleBar:=IIf(IncludeTitleBarTests, K_UI_Show, K_UI_LeaveUnchanged)
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' APPLY NO-OP
 '------------------------------------------------------------------------------
-    'Invoke the API with no arguments so every element is LeaveUnchanged
+    'Invoke the API with no arguments so every element is LeaveUnchanged.
         K_SetExcelUI
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' ASSERT NO-OP RESULT
 '------------------------------------------------------------------------------
-    'Assert Ribbon remained visible
+    'Assert Ribbon remained visible.
         TST_AssertRibbonVisible True, "NoOp.Ribbon"
 
-    'Assert StatusBar remained hidden
+    'Assert StatusBar remained hidden.
         TST_AssertApplicationProperty False, "DisplayStatusBar", "NoOp.StatusBar"
 
-    'Assert ScrollBars remained visible
+    'Assert ScrollBars remained visible.
         TST_AssertApplicationProperty True, "DisplayScrollBars", "NoOp.ScrollBars"
 
-    'Assert FormulaBar remained hidden
+    'Assert FormulaBar remained hidden.
         TST_AssertApplicationProperty False, "DisplayFormulaBar", "NoOp.FormulaBar"
 
-    'Assert Headings remained visible across all windows
+    'Assert Headings remained visible across all windows.
         TST_AssertAllWindowsProperty True, "DisplayHeadings", "NoOp.Headings"
 
-    'Assert WorkbookTabs remained hidden across all windows
+    'Assert WorkbookTabs remained hidden across all windows.
         TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", "NoOp.WorkbookTabs"
 
-    'Assert Gridlines remained visible across all windows
+    'Assert Gridlines remained visible across all windows.
         TST_AssertAllWindowsProperty True, "DisplayGridlines", "NoOp.Gridlines"
 
-    'Assert TitleBar remained visible / unchanged when requested
+    'Assert TitleBar remained visible / unchanged when requested.
         If IncludeTitleBarTests Then
             TST_AssertTitleBarVisible True, "NoOp.TitleBar"
         End If
@@ -947,7 +951,7 @@ Private Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
+    'Log successful completion of the case.
         TST_Log "TST_Case_NoOpLeaveUnchanged", "PASS", "No-op behavior behaved as expected"
 
 End Sub
@@ -975,50 +979,50 @@ Private Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
+    'Log the start of the case.
         TST_Log "TST_Case_ConvenienceWrappers", "START", "Validating K_HideExcelUI and K_ShowExcelUI"
 
 '------------------------------------------------------------------------------
 ' APPLY HIDE-ALL WRAPPER
 '------------------------------------------------------------------------------
-    'Hide all managed UI elements through the convenience wrapper
+    'Hide all managed UI elements through the convenience wrapper.
         K_HideExcelUI
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' ASSERT HIDE-ALL RESULT
 '------------------------------------------------------------------------------
-    'Assert Ribbon hidden
+    'Assert Ribbon hidden.
         TST_AssertRibbonVisible False, "Wrappers.HideAll.Ribbon"
 
-    'Assert StatusBar hidden
+    'Assert StatusBar hidden.
         TST_AssertApplicationProperty False, "DisplayStatusBar", "Wrappers.HideAll.StatusBar"
 
-    'Assert ScrollBars hidden
+    'Assert ScrollBars hidden.
         TST_AssertApplicationProperty False, "DisplayScrollBars", "Wrappers.HideAll.ScrollBars"
 
-    'Assert FormulaBar hidden
+    'Assert FormulaBar hidden.
         TST_AssertApplicationProperty False, "DisplayFormulaBar", "Wrappers.HideAll.FormulaBar"
 
-    'Assert Headings hidden across all windows
+    'Assert Headings hidden across all windows.
         TST_AssertAllWindowsProperty False, "DisplayHeadings", "Wrappers.HideAll.Headings"
 
-    'Assert WorkbookTabs hidden across all windows
+    'Assert WorkbookTabs hidden across all windows.
         TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", "Wrappers.HideAll.WorkbookTabs"
 
-    'Assert Gridlines hidden across all windows
+    'Assert Gridlines hidden across all windows.
         TST_AssertAllWindowsProperty False, "DisplayGridlines", "Wrappers.HideAll.Gridlines"
 
-    'Assert TitleBar hidden when requested
+    'Assert TitleBar hidden when requested.
         If IncludeTitleBarTests Then
             TST_AssertTitleBarVisible False, "Wrappers.HideAll.TitleBar"
         End If
@@ -1026,37 +1030,37 @@ Private Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' APPLY SHOW-ALL WRAPPER
 '------------------------------------------------------------------------------
-    'Show all managed UI elements through the convenience wrapper
+    'Show all managed UI elements through the convenience wrapper.
         K_ShowExcelUI
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' ASSERT SHOW-ALL RESULT
 '------------------------------------------------------------------------------
-    'Assert Ribbon visible
+    'Assert Ribbon visible.
         TST_AssertRibbonVisible True, "Wrappers.ShowAll.Ribbon"
 
-    'Assert StatusBar visible
+    'Assert StatusBar visible.
         TST_AssertApplicationProperty True, "DisplayStatusBar", "Wrappers.ShowAll.StatusBar"
 
-    'Assert ScrollBars visible
+    'Assert ScrollBars visible.
         TST_AssertApplicationProperty True, "DisplayScrollBars", "Wrappers.ShowAll.ScrollBars"
 
-    'Assert FormulaBar visible
+    'Assert FormulaBar visible.
         TST_AssertApplicationProperty True, "DisplayFormulaBar", "Wrappers.ShowAll.FormulaBar"
 
-    'Assert Headings visible across all windows
+    'Assert Headings visible across all windows.
         TST_AssertAllWindowsProperty True, "DisplayHeadings", "Wrappers.ShowAll.Headings"
 
-    'Assert WorkbookTabs visible across all windows
+    'Assert WorkbookTabs visible across all windows.
         TST_AssertAllWindowsProperty True, "DisplayWorkbookTabs", "Wrappers.ShowAll.WorkbookTabs"
 
-    'Assert Gridlines visible across all windows
+    'Assert Gridlines visible across all windows.
         TST_AssertAllWindowsProperty True, "DisplayGridlines", "Wrappers.ShowAll.Gridlines"
 
-    'Assert TitleBar visible when requested
+    'Assert TitleBar visible when requested.
         If IncludeTitleBarTests Then
             TST_AssertTitleBarVisible True, "Wrappers.ShowAll.TitleBar"
         End If
@@ -1064,7 +1068,7 @@ Private Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
+    'Log successful completion of the case.
         TST_Log "TST_Case_ConvenienceWrappers", "PASS", "Convenience wrappers behaved as expected"
 
 End Sub
@@ -1087,44 +1091,44 @@ Private Sub TST_Case_TitleBarRoundTrip()
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
+    'Log the start of the case.
         TST_Log "TST_Case_TitleBarRoundTrip", "START", "Validating title-bar hide/show round-trip"
 
 '------------------------------------------------------------------------------
 ' APPLY TITLE-BAR HIDE
 '------------------------------------------------------------------------------
-    'Hide only the title bar
+    'Hide only the title bar.
         K_SetExcelUI TitleBar:=K_UI_Hide
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
-    'Assert TitleBar hidden
+    'Assert TitleBar hidden.
         TST_AssertTitleBarVisible False, "TitleBarRoundTrip.Hide"
 
 '------------------------------------------------------------------------------
 ' APPLY TITLE-BAR SHOW
 '------------------------------------------------------------------------------
-    'Show only the title bar
+    'Show only the title bar.
         K_SetExcelUI TitleBar:=K_UI_Show
 
-    'Allow the UI a short time to settle
+    'Allow the UI a short time to settle.
         TST_WaitUI TEST_WAIT_SECONDS
 
-    'Assert TitleBar visible
+    'Assert TitleBar visible.
         TST_AssertTitleBarVisible True, "TitleBarRoundTrip.Show"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
+    'Log successful completion of the case.
         TST_Log "TST_Case_TitleBarRoundTrip", "PASS", "Title-bar round-trip behaved as expected"
 
 End Sub
@@ -1155,7 +1159,8 @@ Private Sub TST_SnapshotState( _
 '
 ' INPUTS / OUTPUTS
 '   [ByRef arguments]
-'     Receive the captured application-level, window-level, and title-bar state.
+'     Receive the captured application-level, window-level, and title-bar
+'     state.
 '
 ' RETURNS
 '   None
@@ -1165,7 +1170,7 @@ Private Sub TST_SnapshotState( _
 '   - Best-effort capture; unknown Ribbon / TitleBar state is marked via flags.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1178,18 +1183,18 @@ Private Sub TST_SnapshotState( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Capture application-level state directly from Excel
+    'Capture application-level state directly from Excel.
         StatusBarVisible = Application.DisplayStatusBar
         ScrollBarsVisible = Application.DisplayScrollBars
         FormulaBarVisible = Application.DisplayFormulaBar
 
-    'Capture Ribbon state through the best-effort reader
+    'Capture Ribbon state through the best-effort reader.
         RibbonKnown = TST_TryGetRibbonVisible(RibbonVisible, Msg)
         If Not RibbonKnown Then
             TST_Log "TST_SnapshotState", "Ribbon", Msg
         End If
 
-    'Capture TitleBar state through the best-effort reader
+    'Capture TitleBar state through the best-effort reader.
         TitleBarKnown = TST_TryGetTitleBarVisible(TitleBarVisible, Msg)
         If Not TitleBarKnown Then
             TST_Log "TST_SnapshotState", "TitleBar", Msg
@@ -1198,31 +1203,31 @@ Private Sub TST_SnapshotState( _
 '------------------------------------------------------------------------------
 ' SNAPSHOT WINDOW-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Capture the current Application.Windows count
+    'Capture the current Application.Windows count.
         WindowCount = Application.Windows.Count
 
-    'Allocate per-window snapshot arrays when at least one window exists
+    'Allocate per-window snapshot arrays when at least one window exists.
         If WindowCount > 0 Then
 
-            'Size the Headings state array
+            'Size the Headings state array.
                 ReDim HeadingsVisible(1 To WindowCount)
 
-            'Size the WorkbookTabs state array
+            'Size the WorkbookTabs state array.
                 ReDim WorkbookTabsVisible(1 To WindowCount)
 
-            'Size the Gridlines state array
+            'Size the Gridlines state array.
                 ReDim GridlinesVisible(1 To WindowCount)
 
-            'Capture each window's relevant state
+            'Capture each window's relevant state.
                 For i = 1 To WindowCount
 
-                    'Capture the current window's Headings visibility
+                    'Capture the current window's Headings visibility.
                         HeadingsVisible(i) = Application.Windows(i).DisplayHeadings
 
-                    'Capture the current window's WorkbookTabs visibility
+                    'Capture the current window's WorkbookTabs visibility.
                         WorkbookTabsVisible(i) = Application.Windows(i).DisplayWorkbookTabs
 
-                    'Capture the current window's Gridlines visibility
+                    'Capture the current window's Gridlines visibility.
                         GridlinesVisible(i) = Application.Windows(i).DisplayGridlines
 
                 Next i
@@ -1266,7 +1271,7 @@ Private Sub TST_RestoreState( _
 '   - Best-effort restore only.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1280,19 +1285,19 @@ Private Sub TST_RestoreState( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Suppress local restore failures so all restore steps are attempted
+    'Suppress local restore failures so all restore steps are attempted.
         On Error Resume Next
 
 '------------------------------------------------------------------------------
 ' RESTORE TITLE-BAR STATE
 '------------------------------------------------------------------------------
-    'Restore TitleBar first when its original state was captured successfully
+    'Restore TitleBar first when its original state was captured successfully.
         If TitleBarKnown Then
 
-            'Restore TitleBar via the public API
-                K_SetExcelUI TitleBar:=IIf(TitleBarVisible, K_UI_Show, K_UI_Hide)
+            'Restore TitleBar via the public API.
+                K_SetExcelUI TitleBar:=TST_TitleBarMode(True, IIf(TitleBarVisible, K_UI_Show, K_UI_Hide))
 
-            'Allow the UI a short time to settle
+            'Allow the UI a short time to settle.
                 TST_WaitUI TEST_WAIT_SECONDS
 
         End If
@@ -1300,10 +1305,10 @@ Private Sub TST_RestoreState( _
 '------------------------------------------------------------------------------
 ' RESTORE RIBBON STATE
 '------------------------------------------------------------------------------
-    'Restore Ribbon when its original state was captured successfully
+    'Restore Ribbon when its original state was captured successfully.
         If RibbonKnown Then
 
-            'Attempt Ribbon restore through the test helper
+            'Attempt Ribbon restore through the test helper.
                 If Not TST_TrySetRibbonVisible(RibbonVisible, Msg) Then
                     TST_Log "TST_RestoreState", "Ribbon", Msg
                 End If
@@ -1313,40 +1318,40 @@ Private Sub TST_RestoreState( _
 '------------------------------------------------------------------------------
 ' RESTORE APPLICATION-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Restore StatusBar visibility directly
+    'Restore StatusBar visibility directly.
         Application.DisplayStatusBar = StatusBarVisible
 
-    'Restore ScrollBars visibility directly
+    'Restore ScrollBars visibility directly.
         Application.DisplayScrollBars = ScrollBarsVisible
 
-    'Restore FormulaBar visibility directly
+    'Restore FormulaBar visibility directly.
         Application.DisplayFormulaBar = FormulaBarVisible
 
 '------------------------------------------------------------------------------
 ' RESTORE WINDOW-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Compute the number of windows that can be restored safely by index
+    'Compute the number of windows that can be restored safely by index.
         WindowLimit = Application.Windows.Count
         If WindowCount < WindowLimit Then WindowLimit = WindowCount
 
-    'Restore each saved window state up to the common window count
+    'Restore each saved window state up to the common window count.
         For i = 1 To WindowLimit
 
-            'Restore the current window's Headings visibility
-                Application.Windows(i).DisplayHeadings = HeadingsVisible(i)
+            'Restore the current window's Headings visibility.
+                TST_TryRestoreWindowProp Application.Windows(i), "DisplayHeadings", HeadingsVisible(i)
 
-            'Restore the current window's WorkbookTabs visibility
-                Application.Windows(i).DisplayWorkbookTabs = WorkbookTabsVisible(i)
+            'Restore the current window's WorkbookTabs visibility.
+                TST_TryRestoreWindowProp Application.Windows(i), "DisplayWorkbookTabs", WorkbookTabsVisible(i)
 
-            'Restore the current window's Gridlines visibility
-                Application.Windows(i).DisplayGridlines = GridlinesVisible(i)
+            'Restore the current window's Gridlines visibility.
+                TST_TryRestoreWindowProp Application.Windows(i), "DisplayGridlines", GridlinesVisible(i)
 
         Next i
 
 '------------------------------------------------------------------------------
 ' SETTLE UI
 '------------------------------------------------------------------------------
-    'Allow the UI a short time to settle after restoration
+    'Allow the UI a short time to settle after restoration.
         TST_WaitUI TEST_WAIT_SECONDS
 
 End Sub
@@ -1374,8 +1379,11 @@ Private Sub TST_WaitUI(ByVal SecondsToWait As Double)
 ' ERROR POLICY
 '   - Does NOT raise.
 '
+' NOTES
+'   - Handles Timer rollover at midnight.
+'
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1387,14 +1395,20 @@ Private Sub TST_WaitUI(ByVal SecondsToWait As Double)
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Capture the timer baseline
+    'Exit immediately when no positive wait duration was requested.
+        If SecondsToWait <= 0# Then
+            Exit Sub
+        End If
+
+    'Capture the timer baseline.
         t0 = Timer
 
 '------------------------------------------------------------------------------
 ' WAIT LOOP
 '------------------------------------------------------------------------------
-    'Yield to Excel until the requested duration has elapsed
-        Do While Timer - t0 < SecondsToWait
+    'Yield to Excel until the requested duration has elapsed, handling midnight
+    'rollover safely.
+        Do While TST_TimerElapsedSeconds(t0) < SecondsToWait
             DoEvents
         Loop
 
@@ -1413,7 +1427,8 @@ Private Sub TST_AssertBooleanEquals( _
 '   Raise a descriptive assertion failure when two Boolean values differ.
 '
 ' WHY THIS EXISTS
-'   Regression tests need explicit, readable failures instead of silent mismatches.
+'   Regression tests need explicit, readable failures instead of silent
+'   mismatches.
 '
 ' INPUTS
 '   Expected
@@ -1432,14 +1447,14 @@ Private Sub TST_AssertBooleanEquals( _
 '   - Raises on mismatch.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' ASSERT EQUALITY
 '------------------------------------------------------------------------------
-    'Raise an assertion failure when the Boolean values differ
+    'Raise an assertion failure when the Boolean values differ.
         If Expected <> Actual Then
             Err.Raise TEST_ERR_BASE + 1, _
                       AssertionName, _
@@ -1455,7 +1470,7 @@ Private Sub TST_AssertApplicationProperty( _
 
 '
 '==============================================================================
-'                        TST_AssertApplicationProperty
+'                     TST_AssertApplicationProperty
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Boolean value of an Application-level property.
@@ -1481,7 +1496,7 @@ Private Sub TST_AssertApplicationProperty( _
 '   - Raises on read failure or mismatch.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1494,7 +1509,7 @@ Private Sub TST_AssertApplicationProperty( _
 '------------------------------------------------------------------------------
 ' READ PROPERTY
 '------------------------------------------------------------------------------
-    'Attempt to read the requested Application property
+    'Attempt to read the requested Application property.
         If Not TST_TryGetBooleanProperty(Application, PropertyName, Actual, Msg) Then
             Err.Raise TEST_ERR_BASE + 2, AssertionName, AssertionName & " read failed | " & Msg
         End If
@@ -1502,7 +1517,7 @@ Private Sub TST_AssertApplicationProperty( _
 '------------------------------------------------------------------------------
 ' ASSERT EQUALITY
 '------------------------------------------------------------------------------
-    'Assert the read value against the expectation
+    'Assert the read value against the expectation.
         TST_AssertBooleanEquals Expected, Actual, AssertionName
 
 End Sub
@@ -1514,7 +1529,7 @@ Private Sub TST_AssertAllWindowsProperty( _
 
 '
 '==============================================================================
-'                         TST_AssertAllWindowsProperty
+'                       TST_AssertAllWindowsProperty
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Boolean value of a Window-level property across all open
@@ -1541,7 +1556,7 @@ Private Sub TST_AssertAllWindowsProperty( _
 '   - Raises on read failure or mismatch.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1555,17 +1570,17 @@ Private Sub TST_AssertAllWindowsProperty( _
 '------------------------------------------------------------------------------
 ' ASSERT EACH WINDOW
 '------------------------------------------------------------------------------
-    'Assert the requested property on every open Excel window
+    'Assert the requested property on every open Excel window.
         For Each W In Application.Windows
 
-            'Attempt to read the requested Window property
+            'Attempt to read the requested Window property.
                 If Not TST_TryGetBooleanProperty(W, PropertyName, Actual, Msg) Then
                     Err.Raise TEST_ERR_BASE + 3, _
                               AssertionName, _
                               AssertionName & " read failed on window [" & W.Caption & "] | " & Msg
                 End If
 
-            'Assert the read value against the expectation
+            'Assert the read value against the expectation.
                 TST_AssertBooleanEquals Expected, Actual, AssertionName & " [" & W.Caption & "]"
 
         Next W
@@ -1601,7 +1616,7 @@ Private Sub TST_AssertRibbonVisible( _
 '   - Raises on read failure or mismatch.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1614,7 +1629,7 @@ Private Sub TST_AssertRibbonVisible( _
 '------------------------------------------------------------------------------
 ' READ RIBBON STATE
 '------------------------------------------------------------------------------
-    'Attempt to read the current Ribbon visibility
+    'Attempt to read the current Ribbon visibility.
         If Not TST_TryGetRibbonVisible(Actual, Msg) Then
             Err.Raise TEST_ERR_BASE + 4, AssertionName, AssertionName & " read failed | " & Msg
         End If
@@ -1622,7 +1637,7 @@ Private Sub TST_AssertRibbonVisible( _
 '------------------------------------------------------------------------------
 ' ASSERT EQUALITY
 '------------------------------------------------------------------------------
-    'Assert the read value against the expectation
+    'Assert the read value against the expectation.
         TST_AssertBooleanEquals Expected, Actual, AssertionName
 
 End Sub
@@ -1657,7 +1672,7 @@ Private Sub TST_AssertTitleBarVisible( _
 '   - Raises on read failure or mismatch.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1670,7 +1685,7 @@ Private Sub TST_AssertTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' READ TITLE-BAR STATE
 '------------------------------------------------------------------------------
-    'Attempt to read the current title-bar visibility
+    'Attempt to read the current title-bar visibility.
         If Not TST_TryGetTitleBarVisible(Actual, Msg) Then
             Err.Raise TEST_ERR_BASE + 5, AssertionName, AssertionName & " read failed | " & Msg
         End If
@@ -1678,7 +1693,7 @@ Private Sub TST_AssertTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' ASSERT EQUALITY
 '------------------------------------------------------------------------------
-    'Assert the read value against the expectation
+    'Assert the read value against the expectation.
         TST_AssertBooleanEquals Expected, Actual, AssertionName
 
 End Sub
@@ -1691,7 +1706,7 @@ Private Function TST_TryGetBooleanProperty( _
 
 '
 '==============================================================================
-'                         TST_TryGetBooleanProperty
+'                       TST_TryGetBooleanProperty
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read a Boolean property from an object using CallByName.
@@ -1721,7 +1736,7 @@ Private Function TST_TryGetBooleanProperty( _
 '   - Does NOT raise to callers.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1733,21 +1748,21 @@ Private Function TST_TryGetBooleanProperty( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize outputs and default result
+    'Initialize outputs and default result.
         TST_TryGetBooleanProperty = False
         ValueOut = False
         FailMsg = vbNullString
 
-    'Reject invalid object input deterministically
+    'Reject invalid object input deterministically.
         If Target Is Nothing Then
             FailMsg = "target object is Nothing"
             GoTo SafeExit
         End If
 
-    'Reject empty property name deterministically
+    'Reject empty property name deterministically.
         If Len(PropertyName) = 0 Then
             FailMsg = "property name is empty"
             GoTo SafeExit
@@ -1756,33 +1771,31 @@ Private Function TST_TryGetBooleanProperty( _
 '------------------------------------------------------------------------------
 ' READ PROPERTY
 '------------------------------------------------------------------------------
-    'Read the requested property using late-bound property access
+    'Read the requested property using late-bound property access.
         V = CallByName(Target, PropertyName, VbGet)
 
-    'Convert the result to a Boolean
+    'Convert the result to a Boolean.
         ValueOut = CBool(V)
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after property access completes
+    'Mark success after property access completes.
         TST_TryGetBooleanProperty = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Normal termination point.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure string without raising.
+        FailMsg = TST_BuildRuntimeErrorText
 
 End Function
 
@@ -1813,22 +1826,22 @@ Private Function TST_TryGetRibbonVisible( _
 '   FALSE => read failed
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim V                   As Variant    'Fallback Excel4 macro result
+    Dim V                   As Variant   'Fallback Excel4 macro result
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize outputs and default result
+    'Initialize outputs and default result.
         TST_TryGetRibbonVisible = False
         IsVisible = False
         FailMsg = vbNullString
@@ -1836,7 +1849,7 @@ Private Function TST_TryGetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' TRY COMMANDBARS
 '------------------------------------------------------------------------------
-    'Attempt to read Ribbon visibility from the CommandBars collection
+    'Attempt to read Ribbon visibility from the CommandBars collection.
         On Error Resume Next
             IsVisible = Application.CommandBars("Ribbon").Visible
         If Err.Number = 0 Then
@@ -1850,7 +1863,7 @@ Private Function TST_TryGetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' TRY EXCEL4 MACRO FALLBACK
 '------------------------------------------------------------------------------
-    'Attempt a fallback read using an Excel4 macro
+    'Attempt a fallback read using an Excel4 macro.
         On Error Resume Next
             V = Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
         If Err.Number = 0 Then
@@ -1867,17 +1880,15 @@ Private Function TST_TryGetRibbonVisible( _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Normal termination point.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure message without raising.
+        FailMsg = TST_BuildRuntimeErrorText
 
 End Function
 
@@ -1908,7 +1919,7 @@ Private Function TST_TrySetRibbonVisible( _
 '   FALSE => Ribbon update failed
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -1920,17 +1931,17 @@ Private Function TST_TrySetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize default failure result
+    'Initialize default failure result.
         TST_TrySetRibbonVisible = False
         FailMsg = vbNullString
 
 '------------------------------------------------------------------------------
 ' BUILD MACRO
 '------------------------------------------------------------------------------
-    'Build the Ribbon visibility macro text explicitly
+    'Build the Ribbon visibility macro text explicitly.
         If IsVisible Then
             MacroText = "Show.TOOLBAR(""Ribbon"",True)"
         Else
@@ -1940,30 +1951,28 @@ Private Function TST_TrySetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' EXECUTE MACRO
 '------------------------------------------------------------------------------
-    'Execute the Ribbon visibility macro
+    'Execute the Ribbon visibility macro.
         Application.ExecuteExcel4Macro MacroText
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after macro execution completes
+    'Mark success after macro execution completes.
         TST_TrySetRibbonVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Normal termination point.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure string without raising.
+        FailMsg = TST_BuildRuntimeErrorText
 
 End Function
 
@@ -1973,7 +1982,7 @@ Private Function TST_TryGetTitleBarVisible( _
 
 '
 '==============================================================================
-'                        TST_TryGetTitleBarVisible
+'                      TST_TryGetTitleBarVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current title-bar visibility for the Excel window
@@ -1995,7 +2004,7 @@ Private Function TST_TryGetTitleBarVisible( _
 '   FALSE => read failed
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
@@ -2014,18 +2023,18 @@ Private Function TST_TryGetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Initialize outputs and default result
+    'Initialize outputs and default result.
         TST_TryGetTitleBarVisible = False
         IsVisible = False
         FailMsg = vbNullString
 
-    'Read the Excel window handle
+    'Read the Excel window handle.
         xlHnd = Application.hWnd
 
-    'Reject invalid window handle deterministically
+    'Reject invalid window handle deterministically.
         If xlHnd = 0 Then
             FailMsg = "invalid Excel window handle"
             GoTo SafeExit
@@ -2034,32 +2043,32 @@ Private Function TST_TryGetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' READ WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Clear last-error state before the API call
+    'Clear last-error state before the API call.
         TST_SetLastError 0
 
 #If VBA7 Then
     #If Win64 Then
 
-        'Read the current window style using the 64-bit API
+        'Read the current window style using the 64-bit API.
             StyleValue = TST_GetWindowLongPtr(xlHnd, TST_GWL_STYLE)
 
     #Else
 
-        'Read the current window style using the 32-bit API under VBA7
+        'Read the current window style using the 32-bit API under VBA7.
             StyleValue = TST_GetWindowLong(xlHnd, TST_GWL_STYLE)
 
     #End If
 #Else
 
-    'Read the current window style using the legacy 32-bit API
+    'Read the current window style using the legacy 32-bit API.
         StyleValue = TST_GetWindowLong(xlHnd, TST_GWL_STYLE)
 
 #End If
 
-    'Read the Win32 last-error value immediately after the API call
+    'Read the Win32 last-error value immediately after the API call.
         LastErr = TST_GetLastError
 
-    'Treat zero + nonzero last error as failure
+    'Treat zero + nonzero last error as failure.
         If StyleValue = 0 And LastErr <> 0 Then
             FailMsg = "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & CStr(LastErr)
             GoTo SafeExit
@@ -2068,30 +2077,28 @@ Private Function TST_TryGetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' MAP STYLE TO TITLE-BAR VISIBILITY
 '------------------------------------------------------------------------------
-    'Treat the caption style bit as the title-bar visibility signal
+    'Treat the caption style bit as the title-bar visibility signal.
         IsVisible = ((StyleValue And TST_WS_CAPTION) <> 0)
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after a valid style read
+    'Mark success after a valid style read.
         TST_TryGetTitleBarVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Normal termination point.
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
-        FailMsg = CStr(Err.Number) & ": " & Err.Description & _
-                  IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-                  IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+    'Return a descriptive failure message without raising.
+        FailMsg = TST_BuildRuntimeErrorText
 
 End Function
 
@@ -2128,21 +2135,640 @@ Private Sub TST_Log( _
 '   - Suppresses any unexpected logging failure locally.
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-09
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Protect callers from any unexpected logging failure
+    'Protect callers from any unexpected logging failure.
         On Error Resume Next
 
 '------------------------------------------------------------------------------
 ' WRITE DIAGNOSTIC LINE
 '------------------------------------------------------------------------------
-    'Write a consistent diagnostic line to the Immediate Window
+    'Write a consistent diagnostic line to the Immediate Window.
         Debug.Print ProcName & " @ " & Stage & " | " & Detail
+
+End Sub
+
+Private Sub TST_TryRestoreWindowProp( _
+    ByVal W As Window, _
+    ByVal PropName As String, _
+    ByVal Value As Boolean)
+
+'
+'==============================================================================
+'                         TST_TryRestoreWindowProp
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Attempt to restore a specific Boolean Window property during test cleanup.
+'
+' WHY THIS EXISTS
+'   The restore path must be best-effort and should log window-specific restore
+'   failures without interrupting later cleanup steps.
+'
+' INPUTS
+'   W
+'     Target Excel window.
+'
+'   PropName
+'     Window Boolean property name to restore.
+'
+'   Value
+'     Boolean value to assign.
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Does NOT raise to callers.
+'   - Logs any failure to the Immediate Window.
+'
+' DEPENDENCIES
+'   - TST_TrySetBooleanProperty
+'   - TST_Log
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Msg                 As String    'Diagnostic message from the property-write helper
+
+'------------------------------------------------------------------------------
+' APPLY PROPERTY RESTORE
+'------------------------------------------------------------------------------
+    'Attempt to restore the requested Window property and log any failure.
+        If Not TST_TrySetBooleanProperty(W, PropName, Value, Msg) Then
+            TST_Log "TST_RestoreState", "Restore." & PropName & " [" & W.Caption & "]", Msg
+        End If
+
+End Sub
+
+Private Function TST_TrySetBooleanProperty( _
+    ByVal Target As Object, _
+    ByVal PropertyName As String, _
+    ByVal NewValue As Boolean, _
+    ByRef FailMsg As String) As Boolean
+
+'
+'==============================================================================
+'                       TST_TrySetBooleanProperty
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Attempt to assign a Boolean property on an object using a common,
+'   best-effort helper.
+'
+' WHY THIS EXISTS
+'   The regression harness needs the same kind of shared Boolean property-write
+'   logic used in the main UI module, especially during restore.
+'
+' INPUTS
+'   Target
+'     Object exposing the target Boolean property.
+'
+'   PropertyName
+'     Name of the Boolean property to assign.
+'
+'   NewValue
+'     Boolean value to write to the target property.
+'
+'   FailMsg
+'     Receives a diagnostic reason when the function returns FALSE.
+'
+' RETURNS
+'   TRUE  => property write succeeded
+'   FALSE => property write failed
+'
+' BEHAVIOR
+'   - Uses CallByName with vbLet to assign the property.
+'
+' ERROR POLICY
+'   - Does NOT raise to callers.
+'   - Returns FALSE and populates FailMsg on failure.
+'
+' NOTES
+'   - Intended for Application / Window Boolean property writes in this
+'     module.
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the local failure handler.
+        On Error GoTo Fail
+
+    'Initialize default failure result.
+        TST_TrySetBooleanProperty = False
+        FailMsg = vbNullString
+
+    'Reject invalid object input deterministically.
+        If Target Is Nothing Then
+            FailMsg = "target object is Nothing"
+            GoTo SafeExit
+        End If
+
+    'Reject empty property name deterministically.
+        If Len(PropertyName) = 0 Then
+            FailMsg = "property name is empty"
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY PROPERTY WRITE
+'------------------------------------------------------------------------------
+    'Assign the requested Boolean value using late-bound property assignment.
+        CallByName Target, PropertyName, VbLet, NewValue
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+    'Mark success after property assignment completes.
+        TST_TrySetBooleanProperty = True
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Normal termination point.
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+    'Return a descriptive failure string without raising.
+        FailMsg = TST_BuildRuntimeErrorText
+
+End Function
+
+Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double
+
+'
+'==============================================================================
+'                         TST_TimerElapsedSeconds
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Return elapsed seconds since a Timer baseline, handling midnight rollover.
+'
+' WHY THIS EXISTS
+'   VBA Timer resets at midnight, so direct subtraction can become negative in
+'   long-running sessions or when tests span midnight.
+'
+' INPUTS
+'   TimerStart
+'     Baseline Timer value captured earlier.
+'
+' RETURNS
+'   Elapsed seconds since TimerStart, adjusted for midnight rollover when
+'   necessary.
+'
+' ERROR POLICY
+'   - Does NOT raise.
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim TimerNow            As Double    'Current Timer reading
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Read the current Timer value.
+        TimerNow = Timer
+
+'------------------------------------------------------------------------------
+' RETURN ELAPSED SECONDS
+'------------------------------------------------------------------------------
+    'Adjust for midnight rollover when the current Timer value is less than the
+    'baseline.
+        If TimerNow >= TimerStart Then
+            TST_TimerElapsedSeconds = TimerNow - TimerStart
+        Else
+            TST_TimerElapsedSeconds = (TST_SECONDS_PER_DAY - TimerStart) + TimerNow
+        End If
+
+End Function
+
+Private Function TST_TitleBarMode( _
+    ByVal IncludeTitleBarTests As Boolean, _
+    ByVal RequestedMode As K_UIVisibility) As K_UIVisibility
+
+'
+'==============================================================================
+'                            TST_TitleBarMode
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Return the effective TitleBar mode for a test case based on whether the
+'   current pack includes title-bar assertions.
+'
+' WHY THIS EXISTS
+'   Many test cases need the same small policy:
+'     - when title-bar testing is enabled, apply the requested TitleBar mode
+'     - otherwise leave TitleBar unchanged
+'
+'   Centralizing that logic keeps the case bodies cleaner and avoids repeated
+'   IIf-based enum coercion.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE  => use RequestedMode
+'     FALSE => return K_UI_LeaveUnchanged
+'
+'   RequestedMode
+'     TitleBar visibility mode to apply when title-bar testing is enabled.
+'
+' RETURNS
+'   Effective TitleBar mode for the test case.
+'
+' ERROR POLICY
+'   - Does NOT raise.
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' RETURN EFFECTIVE MODE
+'------------------------------------------------------------------------------
+    'Use the requested mode only when title-bar testing is enabled.
+        If IncludeTitleBarTests Then
+            TST_TitleBarMode = RequestedMode
+        Else
+            TST_TitleBarMode = K_UI_LeaveUnchanged
+        End If
+
+End Function
+
+Private Function TST_BuildRuntimeErrorText() As String
+
+'
+'==============================================================================
+'                       TST_BuildRuntimeErrorText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Build a consistent runtime diagnostic string from the active Err object
+'
+' WHY THIS EXISTS
+'   Several helpers in this module need identical fail-soft diagnostic text
+'   Centralizing the formatting keeps the harness consistent and easier to
+'   maintain
+'
+' RETURNS
+'   A formatted diagnostic string including:
+'     - Err.Number
+'     - Err.Description
+'     - Err.Source, when available
+'     - Erl, when available
+'
+' ERROR POLICY
+'   - Does NOT raise.
+'   - Returns best-effort text.
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Protect callers from any unexpected issue while formatting the diagnostic
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' BUILD RUNTIME ERROR TEXT
+'------------------------------------------------------------------------------
+    'Build a consistent diagnostic string from the current Err state
+        TST_BuildRuntimeErrorText = _
+            CStr(Err.Number) & ": " & Err.Description & _
+            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
+            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+
+End Function
+
+Private Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'                       TST_Case_WithResult_AllSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that K_SetExcelUI_WithResult returns a successful C_UIResult object
+'   when all requested UI updates succeed.
+'
+' WHY THIS EXISTS
+'   K_SetExcelUI_WithResult is intended to mirror the best-effort application
+'   behavior of K_SetExcelUI while returning structured diagnostics.
+'
+'   The most important first regression case is the clean success path:
+'     - result object is returned
+'     - Succeeded = TRUE
+'     - FailureCount = 0
+'     - requested UI state is actually applied
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE  => include TitleBar in the success assertion
+'     FALSE => leave TitleBar unchanged in this case
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - K_SetExcelUI_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim R                   As C_UIResult 'Structured result returned by the API
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Log the start of the case.
+        TST_Log "TST_Case_WithResult_AllSuccess", "START", "Validating structured-result success path"
+
+'------------------------------------------------------------------------------
+' APPLY REQUESTED UI STATE
+'------------------------------------------------------------------------------
+    'Apply a deterministic visible state through the structured-result API.
+        Set R = K_SetExcelUI_WithResult( _
+                    Ribbon:=K_UI_Show, _
+                    StatusBar:=K_UI_Show, _
+                    ScrollBars:=K_UI_Show, _
+                    FormulaBar:=K_UI_Show, _
+                    Headings:=K_UI_Show, _
+                    WorkbookTabs:=K_UI_Show, _
+                    Gridlines:=K_UI_Show, _
+                    TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show))
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT RESULT OBJECT
+'------------------------------------------------------------------------------
+    'Assert that the returned result object represents a clean success path.
+        TST_AssertResultSuccess R, "WithResult.AllSuccess.Result"
+
+'------------------------------------------------------------------------------
+' ASSERT APPLIED UI STATE
+'------------------------------------------------------------------------------
+    'Assert Ribbon visible.
+        TST_AssertRibbonVisible True, "WithResult.AllSuccess.Ribbon"
+
+    'Assert StatusBar visible.
+        TST_AssertApplicationProperty True, "DisplayStatusBar", "WithResult.AllSuccess.StatusBar"
+
+    'Assert ScrollBars visible.
+        TST_AssertApplicationProperty True, "DisplayScrollBars", "WithResult.AllSuccess.ScrollBars"
+
+    'Assert FormulaBar visible.
+        TST_AssertApplicationProperty True, "DisplayFormulaBar", "WithResult.AllSuccess.FormulaBar"
+
+    'Assert Headings visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", "WithResult.AllSuccess.Headings"
+
+    'Assert WorkbookTabs visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayWorkbookTabs", "WithResult.AllSuccess.WorkbookTabs"
+
+    'Assert Gridlines visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", "WithResult.AllSuccess.Gridlines"
+
+    'Assert TitleBar visible when title-bar testing is enabled.
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, "WithResult.AllSuccess.TitleBar"
+        End If
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+    'Log successful completion of the case.
+        TST_Log "TST_Case_WithResult_AllSuccess", "PASS", "Structured-result success path behaved as expected"
+
+End Sub
+
+Private Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'                       TST_Case_WithResult_NoOpSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that K_SetExcelUI_WithResult returns a successful C_UIResult object
+'   when invoked as a no-op with all arguments omitted / left unchanged.
+'
+' WHY THIS EXISTS
+'   The tri-state API promises that omitted arguments do not accidentally drive
+'   visibility changes.
+'
+'   The structured-result variant should preserve that contract while also
+'   reporting a clean success result:
+'     - result object is returned
+'     - Succeeded = TRUE
+'     - FailureCount = 0
+'     - pre-existing UI state remains unchanged
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE  => include TitleBar in the baseline / assertion
+'     FALSE => skip TitleBar assertions in this case
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - K_SetExcelUI
+'   - K_SetExcelUI_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim R                   As C_UIResult 'Structured result returned by the API
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Log the start of the case.
+        TST_Log "TST_Case_WithResult_NoOpSuccess", "START", "Validating structured-result no-op path"
+
+'------------------------------------------------------------------------------
+' ESTABLISH MIXED BASELINE
+'------------------------------------------------------------------------------
+    'Establish a mixed baseline that should remain unchanged.
+        K_SetExcelUI _
+            Ribbon:=K_UI_Show, _
+            StatusBar:=K_UI_Hide, _
+            ScrollBars:=K_UI_Show, _
+            FormulaBar:=K_UI_Hide, _
+            Headings:=K_UI_Show, _
+            WorkbookTabs:=K_UI_Hide, _
+            Gridlines:=K_UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' APPLY NO-OP THROUGH STRUCTURED-RESULT API
+'------------------------------------------------------------------------------
+    'Invoke the structured-result API with no arguments so every element is
+    'LeaveUnchanged.
+        Set R = K_SetExcelUI_WithResult
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT RESULT OBJECT
+'------------------------------------------------------------------------------
+    'Assert that the returned result object represents a clean success path.
+        TST_AssertResultSuccess R, "WithResult.NoOp.Result"
+
+'------------------------------------------------------------------------------
+' ASSERT NO-OP UI STATE
+'------------------------------------------------------------------------------
+    'Assert Ribbon remained visible.
+        TST_AssertRibbonVisible True, "WithResult.NoOp.Ribbon"
+
+    'Assert StatusBar remained hidden.
+        TST_AssertApplicationProperty False, "DisplayStatusBar", "WithResult.NoOp.StatusBar"
+
+    'Assert ScrollBars remained visible.
+        TST_AssertApplicationProperty True, "DisplayScrollBars", "WithResult.NoOp.ScrollBars"
+
+    'Assert FormulaBar remained hidden.
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", "WithResult.NoOp.FormulaBar"
+
+    'Assert Headings remained visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", "WithResult.NoOp.Headings"
+
+    'Assert WorkbookTabs remained hidden across all windows.
+        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", "WithResult.NoOp.WorkbookTabs"
+
+    'Assert Gridlines remained visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", "WithResult.NoOp.Gridlines"
+
+    'Assert TitleBar remained visible / unchanged when requested.
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, "WithResult.NoOp.TitleBar"
+        End If
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+    'Log successful completion of the case.
+        TST_Log "TST_Case_WithResult_NoOpSuccess", "PASS", "Structured-result no-op path behaved as expected"
+
+End Sub
+
+Private Sub TST_AssertResultSuccess( _
+    ByVal ResultObject As C_UIResult, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                         TST_AssertResultSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert that a C_UIResult object exists and represents a clean success path.
+'
+' WHY THIS EXISTS
+'   Structured-result regressions need a shared assertion helper so the tests
+'   validate the same core contract consistently:
+'     - object exists
+'     - Succeeded = TRUE
+'     - FailureCount = 0
+'
+' INPUTS
+'   ResultObject
+'     Structured result object returned by K_SetExcelUI_WithResult.
+'
+'   AssertionName
+'     Human-readable assertion identifier.
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on mismatch.
+'
+' UPDATED
+'   2026-04-09
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' VALIDATE OBJECT REFERENCE
+'------------------------------------------------------------------------------
+    'Reject a missing result object deterministically.
+        If ResultObject Is Nothing Then
+            Err.Raise TEST_ERR_BASE + 20, _
+                      AssertionName, _
+                      AssertionName & " returned Nothing"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT SUCCESS FLAG
+'------------------------------------------------------------------------------
+    'Assert that the result object reports overall success.
+        If Not ResultObject.Succeeded Then
+            Err.Raise TEST_ERR_BASE + 21, _
+                      AssertionName, _
+                      AssertionName & " expected Succeeded=True actual=False"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE COUNT
+'------------------------------------------------------------------------------
+    'Assert that the result object recorded no failures.
+        If ResultObject.FailureCount <> 0 Then
+            Err.Raise TEST_ERR_BASE + 22, _
+                      AssertionName, _
+                      AssertionName & " expected FailureCount=0 actual=" & CStr(ResultObject.FailureCount)
+        End If
 
 End Sub
 
