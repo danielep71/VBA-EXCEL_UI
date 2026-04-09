@@ -20,10 +20,10 @@ The project is intended for workbook-driven solutions that need a constrained, k
 ```text
 /README.md
 /src/M_EXCEL_UI.bas
-/src/C_UIResult.cls
 /demo/M_EXCEL_UI_DEMO.bas
 /demo/EXCEL_UI_DEMO.xlsm
 /test/M_EXCEL_UI_REGRESSION_TESTS.bas
+/test/C_UIResult.cls
 ```
 
 ## Components
