@@ -8,8 +8,9 @@ This repository provides a compact VBA toolkit for Excel UI control, demonstrati
 
 It currently includes:
 
-- a **core module** for applying UI visibility changes through a safe tri-state API
-- a **structured result class** for callers that want diagnostics as data rather than only Immediate Window logging
+- a **core module** for applying Excel UI visibility changes through a safe tri-state API
+- a **structured-result path** for callers that want diagnostics as data rather than only Immediate Window logging
+- an **explicit snapshot / reset path** for capturing and restoring the current managed UI baseline
 - a **demo module** for building and driving a worksheet-based showcase of the UI features
 - a **regression test module** for validating the public behavior of the toolkit
 
@@ -20,7 +21,6 @@ The project is intended for workbook-driven solutions that need a constrained, k
 ```text
 /README.md
 /src/M_EXCEL_UI.bas
-/src/C_UIResult.cls
 /demo/M_EXCEL_UI_DEMO.bas
 /demo/EXCEL_UI_DEMO.xlsm
 /test/M_EXCEL_UI_REGRESSION_TESTS.bas
@@ -39,6 +39,10 @@ It exposes:
 - `K_SetExcelUI_WithResult`
 - `K_HideExcelUI`
 - `K_ShowExcelUI`
+- `K_CaptureExcelUIState`
+- `K_ResetExcelUIToSnapshot`
+- `K_HasExcelUIStateSnapshot`
+- `K_ClearExcelUIStateSnapshot`
 
 Managed UI elements:
 
@@ -59,19 +63,6 @@ Window-frame:
 
 - Title Bar (via WinAPI on the Excel window represented by `Application.Hwnd`)
 
-### `C_UIResult.cls`
-
-Lightweight structured result object used by `K_SetExcelUI_WithResult`.
-
-It provides:
-
-- `Succeeded`
-- `FailureCount`
-- `Failure(Index)`
-- `AddFailure`
-
-This allows callers to inspect whether a best-effort UI operation completed cleanly and, if not, enumerate the element-level failures that were recorded.
-
 ### `M_EXCEL_UI_DEMO.bas`
 
 Worksheet-based demo and demo-sheet builder.
@@ -88,6 +79,9 @@ It provides:
   - Kiosk
   - Analyst
   - Minimal
+- explicit state workflow buttons:
+  - Capture State
+  - Reset State
 - explanatory notes rendered directly on the demo sheet
 
 Main public procedures include:
@@ -100,6 +94,8 @@ Main public procedures include:
 - `Demo_PresetKiosk`
 - `Demo_PresetAnalyst`
 - `Demo_PresetMinimal`
+- `Demo_CaptureCurrentExcelUIState`
+- `Demo_ResetExcelUIToCapturedState`
 - `Demo_CreateExcelUISheet`
 
 ### `M_EXCEL_UI_REGRESSION_TESTS.bas`
@@ -122,6 +118,10 @@ The test harness validates:
 - title-bar hide / show round-trip
 - structured-result clean success path
 - structured-result no-op / leave-unchanged success path
+- structured-result success path without failure-list capture
+- explicit snapshot lifecycle
+- reset without snapshot
+- `ScreenUpdating` preservation around quiet-update behavior
 
 It also snapshots current UI state before test execution and attempts to restore it afterward.
 
@@ -153,9 +153,36 @@ The toolkit provides two complementary entry points:
   Best-effort, fail-soft application with diagnostics written to the Immediate Window.
 
 - `K_SetExcelUI_WithResult`  
-  Best-effort, fail-soft application that returns a `C_UIResult` object containing any recorded failures.
+  Best-effort, fail-soft application that returns:
+  - a Boolean success flag
+  - `FailureCount`
+  - optional `FailureList` as a 1-based string array
 
-This allows callers to choose between a simple procedural API and a structured inspection model.
+This allows callers to choose between a simple procedural API and a structured inspection model without relying on a class module.
+
+### Explicit snapshot / reset
+
+The toolkit also provides an explicit state lifecycle that is separate from `K_ShowExcelUI`:
+
+- `K_CaptureExcelUIState`
+- `K_ResetExcelUIToSnapshot`
+- `K_HasExcelUIStateSnapshot`
+- `K_ClearExcelUIStateSnapshot`
+
+This is intended for workflows where callers want to:
+
+1. capture the current managed UI baseline
+2. apply a constrained shell
+3. restore the captured baseline later
+
+### Reduced redraw where possible
+
+The core apply path now also tries to reduce unnecessary UI churn by:
+
+- temporarily suppressing `Application.ScreenUpdating` where possible
+- skipping no-op writes when the current state already matches the requested target
+
+This improves smoothness for object-model UI elements, though it cannot fully suppress Ribbon or WinAPI non-client refresh.
 
 ### Title-bar control
 
@@ -188,21 +215,27 @@ Selective UI control entry point returning structured diagnostics.
 Example:
 
 ```vb
-Dim R As C_UIResult
+Dim OK As Boolean
+Dim FailureCount As Long
+Dim FailureList As Variant
+Dim i As Long
 
-Set R = K_SetExcelUI_WithResult( _
-            Ribbon:=K_UI_Hide, _
-            StatusBar:=K_UI_Show, _
-            ScrollBars:=K_UI_Hide, _
-            FormulaBar:=K_UI_LeaveUnchanged, _
-            Headings:=K_UI_Hide, _
-            WorkbookTabs:=K_UI_Hide, _
-            Gridlines:=K_UI_Hide, _
-            TitleBar:=K_UI_Hide)
+OK = K_SetExcelUI_WithResult( _
+        Ribbon:=K_UI_Hide, _
+        StatusBar:=K_UI_Show, _
+        ScrollBars:=K_UI_Hide, _
+        FormulaBar:=K_UI_LeaveUnchanged, _
+        Headings:=K_UI_Hide, _
+        WorkbookTabs:=K_UI_Hide, _
+        Gridlines:=K_UI_Hide, _
+        TitleBar:=K_UI_Hide, _
+        FailureCount:=FailureCount, _
+        FailureList:=FailureList)
 
-If Not R.Succeeded Then
-    Debug.Print "Failure count: " & R.FailureCount
-    Debug.Print R.Failure(1)
+If Not OK Then
+    For i = 1 To FailureCount
+        Debug.Print FailureList(i)
+    Next i
 End If
 ```
 
@@ -222,6 +255,38 @@ Show all managed UI elements.
 K_ShowExcelUI
 ```
 
+### `K_CaptureExcelUIState`
+
+Capture the current managed Excel UI state explicitly.
+
+```vb
+K_CaptureExcelUIState
+```
+
+### `K_ResetExcelUIToSnapshot`
+
+Best-effort restore to the most recently captured managed UI snapshot.
+
+```vb
+K_ResetExcelUIToSnapshot
+```
+
+### `K_HasExcelUIStateSnapshot`
+
+Return whether a snapshot is currently available.
+
+```vb
+Debug.Print K_HasExcelUIStateSnapshot
+```
+
+### `K_ClearExcelUIStateSnapshot`
+
+Clear any previously captured managed UI snapshot.
+
+```vb
+K_ClearExcelUIStateSnapshot
+```
+
 ## Demo Quick Start
 
 1. Import `M_EXCEL_UI.bas`.
@@ -238,13 +303,14 @@ Demo_CreateExcelUISheet
    - apply **HIDE SELECTED UI**
    - synchronize check boxes from current UI state
    - apply preset selections
+   - capture the current managed UI state
+   - reset the managed UI to the captured state
 
 ## Regression Test Quick Start
 
 1. Import `M_EXCEL_UI.bas`.
-2. Import `C_UIResult.cls`.
-3. Import `M_EXCEL_UI_REGRESSION_TESTS.bas`.
-4. Run one of:
+2. Import `M_EXCEL_UI_REGRESSION_TESTS.bas`.
+3. Run one of:
 
 ```vb
 Test_EXCEL_UI_RunCore
@@ -271,14 +337,12 @@ Suggested order for manual validation:
 Import:
 
 - `M_EXCEL_UI.bas`
-- `C_UIResult.cls`
 
 ### Core + demo
 
 Import:
 
 - `M_EXCEL_UI.bas`
-- `C_UIResult.cls`
 - `M_EXCEL_UI_DEMO.bas`
 
 ### Core + tests
@@ -286,7 +350,6 @@ Import:
 Import:
 
 - `M_EXCEL_UI.bas`
-- `C_UIResult.cls`
 - `M_EXCEL_UI_REGRESSION_TESTS.bas`
 
 ### Full repository behavior
@@ -294,7 +357,6 @@ Import:
 Import:
 
 - `M_EXCEL_UI.bas`
-- `C_UIResult.cls`
 - `M_EXCEL_UI_DEMO.bas`
 - `M_EXCEL_UI_REGRESSION_TESTS.bas`
 
@@ -308,28 +370,20 @@ Import:
 ## Limitations
 
 - Windows only
-- no snapshot/restore of prior user-specific UI state in the core module
-- `K_ShowExcelUI` means **show all managed UI**, not **restore previous custom state**
 - title-bar control is WinAPI-based, not object-model-based
 - title-bar behavior is best effort and may remain somewhat sensitive to Excel version, window state, and Windows desktop composition behavior
+- `K_ShowExcelUI` means **show all managed UI**, not **restore previous custom state**
+- explicit snapshot/reset is **best effort**, especially for per-window restore when the set or order of open windows has changed
 - the demo module’s window-level synchronization reads from `ActiveWindow`
 - the demo-sheet builder performs a destructive rebuild of the `Demo` sheet
+- reduced redraw does not fully eliminate Ribbon or non-client frame refresh flicker
 
 ## Notes
 
 - Ribbon control relies on `Application.ExecuteExcel4Macro`
 - title-bar control targets the Excel window represented by `Application.Hwnd`
-- `K_SetExcelUI_WithResult` depends on `C_UIResult.cls`
+- the structured-result path no longer requires a class module
 - the toolkit is designed for practical workbook UI control, demos, and regression validation rather than for persistent per-user shell personalization
-
-## Suggested Use Cases
-
-- kiosk-like Excel workbooks
-- guided demos and training workbooks
-- controlled presentation environments
-- reducing visible Excel chrome in client-facing solutions
-- regression validation after refactoring WinAPI/UI code
-- higher-level orchestration that needs structured UI-operation diagnostics
 
 ## Status
 
