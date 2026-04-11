@@ -1,5 +1,6 @@
 Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 Option Explicit
+Option Private Module
 
 '
 '==============================================================================
@@ -42,6 +43,14 @@ Option Explicit
 '   Structured-result tests
 '     - clean success path
 '     - no-op / leave-unchanged success path
+'     - success path without FailureList capture
+'
+'   Snapshot / restore tests
+'     - explicit snapshot lifecycle
+'     - reset without snapshot is a no-op
+'
+'   Environment-preservation tests
+'     - ScreenUpdating restored to prior state
 '
 '   Title-bar tests
 '     - hide / show round-trip
@@ -68,7 +77,7 @@ Option Explicit
 '   Daniele Penza
 '
 ' VERSION
-'   1.1.0
+'   1.0.0
 '==============================================================================
 '
 
@@ -76,8 +85,8 @@ Option Explicit
 ' DECLARE: TEST CONFIGURATION
 '------------------------------------------------------------------------------
 Private Const TEST_WAIT_SECONDS        As Double = 0.15                 'Small UI settle delay after each state change
-Private Const TEST_ERR_BASE            As Long = vbObjectError + 4700  'Base custom error number for test assertions
-Private Const TST_SECONDS_PER_DAY      As Double = 86400#              'Timer rollover interval in seconds
+Private Const TEST_ERR_BASE            As Long = vbObjectError + 4700   'Base custom error number for test assertions
+Private Const TST_SECONDS_PER_DAY      As Double = 86400#               'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
 ' DECLARE: WINAPI SUPPORT FOR TITLE-BAR STATE READ
@@ -372,6 +381,18 @@ Private Sub TST_RunRegressionPack( _
 
     'Run the structured-result no-op case.
         TST_Case_WithResult_NoOpSuccess IncludeTitleBarTests
+
+    'Run the structured-result success case without FailureList capture.
+        TST_Case_WithResult_SuccessWithoutFailureList IncludeTitleBarTests
+
+    'Run the explicit snapshot lifecycle case.
+        TST_Case_SnapshotLifecycle IncludeTitleBarTests
+
+    'Run the reset-without-snapshot no-op case.
+        TST_Case_ResetWithoutSnapshot_NoOp IncludeTitleBarTests
+
+    'Run the ScreenUpdating preservation case.
+        TST_Case_ScreenUpdatingPreserved
 
     'Run the dedicated title-bar case when requested.
         If IncludeTitleBarTests Then
@@ -2751,6 +2772,531 @@ Private Function TST_TitleBarMode( _
         End If
 
 End Function
+
+
+Private Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'              TST_Case_WithResult_SuccessWithoutFailureList
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that K_SetExcelUI_WithResult succeeds cleanly when the caller omits
+'   the optional FailureList output.
+'
+' WHY THIS EXISTS
+'   The standard-module structured-result API intentionally makes FailureList
+'   optional so callers that only need:
+'     - the Boolean result
+'     - FailureCount
+'   do not need to manage an array.
+'
+'   This case validates that omitted FailureList capture does not alter the
+'   clean-success behavior.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE  => include TitleBar in the success assertion
+'     FALSE => leave TitleBar unchanged in this case
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean   'Boolean success flag returned by the API
+    Dim FailureCount        As Long      'Number of recorded failures
+    Dim FailureList         As Variant   'Local untouched Variant proving omission path
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Log the start of the case.
+        TST_Log "TST_Case_WithResult_SuccessWithoutFailureList", "START", _
+            "Validating structured-result success path without FailureList capture"
+
+'------------------------------------------------------------------------------
+' APPLY REQUESTED UI STATE
+'------------------------------------------------------------------------------
+    'Apply a deterministic visible state while omitting the optional
+    'FailureList output.
+        OK = K_SetExcelUI_WithResult( _
+                Ribbon:=K_UI_Show, _
+                StatusBar:=K_UI_Show, _
+                ScrollBars:=K_UI_Show, _
+                FormulaBar:=K_UI_Show, _
+                Headings:=K_UI_Show, _
+                WorkbookTabs:=K_UI_Show, _
+                Gridlines:=K_UI_Show, _
+                TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show), _
+                FailureCount:=FailureCount)
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT RESULT BUFFERS
+'------------------------------------------------------------------------------
+    'Assert that the Boolean result reports success.
+        If Not OK Then
+            Err.Raise TEST_ERR_BASE + 30, _
+                      "WithResult.NoFailureList.Result", _
+                      "WithResult.NoFailureList.Result expected=True actual=False"
+        End If
+
+    'Assert that no failures were recorded.
+        If FailureCount <> 0 Then
+            Err.Raise TEST_ERR_BASE + 31, _
+                      "WithResult.NoFailureList.Result", _
+                      "WithResult.NoFailureList.Result expected FailureCount=0 actual=" & CStr(FailureCount)
+        End If
+
+    'Assert the local untouched Variant remains Empty because it was not passed
+    'to the API call.
+        If Not IsEmpty(FailureList) Then
+            Err.Raise TEST_ERR_BASE + 32, _
+                      "WithResult.NoFailureList.Result", _
+                      "WithResult.NoFailureList.Result expected local FailureList to remain Empty"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT APPLIED UI STATE
+'------------------------------------------------------------------------------
+    'Assert Ribbon visible.
+        TST_AssertRibbonVisible True, "WithResult.NoFailureList.Ribbon"
+
+    'Assert StatusBar visible.
+        TST_AssertApplicationProperty True, "DisplayStatusBar", "WithResult.NoFailureList.StatusBar"
+
+    'Assert ScrollBars visible.
+        TST_AssertApplicationProperty True, "DisplayScrollBars", "WithResult.NoFailureList.ScrollBars"
+
+    'Assert FormulaBar visible.
+        TST_AssertApplicationProperty True, "DisplayFormulaBar", "WithResult.NoFailureList.FormulaBar"
+
+    'Assert Headings visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", "WithResult.NoFailureList.Headings"
+
+    'Assert WorkbookTabs visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayWorkbookTabs", "WithResult.NoFailureList.WorkbookTabs"
+
+    'Assert Gridlines visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", "WithResult.NoFailureList.Gridlines"
+
+    'Assert TitleBar visible when title-bar testing is enabled.
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, "WithResult.NoFailureList.TitleBar"
+        End If
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+    'Log successful completion of the case.
+        TST_Log "TST_Case_WithResult_SuccessWithoutFailureList", "PASS", _
+            "Structured-result success path without FailureList behaved as expected"
+
+End Sub
+
+Private Sub TST_Case_SnapshotLifecycle(ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'                      TST_Case_SnapshotLifecycle
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify the explicit snapshot / reset lifecycle exposed by the core module.
+'
+' WHY THIS EXISTS
+'   The core module now separates:
+'     - K_ShowExcelUI
+'     - explicit snapshot / reset semantics
+'
+'   This case validates the intended lifecycle:
+'     - no snapshot initially after clear
+'     - capture current mixed baseline
+'     - mutate UI away from that baseline
+'     - reset to the captured snapshot
+'     - optional clear removes snapshot availability again
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE  => include TitleBar in the capture / reset assertions
+'     FALSE => skip TitleBar assertions in this case
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Log the start of the case.
+        TST_Log "TST_Case_SnapshotLifecycle", "START", "Validating explicit snapshot / reset lifecycle"
+
+'------------------------------------------------------------------------------
+' CLEAR ANY PRIOR SNAPSHOT
+'------------------------------------------------------------------------------
+    'Clear any prior explicit snapshot before starting the lifecycle test.
+        K_ClearExcelUIStateSnapshot
+
+    'Assert that no snapshot is now available.
+        TST_AssertSnapshotAvailability False, "SnapshotLifecycle.InitialClear"
+
+'------------------------------------------------------------------------------
+' ESTABLISH MIXED BASELINE
+'------------------------------------------------------------------------------
+    'Establish a mixed baseline that will be captured explicitly.
+        K_SetExcelUI _
+            Ribbon:=K_UI_Show, _
+            StatusBar:=K_UI_Hide, _
+            ScrollBars:=K_UI_Show, _
+            FormulaBar:=K_UI_Hide, _
+            Headings:=K_UI_Show, _
+            WorkbookTabs:=K_UI_Hide, _
+            Gridlines:=K_UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' CAPTURE SNAPSHOT
+'------------------------------------------------------------------------------
+    'Capture the current mixed baseline explicitly.
+        K_CaptureExcelUIState
+
+    'Assert that a snapshot is now available.
+        TST_AssertSnapshotAvailability True, "SnapshotLifecycle.AfterCapture"
+
+'------------------------------------------------------------------------------
+' MUTATE AWAY FROM CAPTURED BASELINE
+'------------------------------------------------------------------------------
+    'Drive the managed UI to a materially different state so the reset path has
+    'something meaningful to restore.
+        K_SetExcelUI _
+            Ribbon:=K_UI_Hide, _
+            StatusBar:=K_UI_Show, _
+            ScrollBars:=K_UI_Hide, _
+            FormulaBar:=K_UI_Show, _
+            Headings:=K_UI_Hide, _
+            WorkbookTabs:=K_UI_Show, _
+            Gridlines:=K_UI_Hide, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Hide)
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' RESET TO CAPTURED SNAPSHOT
+'------------------------------------------------------------------------------
+    'Restore the explicitly captured baseline.
+        K_ResetExcelUIToSnapshot
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT RESET RESULT
+'------------------------------------------------------------------------------
+    'Assert Ribbon restored to the captured baseline.
+        TST_AssertRibbonVisible True, "SnapshotLifecycle.Ribbon"
+
+    'Assert StatusBar restored to the captured baseline.
+        TST_AssertApplicationProperty False, "DisplayStatusBar", "SnapshotLifecycle.StatusBar"
+
+    'Assert ScrollBars restored to the captured baseline.
+        TST_AssertApplicationProperty True, "DisplayScrollBars", "SnapshotLifecycle.ScrollBars"
+
+    'Assert FormulaBar restored to the captured baseline.
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", "SnapshotLifecycle.FormulaBar"
+
+    'Assert Headings restored to the captured baseline across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", "SnapshotLifecycle.Headings"
+
+    'Assert WorkbookTabs restored to the captured baseline across all windows.
+        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", "SnapshotLifecycle.WorkbookTabs"
+
+    'Assert Gridlines restored to the captured baseline across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", "SnapshotLifecycle.Gridlines"
+
+    'Assert TitleBar restored to the captured baseline when title-bar testing is
+    'enabled.
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, "SnapshotLifecycle.TitleBar"
+        End If
+
+    'Assert the snapshot still remains available after reset.
+        TST_AssertSnapshotAvailability True, "SnapshotLifecycle.AfterReset"
+
+'------------------------------------------------------------------------------
+' CLEAR SNAPSHOT AGAIN
+'------------------------------------------------------------------------------
+    'Clear the explicit snapshot and assert it is gone.
+        K_ClearExcelUIStateSnapshot
+        TST_AssertSnapshotAvailability False, "SnapshotLifecycle.FinalClear"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+    'Log successful completion of the case.
+        TST_Log "TST_Case_SnapshotLifecycle", "PASS", "Explicit snapshot / reset lifecycle behaved as expected"
+
+End Sub
+
+Private Sub TST_Case_ResetWithoutSnapshot_NoOp(ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'                 TST_Case_ResetWithoutSnapshot_NoOp
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that K_ResetExcelUIToSnapshot behaves as a no-op when no explicit
+'   snapshot is currently available.
+'
+' WHY THIS EXISTS
+'   The reset API is intentionally explicit and should not fabricate a baseline
+'   when none was captured.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE  => include TitleBar in the unchanged-state assertion
+'     FALSE => skip TitleBar assertions in this case
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Log the start of the case.
+        TST_Log "TST_Case_ResetWithoutSnapshot_NoOp", "START", _
+            "Validating reset-to-snapshot no-op behavior when no snapshot exists"
+
+'------------------------------------------------------------------------------
+' CLEAR ANY PRIOR SNAPSHOT
+'------------------------------------------------------------------------------
+    'Clear any prior explicit snapshot before starting the no-snapshot test.
+        K_ClearExcelUIStateSnapshot
+
+    'Assert that no snapshot is available.
+        TST_AssertSnapshotAvailability False, "ResetWithoutSnapshot.NoSnapshot"
+
+'------------------------------------------------------------------------------
+' ESTABLISH MIXED BASELINE
+'------------------------------------------------------------------------------
+    'Establish a mixed baseline that should remain unchanged.
+        K_SetExcelUI _
+            Ribbon:=K_UI_Show, _
+            StatusBar:=K_UI_Hide, _
+            ScrollBars:=K_UI_Show, _
+            FormulaBar:=K_UI_Hide, _
+            Headings:=K_UI_Show, _
+            WorkbookTabs:=K_UI_Hide, _
+            Gridlines:=K_UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' APPLY RESET WITHOUT SNAPSHOT
+'------------------------------------------------------------------------------
+    'Invoke reset without any explicit snapshot being available.
+        K_ResetExcelUIToSnapshot
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT UNCHANGED STATE
+'------------------------------------------------------------------------------
+    'Assert Ribbon remained visible.
+        TST_AssertRibbonVisible True, "ResetWithoutSnapshot.Ribbon"
+
+    'Assert StatusBar remained hidden.
+        TST_AssertApplicationProperty False, "DisplayStatusBar", "ResetWithoutSnapshot.StatusBar"
+
+    'Assert ScrollBars remained visible.
+        TST_AssertApplicationProperty True, "DisplayScrollBars", "ResetWithoutSnapshot.ScrollBars"
+
+    'Assert FormulaBar remained hidden.
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", "ResetWithoutSnapshot.FormulaBar"
+
+    'Assert Headings remained visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", "ResetWithoutSnapshot.Headings"
+
+    'Assert WorkbookTabs remained hidden across all windows.
+        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", "ResetWithoutSnapshot.WorkbookTabs"
+
+    'Assert Gridlines remained visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", "ResetWithoutSnapshot.Gridlines"
+
+    'Assert TitleBar remained visible when title-bar testing is enabled.
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, "ResetWithoutSnapshot.TitleBar"
+        End If
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+    'Log successful completion of the case.
+        TST_Log "TST_Case_ResetWithoutSnapshot_NoOp", "PASS", _
+            "Reset-to-snapshot no-op behavior without snapshot behaved as expected"
+
+End Sub
+
+Private Sub TST_Case_ScreenUpdatingPreserved()
+
+'
+'==============================================================================
+'                    TST_Case_ScreenUpdatingPreserved
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that the EXCEL_UI apply path restores Application.ScreenUpdating to
+'   its prior state after execution.
+'
+' WHY THIS EXISTS
+'   The core module now uses a quiet-update scope with ScreenUpdating to reduce
+'   worksheet redraw flicker where possible.
+'
+'   That behavior must remain invisible to callers from a state-management
+'   perspective:
+'     - when the caller starts with ScreenUpdating=True, it should end True
+'     - when the caller starts with ScreenUpdating=False, it should end False
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SavedScreenUpdating As Boolean   'Caller-visible ScreenUpdating baseline
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Log the start of the case.
+        TST_Log "TST_Case_ScreenUpdatingPreserved", "START", _
+            "Validating ScreenUpdating preservation across EXCEL_UI calls"
+
+    'Capture the caller-visible baseline so it can be restored at the end.
+        SavedScreenUpdating = Application.ScreenUpdating
+
+'------------------------------------------------------------------------------
+' ASSERT TRUE => TRUE
+'------------------------------------------------------------------------------
+    'Set ScreenUpdating to True explicitly.
+        Application.ScreenUpdating = True
+
+    'Call the public API through a small deterministic mutation.
+        K_SetExcelUI _
+            StatusBar:=K_UI_Show, _
+            Gridlines:=K_UI_Show
+
+    'Assert that ScreenUpdating remained True from the caller's perspective.
+        TST_AssertBooleanEquals True, Application.ScreenUpdating, "ScreenUpdatingPreserved.TruePath"
+
+'------------------------------------------------------------------------------
+' ASSERT FALSE => FALSE
+'------------------------------------------------------------------------------
+    'Set ScreenUpdating to False explicitly.
+        Application.ScreenUpdating = False
+
+    'Call the public API through a small deterministic mutation.
+        K_SetExcelUI _
+            StatusBar:=K_UI_Hide, _
+            Gridlines:=K_UI_Hide
+
+    'Assert that ScreenUpdating remained False from the caller's perspective.
+        TST_AssertBooleanEquals False, Application.ScreenUpdating, "ScreenUpdatingPreserved.FalsePath"
+
+'------------------------------------------------------------------------------
+' RESTORE CALLER BASELINE
+'------------------------------------------------------------------------------
+    'Restore the original caller-visible ScreenUpdating baseline.
+        Application.ScreenUpdating = SavedScreenUpdating
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+    'Log successful completion of the case.
+        TST_Log "TST_Case_ScreenUpdatingPreserved", "PASS", _
+            "ScreenUpdating preservation behaved as expected"
+
+End Sub
+
+Private Sub TST_AssertSnapshotAvailability( _
+    ByVal Expected As Boolean, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                      TST_AssertSnapshotAvailability
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert the availability flag returned by K_HasExcelUIStateSnapshot.
+'
+' WHY THIS EXISTS
+'   The explicit snapshot / reset lifecycle introduced by the core module needs
+'   direct regression coverage on the public snapshot-availability contract.
+'
+' INPUTS
+'   Expected
+'     Expected snapshot-availability state.
+'
+'   AssertionName
+'     Human-readable assertion identifier.
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on mismatch.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' ASSERT EQUALITY
+'------------------------------------------------------------------------------
+    'Assert the snapshot-availability flag against the expectation.
+        TST_AssertBooleanEquals Expected, K_HasExcelUIStateSnapshot, AssertionName
+
+End Sub
 
 Private Function TST_BuildRuntimeErrorText() As String
 
