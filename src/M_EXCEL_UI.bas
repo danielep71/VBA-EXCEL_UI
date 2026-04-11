@@ -88,7 +88,7 @@ Option Explicit
 '   Daniele Penza
 '
 ' VERSION
-'   1.0.0
+'   1.1.0
 '==============================================================================
 '
 
@@ -182,19 +182,19 @@ End Enum
 '------------------------------------------------------------------------------
 ' DECLARE: PRIVATE CONSTANTS
 '------------------------------------------------------------------------------
-Private Const GWL_STYLE          As Long = -16       'Window style index
-
-Private Const WS_CAPTION         As Long = &HC00000  'Caption / title bar
-Private Const WS_SYSMENU         As Long = &H80000   'System menu
-Private Const WS_THICKFRAME      As Long = &H40000   'Resizable sizing frame
-Private Const WS_MINIMIZEBOX     As Long = &H20000   'Minimize button
-Private Const WS_MAXIMIZEBOX     As Long = &H10000   'Maximize button
-
-Private Const SWP_NOSIZE         As Long = &H1       'Preserve current size
-Private Const SWP_NOMOVE         As Long = &H2       'Preserve current position
-Private Const SWP_NOZORDER       As Long = &H4       'Do not change Z order
-Private Const SWP_FRAMECHANGED   As Long = &H20      'Repaint non-client frame
-Private Const SWP_NOOWNERZORDER  As Long = &H200     'Do not change owner Z order
+    Private Const GWL_STYLE          As Long = -16       'Window style index
+    
+    Private Const WS_CAPTION         As Long = &HC00000  'Caption / title bar
+    Private Const WS_SYSMENU         As Long = &H80000   'System menu
+    Private Const WS_THICKFRAME      As Long = &H40000   'Resizable sizing frame
+    Private Const WS_MINIMIZEBOX     As Long = &H20000   'Minimize button
+    Private Const WS_MAXIMIZEBOX     As Long = &H10000   'Maximize button
+    
+    Private Const SWP_NOSIZE         As Long = &H1       'Preserve current size
+    Private Const SWP_NOMOVE         As Long = &H2       'Preserve current position
+    Private Const SWP_NOZORDER       As Long = &H4       'Do not change Z order
+    Private Const SWP_FRAMECHANGED   As Long = &H20      'Repaint non-client frame
+    Private Const SWP_NOOWNERZORDER  As Long = &H200     'Do not change owner Z order
 
 '------------------------------------------------------------------------------
 ' DECLARE: PRIVATE MODULE STATE
@@ -669,7 +669,9 @@ Public Function K_SetExcelUI_WithResult( _
     Optional ByVal Headings As K_UIVisibility = K_UI_LeaveUnchanged, _
     Optional ByVal WorkbookTabs As K_UIVisibility = K_UI_LeaveUnchanged, _
     Optional ByVal Gridlines As K_UIVisibility = K_UI_LeaveUnchanged, _
-    Optional ByVal TitleBar As K_UIVisibility = K_UI_LeaveUnchanged) As C_UIResult
+    Optional ByVal TitleBar As K_UIVisibility = K_UI_LeaveUnchanged, _
+    Optional ByRef FailureCount As Long = 0, _
+    Optional ByRef FailureList As Variant) As Boolean
 
 '
 '==============================================================================
@@ -677,8 +679,8 @@ Public Function K_SetExcelUI_WithResult( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Apply the requested visibility state to the Excel UI elements managed by
-'   this module and return a structured result object describing whether any
-'   element-level failures occurred.
+'   this module and return a Boolean success flag, with optional structured
+'   failure details captured through ByRef outputs.
 '
 ' WHY THIS EXISTS
 '   K_SetExcelUI is the preferred fire-and-forget, fail-soft entry point for
@@ -687,11 +689,16 @@ Public Function K_SetExcelUI_WithResult( _
 '
 '   Some callers, however, need structured feedback so they can:
 '     - inspect whether the full operation succeeded
-'     - enumerate element-level failures
+'     - count element-level failures
+'     - enumerate the recorded failures in order
 '     - surface diagnostics to higher-level orchestration or test logic
 '
 '   This routine provides the same best-effort behavior as K_SetExcelUI, but
-'   returns a C_UIResult instance containing any recorded failures.
+'   avoids any class-module dependency by returning:
+'     - a Boolean success flag
+'     - FailureCount as an optional ByRef output
+'     - FailureList as an optional ByRef Variant containing a 1-based String
+'       array of recorded failures
 '
 ' INPUTS
 '   Ribbon (optional)
@@ -736,11 +743,17 @@ Public Function K_SetExcelUI_WithResult( _
 '                               represented by Application.Hwnd
 '     K_UI_LeaveUnchanged   => do not touch title bar
 '
+'   FailureCount (optional, ByRef output)
+'     Receives the number of recorded failures.
+'
+'   FailureList (optional, ByRef output)
+'     When supplied, receives a 1-based String array whose entries follow the
+'     format:
+'         Stage & " | " & Detail
+'
 ' RETURNS
-'   C_UIResult
-'     Result object describing:
-'       - whether the overall operation remained fully successful
-'       - each recorded element-level failure, if any
+'   TRUE  => no failures were recorded
+'   FALSE => one or more failures were recorded
 '
 ' BEHAVIOR
 '   - Applies Ribbon / status bar / scroll bars / formula bar at Application
@@ -751,38 +764,39 @@ Public Function K_SetExcelUI_WithResult( _
 '     Application.Hwnd via WinAPI.
 '   - Uses best-effort processing: one failed UI element does not prevent
 '     subsequent UI elements from being attempted.
-'   - Records failures into the returned C_UIResult object instead of relying
-'     only on Immediate Window diagnostics.
+'   - Records failures through FailureCount and, when requested, FailureList.
 '
 ' ERROR POLICY
 '   - Does NOT raise to callers for ordinary element-level failures.
-'   - Returns a populated C_UIResult object even when failures occur.
+'   - Returns FALSE when one or more failures were recorded.
 '   - Unexpected procedure-level failures are captured as an "Unexpected"
-'     failure entry in the returned result object.
+'     failure entry and also produce a FALSE result.
 '
 ' DEPENDENCIES
-'   - C_UIResult
 '   - K_TrySetRibbonVisible
 '   - K_TrySetBooleanProperty
 '   - K_TrySetTitleBarVisible
 '   - K_VisibilityToBoolean
 '   - K_BuildRuntimeErrorText
+'   - K_ClearResultBuffer
+'   - K_AddFailureToResult
 '
 ' NOTES
 '   - This routine mirrors the best-effort semantics of K_SetExcelUI.
-'   - The returned object preserves failure order.
-'   - This routine does not write to the Immediate Window unless the lower-
-'     level helpers themselves do so elsewhere.
+'   - Failure order is preserved.
+'   - FailureList remains optional so callers that only need the Boolean result
+'     or failure count do not need to manage an array.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim R                   As C_UIResult 'Structured result object returned to the caller
+    Dim Succeeded           As Boolean    'Overall success flag returned to the caller
+    Dim CaptureFailureList  As Boolean    'TRUE when the caller supplied FailureList
     Dim W                   As Window     'Workbook window in current Excel instance
     Dim ShowFlag            As Boolean    'Converted Boolean visibility target
     Dim Msg                 As String     'Element-level diagnostic message
@@ -790,8 +804,12 @@ Public Function K_SetExcelUI_WithResult( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Create the structured result object in its default successful state.
-        Set R = New C_UIResult
+    'Detect whether the caller supplied the optional failure-list output.
+        CaptureFailureList = Not IsMissing(FailureList)
+
+    'Initialize the result buffers in their clean-success state.
+        Succeeded = True
+        K_ClearResultBuffer FailureCount, FailureList, CaptureFailureList
 
     'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
@@ -809,7 +827,7 @@ Public Function K_SetExcelUI_WithResult( _
             'Attempt the Ribbon update and record any element-level failure
             'without interrupting later operations.
                 If Not K_TrySetRibbonVisible(ShowFlag, Msg) Then
-                    R.AddFailure "Ribbon", Msg
+                    K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, "Ribbon", Msg
                 End If
 
         End If
@@ -824,7 +842,7 @@ Public Function K_SetExcelUI_WithResult( _
             'Attempt the property write and record any element-level failure
             'without interrupting later operations.
                 If Not K_TrySetBooleanProperty(Application, "DisplayStatusBar", ShowFlag, Msg) Then
-                    R.AddFailure "StatusBar", Msg
+                    K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, "StatusBar", Msg
                 End If
 
         End If
@@ -839,7 +857,7 @@ Public Function K_SetExcelUI_WithResult( _
             'Attempt the property write and record any element-level failure
             'without interrupting later operations.
                 If Not K_TrySetBooleanProperty(Application, "DisplayScrollBars", ShowFlag, Msg) Then
-                    R.AddFailure "ScrollBars", Msg
+                    K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, "ScrollBars", Msg
                 End If
 
         End If
@@ -854,7 +872,7 @@ Public Function K_SetExcelUI_WithResult( _
             'Attempt the property write and record any element-level failure
             'without interrupting later operations.
                 If Not K_TrySetBooleanProperty(Application, "DisplayFormulaBar", ShowFlag, Msg) Then
-                    R.AddFailure "FormulaBar", Msg
+                    K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, "FormulaBar", Msg
                 End If
 
         End If
@@ -882,7 +900,8 @@ Public Function K_SetExcelUI_WithResult( _
                             'Attempt the property write and record any element-
                             'level failure without interrupting later operations.
                                 If Not K_TrySetBooleanProperty(W, "DisplayHeadings", ShowFlag, Msg) Then
-                                    R.AddFailure "Headings [" & W.Caption & "]", Msg
+                                    K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, _
+                                        "Headings [" & W.Caption & "]", Msg
                                 End If
 
                         End If
@@ -897,7 +916,8 @@ Public Function K_SetExcelUI_WithResult( _
                             'Attempt the property write and record any element-
                             'level failure without interrupting later operations.
                                 If Not K_TrySetBooleanProperty(W, "DisplayWorkbookTabs", ShowFlag, Msg) Then
-                                    R.AddFailure "WorkbookTabs [" & W.Caption & "]", Msg
+                                    K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, _
+                                        "WorkbookTabs [" & W.Caption & "]", Msg
                                 End If
 
                         End If
@@ -912,7 +932,8 @@ Public Function K_SetExcelUI_WithResult( _
                             'Attempt the property write and record any element-
                             'level failure without interrupting later operations.
                                 If Not K_TrySetBooleanProperty(W, "DisplayGridlines", ShowFlag, Msg) Then
-                                    R.AddFailure "Gridlines [" & W.Caption & "]", Msg
+                                    K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, _
+                                        "Gridlines [" & W.Caption & "]", Msg
                                 End If
 
                         End If
@@ -934,7 +955,7 @@ Public Function K_SetExcelUI_WithResult( _
             'Attempt the title-bar update and record any element-level failure
             'without interrupting later operations.
                 If Not K_TrySetTitleBarVisible(ShowFlag, Msg) Then
-                    R.AddFailure "TitleBar", Msg
+                    K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, "TitleBar", Msg
                 End If
 
         End If
@@ -942,8 +963,8 @@ Public Function K_SetExcelUI_WithResult( _
 '------------------------------------------------------------------------------
 ' RETURN RESULT
 '------------------------------------------------------------------------------
-    'Return the structured result object to the caller.
-        Set K_SetExcelUI_WithResult = R
+    'Return the overall success flag to the caller.
+        K_SetExcelUI_WithResult = Succeeded
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -956,16 +977,185 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Capture the unexpected procedure-level failure in the structured result.
-        R.AddFailure "Unexpected", K_BuildRuntimeErrorText
+    'Capture the unexpected procedure-level failure in the result buffers.
+        K_AddFailureToResult Succeeded, FailureCount, FailureList, CaptureFailureList, "Unexpected", K_BuildRuntimeErrorText
 
-    'Return the result object after recording the unexpected failure.
-        Set K_SetExcelUI_WithResult = R
+    'Return the overall success flag after recording the unexpected failure.
+        K_SetExcelUI_WithResult = Succeeded
 
     'Leave quietly through the normal termination path.
         Resume SafeExit
 
 End Function
+
+Private Sub K_ClearResultBuffer( _
+    ByRef FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal CaptureFailureList As Boolean)
+
+'
+'==============================================================================
+'                           K_ClearResultBuffer
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Initialize the ByRef result buffers used by K_SetExcelUI_WithResult.
+'
+' WHY THIS EXISTS
+'   The standard-module result pattern used by K_SetExcelUI_WithResult needs a
+'   consistent way to reset:
+'     - FailureCount
+'     - FailureList
+'
+'   Centralizing that initialization avoids duplicated setup logic and ensures
+'   the function always starts from a clean result state.
+'
+' INPUTS
+'   FailureCount
+'     Receives zero on initialization.
+'
+'   FailureList
+'     Receives Empty when the caller requested the optional list output.
+'
+'   CaptureFailureList
+'     TRUE  => initialize FailureList
+'     FALSE => leave FailureList untouched because the caller did not request it
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Does NOT raise.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Reset the recorded failure count to zero.
+        FailureCount = 0
+
+    'Initialize the failure-list output only when the caller requested it.
+        If CaptureFailureList Then
+            FailureList = Empty
+        End If
+
+End Sub
+
+Private Sub K_AddFailureToResult( _
+    ByRef Succeeded As Boolean, _
+    ByRef FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal CaptureFailureList As Boolean, _
+    ByVal Stage As String, _
+    ByVal Detail As String)
+
+'
+'==============================================================================
+'                          K_AddFailureToResult
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Record a failure into the standard-module result buffers used by
+'   K_SetExcelUI_WithResult.
+'
+' WHY THIS EXISTS
+'   The module no longer depends on a dedicated result class, so failures need
+'   to be accumulated through plain standard-module constructs:
+'     - a Boolean success flag
+'     - a Long failure count
+'     - an optional 1-based String array of failure entries
+'
+'   This helper centralizes that logic and preserves insertion order.
+'
+' INPUTS
+'   Succeeded
+'     Set to FALSE once a failure is recorded.
+'
+'   FailureCount
+'     Incremented for each recorded failure.
+'
+'   FailureList
+'     Optional Variant carrying a 1-based String array of recorded failures.
+'
+'   CaptureFailureList
+'     TRUE  => append the failure text into FailureList
+'     FALSE => update only Succeeded and FailureCount
+'
+'   Stage
+'     Logical stage, element, or operation associated with the failure.
+'
+'   Detail
+'     Failure detail to append.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Sets Succeeded to FALSE.
+'   - Increments FailureCount.
+'   - When requested, appends:
+'         Stage & " | " & Detail
+'     to a 1-based String array stored in FailureList.
+'
+' ERROR POLICY
+'   - Does NOT raise.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FailureText         As String    'Formatted failure entry
+    Dim Arr()               As String    'Working 1-based failure array
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Build the formatted failure text once.
+        FailureText = Stage & " | " & Detail
+
+'------------------------------------------------------------------------------
+' UPDATE RESULT STATUS
+'------------------------------------------------------------------------------
+    'Mark the overall result as unsuccessful.
+        Succeeded = False
+
+    'Increment the recorded failure count.
+        FailureCount = FailureCount + 1
+
+'------------------------------------------------------------------------------
+' APPEND FAILURE TEXT
+'------------------------------------------------------------------------------
+    'Append the formatted failure text only when the caller requested the
+    'failure-list output.
+        If CaptureFailureList Then
+
+            'Allocate the first entry when the failure list is still empty.
+                If IsEmpty(FailureList) Then
+                    ReDim Arr(1 To 1)
+
+            'Otherwise, expand the existing 1-based array while preserving
+            'previous entries.
+                Else
+                    Arr = FailureList
+                    ReDim Preserve Arr(1 To FailureCount)
+                End If
+
+            'Store the new failure entry at the current 1-based position.
+                Arr(FailureCount) = FailureText
+
+            'Write the expanded array back into the Variant output.
+                FailureList = Arr
+
+        End If
+
+End Sub
+
 
 #If VBA7 Then
 Private Function K_TrySetTitleBarVisible( _
@@ -1883,4 +2073,6 @@ Private Sub K_LogFailure( _
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub
+
+
 

@@ -10,6 +10,7 @@ Option Explicit
 '
 '   The harness validates the public behavior of:
 '     - K_SetExcelUI
+'     - K_SetExcelUI_WithResult
 '     - K_HideExcelUI
 '     - K_ShowExcelUI
 '
@@ -20,6 +21,7 @@ Option Explicit
 '     - leave-unchanged semantics
 '     - convenience wrappers
 '     - WinAPI-based title-bar control
+'     - the standard-module structured-result path
 '
 '   A repeatable regression harness reduces the risk of silent regressions and
 '   makes the repository more maintainable.
@@ -36,6 +38,7 @@ Option Explicit
 '     - selective show
 '     - no-op / leave-unchanged
 '     - convenience wrappers
+'
 '   Structured-result tests
 '     - clean success path
 '     - no-op / leave-unchanged success path
@@ -59,13 +62,13 @@ Option Explicit
 '   - Assumes the EXCEL_UI module is present in the same VBA project.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.0.0
+'   1.1.0
 '==============================================================================
 '
 
@@ -151,7 +154,7 @@ Public Sub Test_EXCEL_UI_RunAll()
 '   - TST_RunRegressionPack
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -193,7 +196,7 @@ Public Sub Test_EXCEL_UI_RunCore()
 '   - TST_RunRegressionPack
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -233,7 +236,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '   - TST_RunTitleBarOnlyPack
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -283,11 +286,13 @@ Private Sub TST_RunRegressionPack( _
 '   - TST_Case_SelectiveShow
 '   - TST_Case_NoOpLeaveUnchanged
 '   - TST_Case_ConvenienceWrappers
+'   - TST_Case_WithResult_AllSuccess
+'   - TST_Case_WithResult_NoOpSuccess
 '   - TST_Case_TitleBarRoundTrip
 '   - TST_Log
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -361,11 +366,11 @@ Private Sub TST_RunRegressionPack( _
 
     'Run the convenience-wrapper case.
         TST_Case_ConvenienceWrappers IncludeTitleBarTests
-        
-    'Run the structured-result success case
+
+    'Run the structured-result success case.
         TST_Case_WithResult_AllSuccess IncludeTitleBarTests
 
-    'Run the structured-result no-op case
+    'Run the structured-result no-op case.
         TST_Case_WithResult_NoOpSuccess IncludeTitleBarTests
 
     'Run the dedicated title-bar case when requested.
@@ -456,7 +461,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarRoundTrip
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -594,7 +599,7 @@ Private Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -687,7 +692,7 @@ Private Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -785,7 +790,7 @@ Private Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -883,7 +888,7 @@ Private Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -979,7 +984,7 @@ Private Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1073,6 +1078,260 @@ Private Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 
 End Sub
 
+Private Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'                       TST_Case_WithResult_AllSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that K_SetExcelUI_WithResult returns a clean-success outcome when
+'   all requested UI updates succeed.
+'
+' WHY THIS EXISTS
+'   K_SetExcelUI_WithResult mirrors the best-effort application behavior of
+'   K_SetExcelUI but returns:
+'     - a Boolean success flag
+'     - FailureCount
+'     - FailureList
+'
+'   The most important first structured-result regression case is the clean
+'   success path:
+'     - Boolean result = TRUE
+'     - FailureCount = 0
+'     - FailureList = Empty when captured
+'     - requested UI state is actually applied
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE  => include TitleBar in the success assertion
+'     FALSE => leave TitleBar unchanged in this case
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - K_SetExcelUI_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean   'Boolean success flag returned by the API
+    Dim FailureCount        As Long      'Number of recorded failures
+    Dim FailureList         As Variant   'Optional array of recorded failures
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Log the start of the case.
+        TST_Log "TST_Case_WithResult_AllSuccess", "START", "Validating structured-result success path"
+
+'------------------------------------------------------------------------------
+' APPLY REQUESTED UI STATE
+'------------------------------------------------------------------------------
+    'Apply a deterministic visible state through the structured-result API.
+        OK = K_SetExcelUI_WithResult( _
+                Ribbon:=K_UI_Show, _
+                StatusBar:=K_UI_Show, _
+                ScrollBars:=K_UI_Show, _
+                FormulaBar:=K_UI_Show, _
+                Headings:=K_UI_Show, _
+                WorkbookTabs:=K_UI_Show, _
+                Gridlines:=K_UI_Show, _
+                TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show), _
+                FailureCount:=FailureCount, _
+                FailureList:=FailureList)
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT RESULT BUFFERS
+'------------------------------------------------------------------------------
+    'Assert that the returned result buffers represent a clean success path.
+        TST_AssertResultSuccess OK, FailureCount, FailureList, "WithResult.AllSuccess.Result"
+
+'------------------------------------------------------------------------------
+' ASSERT APPLIED UI STATE
+'------------------------------------------------------------------------------
+    'Assert Ribbon visible.
+        TST_AssertRibbonVisible True, "WithResult.AllSuccess.Ribbon"
+
+    'Assert StatusBar visible.
+        TST_AssertApplicationProperty True, "DisplayStatusBar", "WithResult.AllSuccess.StatusBar"
+
+    'Assert ScrollBars visible.
+        TST_AssertApplicationProperty True, "DisplayScrollBars", "WithResult.AllSuccess.ScrollBars"
+
+    'Assert FormulaBar visible.
+        TST_AssertApplicationProperty True, "DisplayFormulaBar", "WithResult.AllSuccess.FormulaBar"
+
+    'Assert Headings visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", "WithResult.AllSuccess.Headings"
+
+    'Assert WorkbookTabs visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayWorkbookTabs", "WithResult.AllSuccess.WorkbookTabs"
+
+    'Assert Gridlines visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", "WithResult.AllSuccess.Gridlines"
+
+    'Assert TitleBar visible when title-bar testing is enabled.
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, "WithResult.AllSuccess.TitleBar"
+        End If
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+    'Log successful completion of the case.
+        TST_Log "TST_Case_WithResult_AllSuccess", "PASS", "Structured-result success path behaved as expected"
+
+End Sub
+
+Private Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'                       TST_Case_WithResult_NoOpSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that K_SetExcelUI_WithResult returns a clean-success outcome when
+'   invoked as a no-op with all arguments omitted / left unchanged.
+'
+' WHY THIS EXISTS
+'   The tri-state API promises that omitted arguments do not accidentally drive
+'   visibility changes.
+'
+'   The standard-module structured-result variant should preserve that contract
+'   while also reporting a clean success result:
+'     - Boolean result = TRUE
+'     - FailureCount = 0
+'     - FailureList = Empty when captured
+'     - pre-existing UI state remains unchanged
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE  => include TitleBar in the baseline / assertion
+'     FALSE => skip TitleBar assertions in this case
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - K_SetExcelUI
+'   - K_SetExcelUI_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean   'Boolean success flag returned by the API
+    Dim FailureCount        As Long      'Number of recorded failures
+    Dim FailureList         As Variant   'Optional array of recorded failures
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Log the start of the case.
+        TST_Log "TST_Case_WithResult_NoOpSuccess", "START", "Validating structured-result no-op path"
+
+'------------------------------------------------------------------------------
+' ESTABLISH MIXED BASELINE
+'------------------------------------------------------------------------------
+    'Establish a mixed baseline that should remain unchanged.
+        K_SetExcelUI _
+            Ribbon:=K_UI_Show, _
+            StatusBar:=K_UI_Hide, _
+            ScrollBars:=K_UI_Show, _
+            FormulaBar:=K_UI_Hide, _
+            Headings:=K_UI_Show, _
+            WorkbookTabs:=K_UI_Hide, _
+            Gridlines:=K_UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' APPLY NO-OP THROUGH STRUCTURED-RESULT API
+'------------------------------------------------------------------------------
+    'Invoke the structured-result API with no arguments so every element is
+    'LeaveUnchanged.
+        OK = K_SetExcelUI_WithResult( _
+                FailureCount:=FailureCount, _
+                FailureList:=FailureList)
+
+    'Allow the UI a short time to settle.
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT RESULT BUFFERS
+'------------------------------------------------------------------------------
+    'Assert that the returned result buffers represent a clean success path.
+        TST_AssertResultSuccess OK, FailureCount, FailureList, "WithResult.NoOp.Result"
+
+'------------------------------------------------------------------------------
+' ASSERT NO-OP UI STATE
+'------------------------------------------------------------------------------
+    'Assert Ribbon remained visible.
+        TST_AssertRibbonVisible True, "WithResult.NoOp.Ribbon"
+
+    'Assert StatusBar remained hidden.
+        TST_AssertApplicationProperty False, "DisplayStatusBar", "WithResult.NoOp.StatusBar"
+
+    'Assert ScrollBars remained visible.
+        TST_AssertApplicationProperty True, "DisplayScrollBars", "WithResult.NoOp.ScrollBars"
+
+    'Assert FormulaBar remained hidden.
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", "WithResult.NoOp.FormulaBar"
+
+    'Assert Headings remained visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", "WithResult.NoOp.Headings"
+
+    'Assert WorkbookTabs remained hidden across all windows.
+        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", "WithResult.NoOp.WorkbookTabs"
+
+    'Assert Gridlines remained visible across all windows.
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", "WithResult.NoOp.Gridlines"
+
+    'Assert TitleBar remained visible / unchanged when requested.
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, "WithResult.NoOp.TitleBar"
+        End If
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+    'Log successful completion of the case.
+        TST_Log "TST_Case_WithResult_NoOpSuccess", "PASS", "Structured-result no-op path behaved as expected"
+
+End Sub
+
 Private Sub TST_Case_TitleBarRoundTrip()
 
 '
@@ -1091,7 +1350,7 @@ Private Sub TST_Case_TitleBarRoundTrip()
 '   None
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1170,7 +1429,7 @@ Private Sub TST_SnapshotState( _
 '   - Best-effort capture; unknown Ribbon / TitleBar state is marked via flags.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1271,7 +1530,7 @@ Private Sub TST_RestoreState( _
 '   - Best-effort restore only.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1383,7 +1642,7 @@ Private Sub TST_WaitUI(ByVal SecondsToWait As Double)
 '   - Handles Timer rollover at midnight.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1447,7 +1706,7 @@ Private Sub TST_AssertBooleanEquals( _
 '   - Raises on mismatch.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1496,7 +1755,7 @@ Private Sub TST_AssertApplicationProperty( _
 '   - Raises on read failure or mismatch.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1556,7 +1815,7 @@ Private Sub TST_AssertAllWindowsProperty( _
 '   - Raises on read failure or mismatch.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1616,7 +1875,7 @@ Private Sub TST_AssertRibbonVisible( _
 '   - Raises on read failure or mismatch.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1672,7 +1931,7 @@ Private Sub TST_AssertTitleBarVisible( _
 '   - Raises on read failure or mismatch.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1695,6 +1954,84 @@ Private Sub TST_AssertTitleBarVisible( _
 '------------------------------------------------------------------------------
     'Assert the read value against the expectation.
         TST_AssertBooleanEquals Expected, Actual, AssertionName
+
+End Sub
+
+Private Sub TST_AssertResultSuccess( _
+    ByVal Succeeded As Boolean, _
+    ByVal FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                         TST_AssertResultSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert that the standard-module result buffers represent a clean success
+'   path.
+'
+' WHY THIS EXISTS
+'   Structured-result regressions need a shared assertion helper so the tests
+'   validate the same core contract consistently:
+'     - Boolean result = TRUE
+'     - FailureCount = 0
+'     - FailureList = Empty when captured in a clean success path
+'
+' INPUTS
+'   Succeeded
+'     Boolean success flag returned by K_SetExcelUI_WithResult.
+'
+'   FailureCount
+'     Failure-count output returned by K_SetExcelUI_WithResult.
+'
+'   FailureList
+'     Failure-list output returned by K_SetExcelUI_WithResult.
+'
+'   AssertionName
+'     Human-readable assertion identifier.
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on mismatch.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' ASSERT SUCCESS FLAG
+'------------------------------------------------------------------------------
+    'Assert that the Boolean result reports overall success.
+        If Not Succeeded Then
+            Err.Raise TEST_ERR_BASE + 20, _
+                      AssertionName, _
+                      AssertionName & " expected=True actual=False"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE COUNT
+'------------------------------------------------------------------------------
+    'Assert that the result buffers recorded no failures.
+        If FailureCount <> 0 Then
+            Err.Raise TEST_ERR_BASE + 21, _
+                      AssertionName, _
+                      AssertionName & " expected FailureCount=0 actual=" & CStr(FailureCount)
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE LIST STATE
+'------------------------------------------------------------------------------
+    'Assert that the captured failure list remains Empty for a clean success
+    'path.
+        If Not IsEmpty(FailureList) Then
+            Err.Raise TEST_ERR_BASE + 22, _
+                      AssertionName, _
+                      AssertionName & " expected FailureList=Empty for clean success path"
+        End If
 
 End Sub
 
@@ -1736,7 +2073,7 @@ Private Function TST_TryGetBooleanProperty( _
 '   - Does NOT raise to callers.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1826,7 +2163,7 @@ Private Function TST_TryGetRibbonVisible( _
 '   FALSE => read failed
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1919,7 +2256,7 @@ Private Function TST_TrySetRibbonVisible( _
 '   FALSE => Ribbon update failed
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -2004,7 +2341,7 @@ Private Function TST_TryGetTitleBarVisible( _
 '   FALSE => read failed
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -2135,7 +2472,7 @@ Private Sub TST_Log( _
 '   - Suppresses any unexpected logging failure locally.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -2191,7 +2528,7 @@ Private Sub TST_TryRestoreWindowProp( _
 '   - TST_Log
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -2257,7 +2594,7 @@ Private Function TST_TrySetBooleanProperty( _
 '     module.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -2336,7 +2673,7 @@ Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double
 '   - Does NOT raise.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -2399,7 +2736,7 @@ Private Function TST_TitleBarMode( _
 '   - Does NOT raise.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
@@ -2422,12 +2759,12 @@ Private Function TST_BuildRuntimeErrorText() As String
 '                       TST_BuildRuntimeErrorText
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Build a consistent runtime diagnostic string from the active Err object
+'   Build a consistent runtime diagnostic string from the active Err object.
 '
 ' WHY THIS EXISTS
-'   Several helpers in this module need identical fail-soft diagnostic text
+'   Several helpers in this module need identical fail-soft diagnostic text.
 '   Centralizing the formatting keeps the harness consistent and easier to
-'   maintain
+'   maintain.
 '
 ' RETURNS
 '   A formatted diagnostic string including:
@@ -2441,20 +2778,20 @@ Private Function TST_BuildRuntimeErrorText() As String
 '   - Returns best-effort text.
 '
 ' UPDATED
-'   2026-04-09
+'   2026-04-11
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Protect callers from any unexpected issue while formatting the diagnostic
+    'Protect callers from any unexpected issue while formatting the diagnostic.
         On Error Resume Next
 
 '------------------------------------------------------------------------------
 ' BUILD RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
-    'Build a consistent diagnostic string from the current Err state
+    'Build a consistent diagnostic string from the current Err state.
         TST_BuildRuntimeErrorText = _
             CStr(Err.Number) & ": " & Err.Description & _
             IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
@@ -2462,313 +2799,4 @@ Private Function TST_BuildRuntimeErrorText() As String
 
 End Function
 
-Private Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean)
-
-'
-'==============================================================================
-'                       TST_Case_WithResult_AllSuccess
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Verify that K_SetExcelUI_WithResult returns a successful C_UIResult object
-'   when all requested UI updates succeed.
-'
-' WHY THIS EXISTS
-'   K_SetExcelUI_WithResult is intended to mirror the best-effort application
-'   behavior of K_SetExcelUI while returning structured diagnostics.
-'
-'   The most important first regression case is the clean success path:
-'     - result object is returned
-'     - Succeeded = TRUE
-'     - FailureCount = 0
-'     - requested UI state is actually applied
-'
-' INPUTS
-'   IncludeTitleBarTests
-'     TRUE  => include TitleBar in the success assertion
-'     FALSE => leave TitleBar unchanged in this case
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Raises on assertion failure.
-'
-' DEPENDENCIES
-'   - K_SetExcelUI_WithResult
-'   - TST_AssertResultSuccess
-'   - TST_AssertRibbonVisible
-'   - TST_AssertApplicationProperty
-'   - TST_AssertAllWindowsProperty
-'   - TST_AssertTitleBarVisible
-'
-' UPDATED
-'   2026-04-09
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim R                   As C_UIResult 'Structured result returned by the API
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Log the start of the case.
-        TST_Log "TST_Case_WithResult_AllSuccess", "START", "Validating structured-result success path"
-
-'------------------------------------------------------------------------------
-' APPLY REQUESTED UI STATE
-'------------------------------------------------------------------------------
-    'Apply a deterministic visible state through the structured-result API.
-        Set R = K_SetExcelUI_WithResult( _
-                    Ribbon:=K_UI_Show, _
-                    StatusBar:=K_UI_Show, _
-                    ScrollBars:=K_UI_Show, _
-                    FormulaBar:=K_UI_Show, _
-                    Headings:=K_UI_Show, _
-                    WorkbookTabs:=K_UI_Show, _
-                    Gridlines:=K_UI_Show, _
-                    TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show))
-
-    'Allow the UI a short time to settle.
-        TST_WaitUI TEST_WAIT_SECONDS
-
-'------------------------------------------------------------------------------
-' ASSERT RESULT OBJECT
-'------------------------------------------------------------------------------
-    'Assert that the returned result object represents a clean success path.
-        TST_AssertResultSuccess R, "WithResult.AllSuccess.Result"
-
-'------------------------------------------------------------------------------
-' ASSERT APPLIED UI STATE
-'------------------------------------------------------------------------------
-    'Assert Ribbon visible.
-        TST_AssertRibbonVisible True, "WithResult.AllSuccess.Ribbon"
-
-    'Assert StatusBar visible.
-        TST_AssertApplicationProperty True, "DisplayStatusBar", "WithResult.AllSuccess.StatusBar"
-
-    'Assert ScrollBars visible.
-        TST_AssertApplicationProperty True, "DisplayScrollBars", "WithResult.AllSuccess.ScrollBars"
-
-    'Assert FormulaBar visible.
-        TST_AssertApplicationProperty True, "DisplayFormulaBar", "WithResult.AllSuccess.FormulaBar"
-
-    'Assert Headings visible across all windows.
-        TST_AssertAllWindowsProperty True, "DisplayHeadings", "WithResult.AllSuccess.Headings"
-
-    'Assert WorkbookTabs visible across all windows.
-        TST_AssertAllWindowsProperty True, "DisplayWorkbookTabs", "WithResult.AllSuccess.WorkbookTabs"
-
-    'Assert Gridlines visible across all windows.
-        TST_AssertAllWindowsProperty True, "DisplayGridlines", "WithResult.AllSuccess.Gridlines"
-
-    'Assert TitleBar visible when title-bar testing is enabled.
-        If IncludeTitleBarTests Then
-            TST_AssertTitleBarVisible True, "WithResult.AllSuccess.TitleBar"
-        End If
-
-'------------------------------------------------------------------------------
-' LOG PASS
-'------------------------------------------------------------------------------
-    'Log successful completion of the case.
-        TST_Log "TST_Case_WithResult_AllSuccess", "PASS", "Structured-result success path behaved as expected"
-
-End Sub
-
-Private Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolean)
-
-'
-'==============================================================================
-'                       TST_Case_WithResult_NoOpSuccess
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Verify that K_SetExcelUI_WithResult returns a successful C_UIResult object
-'   when invoked as a no-op with all arguments omitted / left unchanged.
-'
-' WHY THIS EXISTS
-'   The tri-state API promises that omitted arguments do not accidentally drive
-'   visibility changes.
-'
-'   The structured-result variant should preserve that contract while also
-'   reporting a clean success result:
-'     - result object is returned
-'     - Succeeded = TRUE
-'     - FailureCount = 0
-'     - pre-existing UI state remains unchanged
-'
-' INPUTS
-'   IncludeTitleBarTests
-'     TRUE  => include TitleBar in the baseline / assertion
-'     FALSE => skip TitleBar assertions in this case
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Raises on assertion failure.
-'
-' DEPENDENCIES
-'   - K_SetExcelUI
-'   - K_SetExcelUI_WithResult
-'   - TST_AssertResultSuccess
-'   - TST_AssertRibbonVisible
-'   - TST_AssertApplicationProperty
-'   - TST_AssertAllWindowsProperty
-'   - TST_AssertTitleBarVisible
-'
-' UPDATED
-'   2026-04-09
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim R                   As C_UIResult 'Structured result returned by the API
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Log the start of the case.
-        TST_Log "TST_Case_WithResult_NoOpSuccess", "START", "Validating structured-result no-op path"
-
-'------------------------------------------------------------------------------
-' ESTABLISH MIXED BASELINE
-'------------------------------------------------------------------------------
-    'Establish a mixed baseline that should remain unchanged.
-        K_SetExcelUI _
-            Ribbon:=K_UI_Show, _
-            StatusBar:=K_UI_Hide, _
-            ScrollBars:=K_UI_Show, _
-            FormulaBar:=K_UI_Hide, _
-            Headings:=K_UI_Show, _
-            WorkbookTabs:=K_UI_Hide, _
-            Gridlines:=K_UI_Show, _
-            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, K_UI_Show)
-
-    'Allow the UI a short time to settle.
-        TST_WaitUI TEST_WAIT_SECONDS
-
-'------------------------------------------------------------------------------
-' APPLY NO-OP THROUGH STRUCTURED-RESULT API
-'------------------------------------------------------------------------------
-    'Invoke the structured-result API with no arguments so every element is
-    'LeaveUnchanged.
-        Set R = K_SetExcelUI_WithResult
-
-    'Allow the UI a short time to settle.
-        TST_WaitUI TEST_WAIT_SECONDS
-
-'------------------------------------------------------------------------------
-' ASSERT RESULT OBJECT
-'------------------------------------------------------------------------------
-    'Assert that the returned result object represents a clean success path.
-        TST_AssertResultSuccess R, "WithResult.NoOp.Result"
-
-'------------------------------------------------------------------------------
-' ASSERT NO-OP UI STATE
-'------------------------------------------------------------------------------
-    'Assert Ribbon remained visible.
-        TST_AssertRibbonVisible True, "WithResult.NoOp.Ribbon"
-
-    'Assert StatusBar remained hidden.
-        TST_AssertApplicationProperty False, "DisplayStatusBar", "WithResult.NoOp.StatusBar"
-
-    'Assert ScrollBars remained visible.
-        TST_AssertApplicationProperty True, "DisplayScrollBars", "WithResult.NoOp.ScrollBars"
-
-    'Assert FormulaBar remained hidden.
-        TST_AssertApplicationProperty False, "DisplayFormulaBar", "WithResult.NoOp.FormulaBar"
-
-    'Assert Headings remained visible across all windows.
-        TST_AssertAllWindowsProperty True, "DisplayHeadings", "WithResult.NoOp.Headings"
-
-    'Assert WorkbookTabs remained hidden across all windows.
-        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", "WithResult.NoOp.WorkbookTabs"
-
-    'Assert Gridlines remained visible across all windows.
-        TST_AssertAllWindowsProperty True, "DisplayGridlines", "WithResult.NoOp.Gridlines"
-
-    'Assert TitleBar remained visible / unchanged when requested.
-        If IncludeTitleBarTests Then
-            TST_AssertTitleBarVisible True, "WithResult.NoOp.TitleBar"
-        End If
-
-'------------------------------------------------------------------------------
-' LOG PASS
-'------------------------------------------------------------------------------
-    'Log successful completion of the case.
-        TST_Log "TST_Case_WithResult_NoOpSuccess", "PASS", "Structured-result no-op path behaved as expected"
-
-End Sub
-
-Private Sub TST_AssertResultSuccess( _
-    ByVal ResultObject As C_UIResult, _
-    ByVal AssertionName As String)
-
-'
-'==============================================================================
-'                         TST_AssertResultSuccess
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Assert that a C_UIResult object exists and represents a clean success path.
-'
-' WHY THIS EXISTS
-'   Structured-result regressions need a shared assertion helper so the tests
-'   validate the same core contract consistently:
-'     - object exists
-'     - Succeeded = TRUE
-'     - FailureCount = 0
-'
-' INPUTS
-'   ResultObject
-'     Structured result object returned by K_SetExcelUI_WithResult.
-'
-'   AssertionName
-'     Human-readable assertion identifier.
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Raises on mismatch.
-'
-' UPDATED
-'   2026-04-09
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' VALIDATE OBJECT REFERENCE
-'------------------------------------------------------------------------------
-    'Reject a missing result object deterministically.
-        If ResultObject Is Nothing Then
-            Err.Raise TEST_ERR_BASE + 20, _
-                      AssertionName, _
-                      AssertionName & " returned Nothing"
-        End If
-
-'------------------------------------------------------------------------------
-' ASSERT SUCCESS FLAG
-'------------------------------------------------------------------------------
-    'Assert that the result object reports overall success.
-        If Not ResultObject.Succeeded Then
-            Err.Raise TEST_ERR_BASE + 21, _
-                      AssertionName, _
-                      AssertionName & " expected Succeeded=True actual=False"
-        End If
-
-'------------------------------------------------------------------------------
-' ASSERT FAILURE COUNT
-'------------------------------------------------------------------------------
-    'Assert that the result object recorded no failures.
-        If ResultObject.FailureCount <> 0 Then
-            Err.Raise TEST_ERR_BASE + 22, _
-                      AssertionName, _
-                      AssertionName & " expected FailureCount=0 actual=" & CStr(ResultObject.FailureCount)
-        End If
-
-End Sub
 
