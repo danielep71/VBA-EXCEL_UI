@@ -115,18 +115,26 @@ Private Const BTN_CLEARALL_MACRO      As String = "Demo_ClearAllUI"             
 Private Const BTN_PRESET_KIOSK_MACRO  As String = "Demo_PresetKiosk"             'Preset-Kiosk button macro
 Private Const BTN_PRESET_ANALYST_MACRO As String = "Demo_PresetAnalyst"          'Preset-Analyst button macro
 Private Const BTN_PRESET_MINIMAL_MACRO As String = "Demo_PresetMinimal"          'Preset-Minimal button macro
+Private Const BTN_CAPTURE_NAME        As String = "btnCaptureExcelUIState"      'Capture-state button shape name
+Private Const BTN_RESET_NAME          As String = "btnResetExcelUIState"        'Reset-state button shape name
+Private Const BTN_CAPTURE_MACRO       As String = "Demo_CaptureCurrentExcelUIState" 'Capture-state button macro
+Private Const BTN_RESET_MACRO         As String = "Demo_ResetExcelUIToCapturedState" 'Reset-state button macro
+
+Private Const BTN_OUTLINE_COLOR       As Long = 0                               'Black outline for action-button shapes
+Private Const BTN_OUTLINE_WEIGHT      As Double = 3#                            'Outline weight for action-button shapes
 
 Private Const NOTE_SCOPE_TEXT As String = _
     "Scope / semantics note:" & vbLf & _
-    "• Checked means SELECTED for the next SHOW or HIDE action." & vbLf & _
-    "• Application-level items affect the current Excel instance." & vbLf & _
-    "• Window-level sync reads ActiveWindow; apply actions target each open Excel window." & vbLf & _
-    "• TitleBar is Windows-only and uses WinAPI against Application.Hwnd." & vbLf & _
-    "• Preset buttons only set selections; they do not apply SHOW or HIDE by themselves."
+    "- Checked means SELECTED for the next SHOW or HIDE action." & vbLf & _
+    "- Application-level items affect the current Excel instance." & vbLf & _
+    "- Window-level sync reads ActiveWindow; apply actions target each open Excel window." & vbLf & _
+    "- TitleBar is Windows-only and uses WinAPI against Application.Hwnd." & vbLf & _
+    "- Preset buttons only set selections; they do not apply SHOW or HIDE by themselves."
 
 Private Const NOTE_RESTORE_TEXT As String = _
     "Restore note:" & vbLf & _
-    "K_ShowExcelUI shows all managed UI elements. It does NOT restore a previously captured user-specific UI state."
+    "K_ShowExcelUI shows all managed UI elements. It does NOT restore a previously captured user-specific UI state." & vbLf & _
+    "Use CAPTURE STATE and RESET STATE for explicit snapshot / restore."
 
 '------------------------------------------------------------------------------
 ' DECLARE: WIN32 / WIN64 API (TITLE-BAR STATE READ FOR SYNC)
@@ -1602,6 +1610,8 @@ Public Sub Demo_CreateExcelUISheet()
 '       * Kiosk preset
 '       * Analyst preset
 '       * Minimal preset
+'       * Capture State
+'       * Reset State
 '   - Adds explanatory notes to the demo sheet.
 '
 ' ERROR POLICY
@@ -1619,7 +1629,7 @@ Public Sub Demo_CreateExcelUISheet()
 '   - Demo_LogFailure
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-11
 '==============================================================================
 '
 
@@ -1635,55 +1645,65 @@ Public Sub Demo_CreateExcelUISheet()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
-    'Cache and suppress screen updates during rebuild
+    'Cache and suppress screen updates during rebuild.
         OldScreenUpdating = Application.ScreenUpdating
         Application.ScreenUpdating = False
 
-    'Resolve the owning workbook
+    'Resolve the owning workbook.
         Set Wb = ThisWorkbook
 
-    'Resolve the demo worksheet or create it when missing
+    'Resolve the demo worksheet or create it when missing.
         Set Ws = Demo_GetOrCreateSheet(Wb, DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
 ' RESET / FORMAT SHEET
 '------------------------------------------------------------------------------
-    'Reset the worksheet to a clean state before rebuilding the demo
+    'Reset the worksheet to a clean state before rebuilding the demo.
         Demo_ResetSheet Ws
-    'Apply the base layout and formatting for the demo surface
+
+    'Apply the base layout and formatting for the demo surface.
         Demo_FormatSheetLayout Ws
-    'Write all static labels and section headers
+
+    'Write all static labels and section headers.
         Demo_WriteStaticLabels Ws
-    'Write explanatory notes to the lower part of the demo sheet
+
+    'Write explanatory notes to the lower part of the demo sheet.
         Demo_WriteNotes Ws
 
 '------------------------------------------------------------------------------
 ' ADD CHECK BOXES
 '------------------------------------------------------------------------------
-    'Add the Ribbon check box
+    'Add the Ribbon check box.
         Demo_AddFormsCheckBox Ws, CB_RIBBON, Ws.Range("K6")
-    'Add the StatusBar check box
+
+    'Add the StatusBar check box.
         Demo_AddFormsCheckBox Ws, CB_STATUSBAR, Ws.Range("K7")
-    'Add the ScrollBars check box
+
+    'Add the ScrollBars check box.
         Demo_AddFormsCheckBox Ws, CB_SCROLLBARS, Ws.Range("K8")
-    'Add the FormulaBar check box
+
+    'Add the FormulaBar check box.
         Demo_AddFormsCheckBox Ws, CB_FORMULABAR, Ws.Range("K9")
-    'Add the Headings check box
+
+    'Add the Headings check box.
         Demo_AddFormsCheckBox Ws, CB_HEADINGS, Ws.Range("K12")
-    'Add the WorkbookTabs check box
+
+    'Add the WorkbookTabs check box.
         Demo_AddFormsCheckBox Ws, CB_WORKBOOKTABS, Ws.Range("K13")
-    'Add the Gridlines check box
+
+    'Add the Gridlines check box.
         Demo_AddFormsCheckBox Ws, CB_GRIDLINES, Ws.Range("K14")
-    'Add the TitleBar check box
+
+    'Add the TitleBar check box.
         Demo_AddFormsCheckBox Ws, CB_TITLEBAR, Ws.Range("K15")
 
 '------------------------------------------------------------------------------
 ' ADD ACTION BUTTONS
 '------------------------------------------------------------------------------
-    'Add the SHOW action shape and wire it to the show macro
+    'Add the SHOW action shape and wire it to the show macro.
         Demo_AddActionButton _
             Ws:=Ws, _
             ShapeName:=BTN_SHOW_NAME, _
@@ -1693,7 +1713,7 @@ Public Sub Demo_CreateExcelUISheet()
             FillColor:=RGB(0, 102, 153), _
             FontColor:=RGB(255, 255, 255)
 
-    'Add the HIDE action shape and wire it to the hide macro
+    'Add the HIDE action shape and wire it to the hide macro.
         Demo_AddActionButton _
             Ws:=Ws, _
             ShapeName:=BTN_HIDE_NAME, _
@@ -1703,7 +1723,7 @@ Public Sub Demo_CreateExcelUISheet()
             FillColor:=RGB(192, 80, 0), _
             FontColor:=RGB(255, 255, 255)
 
-    'Add the Sync Checkboxes shape and wire it to the sync macro
+    'Add the Sync Checkboxes shape and wire it to the sync macro.
         Demo_AddActionButton _
             Ws:=Ws, _
             ShapeName:=BTN_SYNC_NAME, _
@@ -1713,7 +1733,7 @@ Public Sub Demo_CreateExcelUISheet()
             FillColor:=RGB(79, 129, 189), _
             FontColor:=RGB(255, 255, 255)
 
-    'Add the Select All shape and wire it to the select-all macro
+    'Add the Select All shape and wire it to the select-all macro.
         Demo_AddActionButton _
             Ws:=Ws, _
             ShapeName:=BTN_SELECTALL_NAME, _
@@ -1723,7 +1743,7 @@ Public Sub Demo_CreateExcelUISheet()
             FillColor:=RGB(84, 130, 53), _
             FontColor:=RGB(255, 255, 255)
 
-    'Add the Clear All shape and wire it to the clear-all macro
+    'Add the Clear All shape and wire it to the clear-all macro.
         Demo_AddActionButton _
             Ws:=Ws, _
             ShapeName:=BTN_CLEARALL_NAME, _
@@ -1733,7 +1753,7 @@ Public Sub Demo_CreateExcelUISheet()
             FillColor:=RGB(127, 127, 127), _
             FontColor:=RGB(255, 255, 255)
 
-    'Add the Kiosk preset shape and wire it to the preset macro
+    'Add the Kiosk preset shape and wire it to the preset macro.
         Demo_AddActionButton _
             Ws:=Ws, _
             ShapeName:=BTN_PRESET_KIOSK_NAME, _
@@ -1743,7 +1763,7 @@ Public Sub Demo_CreateExcelUISheet()
             FillColor:=RGB(31, 73, 125), _
             FontColor:=RGB(255, 255, 255)
 
-    'Add the Analyst preset shape and wire it to the preset macro
+    'Add the Analyst preset shape and wire it to the preset macro.
         Demo_AddActionButton _
             Ws:=Ws, _
             ShapeName:=BTN_PRESET_ANALYST_NAME, _
@@ -1753,7 +1773,7 @@ Public Sub Demo_CreateExcelUISheet()
             FillColor:=RGB(49, 133, 156), _
             FontColor:=RGB(255, 255, 255)
 
-    'Add the Minimal preset shape and wire it to the preset macro
+    'Add the Minimal preset shape and wire it to the preset macro.
         Demo_AddActionButton _
             Ws:=Ws, _
             ShapeName:=BTN_PRESET_MINIMAL_NAME, _
@@ -1763,34 +1783,56 @@ Public Sub Demo_CreateExcelUISheet()
             FillColor:=RGB(148, 138, 84), _
             FontColor:=RGB(255, 255, 255)
 
+    'Add the Capture State shape and wire it to the capture macro.
+        Demo_AddActionButton _
+            Ws:=Ws, _
+            ShapeName:=BTN_CAPTURE_NAME, _
+            TargetRange:=Ws.Range("D23:E24"), _
+            CaptionText:="CAPTURE STATE", _
+            MacroName:=BTN_CAPTURE_MACRO, _
+            FillColor:=RGB(112, 48, 160), _
+            FontColor:=RGB(255, 255, 255)
+
+    'Add the Reset State shape and wire it to the reset macro.
+        Demo_AddActionButton _
+            Ws:=Ws, _
+            ShapeName:=BTN_RESET_NAME, _
+            TargetRange:=Ws.Range("F23:G24"), _
+            CaptionText:="RESET STATE", _
+            MacroName:=BTN_RESET_MACRO, _
+            FillColor:=RGB(0, 153, 102), _
+            FontColor:=RGB(255, 255, 255)
+
 '------------------------------------------------------------------------------
 ' FINALIZE
 '------------------------------------------------------------------------------
-    'Select the demo sheet so the result is immediately visible
+    'Select the demo sheet so the result is immediately visible.
         Ws.Activate
-    'Position the selection at the top-left useful cell
+
+    'Position the selection at the top-left useful cell.
         Ws.Range("B3").Select
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Restore ScreenUpdating before exiting
+    'Restore ScreenUpdating before exiting.
         Application.ScreenUpdating = OldScreenUpdating
-    'Normal termination point
+
+    'Normal termination point.
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write the failure to the Immediate Window without interrupting callers
+    'Write the failure to the Immediate Window without interrupting callers.
         Demo_LogFailure PROC, "Unexpected", _
             CStr(Err.Number) & ": " & Err.Description & _
             IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
-    'Exit quietly after logging
+    'Exit quietly after logging.
         Resume SafeExit
 
 End Sub
@@ -1960,37 +2002,41 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-11
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
 ' APPLY GLOBAL SHEET FORMATTING
 '------------------------------------------------------------------------------
-    'Set the worksheet tab color
+    'Set the worksheet tab color.
         Ws.Tab.Color = RGB(0, 102, 153)
-    'Set the default worksheet font name
+
+    'Set the default worksheet font name.
         Ws.Cells.Font.Name = "Calibri"
-    'Set the default worksheet font size
+
+    'Set the default worksheet font size.
         Ws.Cells.Font.Size = 11
-    'Set horizontal alignment baseline
+
+    'Set horizontal alignment baseline.
         Ws.Cells.HorizontalAlignment = xlLeft
-    'Set vertical alignment baseline
+
+    'Set vertical alignment baseline.
         Ws.Cells.VerticalAlignment = xlCenter
 
 '------------------------------------------------------------------------------
 ' APPLY COLUMN / ROW LAYOUT
 '------------------------------------------------------------------------------
-    'Set a narrow left margin column
+    'Set a narrow left margin column.
         Ws.Columns("A").ColumnWidth = 2
 
-    'Set the title / subtitle / main content block widths
+    'Set the title / subtitle / main content block widths.
         Ws.Columns("B").ColumnWidth = 2
         Ws.Columns("C").ColumnWidth = 12
         Ws.Columns("D").ColumnWidth = 11
@@ -2004,16 +2050,16 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
         Ws.Columns("L").ColumnWidth = 8
         Ws.Columns("M").ColumnWidth = 8
 
-    'Set the main demo row heights
-        Ws.Rows("1:32").RowHeight = 22
+    'Set the main demo row heights.
+        Ws.Rows("1:33").RowHeight = 22
 
-    'Increase the note rows for wrapped text
-        Ws.Rows("25:31").RowHeight = 28
+    'Increase the note rows for wrapped text.
+        Ws.Rows("26:32").RowHeight = 28
 
 '------------------------------------------------------------------------------
 ' FORMAT TITLE / SUBTITLE BANDS
 '------------------------------------------------------------------------------
-    'Merge and format the title band
+    'Merge and format the title band.
         With Ws.Range("B1:M1")
             .Merge
             .Value = "EXCEL UI"
@@ -2023,7 +2069,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
             .Font.Size = 16
         End With
 
-    'Merge and format the subtitle band
+    'Merge and format the subtitle band.
         With Ws.Range("B2:M2")
             .Merge
             .Value = "Demo"
@@ -2036,7 +2082,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 '------------------------------------------------------------------------------
 ' FORMAT APPLICATION-LEVEL BLOCK
 '------------------------------------------------------------------------------
-    'Format the application-level section header
+    'Format the application-level section header.
         With Ws.Range("I5:K5")
             .Merge
             .Interior.Color = RGB(0, 51, 102)
@@ -2046,19 +2092,19 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
             .Value = "APPLICATION LEVEL UI STATE"
         End With
 
-    'Format the application-level label cells
+    'Format the application-level label cells.
         With Ws.Range("I6:J9")
             .Interior.Color = RGB(220, 230, 241)
             .Font.Bold = True
         End With
 
-    'Format the application-level check-box cells
+    'Format the application-level check-box cells.
         With Ws.Range("K6:K9")
             .Interior.Color = RGB(255, 255, 255)
             .HorizontalAlignment = xlCenter
         End With
 
-    'Apply borders to the application-level block
+    'Apply borders to the application-level block.
         With Ws.Range("I5:K9").Borders
             .LineStyle = xlContinuous
             .Weight = xlThin
@@ -2067,7 +2113,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 '------------------------------------------------------------------------------
 ' FORMAT WINDOW-LEVEL BLOCK
 '------------------------------------------------------------------------------
-    'Format the window-level section header
+    'Format the window-level section header.
         With Ws.Range("I11:K11")
             .Merge
             .Interior.Color = RGB(0, 51, 102)
@@ -2077,19 +2123,19 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
             .Value = "WINDOW-LEVEL UI STATE"
         End With
 
-    'Format the window-level label cells
+    'Format the window-level label cells.
         With Ws.Range("I12:J15")
             .Interior.Color = RGB(220, 230, 241)
             .Font.Bold = True
         End With
 
-    'Format the window-level check-box cells
+    'Format the window-level check-box cells.
         With Ws.Range("K12:K15")
             .Interior.Color = RGB(255, 255, 255)
             .HorizontalAlignment = xlCenter
         End With
 
-    'Apply borders to the window-level block
+    'Apply borders to the window-level block.
         With Ws.Range("I11:K15").Borders
             .LineStyle = xlContinuous
             .Weight = xlThin
@@ -2098,7 +2144,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 '------------------------------------------------------------------------------
 ' FORMAT PRESET LABEL AREA
 '------------------------------------------------------------------------------
-    'Format the preset section label
+    'Format the preset section label.
         With Ws.Range("D18:G18")
             .Merge
             .Interior.Color = RGB(230, 230, 230)
@@ -2110,8 +2156,8 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 '------------------------------------------------------------------------------
 ' FORMAT NOTE AREAS
 '------------------------------------------------------------------------------
-    'Format the scope / semantics note area
-        With Ws.Range("B25:M28")
+    'Format the scope / semantics note area.
+        With Ws.Range("B26:M29")
             .Merge
             .Interior.Color = RGB(255, 242, 204)
             .Font.Color = RGB(0, 0, 0)
@@ -2120,8 +2166,8 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
             .VerticalAlignment = xlTop
         End With
 
-    'Format the restore note area
-        With Ws.Range("B29:M31")
+    'Format the restore note area.
+        With Ws.Range("B30:M32")
             .Merge
             .Interior.Color = RGB(217, 225, 242)
             .Font.Color = RGB(0, 0, 0)
@@ -2130,8 +2176,8 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
             .VerticalAlignment = xlTop
         End With
 
-    'Apply borders to the note areas
-        With Ws.Range("B25:M31").Borders
+    'Apply borders to the note areas.
+        With Ws.Range("B26:M32").Borders
             .LineStyle = xlContinuous
             .Weight = xlThin
         End With
@@ -2140,14 +2186,14 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Normal termination point.
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Exit quietly after partial formatting
+    'Exit quietly after partial formatting.
         Resume SafeExit
 
 End Sub
@@ -2250,36 +2296,37 @@ Private Sub Demo_WriteNotes(ByVal Ws As Worksheet)
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-11
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
 ' WRITE NOTES
 '------------------------------------------------------------------------------
-    'Write the scope / semantics note text
-        Ws.Range("B25").Value = NOTE_SCOPE_TEXT
-    'Write the restore note text
-        Ws.Range("B29").Value = NOTE_RESTORE_TEXT
+    'Write the scope / semantics note text.
+        Ws.Range("B26").Value = NOTE_SCOPE_TEXT
+
+    'Write the restore note text.
+        Ws.Range("B30").Value = NOTE_RESTORE_TEXT
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Normal termination point.
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Exit quietly after partial note assignment
+    'Exit quietly after partial note assignment.
         Resume SafeExit
 
 End Sub
@@ -2410,6 +2457,12 @@ Private Sub Demo_AddActionButton( _
 '   The demo sheet needs visually prominent controls that users can click to
 '   trigger the various demo routines.
 '
+'   This version explicitly applies a visible outline so all action-button
+'   shapes have a stronger visual boundary:
+'     - black
+'     - solid
+'     - weight 3
+'
 ' INPUTS
 '   Ws
 '     Worksheet receiving the action shape.
@@ -2436,7 +2489,7 @@ Private Sub Demo_AddActionButton( _
 '   None
 '
 ' UPDATED
-'   2026-04-04
+'   2026-04-11
 '==============================================================================
 '
 
@@ -2448,13 +2501,13 @@ Private Sub Demo_AddActionButton( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
+    'Route unexpected runtime errors to the local failure handler.
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
 ' CREATE SHAPE
 '------------------------------------------------------------------------------
-    'Create the rounded-rectangle shape over the target range
+    'Create the rounded-rectangle shape over the target range.
         Set Shp = Ws.Shapes.AddShape( _
                         Type:=msoShapeRoundedRectangle, _
                         Left:=TargetRange.Left, _
@@ -2462,54 +2515,61 @@ Private Sub Demo_AddActionButton( _
                         Width:=TargetRange.Width, _
                         Height:=TargetRange.Height)
 
-    'Assign the requested shape name
+    'Assign the requested shape name.
         Shp.Name = ShapeName
 
-    'Tie the shape position and size to its cells
+    'Tie the shape position and size to its cells.
         Shp.Placement = xlMoveAndSize
 
-    'Hide the outline
-        Shp.Line.Visible = msoFalse
-
-    'Apply the requested fill color
+'------------------------------------------------------------------------------
+' APPLY SHAPE STYLING
+'------------------------------------------------------------------------------
+    'Apply the requested fill color.
         Shp.Fill.ForeColor.RGB = FillColor
 
-    'Assign the workbook-qualified macro to the shape click action
+    'Show a solid black outline around the action shape.
+        Shp.Line.Visible = msoTrue
+        Shp.Line.ForeColor.RGB = BTN_OUTLINE_COLOR
+        Shp.Line.Weight = BTN_OUTLINE_WEIGHT
+        Shp.Line.Transparency = 0#
+        Shp.Line.DashStyle = msoLineSolid
+
+    'Assign the workbook-qualified macro to the shape click action.
         Shp.OnAction = "'" & ThisWorkbook.Name & "'!" & MacroName
 
 '------------------------------------------------------------------------------
 ' APPLY TEXT FORMATTING
 '------------------------------------------------------------------------------
-    'Write the button caption
+    'Write the button caption.
         Shp.TextFrame2.TextRange.Characters.Text = CaptionText
 
-    'Center the text horizontally
+    'Center the text horizontally.
         Shp.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
 
-    'Center the text vertically
+    'Center the text vertically.
         Shp.TextFrame2.VerticalAnchor = msoAnchorMiddle
 
-    'Apply the button font size
+    'Apply the button font size.
         Shp.TextFrame2.TextRange.Font.Size = 11
 
-    'Apply bold text
+    'Apply bold text.
         Shp.TextFrame2.TextRange.Font.Bold = msoTrue
 
-    'Apply the requested font color
+    'Apply the requested font color.
         Shp.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = FontColor
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
+    'Normal termination point.
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Exit quietly after partial shape creation
+    'Exit quietly after partial shape creation.
         Resume SafeExit
 
 End Sub
@@ -2563,6 +2623,157 @@ Private Sub Demo_LogFailure( _
 '------------------------------------------------------------------------------
     'Write a consistent diagnostic line to the Immediate Window
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
+
+End Sub
+Public Sub Demo_CaptureCurrentExcelUIState()
+
+'
+'==============================================================================
+'                    Demo_CaptureCurrentExcelUIState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Capture the current managed Excel UI state through the core module's
+'   explicit snapshot API.
+'
+' WHY THIS EXISTS
+'   The demo becomes more useful when users can:
+'     - capture the current baseline
+'     - experiment with show / hide actions
+'     - restore the captured baseline later
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Delegates to K_CaptureExcelUIState.
+'   - Shows a small confirmation message.
+'
+' ERROR POLICY
+'   - Does NOT raise to callers.
+'   - Unexpected failures are written to the Immediate Window.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the local failure handler.
+        On Error GoTo Fail
+
+'------------------------------------------------------------------------------
+' CAPTURE SNAPSHOT
+'------------------------------------------------------------------------------
+    'Capture the current managed Excel UI state through the core module.
+        K_CaptureExcelUIState
+
+'------------------------------------------------------------------------------
+' INFORM USER
+'------------------------------------------------------------------------------
+    'Confirm that the state snapshot was captured.
+        MsgBox "Current Excel UI state captured.", vbInformation, "Excel UI Demo"
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Normal termination point.
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+    'Write a diagnostic line without interrupting callers.
+        Demo_LogFailure "Demo_CaptureCurrentExcelUIState", "Unexpected", _
+            CStr(Err.Number) & ": " & Err.Description & _
+            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
+            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+
+    'Exit quietly after logging.
+        Resume SafeExit
+
+End Sub
+Public Sub Demo_ResetExcelUIToCapturedState()
+
+'
+'==============================================================================
+'                    Demo_ResetExcelUIToCapturedState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restore the managed Excel UI to the most recently captured explicit
+'   snapshot through the core module's reset API.
+'
+' WHY THIS EXISTS
+'   The demo becomes more useful when users can experiment safely and then
+'   return to a captured baseline.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Rejects reset when no snapshot is available.
+'   - Delegates to K_ResetExcelUIToSnapshot.
+'   - Synchronizes the check boxes back to the current visible state.
+'
+' ERROR POLICY
+'   - Does NOT raise to callers.
+'   - Unexpected failures are written to the Immediate Window.
+'
+' UPDATED
+'   2026-04-11
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the local failure handler.
+        On Error GoTo Fail
+
+'------------------------------------------------------------------------------
+' VALIDATE SNAPSHOT AVAILABILITY
+'------------------------------------------------------------------------------
+    'Reject reset when no explicit snapshot is currently available.
+        If Not K_HasExcelUIStateSnapshot Then
+            MsgBox "No captured Excel UI state is available.", vbExclamation, "Excel UI Demo"
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' RESET TO SNAPSHOT
+'------------------------------------------------------------------------------
+    'Restore the captured managed Excel UI state through the core module.
+        K_ResetExcelUIToSnapshot
+
+'------------------------------------------------------------------------------
+' RESYNC DEMO CHECK BOXES
+'------------------------------------------------------------------------------
+    'Synchronize the demo check boxes back to the current visible state after
+    'reset.
+        Demo_SyncCheckBoxesToCurrentUI
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Normal termination point.
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+    'Write a diagnostic line without interrupting callers.
+        Demo_LogFailure "Demo_ResetExcelUIToCapturedState", "Unexpected", _
+            CStr(Err.Number) & ": " & Err.Description & _
+            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
+            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+
+    'Exit quietly after logging.
+        Resume SafeExit
 
 End Sub
 
