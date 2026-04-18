@@ -1,12 +1,39 @@
-# Excel UI
+# VBA-EXCEL_UI
 
-VBA utilities for controlling the Excel UI shell on Windows, including Ribbon, status bar, scroll bars, formula bar, worksheet aids, and WinAPI-based title-bar visibility.
+> Centralized control of Excel UI elements and application interface behavior in VBA
+
+---
+
+## Part of a larger framework
+
+This module is part of the **Excel VBA Runtime Framework**:
+
+👉 https://github.com/danielep71/excel-vba-runtime-framework
+
+The framework provides a structured runtime layer for:
+
+- execution control
+- UI management
+- event-driven interaction
+
+Within that framework, `VBA-EXCEL_UI` acts as the **UI Controller**.
+
+It provides the foundation for:
+
+- centralized Excel interface control
+- application-like workbook presentation
+- consistent visual environments
+- reusable UI-management patterns in VBA projects
+
+---
 
 ## Overview
 
-This repository provides a compact VBA toolkit for Excel UI control, demonstration, and regression validation on Excel for Windows.
+`VBA-EXCEL_UI` is a **compact but structured VBA toolkit for controlling the Excel UI shell on Windows**.
 
-It currently includes:
+It is designed for workbook-driven solutions that need a constrained, kiosk-like, presentation-oriented, or application-style Excel shell, while still preserving a practical and reusable API for ordinary VBA projects.
+
+The repository currently includes:
 
 - a **core module** for applying Excel UI visibility changes through a safe tri-state API
 - a **structured-result path** for callers that want diagnostics as data rather than only Immediate Window logging
@@ -14,9 +41,31 @@ It currently includes:
 - a **demo module** for building and driving a worksheet-based showcase of the UI features
 - a **regression test module** for validating the public behavior of the toolkit
 
-The project is intended for workbook-driven solutions that need a constrained, kiosk-like, presentation-oriented, or application-style Excel shell.
+This makes the project useful both for:
 
-## Repository Contents
+- creating cleaner and more controlled Excel user experiences
+- building guided workbook workflows
+- demonstrating and validating repeatable UI-management behavior in VBA
+
+---
+
+## Why this exists
+
+Excel exposes many interface elements that are useful in general-purpose spreadsheet work, but not always desirable in structured VBA solutions.
+
+In many real projects, it is useful to:
+
+- reduce visual noise
+- guide user interaction
+- hide implementation-oriented Excel chrome
+- standardize the workbook interface before or during automation
+- restore a known visual state after execution
+
+`VBA-EXCEL_UI` exists to provide a **single control layer** for those needs.
+
+---
+
+## Repository contents
 
 ```text
 /README.md
@@ -25,6 +74,8 @@ The project is intended for workbook-driven solutions that need a constrained, k
 /demo/EXCEL_UI_DEMO.xlsm
 /test/M_EXCEL_UI_REGRESSION_TESTS.bas
 ```
+
+---
 
 ## Components
 
@@ -46,22 +97,24 @@ It exposes:
 
 Managed UI elements:
 
-Application-level:
+**Application-level**
 
 - Ribbon
 - Status Bar
 - Scroll Bars
 - Formula Bar
 
-Window-level:
+**Window-level**
 
 - Headings
 - Workbook Tabs
 - Gridlines
 
-Window-frame:
+**Window-frame**
 
 - Title Bar (via WinAPI on the Excel window represented by `Application.Hwnd`)
+
+---
 
 ### `M_EXCEL_UI_DEMO.bas`
 
@@ -98,6 +151,8 @@ Main public procedures include:
 - `Demo_ResetExcelUIToCapturedState`
 - `Demo_CreateExcelUISheet`
 
+---
+
 ### `M_EXCEL_UI_REGRESSION_TESTS.bas`
 
 Regression-test harness for the public API.
@@ -125,7 +180,46 @@ The test harness validates:
 
 It also snapshots current UI state before test execution and attempts to restore it afterward.
 
-## Core Design
+---
+
+## Core capabilities
+
+- centralized control of Excel UI elements
+- tri-state behavior for each element:
+  - show
+  - hide
+  - leave unchanged
+- workbook-window UI control where applicable
+- application-level UI control where applicable
+- title-bar visibility control through WinAPI
+- reusable wrappers for common “hide all” / “show all” patterns
+- structured-result path for safer integration
+- explicit snapshot / reset workflow for managed UI state
+- reduced redraw and no-op avoidance where possible
+
+---
+
+## Typical use cases
+
+### Application-like Excel solutions
+
+Hide unnecessary Excel chrome and present a cleaner, guided interface to the user.
+
+### Controlled workflows
+
+Ensure that a workbook opens or runs under a consistent visual configuration.
+
+### Demo and presentation environments
+
+Temporarily suppress distracting UI elements for workshops, demonstrations, or executive walkthroughs.
+
+### Protected or guided user interaction
+
+Limit visible interface elements so users focus on intended actions and input areas.
+
+---
+
+## Core design
 
 ### Tri-state API
 
@@ -141,16 +235,20 @@ End Enum
 
 This avoids the ambiguity of omitted Boolean arguments and makes caller intent explicit.
 
+---
+
 ### Best-effort processing
 
 `K_SetExcelUI` and `K_SetExcelUI_WithResult` are designed so that one failed UI element does not prevent the rest of the requested changes from being attempted.
+
+---
 
 ### Fire-and-forget vs structured diagnostics
 
 The toolkit provides two complementary entry points:
 
 - `K_SetExcelUI`  
-  Best-effort, fail-soft application with diagnostics written to the Immediate Window.
+  Best-effort, fail-soft application with diagnostics written to the Immediate Window
 
 - `K_SetExcelUI_WithResult`  
   Best-effort, fail-soft application that returns:
@@ -159,6 +257,8 @@ The toolkit provides two complementary entry points:
   - optional `FailureList` as a 1-based string array
 
 This allows callers to choose between a simple procedural API and a structured inspection model without relying on a class module.
+
+---
 
 ### Explicit snapshot / reset
 
@@ -175,18 +275,24 @@ This is intended for workflows where callers want to:
 2. apply a constrained shell
 3. restore the captured baseline later
 
+---
+
 ### Reduced redraw where possible
 
-The core apply path now also tries to reduce unnecessary UI churn by:
+The core apply path tries to reduce unnecessary UI churn by:
 
 - temporarily suppressing `Application.ScreenUpdating` where possible
 - skipping no-op writes when the current state already matches the requested target
 
 This improves smoothness for object-model UI elements, though it cannot fully suppress Ribbon or WinAPI non-client refresh.
 
+---
+
 ### Title-bar control
 
 Excel does not expose title-bar visibility directly through the object model, so the module uses WinAPI to update the style of the Excel window represented by `Application.Hwnd`.
+
+---
 
 ## Public API
 
@@ -207,6 +313,8 @@ K_SetExcelUI _
     Gridlines:=K_UI_Hide, _
     TitleBar:=K_UI_Hide
 ```
+
+---
 
 ### `K_SetExcelUI_WithResult`
 
@@ -239,6 +347,8 @@ If Not OK Then
 End If
 ```
 
+---
+
 ### `K_HideExcelUI`
 
 Hide all managed UI elements.
@@ -246,6 +356,8 @@ Hide all managed UI elements.
 ```vb
 K_HideExcelUI
 ```
+
+---
 
 ### `K_ShowExcelUI`
 
@@ -255,6 +367,8 @@ Show all managed UI elements.
 K_ShowExcelUI
 ```
 
+---
+
 ### `K_CaptureExcelUIState`
 
 Capture the current managed Excel UI state explicitly.
@@ -262,6 +376,8 @@ Capture the current managed Excel UI state explicitly.
 ```vb
 K_CaptureExcelUIState
 ```
+
+---
 
 ### `K_ResetExcelUIToSnapshot`
 
@@ -271,6 +387,8 @@ Best-effort restore to the most recently captured managed UI snapshot.
 K_ResetExcelUIToSnapshot
 ```
 
+---
+
 ### `K_HasExcelUIStateSnapshot`
 
 Return whether a snapshot is currently available.
@@ -278,6 +396,8 @@ Return whether a snapshot is currently available.
 ```vb
 Debug.Print K_HasExcelUIStateSnapshot
 ```
+
+---
 
 ### `K_ClearExcelUIStateSnapshot`
 
@@ -287,10 +407,12 @@ Clear any previously captured managed UI snapshot.
 K_ClearExcelUIStateSnapshot
 ```
 
-## Demo Quick Start
+---
 
-1. Import `M_EXCEL_UI.bas`.
-2. Import `M_EXCEL_UI_DEMO.bas`.
+## Demo quick start
+
+1. Import `M_EXCEL_UI.bas`
+2. Import `M_EXCEL_UI_DEMO.bas`
 3. Run:
 
 ```vb
@@ -298,18 +420,21 @@ Demo_CreateExcelUISheet
 ```
 
 4. Use the generated `Demo` worksheet to:
-   - select target UI elements with check boxes
-   - apply **SHOW SELECTED UI**
-   - apply **HIDE SELECTED UI**
-   - synchronize check boxes from current UI state
-   - apply preset selections
-   - capture the current managed UI state
-   - reset the managed UI to the captured state
 
-## Regression Test Quick Start
+- select target UI elements with check boxes
+- apply **SHOW SELECTED UI**
+- apply **HIDE SELECTED UI**
+- synchronize check boxes from current UI state
+- apply preset selections
+- capture the current managed UI state
+- reset the managed UI to the captured state
 
-1. Import `M_EXCEL_UI.bas`.
-2. Import `M_EXCEL_UI_REGRESSION_TESTS.bas`.
+---
+
+## Regression test quick start
+
+1. Import `M_EXCEL_UI.bas`
+2. Import `M_EXCEL_UI_REGRESSION_TESTS.bas`
 3. Run one of:
 
 ```vb
@@ -329,6 +454,8 @@ Suggested order for manual validation:
 1. `Test_EXCEL_UI_RunCore`
 2. `Test_EXCEL_UI_RunTitleBarOnly`
 3. `Test_EXCEL_UI_RunAll`
+
+---
 
 ## Importing into VBA
 
@@ -360,12 +487,16 @@ Import:
 - `M_EXCEL_UI_DEMO.bas`
 - `M_EXCEL_UI_REGRESSION_TESTS.bas`
 
+---
+
 ## Requirements
 
 - Microsoft Excel for Windows
 - VBA-enabled workbook or add-in host
 - 32-bit or 64-bit Office/VBA supported by conditional compilation
 - WinAPI access available in the host environment
+
+---
 
 ## Limitations
 
@@ -378,13 +509,46 @@ Import:
 - the demo-sheet builder performs a destructive rebuild of the `Demo` sheet
 - reduced redraw does not fully eliminate Ribbon or non-client frame refresh flicker
 
-## Notes
+---
 
-- Ribbon control relies on `Application.ExecuteExcel4Macro`
-- title-bar control targets the Excel window represented by `Application.Hwnd`
-- the structured-result path no longer requires a class module
-- the toolkit is designed for practical workbook UI control, demos, and regression validation rather than for persistent per-user shell personalization
+## Design notes
+
+- use centralized wrappers rather than scattering raw UI toggles throughout a project
+- use selective tri-state control when only some elements should change
+- use “hide all” / “show all” wrappers for consistent workbook presentation flows
+- treat title-bar control as best effort because it depends on supported Windows behavior
+- pair this module with execution-control and event-driven components for more complete Excel application design
+
+---
+
+## Position in the framework
+
+Within the **Excel VBA Runtime Framework**, `VBA-EXCEL_UI` is the component responsible for **UI management and interface control**.
+
+It is intended to work alongside complementary components for:
+
+- execution control and performance management
+- event-driven interaction
+- broader Excel application architecture
+
+Framework home:
+
+👉 https://github.com/danielep71/excel-vba-runtime-framework
+
+---
 
 ## Status
 
-This repository is intended as a reusable VBA utility component for Excel-based solutions on Windows.
+This repository is intended as a reusable VBA component for Excel-based solutions on Windows.
+
+---
+
+## Author
+
+Daniele Penza
+
+---
+
+## License
+
+This project is licensed under the terms in `LICENSE`.
