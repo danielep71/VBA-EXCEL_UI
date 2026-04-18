@@ -27,6 +27,9 @@ It provides the foundation for:
 
 ---
 
+<img width="1536" height="1024" alt="UI Home reduced" src="https://github.com/user-attachments/assets/27c7ba79-2c45-41d0-b076-f215902c7df9" />
+
+
 ## Overview
 
 `VBA-EXCEL_UI` is a **compact but structured VBA toolkit for controlling the Excel UI shell on Windows**.
