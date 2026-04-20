@@ -60,10 +60,10 @@ Option Explicit
 '   - Supports both Forms check boxes and ActiveX check boxes when reading or
 '     writing control state.
 '   - Relies on the public API exposed by the EXCEL_UI module:
-'       * K_UIVisibility
-'       * K_SetExcelUI
-'       * K_HideExcelUI
-'       * K_ShowExcelUI
+'       * UIVisibility
+'       * UI_SetExcelUI
+'       * UI_HideExcelUI
+'       * UI_ShowExcelUI
 '
 ' NOTES
 '   - Window-level sync reads the current ActiveWindow state.
@@ -103,7 +103,7 @@ Private Const BTN_HIDE_NAME           As String = "btnHideExcelUI"          'Hid
 Private Const BTN_SYNC_NAME           As String = "btnSyncExcelUI"          'Sync button shape name
 Private Const BTN_SELECTALL_NAME      As String = "btnSelectAllUI"          'Select-all button shape name
 Private Const BTN_CLEARALL_NAME       As String = "btnClearAllUI"           'Clear-all button shape name
-Private Const BTN_PRESET_KIOSK_NAME   As String = "btnPresetKioskUI"        'Preset-Kiosk button shape name
+Private Const BTN_PRESET_KIOSUI_NAME   As String = "btnPresetKioskUI"        'Preset-Kiosk button shape name
 Private Const BTN_PRESET_ANALYST_NAME As String = "btnPresetAnalystUI"      'Preset-Analyst button shape name
 Private Const BTN_PRESET_MINIMAL_NAME As String = "btnPresetMinimalUI"      'Preset-Minimal button shape name
 
@@ -112,7 +112,7 @@ Private Const BTN_HIDE_MACRO          As String = "Demo_HideSelectedExcelUI"    
 Private Const BTN_SYNC_MACRO          As String = "Demo_SyncCheckBoxesToCurrentUI" 'Sync button macro
 Private Const BTN_SELECTALL_MACRO     As String = "Demo_SelectAllUI"             'Select-all button macro
 Private Const BTN_CLEARALL_MACRO      As String = "Demo_ClearAllUI"              'Clear-all button macro
-Private Const BTN_PRESET_KIOSK_MACRO  As String = "Demo_PresetKiosk"             'Preset-Kiosk button macro
+Private Const BTN_PRESET_KIOSUI_MACRO  As String = "Demo_PresetKiosk"             'Preset-Kiosk button macro
 Private Const BTN_PRESET_ANALYST_MACRO As String = "Demo_PresetAnalyst"          'Preset-Analyst button macro
 Private Const BTN_PRESET_MINIMAL_MACRO As String = "Demo_PresetMinimal"          'Preset-Minimal button macro
 Private Const BTN_CAPTURE_NAME        As String = "btnCaptureExcelUIState"      'Capture-state button shape name
@@ -133,7 +133,7 @@ Private Const NOTE_SCOPE_TEXT As String = _
 
 Private Const NOTE_RESTORE_TEXT As String = _
     "Restore note:" & vbLf & _
-    "K_ShowExcelUI shows all managed UI elements. It does NOT restore a previously captured user-specific UI state." & vbLf & _
+    "UI_ShowExcelUI shows all managed UI elements. It does NOT restore a previously captured user-specific UI state." & vbLf & _
     "Use CAPTURE STATE and RESET STATE for explicit snapshot / restore."
 
 '------------------------------------------------------------------------------
@@ -182,6 +182,210 @@ Private Const NOTE_RESTORE_TEXT As String = _
 Private Const DEMO_GWL_STYLE          As Long = -16       'Window style index
 Private Const DEMO_WS_CAPTION         As Long = &HC00000  'Caption / title-bar style bit
 
+'------------------------------------------------------------------------------
+' PRIVATE CONSTANTS
+'------------------------------------------------------------------------------
+    Private Const UI_SHEET_DEMO            As String = "DEMO_UI"
+
+Public Sub UI_CreateDemoSheet()
+
+'
+'==============================================================================
+'                            UI_CreateDemoSheet
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Build or rebuild the Excel UI demo sheet and its control panel
+'
+' WHY THIS EXISTS
+'   The demo workbook needs a repeatable builder that:
+'     - prepares the demo template
+'     - writes the application-level control block
+'     - writes the window-level control block
+'     - applies workbook names for each input cell
+'     - restores Excel Application state cleanly even on failure
+'
+'   Centralizing that logic makes the demo easier to rebuild, maintain, and
+'   publish
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Enters a fast-mode scope for smoother rebuild
+'   - Rebuilds the demo template sheet
+'   - Writes two control sections:
+'       * application-level UI state
+'       * window-level UI state
+'   - Converts the input cells to checkboxes
+'   - Restores cursor and fast-mode state through a centralized cleanup path
+'
+' ERROR POLICY
+'   - Raises errors normally
+'   - Cleanup is best-effort and should not overwrite the original error
+'
+' DEPENDENCIES
+'   - DEMO_Begin_FastMode
+'   - DEMO_End_FastMode
+'   - DEMO_Build_DemoTemplate
+'   - DEMO_Prepare_LabeledInputSection
+'   - DEMO_Write_NamedInputRow
+'
+' UPDATED
+'   2026-04-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WB                  As Workbook             'Target workbook
+    Dim WS                  As Worksheet            'Demo / control sheet
+
+    Dim FastModeState       As tDemoFastModeState   'Saved Application-state snapshot
+    Dim FastModeOn          As Boolean              'TRUE when fast mode was entered
+
+    Dim SavedErrNumber      As Long                 'Captured error number
+    Dim SavedErrSource      As String               'Captured error source
+    Dim SavedErrDescription As String               'Captured error description
+
+    Const PROC As String = "UI_CreateDemoSheet"     'Procedure name for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable structured cleanup on failure
+        On Error GoTo Clean_Fail
+    'Target the workbook that contains this module
+        Set WB = ThisWorkbook
+    'Capture and apply fast-mode Application settings
+        DEMO_Begin_FastMode FastModeState
+        FastModeOn = True
+    'Show the wait cursor while rebuilding the demo workbook
+        Application.Cursor = xlWait
+    'Build or rebuild the generic template for the demo sheet
+        DEMO_Build_DemoTemplate _
+            UI_SHEET_DEMO, _
+            "EXCEL UI", _
+            "Demo Sheet"
+    'Resolve the main demo sheet after template preparation
+        Set WS = WB.Worksheets(UI_SHEET_DEMO)
+
+'------------------------------------------------------------------------------
+' BUILD CONTROL PANEL: APPLICATION-LEVEL UI STATE
+'------------------------------------------------------------------------------
+    'Apply the standard section, label, and input formatting
+        DEMO_Prepare_LabeledInputSection _
+            WS, _
+            WS.Range("I4:J4"), _
+            "APPLICATION LEVEL UI STATE", _
+            WS.Range("I5:I8"), _
+            WS.Range("J5:J8")
+
+'------------------------------------------------------------------------------
+' WRITE INPUT ROWS: APPLICATION-LEVEL UI STATE
+'------------------------------------------------------------------------------
+    'Write the Ribbon input row
+        DEMO_Write_NamedInputRow _
+            WB, WS, _
+            WS.Range("I5"), WS.Range("J5"), _
+            "Ribbon", True, _
+            "UI_Ribbon"
+    'Write the Status Bar input row
+        DEMO_Write_NamedInputRow _
+            WB, WS, _
+            WS.Range("I6"), WS.Range("J6"), _
+            "Status bar", True, _
+            "UI_StatusBar"
+    'Write the Scroll Bars input row
+        DEMO_Write_NamedInputRow _
+            WB, WS, _
+            WS.Range("I7"), WS.Range("J7"), _
+            "Scroll bars", True, _
+            "UI_ScrollBars"
+    'Write the Formula Bar input row
+        DEMO_Write_NamedInputRow _
+            WB, WS, _
+            WS.Range("I8"), WS.Range("J8"), _
+            "Formula bar", True, _
+            "UI_FormulaBar"
+    'Convert the application-level input cells to checkboxes
+        WS.Range("J5:J8").CellControl.SetCheckbox
+
+'------------------------------------------------------------------------------
+' BUILD CONTROL PANEL: WINDOW-LEVEL UI STATE
+'------------------------------------------------------------------------------
+    'Apply the standard section, label, and input formatting
+        DEMO_Prepare_LabeledInputSection _
+            WS, _
+            WS.Range("I11:J11"), _
+            "WINDOW LEVEL UI STATE", _
+            WS.Range("I12:I15"), _
+            WS.Range("J12:J15")
+
+'------------------------------------------------------------------------------
+' WRITE INPUT ROWS: WINDOW-LEVEL UI STATE
+'------------------------------------------------------------------------------
+    'Write the Headings input row
+        DEMO_Write_NamedInputRow _
+            WB, WS, _
+            WS.Range("I12"), WS.Range("J12"), _
+            "Headings", True, _
+            "UI_Headings"
+    'Write the Workbook Tabs input row
+        DEMO_Write_NamedInputRow _
+            WB, WS, _
+            WS.Range("I13"), WS.Range("J13"), _
+            "Workbook tabs", True, _
+            "UI_WorkbookTabs"
+    'Write the Gridlines input row
+        DEMO_Write_NamedInputRow _
+            WB, WS, _
+            WS.Range("I14"), WS.Range("J14"), _
+            "Gridlines", True, _
+            "UI_Gridlines"
+    'Write the Title Bar input row
+        DEMO_Write_NamedInputRow _
+            WB, WS, _
+            WS.Range("I15"), WS.Range("J15"), _
+            "Title bar", True, _
+            "UI_TitleBar"
+    'Convert the window-level input cells to checkboxes
+        WS.Range("J12:J15").CellControl.SetCheckbox
+
+Clean_Exit:
+'------------------------------------------------------------------------------
+' CLEANUP
+'------------------------------------------------------------------------------
+    'Protect cleanup so it cannot overwrite the original error
+        On Error Resume Next
+    'Restore the normal cursor
+        Application.Cursor = xlDefault
+    'Restore the original Excel Application state only when fast mode was entered
+        If FastModeOn Then
+            DEMO_End_FastMode FastModeState
+        End If
+    'Restore normal error handling before any re-raise
+        On Error GoTo 0
+    'Re-raise the original error after cleanup when needed
+        If SavedErrNumber <> 0 Then
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
+        End If
+    'Normal termination point
+        Exit Sub
+
+Clean_Fail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Capture the original error details before cleanup
+        SavedErrNumber = Err.Number
+        SavedErrSource = IIf(Len(Err.Source) > 0, Err.Source, PROC)
+        SavedErrDescription = Err.Description
+    'Continue through the centralized cleanup path
+        Resume Clean_Exit
+
+End Sub
+
 Public Sub Demo_ShowSelectedExcelUI()
 
 '
@@ -200,7 +404,7 @@ Public Sub Demo_ShowSelectedExcelUI()
 '
 ' BEHAVIOR
 '   - Interprets checked boxes as selected targets.
-'   - Applies K_UI_Show to selected elements.
+'   - Applies UI_Show to selected elements.
 '   - Leaves unchecked elements unchanged.
 '
 ' DEPENDENCIES
@@ -215,7 +419,7 @@ Public Sub Demo_ShowSelectedExcelUI()
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Delegate the action to the shared worker
-        Demo_ApplySelectedExcelUI K_UI_Show, "Demo_ShowSelectedExcelUI"
+        Demo_ApplySelectedExcelUI UI_Show, "Demo_ShowSelectedExcelUI"
 
 End Sub
 
@@ -237,7 +441,7 @@ Public Sub Demo_HideSelectedExcelUI()
 '
 ' BEHAVIOR
 '   - Interprets checked boxes as selected targets.
-'   - Applies K_UI_Hide to selected elements.
+'   - Applies UI_Hide to selected elements.
 '   - Leaves unchecked elements unchanged.
 '
 ' DEPENDENCIES
@@ -252,7 +456,7 @@ Public Sub Demo_HideSelectedExcelUI()
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Delegate the action to the shared worker
-        Demo_ApplySelectedExcelUI K_UI_Hide, "Demo_HideSelectedExcelUI"
+        Demo_ApplySelectedExcelUI UI_Hide, "Demo_HideSelectedExcelUI"
 
 End Sub
 
@@ -301,7 +505,7 @@ Public Sub Demo_SyncCheckBoxesToCurrentUI()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Ws                  As Worksheet     'Demo worksheet
+    Dim WS                  As Worksheet     'Demo worksheet
     Dim Win                 As Window        'Active Excel window for window-level reads
     Dim IsVisible           As Boolean       'Resolved current visibility state
     Dim Msg                 As String        'Diagnostic message from reader / writer helpers
@@ -315,7 +519,7 @@ Public Sub Demo_SyncCheckBoxesToCurrentUI()
         On Error GoTo Fail
 
     'Resolve the demo worksheet
-        Set Ws = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
+        Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
 
     'Resolve the active Excel window used for window-level sync
         Set Win = Application.ActiveWindow
@@ -325,7 +529,7 @@ Public Sub Demo_SyncCheckBoxesToCurrentUI()
 '------------------------------------------------------------------------------
     'Read current Ribbon visibility and update the related check box
         If Demo_TryGetRibbonVisible(IsVisible, Msg) Then
-            If Not Demo_TrySetCheckBoxState(Ws, CB_RIBBON, IsVisible, Msg) Then
+            If Not Demo_TrySetCheckBoxState(WS, CB_RIBBON, IsVisible, Msg) Then
                 Demo_LogFailure PROC, CB_RIBBON, Msg
             End If
         Else
@@ -333,17 +537,17 @@ Public Sub Demo_SyncCheckBoxesToCurrentUI()
         End If
 
     'Read current StatusBar visibility and update the related check box
-        If Not Demo_TrySetCheckBoxState(Ws, CB_STATUSBAR, Application.DisplayStatusBar, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_STATUSBAR, Application.DisplayStatusBar, Msg) Then
             Demo_LogFailure PROC, CB_STATUSBAR, Msg
         End If
 
     'Read current ScrollBars visibility and update the related check box
-        If Not Demo_TrySetCheckBoxState(Ws, CB_SCROLLBARS, Application.DisplayScrollBars, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_SCROLLBARS, Application.DisplayScrollBars, Msg) Then
             Demo_LogFailure PROC, CB_SCROLLBARS, Msg
         End If
 
     'Read current FormulaBar visibility and update the related check box
-        If Not Demo_TrySetCheckBoxState(Ws, CB_FORMULABAR, Application.DisplayFormulaBar, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_FORMULABAR, Application.DisplayFormulaBar, Msg) Then
             Demo_LogFailure PROC, CB_FORMULABAR, Msg
         End If
 
@@ -359,17 +563,17 @@ Public Sub Demo_SyncCheckBoxesToCurrentUI()
         Else
 
             'Update the Headings check box from ActiveWindow
-                If Not Demo_TrySetCheckBoxState(Ws, CB_HEADINGS, Win.DisplayHeadings, Msg) Then
+                If Not Demo_TrySetCheckBoxState(WS, CB_HEADINGS, Win.DisplayHeadings, Msg) Then
                     Demo_LogFailure PROC, CB_HEADINGS, Msg
                 End If
 
             'Update the WorkbookTabs check box from ActiveWindow
-                If Not Demo_TrySetCheckBoxState(Ws, CB_WORKBOOKTABS, Win.DisplayWorkbookTabs, Msg) Then
+                If Not Demo_TrySetCheckBoxState(WS, CB_WORKBOOKTABS, Win.DisplayWorkbookTabs, Msg) Then
                     Demo_LogFailure PROC, CB_WORKBOOKTABS, Msg
                 End If
 
             'Update the Gridlines check box from ActiveWindow
-                If Not Demo_TrySetCheckBoxState(Ws, CB_GRIDLINES, Win.DisplayGridlines, Msg) Then
+                If Not Demo_TrySetCheckBoxState(WS, CB_GRIDLINES, Win.DisplayGridlines, Msg) Then
                     Demo_LogFailure PROC, CB_GRIDLINES, Msg
                 End If
 
@@ -380,7 +584,7 @@ Public Sub Demo_SyncCheckBoxesToCurrentUI()
 '------------------------------------------------------------------------------
     'Read current title-bar visibility and update the related check box
         If Demo_TryGetTitleBarVisible(IsVisible, Msg) Then
-            If Not Demo_TrySetCheckBoxState(Ws, CB_TITLEBAR, IsVisible, Msg) Then
+            If Not Demo_TrySetCheckBoxState(WS, CB_TITLEBAR, IsVisible, Msg) Then
                 Demo_LogFailure PROC, CB_TITLEBAR, Msg
             End If
         Else
@@ -628,7 +832,7 @@ Public Sub Demo_PresetMinimal()
 End Sub
 
 Private Sub Demo_ApplySelectedExcelUI( _
-    ByVal SelectedVisibility As K_UIVisibility, _
+    ByVal SelectedVisibility As UIVisibility, _
     ByVal CallerProc As String)
 
 '
@@ -646,8 +850,8 @@ Private Sub Demo_ApplySelectedExcelUI( _
 ' INPUTS
 '   SelectedVisibility
 '     Requested action for checked elements:
-'       - K_UI_Show
-'       - K_UI_Hide
+'       - UI_Show
+'       - UI_Hide
 '
 '   CallerProc
 '     Public caller procedure name used for diagnostics.
@@ -658,8 +862,8 @@ Private Sub Demo_ApplySelectedExcelUI( _
 ' BEHAVIOR
 '   - Reads each demo check box.
 '   - Maps checked => SelectedVisibility.
-'   - Maps unchecked => K_UI_LeaveUnchanged.
-'   - Applies K_SetExcelUI when at least one control is selected.
+'   - Maps unchecked => UI_LeaveUnchanged.
+'   - Applies UI_SetExcelUI when at least one control is selected.
 '
 ' ERROR POLICY
 '   - Does NOT raise to callers.
@@ -668,7 +872,7 @@ Private Sub Demo_ApplySelectedExcelUI( _
 ' DEPENDENCIES
 '   - Demo_CheckBoxToVisibility
 '   - Demo_HasAnyRequestedChange
-'   - K_SetExcelUI
+'   - UI_SetExcelUI
 '   - Demo_LogFailure
 '
 ' UPDATED
@@ -679,15 +883,15 @@ Private Sub Demo_ApplySelectedExcelUI( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Ws                  As Worksheet         'Demo worksheet
-    Dim RibbonVis           As K_UIVisibility    'Resolved Ribbon visibility
-    Dim StatusBarVis        As K_UIVisibility    'Resolved StatusBar visibility
-    Dim ScrollBarsVis       As K_UIVisibility    'Resolved ScrollBars visibility
-    Dim FormulaBarVis       As K_UIVisibility    'Resolved FormulaBar visibility
-    Dim HeadingsVis         As K_UIVisibility    'Resolved Headings visibility
-    Dim WorkbookTabsVis     As K_UIVisibility    'Resolved WorkbookTabs visibility
-    Dim GridlinesVis        As K_UIVisibility    'Resolved Gridlines visibility
-    Dim TitleBarVis         As K_UIVisibility    'Resolved TitleBar visibility
+    Dim WS                  As Worksheet         'Demo worksheet
+    Dim RibbonVis           As UIVisibility    'Resolved Ribbon visibility
+    Dim StatusBarVis        As UIVisibility    'Resolved StatusBar visibility
+    Dim ScrollBarsVis       As UIVisibility    'Resolved ScrollBars visibility
+    Dim FormulaBarVis       As UIVisibility    'Resolved FormulaBar visibility
+    Dim HeadingsVis         As UIVisibility    'Resolved Headings visibility
+    Dim WorkbookTabsVis     As UIVisibility    'Resolved WorkbookTabs visibility
+    Dim GridlinesVis        As UIVisibility    'Resolved Gridlines visibility
+    Dim TitleBarVis         As UIVisibility    'Resolved TitleBar visibility
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -696,34 +900,34 @@ Private Sub Demo_ApplySelectedExcelUI( _
         On Error GoTo Fail
 
     'Resolve the demo worksheet
-        Set Ws = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
+        Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
 ' RESOLVE REQUESTED UI STATE
 '------------------------------------------------------------------------------
     'Resolve Ribbon request from the related check box
-        RibbonVis = Demo_CheckBoxToVisibility(Ws, CB_RIBBON, SelectedVisibility, CallerProc)
+        RibbonVis = Demo_CheckBoxToVisibility(WS, CB_RIBBON, SelectedVisibility, CallerProc)
 
     'Resolve StatusBar request from the related check box
-        StatusBarVis = Demo_CheckBoxToVisibility(Ws, CB_STATUSBAR, SelectedVisibility, CallerProc)
+        StatusBarVis = Demo_CheckBoxToVisibility(WS, CB_STATUSBAR, SelectedVisibility, CallerProc)
 
     'Resolve ScrollBars request from the related check box
-        ScrollBarsVis = Demo_CheckBoxToVisibility(Ws, CB_SCROLLBARS, SelectedVisibility, CallerProc)
+        ScrollBarsVis = Demo_CheckBoxToVisibility(WS, CB_SCROLLBARS, SelectedVisibility, CallerProc)
 
     'Resolve FormulaBar request from the related check box
-        FormulaBarVis = Demo_CheckBoxToVisibility(Ws, CB_FORMULABAR, SelectedVisibility, CallerProc)
+        FormulaBarVis = Demo_CheckBoxToVisibility(WS, CB_FORMULABAR, SelectedVisibility, CallerProc)
 
     'Resolve Headings request from the related check box
-        HeadingsVis = Demo_CheckBoxToVisibility(Ws, CB_HEADINGS, SelectedVisibility, CallerProc)
+        HeadingsVis = Demo_CheckBoxToVisibility(WS, CB_HEADINGS, SelectedVisibility, CallerProc)
 
     'Resolve WorkbookTabs request from the related check box
-        WorkbookTabsVis = Demo_CheckBoxToVisibility(Ws, CB_WORKBOOKTABS, SelectedVisibility, CallerProc)
+        WorkbookTabsVis = Demo_CheckBoxToVisibility(WS, CB_WORKBOOKTABS, SelectedVisibility, CallerProc)
 
     'Resolve Gridlines request from the related check box
-        GridlinesVis = Demo_CheckBoxToVisibility(Ws, CB_GRIDLINES, SelectedVisibility, CallerProc)
+        GridlinesVis = Demo_CheckBoxToVisibility(WS, CB_GRIDLINES, SelectedVisibility, CallerProc)
 
     'Resolve TitleBar request from the related check box
-        TitleBarVis = Demo_CheckBoxToVisibility(Ws, CB_TITLEBAR, SelectedVisibility, CallerProc)
+        TitleBarVis = Demo_CheckBoxToVisibility(WS, CB_TITLEBAR, SelectedVisibility, CallerProc)
 
 '------------------------------------------------------------------------------
 ' VALIDATE SELECTION
@@ -751,7 +955,7 @@ Private Sub Demo_ApplySelectedExcelUI( _
 ' APPLY REQUESTED STATE
 '------------------------------------------------------------------------------
     'Apply the requested visibility only to the selected UI elements
-        K_SetExcelUI _
+        UI_SetExcelUI _
             Ribbon:=RibbonVis, _
             StatusBar:=StatusBarVis, _
             ScrollBars:=ScrollBarsVis, _
@@ -784,10 +988,10 @@ Fail:
 End Sub
 
 Private Function Demo_CheckBoxToVisibility( _
-    ByVal Ws As Worksheet, _
+    ByVal WS As Worksheet, _
     ByVal CheckBoxName As String, _
-    ByVal SelectedVisibility As K_UIVisibility, _
-    ByVal CallerProc As String) As K_UIVisibility
+    ByVal SelectedVisibility As UIVisibility, _
+    ByVal CallerProc As String) As UIVisibility
 
 '
 '==============================================================================
@@ -795,7 +999,7 @@ Private Function Demo_CheckBoxToVisibility( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Convert the checked state of a demo worksheet check box into a tri-state
-'   K_UIVisibility value suitable for K_SetExcelUI.
+'   UIVisibility value suitable for UI_SetExcelUI.
 '
 ' WHY THIS EXISTS
 '   The demo uses check boxes to express selection semantics:
@@ -811,15 +1015,15 @@ Private Function Demo_CheckBoxToVisibility( _
 '
 '   SelectedVisibility
 '     The visibility to apply when the check box is checked:
-'       - K_UI_Show
-'       - K_UI_Hide
+'       - UI_Show
+'       - UI_Hide
 '
 '   CallerProc
 '     Calling procedure name used for diagnostics.
 '
 ' RETURNS
-'   K_UI_Show / K_UI_Hide when the check box is checked.
-'   K_UI_LeaveUnchanged when the check box is unchecked or unavailable.
+'   UI_Show / UI_Hide when the check box is checked.
+'   UI_LeaveUnchanged when the check box is unchecked or unavailable.
 '
 ' ERROR POLICY
 '   - Does NOT raise to callers.
@@ -845,13 +1049,13 @@ Private Function Demo_CheckBoxToVisibility( _
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Default to LeaveUnchanged unless a checked state is confirmed
-        Demo_CheckBoxToVisibility = K_UI_LeaveUnchanged
+        Demo_CheckBoxToVisibility = UI_LeaveUnchanged
 
 '------------------------------------------------------------------------------
 ' READ CHECK-BOX STATE
 '------------------------------------------------------------------------------
     'Attempt to read the requested check box
-        If Not Demo_TryGetCheckBoxState(Ws, CheckBoxName, IsChecked, Msg) Then
+        If Not Demo_TryGetCheckBoxState(WS, CheckBoxName, IsChecked, Msg) Then
 
             'Log the control-resolution failure and keep LeaveUnchanged
                 Demo_LogFailure CallerProc, CheckBoxName, Msg
@@ -868,13 +1072,13 @@ Private Function Demo_CheckBoxToVisibility( _
         If IsChecked Then
             Demo_CheckBoxToVisibility = SelectedVisibility
         Else
-            Demo_CheckBoxToVisibility = K_UI_LeaveUnchanged
+            Demo_CheckBoxToVisibility = UI_LeaveUnchanged
         End If
 
 End Function
 
 Private Function Demo_TryGetCheckBoxState( _
-    ByVal Ws As Worksheet, _
+    ByVal WS As Worksheet, _
     ByVal ControlName As String, _
     ByRef IsChecked As Boolean, _
     ByRef FailMsg As String) As Boolean
@@ -942,7 +1146,7 @@ Private Function Demo_TryGetCheckBoxState( _
 '------------------------------------------------------------------------------
     'Attempt to resolve the control as a worksheet shape
         On Error Resume Next
-            Set Shp = Ws.Shapes(ControlName)
+            Set Shp = WS.Shapes(ControlName)
         On Error GoTo Fail
 
     'Process the shape when it exists
@@ -976,7 +1180,7 @@ Private Function Demo_TryGetCheckBoxState( _
 '------------------------------------------------------------------------------
     'Attempt to resolve the control as an ActiveX OLEObject
         On Error Resume Next
-            Set Ole = Ws.OLEObjects(ControlName)
+            Set Ole = WS.OLEObjects(ControlName)
         On Error GoTo Fail
 
     'Process the OLEObject when it exists
@@ -1025,7 +1229,7 @@ Fail:
 End Function
 
 Private Function Demo_TrySetCheckBoxState( _
-    ByVal Ws As Worksheet, _
+    ByVal WS As Worksheet, _
     ByVal ControlName As String, _
     ByVal IsChecked As Boolean, _
     ByRef FailMsg As String) As Boolean
@@ -1088,7 +1292,7 @@ Private Function Demo_TrySetCheckBoxState( _
 '------------------------------------------------------------------------------
     'Attempt to resolve the control as a worksheet shape
         On Error Resume Next
-            Set Shp = Ws.Shapes(ControlName)
+            Set Shp = WS.Shapes(ControlName)
         On Error GoTo Fail
 
     'Process the shape when it exists
@@ -1122,7 +1326,7 @@ Private Function Demo_TrySetCheckBoxState( _
 '------------------------------------------------------------------------------
     'Attempt to resolve the control as an ActiveX OLEObject
         On Error Resume Next
-            Set Ole = Ws.OLEObjects(ControlName)
+            Set Ole = WS.OLEObjects(ControlName)
         On Error GoTo Fail
 
     'Process the OLEObject when it exists
@@ -1222,7 +1426,7 @@ Private Sub Demo_SetSelectionProfile( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Ws                  As Worksheet     'Demo worksheet
+    Dim WS                  As Worksheet     'Demo worksheet
     Dim Msg                 As String        'Diagnostic message from the writer helper
 
 '------------------------------------------------------------------------------
@@ -1232,48 +1436,48 @@ Private Sub Demo_SetSelectionProfile( _
         On Error GoTo Fail
 
     'Resolve the demo worksheet
-        Set Ws = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
+        Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
 ' WRITE SELECTION PROFILE
 '------------------------------------------------------------------------------
     'Write the Ribbon selection state
-        If Not Demo_TrySetCheckBoxState(Ws, CB_RIBBON, RibbonSelected, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_RIBBON, RibbonSelected, Msg) Then
             Demo_LogFailure CallerProc, CB_RIBBON, Msg
         End If
 
     'Write the StatusBar selection state
-        If Not Demo_TrySetCheckBoxState(Ws, CB_STATUSBAR, StatusBarSelected, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_STATUSBAR, StatusBarSelected, Msg) Then
             Demo_LogFailure CallerProc, CB_STATUSBAR, Msg
         End If
 
     'Write the ScrollBars selection state
-        If Not Demo_TrySetCheckBoxState(Ws, CB_SCROLLBARS, ScrollBarsSelected, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_SCROLLBARS, ScrollBarsSelected, Msg) Then
             Demo_LogFailure CallerProc, CB_SCROLLBARS, Msg
         End If
 
     'Write the FormulaBar selection state
-        If Not Demo_TrySetCheckBoxState(Ws, CB_FORMULABAR, FormulaBarSelected, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_FORMULABAR, FormulaBarSelected, Msg) Then
             Demo_LogFailure CallerProc, CB_FORMULABAR, Msg
         End If
 
     'Write the Headings selection state
-        If Not Demo_TrySetCheckBoxState(Ws, CB_HEADINGS, HeadingsSelected, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_HEADINGS, HeadingsSelected, Msg) Then
             Demo_LogFailure CallerProc, CB_HEADINGS, Msg
         End If
 
     'Write the WorkbookTabs selection state
-        If Not Demo_TrySetCheckBoxState(Ws, CB_WORKBOOKTABS, WorkbookTabsSelected, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_WORKBOOKTABS, WorkbookTabsSelected, Msg) Then
             Demo_LogFailure CallerProc, CB_WORKBOOKTABS, Msg
         End If
 
     'Write the Gridlines selection state
-        If Not Demo_TrySetCheckBoxState(Ws, CB_GRIDLINES, GridlinesSelected, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_GRIDLINES, GridlinesSelected, Msg) Then
             Demo_LogFailure CallerProc, CB_GRIDLINES, Msg
         End If
 
     'Write the TitleBar selection state
-        If Not Demo_TrySetCheckBoxState(Ws, CB_TITLEBAR, TitleBarSelected, Msg) Then
+        If Not Demo_TrySetCheckBoxState(WS, CB_TITLEBAR, TitleBarSelected, Msg) Then
             Demo_LogFailure CallerProc, CB_TITLEBAR, Msg
         End If
 
@@ -1533,14 +1737,14 @@ Fail:
 End Function
 
 Private Function Demo_HasAnyRequestedChange( _
-    ByVal RibbonVis As K_UIVisibility, _
-    ByVal StatusBarVis As K_UIVisibility, _
-    ByVal ScrollBarsVis As K_UIVisibility, _
-    ByVal FormulaBarVis As K_UIVisibility, _
-    ByVal HeadingsVis As K_UIVisibility, _
-    ByVal WorkbookTabsVis As K_UIVisibility, _
-    ByVal GridlinesVis As K_UIVisibility, _
-    ByVal TitleBarVis As K_UIVisibility) As Boolean
+    ByVal RibbonVis As UIVisibility, _
+    ByVal StatusBarVis As UIVisibility, _
+    ByVal ScrollBarsVis As UIVisibility, _
+    ByVal FormulaBarVis As UIVisibility, _
+    ByVal HeadingsVis As UIVisibility, _
+    ByVal WorkbookTabsVis As UIVisibility, _
+    ByVal GridlinesVis As UIVisibility, _
+    ByVal TitleBarVis As UIVisibility) As Boolean
 
 '
 '==============================================================================
@@ -1554,8 +1758,8 @@ Private Function Demo_HasAnyRequestedChange( _
 '   rather than silently doing nothing.
 '
 ' RETURNS
-'   TRUE  => at least one argument differs from K_UI_LeaveUnchanged
-'   FALSE => all arguments are K_UI_LeaveUnchanged
+'   TRUE  => at least one argument differs from UI_LeaveUnchanged
+'   FALSE => all arguments are UI_LeaveUnchanged
 '
 ' UPDATED
 '   2026-04-04
@@ -1567,14 +1771,14 @@ Private Function Demo_HasAnyRequestedChange( _
 '------------------------------------------------------------------------------
     'Return TRUE when at least one requested visibility is actionable
         Demo_HasAnyRequestedChange = ( _
-            RibbonVis <> K_UI_LeaveUnchanged _
-            Or StatusBarVis <> K_UI_LeaveUnchanged _
-            Or ScrollBarsVis <> K_UI_LeaveUnchanged _
-            Or FormulaBarVis <> K_UI_LeaveUnchanged _
-            Or HeadingsVis <> K_UI_LeaveUnchanged _
-            Or WorkbookTabsVis <> K_UI_LeaveUnchanged _
-            Or GridlinesVis <> K_UI_LeaveUnchanged _
-            Or TitleBarVis <> K_UI_LeaveUnchanged)
+            RibbonVis <> UI_LeaveUnchanged _
+            Or StatusBarVis <> UI_LeaveUnchanged _
+            Or ScrollBarsVis <> UI_LeaveUnchanged _
+            Or FormulaBarVis <> UI_LeaveUnchanged _
+            Or HeadingsVis <> UI_LeaveUnchanged _
+            Or WorkbookTabsVis <> UI_LeaveUnchanged _
+            Or GridlinesVis <> UI_LeaveUnchanged _
+            Or TitleBarVis <> UI_LeaveUnchanged)
 
 End Function
 
@@ -1636,8 +1840,8 @@ Public Sub Demo_CreateExcelUISheet()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Wb                  As Workbook     'Owning workbook
-    Dim Ws                  As Worksheet    'Demo worksheet
+    Dim WB                  As Workbook     'Owning workbook
+    Dim WS                  As Worksheet    'Demo worksheet
     Dim OldScreenUpdating   As Boolean      'Previous ScreenUpdating state
 
     Const PROC As String = "Demo_CreateExcelUISheet"   'Procedure name for diagnostics
@@ -1645,69 +1849,65 @@ Public Sub Demo_CreateExcelUISheet()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler.
+    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
-
-    'Cache and suppress screen updates during rebuild.
+    'Cache and suppress screen updates during rebuild
         OldScreenUpdating = Application.ScreenUpdating
         Application.ScreenUpdating = False
-
-    'Resolve the owning workbook.
-        Set Wb = ThisWorkbook
-
-    'Resolve the demo worksheet or create it when missing.
-        Set Ws = Demo_GetOrCreateSheet(Wb, DEMO_SHEET_NAME)
+    'Resolve the owning workbook
+        Set WB = ThisWorkbook
+    'Resolve the demo worksheet or create it when missing
+        Set WS = DEMO_GetOrCreateSheet(WB, DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
 ' RESET / FORMAT SHEET
 '------------------------------------------------------------------------------
-    'Reset the worksheet to a clean state before rebuilding the demo.
-        Demo_ResetSheet Ws
-
-    'Apply the base layout and formatting for the demo surface.
-        Demo_FormatSheetLayout Ws
+    'Reset the worksheet to a clean state before rebuilding the demo
+        Demo_ResetSheet WS
+    'Apply the base layout and formatting for the demo surface
+        Demo_FormatSheetLayout WS
 
     'Write all static labels and section headers.
-        Demo_WriteStaticLabels Ws
+        Demo_WriteStaticLabels WS
 
     'Write explanatory notes to the lower part of the demo sheet.
-        Demo_WriteNotes Ws
+        Demo_WriteNotes WS
 
 '------------------------------------------------------------------------------
 ' ADD CHECK BOXES
 '------------------------------------------------------------------------------
     'Add the Ribbon check box.
-        Demo_AddFormsCheckBox Ws, CB_RIBBON, Ws.Range("K6")
+        Demo_AddFormsCheckBox WS, CB_RIBBON, WS.Range("K6")
 
     'Add the StatusBar check box.
-        Demo_AddFormsCheckBox Ws, CB_STATUSBAR, Ws.Range("K7")
+        Demo_AddFormsCheckBox WS, CB_STATUSBAR, WS.Range("K7")
 
     'Add the ScrollBars check box.
-        Demo_AddFormsCheckBox Ws, CB_SCROLLBARS, Ws.Range("K8")
+        Demo_AddFormsCheckBox WS, CB_SCROLLBARS, WS.Range("K8")
 
     'Add the FormulaBar check box.
-        Demo_AddFormsCheckBox Ws, CB_FORMULABAR, Ws.Range("K9")
+        Demo_AddFormsCheckBox WS, CB_FORMULABAR, WS.Range("K9")
 
     'Add the Headings check box.
-        Demo_AddFormsCheckBox Ws, CB_HEADINGS, Ws.Range("K12")
+        Demo_AddFormsCheckBox WS, CB_HEADINGS, WS.Range("K12")
 
     'Add the WorkbookTabs check box.
-        Demo_AddFormsCheckBox Ws, CB_WORKBOOKTABS, Ws.Range("K13")
+        Demo_AddFormsCheckBox WS, CB_WORKBOOKTABS, WS.Range("K13")
 
     'Add the Gridlines check box.
-        Demo_AddFormsCheckBox Ws, CB_GRIDLINES, Ws.Range("K14")
+        Demo_AddFormsCheckBox WS, CB_GRIDLINES, WS.Range("K14")
 
     'Add the TitleBar check box.
-        Demo_AddFormsCheckBox Ws, CB_TITLEBAR, Ws.Range("K15")
+        Demo_AddFormsCheckBox WS, CB_TITLEBAR, WS.Range("K15")
 
 '------------------------------------------------------------------------------
 ' ADD ACTION BUTTONS
 '------------------------------------------------------------------------------
     'Add the SHOW action shape and wire it to the show macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_SHOW_NAME, _
-            TargetRange:=Ws.Range("D6:F7"), _
+            TargetRange:=WS.Range("D6:F7"), _
             CaptionText:="SHOW SELECTED UI", _
             MacroName:=BTN_SHOW_MACRO, _
             FillColor:=RGB(0, 102, 153), _
@@ -1715,9 +1915,9 @@ Public Sub Demo_CreateExcelUISheet()
 
     'Add the HIDE action shape and wire it to the hide macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_HIDE_NAME, _
-            TargetRange:=Ws.Range("D9:F10"), _
+            TargetRange:=WS.Range("D9:F10"), _
             CaptionText:="HIDE SELECTED UI", _
             MacroName:=BTN_HIDE_MACRO, _
             FillColor:=RGB(192, 80, 0), _
@@ -1725,9 +1925,9 @@ Public Sub Demo_CreateExcelUISheet()
 
     'Add the Sync Checkboxes shape and wire it to the sync macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_SYNC_NAME, _
-            TargetRange:=Ws.Range("D12:F13"), _
+            TargetRange:=WS.Range("D12:F13"), _
             CaptionText:="SYNC CHECKBOXES", _
             MacroName:=BTN_SYNC_MACRO, _
             FillColor:=RGB(79, 129, 189), _
@@ -1735,9 +1935,9 @@ Public Sub Demo_CreateExcelUISheet()
 
     'Add the Select All shape and wire it to the select-all macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_SELECTALL_NAME, _
-            TargetRange:=Ws.Range("D15:E16"), _
+            TargetRange:=WS.Range("D15:E16"), _
             CaptionText:="SELECT ALL", _
             MacroName:=BTN_SELECTALL_MACRO, _
             FillColor:=RGB(84, 130, 53), _
@@ -1745,9 +1945,9 @@ Public Sub Demo_CreateExcelUISheet()
 
     'Add the Clear All shape and wire it to the clear-all macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_CLEARALL_NAME, _
-            TargetRange:=Ws.Range("F15:G16"), _
+            TargetRange:=WS.Range("F15:G16"), _
             CaptionText:="CLEAR ALL", _
             MacroName:=BTN_CLEARALL_MACRO, _
             FillColor:=RGB(127, 127, 127), _
@@ -1755,19 +1955,19 @@ Public Sub Demo_CreateExcelUISheet()
 
     'Add the Kiosk preset shape and wire it to the preset macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
-            ShapeName:=BTN_PRESET_KIOSK_NAME, _
-            TargetRange:=Ws.Range("D19:E20"), _
+            WS:=WS, _
+            ShapeName:=BTN_PRESET_KIOSUI_NAME, _
+            TargetRange:=WS.Range("D19:E20"), _
             CaptionText:="KIOSK", _
-            MacroName:=BTN_PRESET_KIOSK_MACRO, _
+            MacroName:=BTN_PRESET_KIOSUI_MACRO, _
             FillColor:=RGB(31, 73, 125), _
             FontColor:=RGB(255, 255, 255)
 
     'Add the Analyst preset shape and wire it to the preset macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_PRESET_ANALYST_NAME, _
-            TargetRange:=Ws.Range("F19:G20"), _
+            TargetRange:=WS.Range("F19:G20"), _
             CaptionText:="ANALYST", _
             MacroName:=BTN_PRESET_ANALYST_MACRO, _
             FillColor:=RGB(49, 133, 156), _
@@ -1775,9 +1975,9 @@ Public Sub Demo_CreateExcelUISheet()
 
     'Add the Minimal preset shape and wire it to the preset macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_PRESET_MINIMAL_NAME, _
-            TargetRange:=Ws.Range("D21:G22"), _
+            TargetRange:=WS.Range("D21:G22"), _
             CaptionText:="MINIMAL", _
             MacroName:=BTN_PRESET_MINIMAL_MACRO, _
             FillColor:=RGB(148, 138, 84), _
@@ -1785,9 +1985,9 @@ Public Sub Demo_CreateExcelUISheet()
 
     'Add the Capture State shape and wire it to the capture macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_CAPTURE_NAME, _
-            TargetRange:=Ws.Range("D23:E24"), _
+            TargetRange:=WS.Range("D23:E24"), _
             CaptionText:="CAPTURE STATE", _
             MacroName:=BTN_CAPTURE_MACRO, _
             FillColor:=RGB(112, 48, 160), _
@@ -1795,9 +1995,9 @@ Public Sub Demo_CreateExcelUISheet()
 
     'Add the Reset State shape and wire it to the reset macro.
         Demo_AddActionButton _
-            Ws:=Ws, _
+            WS:=WS, _
             ShapeName:=BTN_RESET_NAME, _
-            TargetRange:=Ws.Range("F23:G24"), _
+            TargetRange:=WS.Range("F23:G24"), _
             CaptionText:="RESET STATE", _
             MacroName:=BTN_RESET_MACRO, _
             FillColor:=RGB(0, 153, 102), _
@@ -1807,10 +2007,10 @@ Public Sub Demo_CreateExcelUISheet()
 ' FINALIZE
 '------------------------------------------------------------------------------
     'Select the demo sheet so the result is immediately visible.
-        Ws.Activate
+        WS.Activate
 
     'Position the selection at the top-left useful cell.
-        Ws.Range("B3").Select
+        WS.Range("B3").Select
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -1837,8 +2037,8 @@ Fail:
 
 End Sub
 
-Private Function Demo_GetOrCreateSheet( _
-    ByVal Wb As Workbook, _
+Private Function DEMO_GetOrCreateSheet( _
+    ByVal WB As Workbook, _
     ByVal SheetName As String) As Worksheet
 
 '
@@ -1870,27 +2070,27 @@ Private Function Demo_GetOrCreateSheet( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Ws                  As Worksheet    'Resolved worksheet
+    Dim WS                  As Worksheet    'Resolved worksheet
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Attempt to resolve the worksheet by name
         On Error Resume Next
-            Set Ws = Wb.Worksheets(SheetName)
+            Set WS = WB.Worksheets(SheetName)
         On Error GoTo 0
 
 '------------------------------------------------------------------------------
 ' CREATE WHEN MISSING
 '------------------------------------------------------------------------------
     'Create the worksheet when it does not already exist
-        If Ws Is Nothing Then
+        If WS Is Nothing Then
 
             'Add a new worksheet at the end of the workbook
-                Set Ws = Wb.Worksheets.Add(After:=Wb.Worksheets(Wb.Worksheets.Count))
+                Set WS = WB.Worksheets.Add(After:=WB.Worksheets(WB.Worksheets.Count))
 
             'Assign the requested worksheet name
-                Ws.Name = SheetName
+                WS.Name = SheetName
 
         End If
 
@@ -1898,11 +2098,11 @@ Private Function Demo_GetOrCreateSheet( _
 ' RETURN WORKSHEET
 '------------------------------------------------------------------------------
     'Return the resolved worksheet reference
-        Set Demo_GetOrCreateSheet = Ws
+        Set DEMO_GetOrCreateSheet = WS
 
 End Function
 
-Private Sub Demo_ResetSheet(ByVal Ws As Worksheet)
+Private Sub Demo_ResetSheet(ByVal WS As Worksheet)
 
 '
 '==============================================================================
@@ -1947,23 +2147,23 @@ Private Sub Demo_ResetSheet(ByVal Ws As Worksheet)
 ' DELETE SHAPES
 '------------------------------------------------------------------------------
     'Delete all existing shapes in reverse order
-        For i = Ws.Shapes.Count To 1 Step -1
-            Ws.Shapes(i).Delete
+        For i = WS.Shapes.Count To 1 Step -1
+            WS.Shapes(i).Delete
         Next i
 
 '------------------------------------------------------------------------------
 ' DELETE OLEOBJECTS
 '------------------------------------------------------------------------------
     'Delete all existing OLEObjects in reverse order
-        For i = Ws.OLEObjects.Count To 1 Step -1
-            Ws.OLEObjects(i).Delete
+        For i = WS.OLEObjects.Count To 1 Step -1
+            WS.OLEObjects(i).Delete
         Next i
 
 '------------------------------------------------------------------------------
 ' CLEAR CELLS
 '------------------------------------------------------------------------------
     'Clear all cell content, formatting, comments, and validation
-        Ws.Cells.Clear
+        WS.Cells.Clear
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -1981,7 +2181,7 @@ Fail:
 
 End Sub
 
-Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
+Private Sub Demo_FormatSheetLayout(ByVal WS As Worksheet)
 
 '
 '==============================================================================
@@ -2016,51 +2216,47 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 ' APPLY GLOBAL SHEET FORMATTING
 '------------------------------------------------------------------------------
     'Set the worksheet tab color.
-        Ws.Tab.Color = RGB(0, 102, 153)
-
+        WS.Tab.Color = RGB(0, 102, 153)
     'Set the default worksheet font name.
-        Ws.Cells.Font.Name = "Calibri"
-
+        WS.Cells.Font.Name = "Calibri"
     'Set the default worksheet font size.
-        Ws.Cells.Font.Size = 11
-
+        WS.Cells.Font.Size = 11
     'Set horizontal alignment baseline.
-        Ws.Cells.HorizontalAlignment = xlLeft
-
+        WS.Cells.HorizontalAlignment = xlLeft
     'Set vertical alignment baseline.
-        Ws.Cells.VerticalAlignment = xlCenter
+        WS.Cells.VerticalAlignment = xlCenter
 
 '------------------------------------------------------------------------------
 ' APPLY COLUMN / ROW LAYOUT
 '------------------------------------------------------------------------------
     'Set a narrow left margin column.
-        Ws.Columns("A").ColumnWidth = 2
+        WS.Columns("A").ColumnWidth = 2
 
     'Set the title / subtitle / main content block widths.
-        Ws.Columns("B").ColumnWidth = 2
-        Ws.Columns("C").ColumnWidth = 12
-        Ws.Columns("D").ColumnWidth = 11
-        Ws.Columns("E").ColumnWidth = 11
-        Ws.Columns("F").ColumnWidth = 11
-        Ws.Columns("G").ColumnWidth = 11
-        Ws.Columns("H").ColumnWidth = 7
-        Ws.Columns("I").ColumnWidth = 14
-        Ws.Columns("J").ColumnWidth = 12
-        Ws.Columns("K").ColumnWidth = 8
-        Ws.Columns("L").ColumnWidth = 8
-        Ws.Columns("M").ColumnWidth = 8
+        WS.Columns("B").ColumnWidth = 2
+        WS.Columns("C").ColumnWidth = 12
+        WS.Columns("D").ColumnWidth = 11
+        WS.Columns("E").ColumnWidth = 11
+        WS.Columns("F").ColumnWidth = 11
+        WS.Columns("G").ColumnWidth = 11
+        WS.Columns("H").ColumnWidth = 7
+        WS.Columns("I").ColumnWidth = 14
+        WS.Columns("J").ColumnWidth = 12
+        WS.Columns("K").ColumnWidth = 8
+        WS.Columns("L").ColumnWidth = 8
+        WS.Columns("M").ColumnWidth = 8
 
     'Set the main demo row heights.
-        Ws.Rows("1:33").RowHeight = 22
+        WS.Rows("1:33").RowHeight = 22
 
     'Increase the note rows for wrapped text.
-        Ws.Rows("26:32").RowHeight = 28
+        WS.Rows("26:32").RowHeight = 28
 
 '------------------------------------------------------------------------------
 ' FORMAT TITLE / SUBTITLE BANDS
 '------------------------------------------------------------------------------
     'Merge and format the title band.
-        With Ws.Range("B1:M1")
+        With WS.Range("B1:M1")
             .Merge
             .Value = "EXCEL UI"
             .Interior.Color = RGB(0, 0, 0)
@@ -2070,7 +2266,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
         End With
 
     'Merge and format the subtitle band.
-        With Ws.Range("B2:M2")
+        With WS.Range("B2:M2")
             .Merge
             .Value = "Demo"
             .Interior.Color = RGB(0, 51, 102)
@@ -2083,7 +2279,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 ' FORMAT APPLICATION-LEVEL BLOCK
 '------------------------------------------------------------------------------
     'Format the application-level section header.
-        With Ws.Range("I5:K5")
+        With WS.Range("I5:K5")
             .Merge
             .Interior.Color = RGB(0, 51, 102)
             .Font.Color = RGB(255, 255, 255)
@@ -2093,19 +2289,19 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
         End With
 
     'Format the application-level label cells.
-        With Ws.Range("I6:J9")
+        With WS.Range("I6:J9")
             .Interior.Color = RGB(220, 230, 241)
             .Font.Bold = True
         End With
 
     'Format the application-level check-box cells.
-        With Ws.Range("K6:K9")
+        With WS.Range("K6:K9")
             .Interior.Color = RGB(255, 255, 255)
             .HorizontalAlignment = xlCenter
         End With
 
     'Apply borders to the application-level block.
-        With Ws.Range("I5:K9").Borders
+        With WS.Range("I5:K9").Borders
             .LineStyle = xlContinuous
             .Weight = xlThin
         End With
@@ -2114,7 +2310,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 ' FORMAT WINDOW-LEVEL BLOCK
 '------------------------------------------------------------------------------
     'Format the window-level section header.
-        With Ws.Range("I11:K11")
+        With WS.Range("I11:K11")
             .Merge
             .Interior.Color = RGB(0, 51, 102)
             .Font.Color = RGB(255, 255, 255)
@@ -2124,19 +2320,19 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
         End With
 
     'Format the window-level label cells.
-        With Ws.Range("I12:J15")
+        With WS.Range("I12:J15")
             .Interior.Color = RGB(220, 230, 241)
             .Font.Bold = True
         End With
 
     'Format the window-level check-box cells.
-        With Ws.Range("K12:K15")
+        With WS.Range("K12:K15")
             .Interior.Color = RGB(255, 255, 255)
             .HorizontalAlignment = xlCenter
         End With
 
     'Apply borders to the window-level block.
-        With Ws.Range("I11:K15").Borders
+        With WS.Range("I11:K15").Borders
             .LineStyle = xlContinuous
             .Weight = xlThin
         End With
@@ -2145,7 +2341,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 ' FORMAT PRESET LABEL AREA
 '------------------------------------------------------------------------------
     'Format the preset section label.
-        With Ws.Range("D18:G18")
+        With WS.Range("D18:G18")
             .Merge
             .Interior.Color = RGB(230, 230, 230)
             .Font.Bold = True
@@ -2157,7 +2353,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
 ' FORMAT NOTE AREAS
 '------------------------------------------------------------------------------
     'Format the scope / semantics note area.
-        With Ws.Range("B26:M29")
+        With WS.Range("B26:M29")
             .Merge
             .Interior.Color = RGB(255, 242, 204)
             .Font.Color = RGB(0, 0, 0)
@@ -2167,7 +2363,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
         End With
 
     'Format the restore note area.
-        With Ws.Range("B30:M32")
+        With WS.Range("B30:M32")
             .Merge
             .Interior.Color = RGB(217, 225, 242)
             .Font.Color = RGB(0, 0, 0)
@@ -2177,7 +2373,7 @@ Private Sub Demo_FormatSheetLayout(ByVal Ws As Worksheet)
         End With
 
     'Apply borders to the note areas.
-        With Ws.Range("B26:M32").Borders
+        With WS.Range("B26:M32").Borders
             .LineStyle = xlContinuous
             .Weight = xlThin
         End With
@@ -2198,7 +2394,7 @@ Fail:
 
 End Sub
 
-Private Sub Demo_WriteStaticLabels(ByVal Ws As Worksheet)
+Private Sub Demo_WriteStaticLabels(ByVal WS As Worksheet)
 
 '
 '==============================================================================
@@ -2233,31 +2429,31 @@ Private Sub Demo_WriteStaticLabels(ByVal Ws As Worksheet)
 ' WRITE APPLICATION-LEVEL LABELS
 '------------------------------------------------------------------------------
     'Write the Ribbon label
-        Ws.Range("I6").Value = "Ribbon"
+        WS.Range("I6").Value = "Ribbon"
 
     'Write the StatusBar label
-        Ws.Range("I7").Value = "StatusBar"
+        WS.Range("I7").Value = "StatusBar"
 
     'Write the ScrollBars label
-        Ws.Range("I8").Value = "ScrollBars"
+        WS.Range("I8").Value = "ScrollBars"
 
     'Write the FormulaBar label
-        Ws.Range("I9").Value = "FormulaBar"
+        WS.Range("I9").Value = "FormulaBar"
 
 '------------------------------------------------------------------------------
 ' WRITE WINDOW-LEVEL LABELS
 '------------------------------------------------------------------------------
     'Write the Headings label
-        Ws.Range("I12").Value = "Headings"
+        WS.Range("I12").Value = "Headings"
 
     'Write the WorkbookTabs label
-        Ws.Range("I13").Value = "WorkbookTabs"
+        WS.Range("I13").Value = "WorkbookTabs"
 
     'Write the Gridlines label
-        Ws.Range("I14").Value = "Gridlines"
+        WS.Range("I14").Value = "Gridlines"
 
     'Write the TitleBar label
-        Ws.Range("I15").Value = "TitleBar"
+        WS.Range("I15").Value = "TitleBar"
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -2275,7 +2471,7 @@ Fail:
 
 End Sub
 
-Private Sub Demo_WriteNotes(ByVal Ws As Worksheet)
+Private Sub Demo_WriteNotes(ByVal WS As Worksheet)
 
 '
 '==============================================================================
@@ -2310,10 +2506,10 @@ Private Sub Demo_WriteNotes(ByVal Ws As Worksheet)
 ' WRITE NOTES
 '------------------------------------------------------------------------------
     'Write the scope / semantics note text.
-        Ws.Range("B26").Value = NOTE_SCOPE_TEXT
+        WS.Range("B26").Value = NOTE_SCOPE_TEXT
 
     'Write the restore note text.
-        Ws.Range("B30").Value = NOTE_RESTORE_TEXT
+        WS.Range("B30").Value = NOTE_RESTORE_TEXT
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -2332,7 +2528,7 @@ Fail:
 End Sub
 
 Private Sub Demo_AddFormsCheckBox( _
-    ByVal Ws As Worksheet, _
+    ByVal WS As Worksheet, _
     ByVal CheckBoxName As String, _
     ByVal AnchorCell As Range)
 
@@ -2400,7 +2596,7 @@ Private Sub Demo_AddFormsCheckBox( _
 ' CREATE CHECK BOX
 '------------------------------------------------------------------------------
     'Create the Forms check box
-        Set Cb = Ws.CheckBoxes.Add(BoxLeft, BoxTop, BoxWidth, BoxHeight)
+        Set Cb = WS.CheckBoxes.Add(BoxLeft, BoxTop, BoxWidth, BoxHeight)
 
     'Assign the requested control name
         Cb.Name = CheckBoxName
@@ -2437,7 +2633,7 @@ Fail:
 End Sub
 
 Private Sub Demo_AddActionButton( _
-    ByVal Ws As Worksheet, _
+    ByVal WS As Worksheet, _
     ByVal ShapeName As String, _
     ByVal TargetRange As Range, _
     ByVal CaptionText As String, _
@@ -2508,7 +2704,7 @@ Private Sub Demo_AddActionButton( _
 ' CREATE SHAPE
 '------------------------------------------------------------------------------
     'Create the rounded-rectangle shape over the target range.
-        Set Shp = Ws.Shapes.AddShape( _
+        Set Shp = WS.Shapes.AddShape( _
                         Type:=msoShapeRoundedRectangle, _
                         Left:=TargetRange.Left, _
                         Top:=TargetRange.Top, _
@@ -2645,7 +2841,7 @@ Public Sub Demo_CaptureCurrentExcelUIState()
 '   None
 '
 ' BEHAVIOR
-'   - Delegates to K_CaptureExcelUIState.
+'   - Delegates to UI_CaptureExcelUIState.
 '   - Shows a small confirmation message.
 '
 ' ERROR POLICY
@@ -2667,7 +2863,7 @@ Public Sub Demo_CaptureCurrentExcelUIState()
 ' CAPTURE SNAPSHOT
 '------------------------------------------------------------------------------
     'Capture the current managed Excel UI state through the core module.
-        K_CaptureExcelUIState
+        UI_CaptureExcelUIState
 
 '------------------------------------------------------------------------------
 ' INFORM USER
@@ -2715,7 +2911,7 @@ Public Sub Demo_ResetExcelUIToCapturedState()
 '
 ' BEHAVIOR
 '   - Rejects reset when no snapshot is available.
-'   - Delegates to K_ResetExcelUIToSnapshot.
+'   - Delegates to UI_ResetExcelUIToSnapshot.
 '   - Synchronizes the check boxes back to the current visible state.
 '
 ' ERROR POLICY
@@ -2737,7 +2933,7 @@ Public Sub Demo_ResetExcelUIToCapturedState()
 ' VALIDATE SNAPSHOT AVAILABILITY
 '------------------------------------------------------------------------------
     'Reject reset when no explicit snapshot is currently available.
-        If Not K_HasExcelUIStateSnapshot Then
+        If Not UI_HasExcelUIStateSnapshot Then
             MsgBox "No captured Excel UI state is available.", vbExclamation, "Excel UI Demo"
             GoTo SafeExit
         End If
@@ -2746,7 +2942,7 @@ Public Sub Demo_ResetExcelUIToCapturedState()
 ' RESET TO SNAPSHOT
 '------------------------------------------------------------------------------
     'Restore the captured managed Excel UI state through the core module.
-        K_ResetExcelUIToSnapshot
+        UI_ResetExcelUIToSnapshot
 
 '------------------------------------------------------------------------------
 ' RESYNC DEMO CHECK BOXES
