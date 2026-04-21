@@ -1,4 +1,4 @@
-# VBA-EXCEL_UI
+# VBA-EXCEL UI
 
 > Centralized control of Excel UI elements and application interface behavior in VBA
 
