@@ -564,7 +564,7 @@ Framework home:
 
 For additional examples, notes, and repository-level guidance, see the project wiki:
 
-[cPerformanceManager Wiki](https://github.com/danielep71/VBA-EXCEL_UI/wiki)
+[EXCEL UI Wiki](https://github.com/danielep71/VBA-EXCEL_UI/wiki)
 
 ---
 
