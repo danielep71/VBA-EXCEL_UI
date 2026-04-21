@@ -560,6 +560,14 @@ Framework home:
 
 ---
 
+## Wiki
+
+For additional examples, notes, and repository-level guidance, see the project wiki:
+
+[cPerformanceManager Wiki](https://github.com/danielep71/VBA-EXCEL_UI/wiki)
+
+---
+
 ## Status
 
 This repository is intended as a reusable VBA component for Excel-based solutions on Windows.
