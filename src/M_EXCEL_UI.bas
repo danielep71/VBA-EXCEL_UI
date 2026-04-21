@@ -1,10 +1,4 @@
 Attribute VB_Name = "M_EXCEL_UI"
-'TODO: RIVEDERE IMMAGINE
-'TODO: DEMO - pulire modulo
-'TODO: RIVEDERE TEST
-'TODO: README
-'TODO: WIKI
-'TODO: RELEASE
 '==============================================================================
 '                           MODULE: M_EXCEL_UI
 '------------------------------------------------------------------------------
@@ -56,6 +50,7 @@ Attribute VB_Name = "M_EXCEL_UI"
 '   - UI_TryGetWindowStyle
 '   - UI_TrySetWindowStyle
 '   - UI_TryRefreshWindowFrame
+'   - UI_IsValidVisibility
 '   - UI_VisibilityToBoolean
 '   - UI_BuildRuntimeErrorText
 '   - UI_LogFailure
@@ -723,8 +718,7 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Capture the unexpected wrapper-level failure in the structured result
-'   buffers
+    'Capture the unexpected wrapper-level failure in the structured result buffers
         UI_HandleApplyFailure ProcName:=PROC, LogFailures:=False, _
             Succeeded:=Succeeded, FailureCount:=FailureCount, _
             FailureList:=InternalFailureList, CaptureFailureList:=CaptureFailureList, _
@@ -1502,17 +1496,55 @@ Fail:
 
 End Function
 
-Private Function UI_IsValidVisibility(ByVal Visibility As UIVisibility) As _
-    Boolean
+Private Function UI_IsValidVisibility(ByVal Visibility As UIVisibility) As Boolean
+
+'
+'==============================================================================
+'                           UI_IsValidVisibility
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Return whether a UIVisibility argument contains one of the supported
+'   tri-state enum values
+'
+' WHY THIS EXISTS
+'   Public procedures accept UIVisibility arguments, but VBA enum-typed
+'   parameters can still receive invalid numeric values at runtime
+'
+'   This helper centralizes defensive validation so the worker can:
+'     - detect invalid values explicitly
+'     - record structured failures consistently
+'     - avoid silently coercing unexpected values into Boolean targets
+'
+' INPUTS
+'   Visibility
+'     Candidate UIVisibility value to validate
+'
+' RETURNS
+'   TRUE  => value is one of:
+'              * UI_LeaveUnchanged
+'              * UI_Hide
+'              * UI_Show
+'   FALSE => value is outside the supported UIVisibility domain
+'
+' ERROR POLICY
+'   - Does NOT raise
+'
+' UPDATED
+'   2026-04-21
+'==============================================================================
+'
 
 '------------------------------------------------------------------------------
-' RETURN: VALIDITY FLAG
+' RETURN VALIDITY FLAG
 '------------------------------------------------------------------------------
     'Return TRUE only for the three supported tri-state enum values
-        UI_IsValidVisibility = (Visibility = UI_LeaveUnchanged) Or (Visibility = _
-            UI_Hide) Or (Visibility = UI_Show)
+        UI_IsValidVisibility = _
+            (Visibility = UI_LeaveUnchanged) Or _
+            (Visibility = UI_Hide) Or _
+            (Visibility = UI_Show)
 
 End Function
+
 Private Sub UI_HandleApplyFailure(ByVal ProcName As String, ByVal LogFailures As _
     Boolean, ByRef Succeeded As Boolean, ByRef FailureCount As Long, ByRef _
     FailureList As Variant, ByVal CaptureFailureList As Boolean, ByVal Stage As _
