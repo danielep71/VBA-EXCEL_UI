@@ -3333,11 +3333,11 @@ Public Sub Btn_Click()
 
 End Sub
 
-Public Sub Demo_PlayButtonFeedback()
+Public Sub DEMO_PlayButtonFeedback()
 
 '
 '==============================================================================
-'                       Demo_PlayButtonFeedback
+'                       DEMO_PlayButtonFeedback
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Invoke the shared button-click feedback helper on a best-effort basis
