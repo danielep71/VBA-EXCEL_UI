@@ -1,4 +1,4 @@
-# VBA-EXCEL_UI
+# VBA-EXCEL UI
 
 > Centralized control of Excel UI elements and application interface behavior in VBA
 
@@ -29,8 +29,6 @@ It provides the foundation for:
 
 <img width="1536" height="1024" alt="EXCEL UI - HOME" src="https://github.com/user-attachments/assets/574869d3-f17b-4daa-a17e-aa4c79e15bf7" />
 
-
-
 ## Overview
 
 `VBA-EXCEL_UI` is a **compact but structured VBA toolkit for controlling the Excel UI shell on Windows**.
@@ -44,6 +42,7 @@ The repository currently includes:
 - an **explicit snapshot / reset path** for capturing and restoring the current managed UI baseline
 - a **demo module** for building and driving a worksheet-based showcase of the UI features
 - a **regression test module** for validating the public behavior of the toolkit
+- a **shared test helper module** for reusable assertion, logging, and utility support
 
 This makes the project useful both for:
 
@@ -77,6 +76,7 @@ In many real projects, it is useful to:
 /demo/M_EXCEL_UI_DEMO.bas
 /demo/EXCEL_UI_DEMO.xlsm
 /test/M_EXCEL_UI_REGRESSION_TESTS.bas
+/test/M_TEST_HELPERS.bas
 ```
 
 ---
@@ -89,15 +89,15 @@ Core Excel UI control module.
 
 It exposes:
 
-- `K_UIVisibility`
-- `K_SetExcelUI`
-- `K_SetExcelUI_WithResult`
-- `K_HideExcelUI`
-- `K_ShowExcelUI`
-- `K_CaptureExcelUIState`
-- `K_ResetExcelUIToSnapshot`
-- `K_HasExcelUIStateSnapshot`
-- `K_ClearExcelUIStateSnapshot`
+- `UIVisibility`
+- `UI_SetExcelUI`
+- `UI_SetExcelUI_WithResult`
+- `UI_HideExcelUI`
+- `UI_ShowExcelUI`
+- `UI_CaptureExcelUIState`
+- `UI_ResetExcelUIToSnapshot`
+- `UI_HasExcelUIStateSnapshot`
+- `UI_ClearExcelUIStateSnapshot`
 
 Managed UI elements:
 
@@ -116,7 +116,7 @@ Managed UI elements:
 
 **Window-frame**
 
-- Title Bar (via WinAPI on the Excel window represented by `Application.Hwnd`)
+- Title Bar via WinAPI on the Excel window represented by `Application.Hwnd`
 
 ---
 
@@ -143,17 +143,17 @@ It provides:
 
 Main public procedures include:
 
-- `Demo_ShowSelectedExcelUI`
-- `Demo_HideSelectedExcelUI`
-- `Demo_SyncCheckBoxesToCurrentUI`
+- `Demo_CreateDemoSheet`
+- `Demo_ShowSelectedUI`
+- `Demo_HideSelectedUI`
+- `Demo_SyncCheckBoxesToUI`
 - `Demo_SelectAllUI`
 - `Demo_ClearAllUI`
 - `Demo_PresetKiosk`
 - `Demo_PresetAnalyst`
 - `Demo_PresetMinimal`
-- `Demo_CaptureCurrentExcelUIState`
-- `Demo_ResetExcelUIToCapturedState`
-- `Demo_CreateExcelUISheet`
+- `Demo_CaptureUIState`
+- `Demo_ResetUIToCapturedState`
 
 ---
 
@@ -186,6 +186,22 @@ It also snapshots current UI state before test execution and attempts to restore
 
 ---
 
+### `M_TEST_HELPERS.bas`
+
+Shared test support module.
+
+It provides reusable helpers for:
+
+- assertion support
+- diagnostic output
+- runtime error formatting
+- timing / wait utilities
+- generic test plumbing reused across regression modules
+
+This keeps individual regression modules smaller, more consistent, and easier to maintain.
+
+---
+
 ## Core capabilities
 
 - centralized control of Excel UI elements
@@ -196,7 +212,7 @@ It also snapshots current UI state before test execution and attempts to restore
 - workbook-window UI control where applicable
 - application-level UI control where applicable
 - title-bar visibility control through WinAPI
-- reusable wrappers for common “hide all” / “show all” patterns
+- reusable wrappers for common hide-all / show-all patterns
 - structured-result path for safer integration
 - explicit snapshot / reset workflow for managed UI state
 - reduced redraw and no-op avoidance where possible
@@ -230,10 +246,10 @@ Limit visible interface elements so users focus on intended actions and input ar
 The core module uses a tri-state enum instead of Boolean optional arguments:
 
 ```vb
-Public Enum K_UIVisibility
-    K_UI_LeaveUnchanged = -1
-    K_UI_Hide = 0
-    K_UI_Show = 1
+Public Enum UIVisibility
+    UI_LeaveUnchanged = -1
+    UI_Hide = 0
+    UI_Show = 1
 End Enum
 ```
 
@@ -243,7 +259,7 @@ This avoids the ambiguity of omitted Boolean arguments and makes caller intent e
 
 ### Best-effort processing
 
-`K_SetExcelUI` and `K_SetExcelUI_WithResult` are designed so that one failed UI element does not prevent the rest of the requested changes from being attempted.
+`UI_SetExcelUI` and `UI_SetExcelUI_WithResult` are designed so that one failed UI element does not prevent the rest of the requested changes from being attempted.
 
 ---
 
@@ -251,10 +267,10 @@ This avoids the ambiguity of omitted Boolean arguments and makes caller intent e
 
 The toolkit provides two complementary entry points:
 
-- `K_SetExcelUI`  
+- `UI_SetExcelUI`  
   Best-effort, fail-soft application with diagnostics written to the Immediate Window
 
-- `K_SetExcelUI_WithResult`  
+- `UI_SetExcelUI_WithResult`  
   Best-effort, fail-soft application that returns:
   - a Boolean success flag
   - `FailureCount`
@@ -266,12 +282,12 @@ This allows callers to choose between a simple procedural API and a structured i
 
 ### Explicit snapshot / reset
 
-The toolkit also provides an explicit state lifecycle that is separate from `K_ShowExcelUI`:
+The toolkit also provides an explicit state lifecycle that is separate from `UI_ShowExcelUI`:
 
-- `K_CaptureExcelUIState`
-- `K_ResetExcelUIToSnapshot`
-- `K_HasExcelUIStateSnapshot`
-- `K_ClearExcelUIStateSnapshot`
+- `UI_CaptureExcelUIState`
+- `UI_ResetExcelUIToSnapshot`
+- `UI_HasExcelUIStateSnapshot`
+- `UI_ClearExcelUIStateSnapshot`
 
 This is intended for workflows where callers want to:
 
@@ -300,27 +316,27 @@ Excel does not expose title-bar visibility directly through the object model, so
 
 ## Public API
 
-### `K_SetExcelUI`
+### `UI_SetExcelUI`
 
 Selective UI control entry point.
 
 Example:
 
 ```vb
-K_SetExcelUI _
-    Ribbon:=K_UI_Hide, _
-    StatusBar:=K_UI_Show, _
-    ScrollBars:=K_UI_Hide, _
-    FormulaBar:=K_UI_LeaveUnchanged, _
-    Headings:=K_UI_Hide, _
-    WorkbookTabs:=K_UI_Hide, _
-    Gridlines:=K_UI_Hide, _
-    TitleBar:=K_UI_Hide
+UI_SetExcelUI _
+    Ribbon:=UI_Hide, _
+    StatusBar:=UI_Show, _
+    ScrollBars:=UI_Hide, _
+    FormulaBar:=UI_LeaveUnchanged, _
+    Headings:=UI_Hide, _
+    WorkbookTabs:=UI_Hide, _
+    Gridlines:=UI_Hide, _
+    TitleBar:=UI_Hide
 ```
 
 ---
 
-### `K_SetExcelUI_WithResult`
+### `UI_SetExcelUI_WithResult`
 
 Selective UI control entry point returning structured diagnostics.
 
@@ -332,15 +348,15 @@ Dim FailureCount As Long
 Dim FailureList As Variant
 Dim i As Long
 
-OK = K_SetExcelUI_WithResult( _
-        Ribbon:=K_UI_Hide, _
-        StatusBar:=K_UI_Show, _
-        ScrollBars:=K_UI_Hide, _
-        FormulaBar:=K_UI_LeaveUnchanged, _
-        Headings:=K_UI_Hide, _
-        WorkbookTabs:=K_UI_Hide, _
-        Gridlines:=K_UI_Hide, _
-        TitleBar:=K_UI_Hide, _
+OK = UI_SetExcelUI_WithResult( _
+        Ribbon:=UI_Hide, _
+        StatusBar:=UI_Show, _
+        ScrollBars:=UI_Hide, _
+        FormulaBar:=UI_LeaveUnchanged, _
+        Headings:=UI_Hide, _
+        WorkbookTabs:=UI_Hide, _
+        Gridlines:=UI_Hide, _
+        TitleBar:=UI_Hide, _
         FailureCount:=FailureCount, _
         FailureList:=FailureList)
 
@@ -353,62 +369,62 @@ End If
 
 ---
 
-### `K_HideExcelUI`
+### `UI_HideExcelUI`
 
 Hide all managed UI elements.
 
 ```vb
-K_HideExcelUI
+UI_HideExcelUI
 ```
 
 ---
 
-### `K_ShowExcelUI`
+### `UI_ShowExcelUI`
 
 Show all managed UI elements.
 
 ```vb
-K_ShowExcelUI
+UI_ShowExcelUI
 ```
 
 ---
 
-### `K_CaptureExcelUIState`
+### `UI_CaptureExcelUIState`
 
 Capture the current managed Excel UI state explicitly.
 
 ```vb
-K_CaptureExcelUIState
+UI_CaptureExcelUIState
 ```
 
 ---
 
-### `K_ResetExcelUIToSnapshot`
+### `UI_ResetExcelUIToSnapshot`
 
 Best-effort restore to the most recently captured managed UI snapshot.
 
 ```vb
-K_ResetExcelUIToSnapshot
+UI_ResetExcelUIToSnapshot
 ```
 
 ---
 
-### `K_HasExcelUIStateSnapshot`
+### `UI_HasExcelUIStateSnapshot`
 
 Return whether a snapshot is currently available.
 
 ```vb
-Debug.Print K_HasExcelUIStateSnapshot
+Debug.Print UI_HasExcelUIStateSnapshot
 ```
 
 ---
 
-### `K_ClearExcelUIStateSnapshot`
+### `UI_ClearExcelUIStateSnapshot`
 
 Clear any previously captured managed UI snapshot.
 
 ```vb
-K_ClearExcelUIStateSnapshot
+UI_ClearExcelUIStateSnapshot
 ```
 
 ---
@@ -420,10 +436,10 @@ K_ClearExcelUIStateSnapshot
 3. Run:
 
 ```vb
-Demo_CreateExcelUISheet
+Demo_CreateDemoSheet
 ```
 
-4. Use the generated `Demo` worksheet to:
+4. Use the generated `DEMO_UI` worksheet to:
 
 - select target UI elements with check boxes
 - apply **SHOW SELECTED UI**
@@ -438,8 +454,9 @@ Demo_CreateExcelUISheet
 ## Regression test quick start
 
 1. Import `M_EXCEL_UI.bas`
-2. Import `M_EXCEL_UI_REGRESSION_TESTS.bas`
-3. Run one of:
+2. Import `M_TEST_HELPERS.bas`
+3. Import `M_EXCEL_UI_REGRESSION_TESTS.bas`
+4. Run one of:
 
 ```vb
 Test_EXCEL_UI_RunCore
@@ -481,6 +498,7 @@ Import:
 Import:
 
 - `M_EXCEL_UI.bas`
+- `M_TEST_HELPERS.bas`
 - `M_EXCEL_UI_REGRESSION_TESTS.bas`
 
 ### Full repository behavior
@@ -489,6 +507,7 @@ Import:
 
 - `M_EXCEL_UI.bas`
 - `M_EXCEL_UI_DEMO.bas`
+- `M_TEST_HELPERS.bas`
 - `M_EXCEL_UI_REGRESSION_TESTS.bas`
 
 ---
@@ -507,10 +526,10 @@ Import:
 - Windows only
 - title-bar control is WinAPI-based, not object-model-based
 - title-bar behavior is best effort and may remain somewhat sensitive to Excel version, window state, and Windows desktop composition behavior
-- `K_ShowExcelUI` means **show all managed UI**, not **restore previous custom state**
+- `UI_ShowExcelUI` means **show all managed UI**, not **restore previous custom state**
 - explicit snapshot/reset is **best effort**, especially for per-window restore when the set or order of open windows has changed
 - the demo module’s window-level synchronization reads from `ActiveWindow`
-- the demo-sheet builder performs a destructive rebuild of the `Demo` sheet
+- the demo-sheet builder performs a destructive rebuild of the `DEMO_UI` sheet
 - reduced redraw does not fully eliminate Ribbon or non-client frame refresh flicker
 
 ---
@@ -519,7 +538,7 @@ Import:
 
 - use centralized wrappers rather than scattering raw UI toggles throughout a project
 - use selective tri-state control when only some elements should change
-- use “hide all” / “show all” wrappers for consistent workbook presentation flows
+- use hide-all / show-all wrappers for consistent workbook presentation flows
 - treat title-bar control as best effort because it depends on supported Windows behavior
 - pair this module with execution-control and event-driven components for more complete Excel application design
 
@@ -538,6 +557,14 @@ It is intended to work alongside complementary components for:
 Framework home:
 
 👉 https://github.com/danielep71/excel-vba-runtime-framework
+
+---
+
+## Wiki
+
+For additional examples, notes, and repository-level guidance, see the project wiki:
+
+[EXCEL UI Wiki](https://github.com/danielep71/VBA-EXCEL_UI/wiki)
 
 ---
 
