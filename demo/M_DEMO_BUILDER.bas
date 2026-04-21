@@ -3,11 +3,11 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 ' MODULE: M_DEMO_BUILDER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Provides reusable helper routines to build, reset, and format demo sheets
+'   Provides reusable helper routines to build, reset, and format DEMO sheets
 '   consistently.
 '
 ' WHY THIS EXISTS
-'   Demo / showcase workbooks often require repeated setup logic for:
+'   DEMO / showcase workbooks often require repeated setup logic for:
 '     - worksheet creation / retrieval
 '     - sheet reset before rebuild
 '     - title / subtitle bands
@@ -18,10 +18,10 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '     - named ranges
 '     - validation lists
 '     - helper-list storage
-'     - placeholder demo buttons
+'     - placeholder DEMO buttons
 '     - table / log setup
 '
-'   Centralizing that logic in one module keeps demo-sheet construction:
+'   Centralizing that logic in one module keeps DEMO-sheet construction:
 '     - more consistent
 '     - easier to maintain
 '     - easier to reuse across projects
@@ -30,7 +30,7 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '   - This module is workbook-oriented and defaults to ThisWorkbook for build
 '     operations unless a workbook is explicitly passed by the caller.
 '   - Formatting helpers are kept generic enough to be reusable outside one
-'     specific demo sheet.
+'     specific DEMO sheet.
 '   - Button creation supports an optional action macro so the helper is not
 '     hard-wired to one single placeholder routine.
 '   - Fast-mode helpers centralize temporary Application-state changes used
@@ -89,7 +89,7 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '------------------------------------------------------------------------------
 ' PUBLIC TYPES
 '------------------------------------------------------------------------------
-    Public Type tDemoFastModeState
+    Public Type tDEMOFastModeState
         ScreenUpdating  As Boolean       'Saved Application.ScreenUpdating
         EnableEvents    As Boolean       'Saved Application.EnableEvents
         DisplayAlerts   As Boolean       'Saved Application.DisplayAlerts
@@ -123,11 +123,11 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '------------------------------------------------------------------------------
 ' ENUMS
 '------------------------------------------------------------------------------
-    Public Enum DemoInputValidationKind
-        demoInputValidationNone = 0
-        DemoInputValidationList = 1
-        DemoInputValidationNumeric = 2
-        DemoInputValidationBoolean = 3
+    Public Enum DEMOInputValidationKind
+        DEMOInputValidationNone = 0
+        DEMOInputValidationList = 1
+        DEMOInputValidationNumeric = 2
+        DEMOInputValidationBoolean = 3
     End Enum
     
 
@@ -152,11 +152,11 @@ Public Sub DEMO_Build_DemoTemplate( _
 '                           BUILD DEMO TEMPLATE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Creates or rebuilds a demo worksheet with a standard title/subtitle layout
+'   Creates or rebuilds a DEMO worksheet with a standard title/subtitle layout
 '   and configurable base formatting
 '
 ' WHY THIS EXISTS
-'   Demo sheets should start from a consistent visual and structural baseline.
+'   DEMO sheets should start from a consistent visual and structural baseline.
 '   This routine centralizes worksheet retrieval, reset, title/subtitle band
 '   creation, base formatting, configurable sizing, and view normalization
 '
@@ -237,7 +237,7 @@ Public Sub DEMO_Build_DemoTemplate( _
 '     for backward compatibility
 '
 ' UPDATED
-'   2026-04-18
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -639,7 +639,7 @@ Private Function DEMO_ColumnLetter( _
 '   Raises when ColIndex is less than 1
 '
 ' UPDATED
-'   2026-04-18
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -680,7 +680,7 @@ Private Function DEMO_ColumnLetter( _
 
 End Function
 Public Sub DEMO_Begin_FastMode( _
-    ByRef StateOut As tDemoFastModeState)
+    ByRef StateOut As tDEMOFastModeState)
 '
 '==============================================================================
 '                              BEGIN FAST MODE
@@ -690,7 +690,7 @@ Public Sub DEMO_Begin_FastMode( _
 '   reduced-noise fast mode suitable for sheet-building operations.
 '
 ' WHY THIS EXISTS
-'   Demo-sheet builders often repeat the same Application-state pattern:
+'   DEMO-sheet builders often repeat the same Application-state pattern:
 '     - save current state
 '     - reduce UI noise
 '     - restore later
@@ -717,7 +717,7 @@ Public Sub DEMO_Begin_FastMode( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -740,7 +740,7 @@ Public Sub DEMO_Begin_FastMode( _
 End Sub
 
 Public Sub DEMO_End_FastMode( _
-    ByRef StateIn As tDemoFastModeState)
+    ByRef StateIn As tDEMOFastModeState)
 '
 '==============================================================================
 '                               END FAST MODE
@@ -769,7 +769,7 @@ Public Sub DEMO_End_FastMode( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -796,7 +796,7 @@ Public Sub DEMO_Set_RangeBorder( _
 '   Applies a consistent border format to a target range.
 '
 ' WHY THIS EXISTS
-'   Border formatting is often repeated across demo-sheet setup and reporting
+'   Border formatting is often repeated across DEMO-sheet setup and reporting
 '   routines.
 '
 '   This helper centralizes the logic so callers can apply:
@@ -849,7 +849,7 @@ Public Sub DEMO_Set_RangeBorder( _
 '     grid lines from the outer frame when desired
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -924,7 +924,7 @@ Public Function DEMO_GetOrCreateSheet( _
 '   Returns an existing worksheet by name, or creates it if missing.
 '
 ' WHY THIS EXISTS
-'   The demo builder needs repeatable access to a known set of sheets while
+'   The DEMO builder needs repeatable access to a known set of sheets while
 '   remaining safe to run on a fresh workbook or a partially prepared workbook.
 '
 ' INPUTS
@@ -947,7 +947,7 @@ Public Function DEMO_GetOrCreateSheet( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1021,10 +1021,10 @@ Public Sub DEMO_Reset_Sheet( _
 '                                RESET SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Clears a worksheet to a clean, reusable state for demo-sheet rebuilding
+'   Clears a worksheet to a clean, reusable state for DEMO-sheet rebuilding
 '
 ' WHY THIS EXISTS
-'   Re-running the demo builder should rebuild the layout predictably without
+'   Re-running the DEMO builder should rebuild the layout predictably without
 '   requiring manual deletion of old shapes, formatting, content, tables, or
 '   merged cells
 '
@@ -1108,7 +1108,7 @@ Public Sub DEMO_Reset_Sheet( _
 '   steps guarded with On Error Resume Next
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1349,7 +1349,7 @@ Public Sub DEMO_Format_Labels( _
 '   Applies a standard label format to a target range.
 '
 ' WHY THIS EXISTS
-'   Demo sheets often contain repeated label blocks that should share a common
+'   DEMO sheets often contain repeated label blocks that should share a common
 '   visual treatment.
 '
 ' INPUTS
@@ -1368,7 +1368,7 @@ Public Sub DEMO_Format_Labels( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1403,10 +1403,10 @@ Public Sub DEMO_Format_InputCell( _
 '                           FORMAT INPUT CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Formats one or more demo control-input cells consistently.
+'   Formats one or more DEMO control-input cells consistently.
 '
 ' WHY THIS EXISTS
-'   Demo sheets should clearly distinguish user-editable control cells from
+'   DEMO sheets should clearly distinguish user-editable control cells from
 '   labels and output areas.
 '
 ' INPUTS
@@ -1426,7 +1426,7 @@ Public Sub DEMO_Format_InputCell( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1462,7 +1462,7 @@ Public Sub DEMO_Format_OutputCell( _
 '   Formats one or more output/result cells consistently.
 '
 ' WHY THIS EXISTS
-'   Demo sheets often contain read-only output or result areas that should be
+'   DEMO sheets often contain read-only output or result areas that should be
 '   visually distinct from labels and editable input cells.
 '
 ' INPUTS
@@ -1481,7 +1481,7 @@ Public Sub DEMO_Format_OutputCell( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1526,7 +1526,7 @@ Public Sub DEMO_Write_BandHeader( _
 '   Writes and formats one left-aligned header band without merged cells.
 '
 ' WHY THIS EXISTS
-'   Demo sheets often use title, subtitle, or banner ranges spanning multiple
+'   DEMO sheets often use title, subtitle, or banner ranges spanning multiple
 '   columns. This helper applies a consistent visual band while preserving the
 '   underlying cell structure.
 '
@@ -1570,7 +1570,7 @@ Public Sub DEMO_Write_BandHeader( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1628,7 +1628,7 @@ Public Sub DEMO_Apply_ValidationList( _
 '   Applies an in-cell dropdown validation list to a target cell or range.
 '
 ' WHY THIS EXISTS
-'   Demo-sheet inputs are easier to use and less error-prone when users can pick
+'   DEMO-sheet inputs are easier to use and less error-prone when users can pick
 '   values from a controlled dropdown instead of typing freely.
 '
 ' INPUTS
@@ -1655,7 +1655,7 @@ Public Sub DEMO_Apply_ValidationList( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1761,7 +1761,7 @@ Public Sub DEMO_Apply_NumericValidation( _
 '   - Formula1 / Formula2 are passed as strings to the Validation object
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1876,7 +1876,7 @@ Public Sub DEMO_Create_BoolList( _
 '   - That is intentional so the dropdown remains locale-independent
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1967,7 +1967,7 @@ Public Sub DEMO_Apply_BoolValidation( _
 '   - DEMO_Apply_ValidationList
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2001,7 +2001,7 @@ Public Sub DEMO_Set_WorkbookName( _
 '   Creates or refreshes a workbook-level defined name pointing to one cell.
 '
 ' WHY THIS EXISTS
-'   Demo workbooks use workbook-level names so action macros can read
+'   DEMO workbooks use workbook-level names so action macros can read
 '   control-panel settings without hard-coding cell addresses repeatedly.
 '
 ' INPUTS
@@ -2025,7 +2025,7 @@ Public Sub DEMO_Set_WorkbookName( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2076,13 +2076,13 @@ Public Sub DEMO_Add_DemoButton( _
     ByVal TopPos As Double, _
     ByVal ShapeWidth As Double, _
     ByVal ShapeHeight As Double, _
-    Optional ByVal ActionMacro As String = "DEMO_DemoButton_NotAssigned")
+    Optional ByVal ActionMacro As String = "DEMO_DEMOButton_NotAssigned")
 '
 '==============================================================================
 '                             ADD DEMO BUTTON
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Creates one demo button as a worksheet Shape.
+'   Creates one DEMO button as a worksheet Shape.
 '
 ' WHY THIS EXISTS
 '   Shape-based buttons are portable, easy to style, and easy to assign to a
@@ -2126,7 +2126,7 @@ Public Sub DEMO_Add_DemoButton( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2159,7 +2159,7 @@ Public Sub DEMO_Add_DemoButton( _
 '------------------------------------------------------------------------------
 ' CREATE SHAPE
 '------------------------------------------------------------------------------
-    'Create a rounded-rectangle shape for the demo button
+    'Create a rounded-rectangle shape for the DEMO button
         Set Shp = WS.Shapes.AddShape(Type:=msoShapeRoundedRectangle, _
                                      Left:=LeftPos, _
                                      Top:=TopPos, _
@@ -2174,7 +2174,7 @@ Public Sub DEMO_Add_DemoButton( _
 
     'Assign the requested action macro
         If Len(Trim$(ActionMacro)) = 0 Then
-            Shp.OnAction = "'" & ThisWorkbook.Name & "'!DEMO_DemoButton_NotAssigned"
+            Shp.OnAction = "'" & ThisWorkbook.Name & "'!DEMO_DEMOButton_NotAssigned"
         ElseIf InStr(1, ActionMacro, "!", vbTextCompare) > 0 Then
             Shp.OnAction = ActionMacro
         Else
@@ -2206,10 +2206,10 @@ Public Sub DEMO_Hide_HelperColumns( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Hides one or more helper columns used to store internal lists or support
-'   data on a demo sheet.
+'   data on a DEMO sheet.
 '
 ' WHY THIS EXISTS
-'   Demo sheets often need helper ranges for:
+'   DEMO sheets often need helper ranges for:
 '     - validation lists
 '     - internal lookup values
 '     - support formulas
@@ -2237,7 +2237,7 @@ Public Sub DEMO_Hide_HelperColumns( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2269,7 +2269,7 @@ Public Function DEMO_Create_Table( _
 '   Creates or recreates an Excel ListObject on a target range.
 '
 ' WHY THIS EXISTS
-'   Demo workbooks often benefit from standardized result or log tables.
+'   DEMO workbooks often benefit from standardized result or log tables.
 '   This helper centralizes table creation so callers do not need to repeat the
 '   same ListObject setup logic.
 '
@@ -2296,7 +2296,7 @@ Public Function DEMO_Create_Table( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2362,7 +2362,7 @@ Public Sub DEMO_Clear_TableBody( _
 '   structure.
 '
 ' WHY THIS EXISTS
-'   Demo result/log tables often need to be cleared between runs without
+'   DEMO result/log tables often need to be cleared between runs without
 '   destroying the table definition itself.
 '
 ' INPUTS
@@ -2380,7 +2380,7 @@ Public Sub DEMO_Clear_TableBody( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2409,7 +2409,7 @@ Public Sub DEMO_Append_TableRow( _
 '   Appends one row of values to an Excel table.
 '
 ' WHY THIS EXISTS
-'   Demo result/log tables are easier to populate consistently through one
+'   DEMO result/log tables are easier to populate consistently through one
 '   helper routine rather than repeating ListRow logic in multiple macros.
 '
 ' INPUTS
@@ -2436,7 +2436,7 @@ Public Sub DEMO_Append_TableRow( _
 '   Raises errors normally.
 '
 ' UPDATED
-'   2026-03-30
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2499,12 +2499,12 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
 '   Applies the standard setup for a vertical label/value input section
 '
 ' WHY THIS EXISTS
-'   Many demo sheets share the same pattern:
+'   Many DEMO sheets share the same pattern:
 '     - a section header
 '     - a label column
 '     - a parallel input/value column
 '
-'   Centralizing that setup avoids repeated formatting code in each demo sheet
+'   Centralizing that setup avoids repeated formatting code in each DEMO sheet
 '
 ' INPUTS
 '   WS
@@ -2539,7 +2539,7 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
 '   - DEMO_Format_InputCell
 '
 ' UPDATED
-'   2026-04-12
+'   2026-04-19
 '==============================================================================
     
 '------------------------------------------------------------------------------
@@ -2563,7 +2563,7 @@ Public Sub DEMO_Write_NamedInputRow( _
     ByVal LabelText As String, _
     ByVal DefaultValue As Variant, _
     Optional ByVal WorkbookNameText As String = "", _
-    Optional ByVal ValidationKind As DemoInputValidationKind = demoInputValidationNone, _
+    Optional ByVal ValidationKind As DEMOInputValidationKind = DEMOInputValidationNone, _
     Optional ByVal ValidationSource As String = "", _
     Optional ByVal ValidationMin As Double = 0, _
     Optional ByVal ValidationMax As Double = 0, _
@@ -2574,10 +2574,10 @@ Public Sub DEMO_Write_NamedInputRow( _
 '                         WRITE NAMED INPUT ROW
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Writes one standard label/value row for a demo sheet control panel
+'   Writes one standard label/value row for a DEMO sheet control panel
 '
 ' WHY THIS EXISTS
-'   Demo control panels often require the same row-level actions:
+'   DEMO control panels often require the same row-level actions:
 '     - write a label
 '     - seed a default value
 '     - apply validation
@@ -2645,7 +2645,7 @@ Public Sub DEMO_Write_NamedInputRow( _
 '   - DEMO_Set_WorkbookName
 '
 ' UPDATED
-'   2026-04-12
+'   2026-04-19
 '==============================================================================
     
 '------------------------------------------------------------------------------
@@ -2660,15 +2660,15 @@ Public Sub DEMO_Write_NamedInputRow( _
 ' APPLY VALIDATION
 '------------------------------------------------------------------------------
     Select Case ValidationKind
-        Case demoInputValidationNone
+        Case DEMOInputValidationNone
             'Leave the cell without validation
-        Case DemoInputValidationList
+        Case DEMOInputValidationList
             'Apply a standard list validation
                 DEMO_Apply_ValidationList ValueCell, ValidationSource
-        Case DemoInputValidationNumeric
+        Case DEMOInputValidationNumeric
             'Apply numeric validation with the requested numeric policy
                 DEMO_Apply_NumericValidation ValueCell, ValidationMin, ValidationMax, AllowDecimal
-        Case DemoInputValidationBoolean
+        Case DEMOInputValidationBoolean
             'Ensure the workbook-level boolean list exists for this sheet context
                 DEMO_Create_BoolList WS.Name
             'Apply the shared boolean dropdown
@@ -2702,18 +2702,18 @@ Public Sub DEMO_Add_ButtonGrid( _
     Optional ByVal ButtonWidth As Double = 150, _
     Optional ByVal ButtonHeight As Double = 25, _
     Optional ByVal GapX As Double = 20, _
-    Optional ByVal GapY As Double = 15, _
+    Optional ByVal GapY As Double = 13, _
     Optional ByVal OffsetLeft As Double = 4, _
-    Optional ByVal OffsetTop As Double = 5)
+    Optional ByVal OffsetTop As Double = 8)
 '
 '==============================================================================
 '                           ADD BUTTON GRID
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Creates a regular grid of demo buttons from a compact button specification
+'   Creates a regular grid of DEMO buttons from a compact button specification
 '
 ' WHY THIS EXISTS
-'   Demo sheets often contain repeated button-layout code with only:
+'   DEMO sheets often contain repeated button-layout code with only:
 '     - button name
 '     - button caption
 '     - optional action macro
@@ -2727,7 +2727,7 @@ Public Sub DEMO_Add_ButtonGrid( _
 '         Array(ButtonName, ButtonCaption, ActionMacro)
 '
 ' UPDATED
-'   2026-04-15
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2755,7 +2755,7 @@ Public Sub DEMO_Add_ButtonGrid( _
             If UBound(ButtonSpecs(i)) >= 2 Then
                 ActionMacro = CStr(ButtonSpecs(i)(2))
             Else
-                ActionMacro = "DEMO_DemoButton_NotAssigned"
+                ActionMacro = "DEMO_DEMOButton_NotAssigned"
             End If
 
         'Create the current button
@@ -2788,7 +2788,7 @@ Public Function DEMO_Create_TableSection( _
 '   Builds a standard titled section containing a formatted ListObject table
 '
 ' WHY THIS EXISTS
-'   Many demo sheets need the same output/log pattern:
+'   Many DEMO sheets need the same output/log pattern:
 '     - section header band
 '     - one formatted header row
 '     - one seeded blank row
@@ -2996,7 +2996,7 @@ Public Sub Btn_ApplyState( _
 '   Applies one named visual state to a shape-based button
 '
 ' WHY THIS EXISTS
-'   Demo buttons use a small set of visual states such as:
+'   DEMO buttons use a small set of visual states such as:
 '     - normal
 '     - hover
 '     - pressed
@@ -3020,7 +3020,7 @@ Public Sub Btn_ApplyState( _
 '   Raises errors normally
 '
 ' UPDATED
-'   2026-04-14
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3089,7 +3089,7 @@ Private Function Btn_CaptureAppearance( _
 '   Raises errors normally
 '
 ' UPDATED
-'   2026-04-14
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3173,7 +3173,7 @@ Private Sub Btn_RestoreAppearance( _
 '   Raises errors normally
 '
 ' UPDATED
-'   2026-04-14
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3220,7 +3220,7 @@ Public Sub Btn_Click()
 '   Applies a short pressed-state visual feedback to the calling shape button
 '
 ' WHY THIS EXISTS
-'   Demo actions may optionally call this routine to simulate a button press
+'   DEMO actions may optionally call this routine to simulate a button press
 '   before running the underlying business logic
 '
 '   This routine is defensive: when no valid shape caller exists, it exits
@@ -3270,18 +3270,14 @@ Public Sub Btn_Click()
 '------------------------------------------------------------------------------
     'Read the current caller context
         CallerName = Application.Caller
-
     'Exit quietly when not called by a shape
         If VarType(CallerName) <> vbString Then Exit Sub
-
     'Resolve the active sheet
         Set WS = ActiveSheet
-
     'Try to resolve the calling shape on the active sheet
         On Error Resume Next
         Set Shp = WS.Shapes(CStr(CallerName))
         On Error GoTo 0
-
     'Exit quietly when the shape cannot be resolved
         If Shp Is Nothing Then Exit Sub
 
@@ -3296,11 +3292,9 @@ Public Sub Btn_Click()
 '------------------------------------------------------------------------------
     'Apply the pressed color state
         Btn_ApplyState Shp, "Pressed"
-
     'Apply a small pressed-position effect
         Shp.Top = Shp.Top + 1
         Shp.Left = Shp.Left + 1
-
     'Apply a temporary pressed shadow
         With Shp.Shadow
             .Visible = msoTrue
@@ -3319,17 +3313,14 @@ Public Sub Btn_Click()
         Do
             'Compute elapsed seconds since the delay started
                 ElapsedS = Timer - StartS
-
             'Correct midnight rollover when Timer() wraps at 24 hours
                 If ElapsedS < 0# Then
                     ElapsedS = ElapsedS + 86400#
                 End If
-
             'Exit once the short visual delay has elapsed
                 If ElapsedS >= 0.08 Then
                     Exit Do
                 End If
-
             'Yield to Excel/UI during the brief wait
                 DoEvents
         Loop
@@ -3341,6 +3332,42 @@ Public Sub Btn_Click()
         Btn_RestoreAppearance Shp, SavedState
 
 End Sub
+
+Public Sub Demo_PlayButtonFeedback()
+
+'
+'==============================================================================
+'                       Demo_PlayButtonFeedback
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Invoke the shared button-click feedback helper on a best-effort basis
+'
+' WHY THIS EXISTS
+'   Several public demo actions want the same visual pressed-state feedback
+'   without duplicating local error suppression around Btn_Click
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   Best effort only
+'
+' UPDATED
+'   2026-04-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' APPLY BEST-EFFORT FEEDBACK
+'------------------------------------------------------------------------------
+    'Play the shared button-click visual feedback on a best-effort basis
+        On Error Resume Next
+        Btn_Click
+        On Error GoTo 0
+
+End Sub
+
+
 Public Sub DEMO_SB_SetProgress( _
     ByVal CurrentStep As Long, _
     ByVal TotalSteps As Long, _
@@ -3370,7 +3397,7 @@ Public Sub DEMO_SB_SetProgress( _
 '   None
 '
 ' UPDATED
-'   2026-04-18
+'   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3413,6 +3440,480 @@ Public Sub DEMO_SB_SetProgress( _
 
 End Sub
 
+Public Sub DEMO_AddFormsCheckBox( _
+    ByVal WS As Worksheet, _
+    ByVal AnchorRange As Range, _
+    Optional ByVal CheckBoxNames As Variant)
+
+'
+'==============================================================================
+'                           DEMO_AddFormsCheckBox
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Add one Forms check box for each cell in the supplied anchor range
+'
+' WHY THIS EXISTS
+'   DEMO sheets may need:
+'     - one checkbox in a single anchor cell
+'     - one checkbox per cell across a multi-cell range
+'
+'   In the multi-cell case, callers may want to pass a parallel array of
+'   checkbox names instead of relying on auto-generated names
+'
+'   This helper centralizes:
+'     - input validation
+'     - deterministic control replacement
+'     - centered per-cell checkbox placement
+'     - optional explicit naming
+'     - standard checkbox initialization
+'
+' INPUTS
+'   WS
+'     Worksheet receiving the Forms check box or check boxes
+'
+'   AnchorRange
+'     One-cell or multi-cell range whose individual cells will each receive
+'     one Forms check box
+'
+'   CheckBoxNames
+'     Optional naming input
+'
+'     Allowed forms:
+'       - omitted
+'       - String when AnchorRange contains exactly one cell
+'       - one-dimensional array of names with one element per cell in
+'         AnchorRange
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Validates the worksheet, anchor range, and optional naming input
+'   - Creates one Forms check box per cell in AnchorRange
+'   - Deletes an existing same-sheet Forms check box with the same name when present
+'   - Centers each check box inside its own anchor cell
+'   - Removes the visible caption
+'   - Initializes each control to unchecked
+'   - Clears any linked cell
+'   - Ties each control to cell movement / sizing
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CellCount           As Long          'Number of target cells
+    Dim CellIndex           As Long          '1-based current target-cell index
+    Dim TargetCell          As Range         'Current target cell
+    Dim ResolvedName        As String        'Resolved check-box name for the current cell
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Reject a missing worksheet reference
+        If WS Is Nothing Then
+            Err.Raise vbObjectError + 2141, _
+                      "M_DEMO_BUILDER.DEMO_AddFormsCheckBox", _
+                      "Worksheet reference cannot be Nothing"
+        End If
+
+    'Reject a missing anchor range
+        If AnchorRange Is Nothing Then
+            Err.Raise vbObjectError + 2142, _
+                      "M_DEMO_BUILDER.DEMO_AddFormsCheckBox", _
+                      "AnchorRange cannot be Nothing"
+        End If
+
+    'Reject anchor ranges that do not belong to the target worksheet
+        If Not AnchorRange.Worksheet Is WS Then
+            Err.Raise vbObjectError + 2143, _
+                      "M_DEMO_BUILDER.DEMO_AddFormsCheckBox", _
+                      "AnchorRange must belong to the target worksheet"
+        End If
+
+    'Reject non-rectangular multi-area ranges
+        If AnchorRange.Areas.Count > 1 Then
+            Err.Raise vbObjectError + 2144, _
+                      "M_DEMO_BUILDER.DEMO_AddFormsCheckBox", _
+                      "AnchorRange must be one contiguous rectangular range"
+        End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Capture the number of target cells
+        CellCount = AnchorRange.Cells.Count
+
+'------------------------------------------------------------------------------
+' VALIDATE OPTIONAL NAMES INPUT
+'------------------------------------------------------------------------------
+    'Validate the supplied naming input against the target-cell count
+        DEMO_ValidateCheckBoxNamesInput AnchorRange, CheckBoxNames
+
+'------------------------------------------------------------------------------
+' CREATE ONE CHECK BOX PER CELL
+'------------------------------------------------------------------------------
+    'Create one Forms check box per target cell
+        CellIndex = 0
+
+        For Each TargetCell In AnchorRange.Cells
+
+            'Advance the current 1-based cell index
+                CellIndex = CellIndex + 1
+
+            'Resolve the checkbox name for the current target cell
+                ResolvedName = DEMO_ResolveCheckBoxName(TargetCell, CheckBoxNames, CellIndex)
+
+            'Create the current Forms check box
+                DEMO_AddOneFormsCheckBox WS, TargetCell, ResolvedName
+
+        Next TargetCell
+
+End Sub
 
 
+Private Sub DEMO_ValidateCheckBoxNamesInput( _
+    ByVal AnchorRange As Range, _
+    ByVal CheckBoxNames As Variant)
+
+'
+'==============================================================================
+'                     DEMO_ValidateCheckBoxNamesInput
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validate the optional CheckBoxNames input for DEMO_AddFormsCheckBox
+'
+' WHY THIS EXISTS
+'   The public checkbox builder accepts several naming forms, so validation is
+'   centralized here to keep the public routine smaller and easier to read
+'
+' INPUTS
+'   AnchorRange
+'     One-cell or multi-cell target range
+'
+'   CheckBoxNames
+'     Optional name input passed by the caller
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CellCount           As Long      'Number of target cells
+    Dim ArrLo               As Long      'Array lower bound
+    Dim ArrHi               As Long      'Array upper bound
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Capture the number of target cells
+        CellCount = AnchorRange.Cells.Count
+
+'------------------------------------------------------------------------------
+' EXIT WHEN OMITTED
+'------------------------------------------------------------------------------
+    'Leave when the optional names input was omitted
+        If IsMissing(CheckBoxNames) Then
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE SINGLE-CELL CASE
+'------------------------------------------------------------------------------
+    'For a single-cell anchor, allow either a scalar string or a one-element array
+        If CellCount = 1 Then
+
+            'Accept a scalar string
+                If VarType(CheckBoxNames) = vbString Then
+                    Exit Sub
+                End If
+
+            'Accept a one-element array
+                If IsArray(CheckBoxNames) Then
+                    ArrLo = LBound(CheckBoxNames)
+                    ArrHi = UBound(CheckBoxNames)
+
+                    If ArrHi - ArrLo + 1 = 1 Then
+                        Exit Sub
+                    End If
+                End If
+
+            'Reject all other input shapes
+                Err.Raise vbObjectError + 2145, _
+                          "M_DEMO_BUILDER.DEMO_ValidateCheckBoxNamesInput", _
+                          "For a single-cell anchor, CheckBoxNames must be omitted, be a String, or be a one-element array"
+
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE MULTI-CELL CASE
+'------------------------------------------------------------------------------
+    'For a multi-cell anchor, require an array when names were supplied
+        If Not IsArray(CheckBoxNames) Then
+            Err.Raise vbObjectError + 2146, _
+                      "M_DEMO_BUILDER.DEMO_ValidateCheckBoxNamesInput", _
+                      "For a multi-cell anchor, CheckBoxNames must be omitted or be a one-dimensional array"
+        End If
+
+    'Validate the supplied array size against the target-cell count
+        ArrLo = LBound(CheckBoxNames)
+        ArrHi = UBound(CheckBoxNames)
+
+        If ArrHi - ArrLo + 1 <> CellCount Then
+            Err.Raise vbObjectError + 2147, _
+                      "M_DEMO_BUILDER.DEMO_ValidateCheckBoxNamesInput", _
+                      "When supplied for a multi-cell anchor, CheckBoxNames must contain exactly one name per target cell"
+        End If
+
+End Sub
+
+
+Private Function DEMO_ResolveCheckBoxName( _
+    ByVal TargetCell As Range, _
+    ByVal CheckBoxNames As Variant, _
+    ByVal CellIndex As Long) _
+    As String
+
+'
+'==============================================================================
+'                       DEMO_ResolveCheckBoxName
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolve the effective checkbox name for one target cell
+'
+' WHY THIS EXISTS
+'   Checkbox names may be:
+'     - omitted
+'     - supplied as a scalar for a single-cell anchor
+'     - supplied as an array for one or many cells
+'
+'   Centralizing that resolution keeps the main builder routine compact
+'
+' INPUTS
+'   TargetCell
+'     Current target cell
+'
+'   CheckBoxNames
+'     Optional naming input
+'
+'   CellIndex
+'     1-based current target-cell index
+'
+' RETURNS
+'   String
+'     Effective checkbox name
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ArrLo               As Long      'Array lower bound
+
+'------------------------------------------------------------------------------
+' RESOLVE OMITTED CASE
+'------------------------------------------------------------------------------
+    'Auto-generate a name when the optional names input was omitted
+        If IsMissing(CheckBoxNames) Then
+            DEMO_ResolveCheckBoxName = DEMO_DefaultCheckBoxName(TargetCell)
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE SCALAR STRING CASE
+'------------------------------------------------------------------------------
+    'Use the supplied scalar string for the single-cell case
+        If VarType(CheckBoxNames) = vbString Then
+            DEMO_ResolveCheckBoxName = Trim$(CStr(CheckBoxNames))
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE ARRAY CASE
+'------------------------------------------------------------------------------
+    'Use the corresponding array element for the current cell
+        ArrLo = LBound(CheckBoxNames)
+
+        DEMO_ResolveCheckBoxName = Trim$(CStr(CheckBoxNames(ArrLo + CellIndex - 1)))
+
+'------------------------------------------------------------------------------
+' NORMALIZE BLANK NAME
+'------------------------------------------------------------------------------
+    'Fall back to an auto-generated name when the resolved name is blank
+        If Len(DEMO_ResolveCheckBoxName) = 0 Then
+            DEMO_ResolveCheckBoxName = DEMO_DefaultCheckBoxName(TargetCell)
+        End If
+
+End Function
+
+
+Private Function DEMO_DefaultCheckBoxName( _
+    ByVal TargetCell As Range) _
+    As String
+
+'
+'==============================================================================
+'                        DEMO_DefaultCheckBoxName
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Build a deterministic default checkbox name from one target cell
+'
+' WHY THIS EXISTS
+'   Callers should not be forced to invent checkbox names when they do not need
+'   to reference the controls later
+'
+' INPUTS
+'   TargetCell
+'     Cell that will receive the Forms check box
+'
+' RETURNS
+'   String
+'     Auto-generated checkbox name
+'
+' UPDATED
+'   2026-04-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' RETURN DEFAULT NAME
+'------------------------------------------------------------------------------
+    'Build a deterministic default name from the cell address
+        DEMO_DefaultCheckBoxName = "chk_" & Replace$(TargetCell.Address(False, False), "$", vbNullString)
+
+End Function
+
+
+Private Sub DEMO_AddOneFormsCheckBox( _
+    ByVal WS As Worksheet, _
+    ByVal AnchorCell As Range, _
+    ByVal CheckBoxName As String)
+
+'
+'==============================================================================
+'                        DEMO_AddOneFormsCheckBox
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Create one Forms check box centered inside one anchor cell
+'
+' WHY THIS EXISTS
+'   The multi-cell public builder delegates the actual per-cell control
+'   creation to this helper
+'
+' INPUTS
+'   WS
+'     Worksheet receiving the Forms check box
+'
+'   AnchorCell
+'     Single target cell
+'
+'   CheckBoxName
+'     Name assigned to the created Forms check box
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-04-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Cb                  As CheckBox    'Created Forms check box
+    Dim BoxWidth            As Double      'Check-box width
+    Dim BoxHeight           As Double      'Check-box height
+    Dim BoxLeft             As Double      'Resolved left position
+    Dim BoxTop              As Double      'Resolved top position
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Reject a blank control name
+        If Len(Trim$(CheckBoxName)) = 0 Then
+            Err.Raise vbObjectError + 2148, _
+                      "M_DEMO_BUILDER.DEMO_AddOneFormsCheckBox", _
+                      "CheckBoxName cannot be blank"
+        End If
+
+    'Reject multi-cell anchors in the per-cell helper
+        If AnchorCell.Cells.CountLarge <> 1 Then
+            Err.Raise vbObjectError + 2149, _
+                      "M_DEMO_BUILDER.DEMO_AddOneFormsCheckBox", _
+                      "AnchorCell must be a single cell"
+        End If
+
+'------------------------------------------------------------------------------
+' DELETE EXISTING SAME-NAME CHECK BOX
+'------------------------------------------------------------------------------
+    'Delete an existing same-sheet Forms check box with the same name when present
+        On Error Resume Next
+            WS.CheckBoxes(CheckBoxName).Delete
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Define the standard visual check-box size
+        BoxWidth = 18
+
+    'Define the standard visual check-box size
+        BoxHeight = 16
+
+    'Center the control horizontally inside the anchor cell
+        BoxLeft = AnchorCell.Left + (AnchorCell.Width - BoxWidth) / 2
+
+    'Center the control vertically inside the anchor cell
+        BoxTop = AnchorCell.Top + (AnchorCell.Height - BoxHeight) / 2
+
+'------------------------------------------------------------------------------
+' CREATE CHECK BOX
+'------------------------------------------------------------------------------
+    'Create the Forms check box
+        Set Cb = WS.CheckBoxes.Add(BoxLeft, BoxTop, BoxWidth, BoxHeight)
+
+    'Assign the requested control name
+        Cb.Name = CheckBoxName
+
+    'Remove the visible check-box caption
+        Cb.Caption = vbNullString
+
+    'Initialize the control to unchecked
+        Cb.Value = xlOff
+
+    'Clear any linked cell
+        Cb.LinkedCell = vbNullString
+
+    'Tie the control position and size to its cells
+        Cb.Placement = xlMoveAndSize
+
+    'Ensure the control is printed with the sheet
+        Cb.PrintObject = True
+
+End Sub
 
