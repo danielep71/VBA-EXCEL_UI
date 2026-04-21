@@ -74,9 +74,9 @@ In many real projects, it is useful to:
 /README.md
 /src/M_EXCEL_UI.bas
 /demo/M_EXCEL_UI_DEMO.bas
+/demo/M_DEMO_BUILDER.bas
 /demo/EXCEL_UI_DEMO.xlsm
 /test/M_EXCEL_UI_REGRESSION_TESTS.bas
-/test/M_TEST_HELPERS.bas
 ```
 
 ---
@@ -183,22 +183,6 @@ The test harness validates:
 - `ScreenUpdating` preservation around quiet-update behavior
 
 It also snapshots current UI state before test execution and attempts to restore it afterward.
-
----
-
-### `M_TEST_HELPERS.bas`
-
-Shared test support module.
-
-It provides reusable helpers for:
-
-- assertion support
-- diagnostic output
-- runtime error formatting
-- timing / wait utilities
-- generic test plumbing reused across regression modules
-
-This keeps individual regression modules smaller, more consistent, and easier to maintain.
 
 ---
 
