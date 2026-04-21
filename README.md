@@ -27,7 +27,8 @@ It provides the foundation for:
 
 ---
 
-<img width="1536" height="1024" alt="UI Home reduced" src="https://github.com/user-attachments/assets/27c7ba79-2c45-41d0-b076-f215902c7df9" />
+<img width="1536" height="1024" alt="EXCEL UI - HOME" src="https://github.com/user-attachments/assets/574869d3-f17b-4daa-a17e-aa4c79e15bf7" />
+
 
 
 ## Overview
