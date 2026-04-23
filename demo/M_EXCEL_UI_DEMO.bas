@@ -88,7 +88,6 @@ Attribute VB_Name = "M_EXCEL_UI_DEMO"
 ' MODULE SETTINGS
 '------------------------------------------------------------------------------
     Option Explicit         'Force explicit declaration of all variables
-    Option Private Module   'Hide support routines from the Macro dialog
     
 '------------------------------------------------------------------------------
 ' DEMO CONFIGURATION
@@ -199,16 +198,16 @@ Public Sub Demo_CreateDemoSheet()
 '   - Cleanup is best-effort and should not overwrite the original error
 '
 ' DEPENDENCIES
-'   - DEMO_Begin_FastMode
-'   - DEMO_End_FastMode
-'   - DEMO_Build_DemoTemplate
+'   - DEMO_FastMode_Begin
+'   - DEMO_FastMode_End
+'   - DEMO_Sheet_BuildTemplate
 '   - DEMO_Prepare_LabeledInputSection
 '   - DEMO_Write_NamedInputRow
 '   - DEMO_Write_BandHeader
-'   - DEMO_Add_ButtonGrid
-'   - DEMO_Add_DemoButton
+'   - DEMO_Btn_AddGrid
+'   - DEMO_Btn_Add
 '   - DEMO_Set_RangeBorder
-'   - DEMO_AddFormsCheckBox
+'   - DEMO_CB_AddForms
 '   - Demo_SyncCheckBoxesToUI
 '
 ' UPDATED
@@ -237,15 +236,16 @@ Public Sub Demo_CreateDemoSheet()
         On Error GoTo Clean_Fail
     'Target the workbook that contains this module
         Set WB = ThisWorkbook
+    'Simulate Button click
+        DEMO_Btn_Click
     'Capture and apply fast-mode Application settings
-        DEMO_Begin_FastMode FastModeState
+        DEMO_FastMode_Begin FastModeState
         FastModeOn = True
     'Show the wait cursor while rebuilding the demo workbook
         Application.Cursor = xlWait
     'Build or rebuild the generic template for the demo sheet
-        DEMO_Build_DemoTemplate DEMO_SHEET_NAME, "EXCEL UI", "Demo Sheet", , , , _
+        DEMO_Sheet_BuildTemplate DEMO_SHEET_NAME, "EXCEL UI", "Demo Sheet", , , , _
             , , "C:H", , , , , , , , , , 29
-
     'Resolve the main demo sheet after template preparation
         Set WS = WB.Worksheets(DEMO_SHEET_NAME)
 
@@ -272,7 +272,7 @@ Public Sub Demo_CreateDemoSheet()
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G8"), WS.Range("H8"), _
             "Formula bar", ""
     'Convert the application-level input cells to checkboxes
-        DEMO_AddFormsCheckBox WS, WS.Range("H5:H8"), Array(CB_RIBBON, _
+        DEMO_CB_AddForms WS, WS.Range("H5:H8"), Array(CB_RIBBON, _
             CB_STATUSBAR, CB_SCROLLBARS, CB_FORMULABAR)
 
 '------------------------------------------------------------------------------
@@ -298,7 +298,7 @@ Public Sub Demo_CreateDemoSheet()
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G15"), WS.Range("H15"), _
             "Title bar", ""
     'Convert the window-level input cells to checkboxes
-        DEMO_AddFormsCheckBox WS, WS.Range("H12:H15"), Array(CB_HEADINGS, _
+        DEMO_CB_AddForms WS, WS.Range("H12:H15"), Array(CB_HEADINGS, _
             CB_WORKBOOKTABS, CB_GRIDLINES, CB_TITLEBAR)
 
 '------------------------------------------------------------------------------
@@ -311,7 +311,7 @@ Public Sub Demo_CreateDemoSheet()
             "Demo_ShowSelectedUI"), Array("btn_UI_Hide", "HIDE SELECTED UI", _
             "Demo_HideSelectedUI"))
     'Create the standard two-column action-button grid
-        DEMO_Add_ButtonGrid WS, WS.Range("C5"), ButtonSpecs, 2, 150, 25
+        DEMO_Btn_AddGrid WS, WS.Range("C5"), ButtonSpecs, 2, 150, 25
     'Apply a border around the full action-button area
         DEMO_Set_RangeBorder WS.Range("C4:E6")
 
@@ -325,7 +325,7 @@ Public Sub Demo_CreateDemoSheet()
             "Demo_SelectAllUI"), Array("btn_UI_ClearAll", "CLEAR ALL", _
             "Demo_ClearAllUI"))
     'Create the standard two-column select / clear button grid
-        DEMO_Add_ButtonGrid WS, WS.Range("C9"), ButtonSpecs, 2, 150, 25
+        DEMO_Btn_AddGrid WS, WS.Range("C9"), ButtonSpecs, 2, 150, 25
     'Apply a border around the full select / clear area
         DEMO_Set_RangeBorder WS.Range("C8:E10")
 
@@ -339,7 +339,7 @@ Public Sub Demo_CreateDemoSheet()
             Array("btn_UI_Analyst", "ANALYST", "Demo_PresetAnalyst"), _
             Array("btn_UI_Minimal", "MINIMAL", "Demo_PresetMinimal"))
     'Create the standard two-column preset / utility button grid
-        DEMO_Add_ButtonGrid WS, WS.Range("C13"), ButtonSpecs, 2, 150, 25, , 13, , _
+        DEMO_Btn_AddGrid WS, WS.Range("C13"), ButtonSpecs, 2, 150, 25, , 13, , _
             8
     'Apply a border around the full preset / utility area
         DEMO_Set_RangeBorder WS.Range("C12:E16")
@@ -354,7 +354,7 @@ Public Sub Demo_CreateDemoSheet()
             "Demo_CaptureUIState"), Array("btn_UI_ResetState", "RESET STATE", _
             "Demo_ResetUIToCapturedState"))
     'Create the standard two-column capture / reset button grid
-        DEMO_Add_ButtonGrid WS, WS.Range("C19"), ButtonSpecs, 2, 150, 25, , 13, , _
+        DEMO_Btn_AddGrid WS, WS.Range("C19"), ButtonSpecs, 2, 150, 25, , 13, , _
             8
     'Apply a border around the full capture / reset area
         DEMO_Set_RangeBorder WS.Range("C18:E20")
@@ -363,7 +363,7 @@ Public Sub Demo_CreateDemoSheet()
 ' BUILD SYNC CHECK BOXES BUTTON
 '------------------------------------------------------------------------------
     'Create the sync button anchored to a dedicated layout block
-        DEMO_Add_DemoButton WS, "btn_UI_Sync", "SYNC CHECKBOXES", _
+        DEMO_Btn_Add WS, "btn_UI_Sync", "SYNC CHECKBOXES", _
             WS.Range("G17").Left, WS.Range("G17").Top, WS.Range("G17:H18").Width, 25, _
             "Demo_SyncCheckBoxesToUI"
             
@@ -407,6 +407,14 @@ Public Sub Demo_CreateDemoSheet()
     'Synchronize the check boxes back to the current visible UI state
         Demo_SyncCheckBoxesToUI False
 
+'------------------------------------------------------------------------------
+' BUILD RESET SHEET BUTTON
+'------------------------------------------------------------------------------
+    'Create the reset sheet button
+        DEMO_Btn_Add WS, "btn_UI_ResetSheet", "RESET SHEET", _
+            WS.Range("H2").Left + 1, WS.Range("H2").Top + 1, 105, 25, _
+            "Demo_CreateDemoSheet"
+
 Clean_Exit:
 '------------------------------------------------------------------------------
 ' CLEANUP
@@ -417,7 +425,7 @@ Clean_Exit:
         Application.Cursor = xlDefault
     'Restore the original Excel Application state only when fast mode was entered
         If FastModeOn Then
-            DEMO_End_FastMode FastModeState
+            DEMO_FastMode_End FastModeState
         End If
     'Restore normal error handling before any re-raise
         On Error GoTo 0
@@ -472,7 +480,7 @@ Public Sub Demo_ShowSelectedUI()
 '   - Leaves unchecked elements unchanged
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - Demo_ApplySelectedUI
 '
 ' UPDATED
@@ -484,7 +492,7 @@ Public Sub Demo_ShowSelectedUI()
 ' APPLY ACTION
 '------------------------------------------------------------------------------
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
     'Delegate the action to the shared worker
         Demo_ApplySelectedUI UI_Show, "Demo_ShowSelectedUI"
 
@@ -512,7 +520,7 @@ Public Sub Demo_HideSelectedUI()
 '   - Leaves unchecked elements unchanged
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - Demo_ApplySelectedUI
 '
 ' UPDATED
@@ -524,7 +532,7 @@ Public Sub Demo_HideSelectedUI()
 ' APPLY ACTION
 '------------------------------------------------------------------------------
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
     'Delegate the action to the shared worker
         Demo_ApplySelectedUI UI_Hide, "Demo_HideSelectedUI"
 
@@ -559,7 +567,7 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '   - Partial failures are written to the Immediate Window
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - Demo_TryGetRibbonVisibility
 '   - Demo_TryGetTitleBarVisibility
 '   - Demo_TrySetCheckBoxState
@@ -590,7 +598,7 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
         On Error GoTo Fail
     'Play the optional button-click visual feedback only when requested
         If PlayFeedback Then
-            DEMO_PlayButtonFeedback
+            DEMO_Btn_PlayFeedback
         End If
     'Resolve the demo worksheet
         Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
@@ -699,7 +707,7 @@ Public Sub Demo_SelectAllUI()
 '   None
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
@@ -711,7 +719,7 @@ Public Sub Demo_SelectAllUI()
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
 
     'Select all managed UI elements
         Demo_SetSelectionProfile CallerProc:="Demo_SelectAllUI", _
@@ -739,7 +747,7 @@ Public Sub Demo_ClearAllUI()
 '   None
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
@@ -751,7 +759,7 @@ Public Sub Demo_ClearAllUI()
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
     'Clear all managed UI selections
         Demo_SetSelectionProfile CallerProc:="Demo_ClearAllUI", _
             RibbonSelected:=False, StatusBarSelected:=False, _
@@ -782,7 +790,7 @@ Public Sub Demo_PresetKiosk()
 '   - It does NOT apply SHOW or HIDE by itself
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
@@ -794,7 +802,7 @@ Public Sub Demo_PresetKiosk()
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
     'Select all managed UI elements for a kiosk-style bundle
         Demo_SetSelectionProfile CallerProc:="Demo_PresetKiosk", _
             RibbonSelected:=True, StatusBarSelected:=True, ScrollBarsSelected:=True, _
@@ -825,7 +833,7 @@ Public Sub Demo_PresetAnalyst()
 '   - It does NOT apply SHOW or HIDE by itself
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
@@ -837,7 +845,7 @@ Public Sub Demo_PresetAnalyst()
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
     'Select a worksheet-analysis-oriented bundle
         Demo_SetSelectionProfile CallerProc:="Demo_PresetAnalyst", _
             RibbonSelected:=False, StatusBarSelected:=True, ScrollBarsSelected:=True, _
@@ -869,7 +877,7 @@ Public Sub Demo_PresetMinimal()
 '   - It does NOT apply SHOW or HIDE by itself
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
@@ -881,7 +889,7 @@ Public Sub Demo_PresetMinimal()
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
     'Select a minimal-shell-oriented bundle
         Demo_SetSelectionProfile CallerProc:="Demo_PresetMinimal", _
             RibbonSelected:=True, StatusBarSelected:=True, ScrollBarsSelected:=True, _
@@ -919,7 +927,7 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
 '   - Unexpected failures are written to the Immediate Window
 '
 ' DEPENDENCIES
-'   - DEMO_PlayButtonFeedback
+'   - DEMO_Btn_PlayFeedback
 '   - UI_CaptureExcelUIState
 '   - Demo_LogFailure
 '
@@ -939,7 +947,7 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
     'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
 
 '------------------------------------------------------------------------------
 ' CAPTURE SNAPSHOT
@@ -1022,7 +1030,7 @@ Public Sub Demo_ResetUIToCapturedState()
     'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
     'Play the optional button-click visual feedback
-        DEMO_PlayButtonFeedback
+        DEMO_Btn_PlayFeedback
         
 '------------------------------------------------------------------------------
 ' VALIDATE SNAPSHOT AVAILABILITY
