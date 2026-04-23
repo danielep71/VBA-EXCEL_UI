@@ -131,9 +131,7 @@ Attribute VB_Name = "M_DEMO_BUILDER"
     End Enum
     
 
-
-
-Public Sub DEMO_Build_DemoTemplate( _
+Public Sub DEMO_Sheet_BuildTemplate( _
     ByVal WS_Name As String, Optional ByVal Title As String = "Title", _
     Optional ByVal SubTitle As String = "SubTitle", Optional ByVal IsFrozenPane As Boolean = True, _
     Optional ByVal FreezeAtRow As Long = 3, Optional ByVal TargetWorkbook As Variant, _
@@ -226,8 +224,8 @@ Public Sub DEMO_Build_DemoTemplate( _
 '   Raises errors normally
 '
 ' DEPENDENCIES
-'   - DEMO_GetOrCreateSheet
-'   - DEMO_Reset_Sheet
+'   - DEMO_Sheet_GetOrCreate
+'   - DEMO_Sheet_Reset
 '   - DEMO_Write_BandHeader
 '   - DEMO_ColumnLetter
 '
@@ -278,7 +276,7 @@ Public Sub DEMO_Build_DemoTemplate( _
     'Reject an empty worksheet name
         If Len(Trim$(WS_Name)) = 0 Then
             Err.Raise vbObjectError + 2000, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "Worksheet name cannot be blank."
         End If
 
@@ -286,7 +284,7 @@ Public Sub DEMO_Build_DemoTemplate( _
         If IsFrozenPane Then
             If FreezeAtRow < 2 Then
                 Err.Raise vbObjectError + 2013, _
-                          "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                          "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                           "FreezeAtRow must be >= 2 when IsFrozenPane = True."
             End If
         End If
@@ -294,7 +292,7 @@ Public Sub DEMO_Build_DemoTemplate( _
     'Reject invalid body-row ranges
         If BodyRowFrom < 1 Or BodyRowTo < BodyRowFrom Then
             Err.Raise vbObjectError + 2014, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "Invalid body-row range."
         End If
 
@@ -303,7 +301,7 @@ Public Sub DEMO_Build_DemoTemplate( _
            ContentColumnWidth <= 0# Or _
            SeparatorColumnWidth <= 0# Then
             Err.Raise vbObjectError + 2015, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "Column widths must be positive."
         End If
 
@@ -312,7 +310,7 @@ Public Sub DEMO_Build_DemoTemplate( _
            SubTitleRowHeight <= 0# Or _
            BodyRowHeight <= 0# Then
             Err.Raise vbObjectError + 2016, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "Row heights must be positive."
         End If
 
@@ -320,7 +318,7 @@ Public Sub DEMO_Build_DemoTemplate( _
         If ZoomPercent <> 0 Then
             If ZoomPercent < 10 Or ZoomPercent > 400 Then
                 Err.Raise vbObjectError + 2017, _
-                          "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                          "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                           "ZoomPercent must be 0 or between 10 and 400."
             End If
         End If
@@ -342,7 +340,7 @@ Public Sub DEMO_Build_DemoTemplate( _
             End If
         Else
             Err.Raise vbObjectError + 2018, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "TargetWorkbook must be a Workbook object when supplied."
         End If
 
@@ -350,10 +348,10 @@ Public Sub DEMO_Build_DemoTemplate( _
 ' RESET SHEET
 '------------------------------------------------------------------------------
     'Get or create the target worksheet
-        Set WS = DEMO_GetOrCreateSheet(WB, WS_Name)
+        Set WS = DEMO_Sheet_GetOrCreate(WB, WS_Name)
 
     'Reset the worksheet to a clean reusable state before rebuilding it
-        DEMO_Reset_Sheet WS
+        DEMO_Sheet_Reset WS
 
 '------------------------------------------------------------------------------
 ' INITIALIZE WORKSHEET LIMITS
@@ -373,7 +371,7 @@ Public Sub DEMO_Build_DemoTemplate( _
     'Reject a blank content-column specification
         If Len(ContentText) = 0 Then
             Err.Raise vbObjectError + 2021, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "ContentColumns cannot be blank."
         End If
 
@@ -393,7 +391,7 @@ Public Sub DEMO_Build_DemoTemplate( _
     'Reject invalid multi-part content-column specifications
         Else
             Err.Raise vbObjectError + 2022, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "ContentColumns must resolve to one column or one contiguous column range."
         End If
 
@@ -407,14 +405,14 @@ Public Sub DEMO_Build_DemoTemplate( _
     'Reject content-column blocks that do not leave room for separator + hidden block
         If ContentLastColIndex > MaxCol - 2 Then
             Err.Raise vbObjectError + 2023, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "ContentColumns must leave room for a separator column and at least one hidden trailing column."
         End If
 
     'Reject content-column blocks that end before column B
         If ContentLastColIndex < 2 Then
             Err.Raise vbObjectError + 2024, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "ContentColumns must extend at least through column B."
         End If
 
@@ -440,7 +438,7 @@ Public Sub DEMO_Build_DemoTemplate( _
     'Reject invalid row-hide requests
         If HideRowsFrom < 1 Or HideRowsFrom > MaxRow Then
             Err.Raise vbObjectError + 2019, _
-                      "M_DEMO_BUILDER.DEMO_Build_DemoTemplate", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "HideRowsFrom must be between 1 and the worksheet last row."
         End If
 
@@ -679,7 +677,7 @@ Private Function DEMO_ColumnLetter( _
         DEMO_ColumnLetter = S
 
 End Function
-Public Sub DEMO_Begin_FastMode( _
+Public Sub DEMO_FastMode_Begin( _
     ByRef StateOut As tDEMOFastModeState)
 '
 '==============================================================================
@@ -739,7 +737,7 @@ Public Sub DEMO_Begin_FastMode( _
         Application.Calculation = xlCalculationManual
 End Sub
 
-Public Sub DEMO_End_FastMode( _
+Public Sub DEMO_FastMode_End( _
     ByRef StateIn As tDEMOFastModeState)
 '
 '==============================================================================
@@ -749,7 +747,7 @@ Public Sub DEMO_End_FastMode( _
 '   Restores a previously saved Excel Application state.
 '
 ' WHY THIS EXISTS
-'   This is the cleanup companion to DEMO_Begin_FastMode.
+'   This is the cleanup companion to DEMO_FastMode_Begin.
 '
 ' INPUTS
 '   StateIn
@@ -912,7 +910,7 @@ Public Sub DEMO_Set_RangeBorder( _
         End If
 End Sub
 
-Public Function DEMO_GetOrCreateSheet( _
+Public Function DEMO_Sheet_GetOrCreate( _
     ByVal WB As Workbook, _
     ByVal SheetName As String) _
     As Worksheet
@@ -961,14 +959,14 @@ Public Function DEMO_GetOrCreateSheet( _
     'Reject a missing workbook reference
         If WB Is Nothing Then
             Err.Raise vbObjectError + 2001, _
-                      "M_DEMO_BUILDER.DEMO_GetOrCreateSheet", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate", _
                       "Workbook reference cannot be Nothing."
         End If
 
     'Reject a blank worksheet name
         If Len(Trim$(SheetName)) = 0 Then
             Err.Raise vbObjectError + 2002, _
-                      "M_DEMO_BUILDER.DEMO_GetOrCreateSheet", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate", _
                       "Worksheet name cannot be blank."
         End If
 
@@ -978,7 +976,7 @@ Public Function DEMO_GetOrCreateSheet( _
     'Search for an existing worksheet with the requested name
         For Each WS In WB.Worksheets
             If StrComp(WS.Name, SheetName, vbTextCompare) = 0 Then
-                Set DEMO_GetOrCreateSheet = WS
+                Set DEMO_Sheet_GetOrCreate = WS
                 Exit Function
             End If
         Next WS
@@ -996,10 +994,10 @@ Public Function DEMO_GetOrCreateSheet( _
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
     'Return the existing or newly created worksheet
-        Set DEMO_GetOrCreateSheet = WS
+        Set DEMO_Sheet_GetOrCreate = WS
 End Function
 
-Public Sub DEMO_Reset_Sheet( _
+Public Sub DEMO_Sheet_Reset( _
     Optional ByVal WS_In As Variant, _
     Optional ByVal DeleteShapes As Boolean = True, _
     Optional ByVal DeleteTables As Boolean = True, _
@@ -1136,7 +1134,7 @@ Public Sub DEMO_Reset_Sheet( _
             'Reject non-worksheet active sheets such as chart sheets
                 If Not TypeOf ActiveSheet Is Worksheet Then
                     Err.Raise vbObjectError + 2101, _
-                              "M_DEMO_BUILDER.DEMO_Reset_Sheet", _
+                              "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
                               "ActiveSheet is not a worksheet."
                 End If
 
@@ -1151,7 +1149,7 @@ Public Sub DEMO_Reset_Sheet( _
                     'Reject non-worksheet active sheets such as chart sheets
                         If Not TypeOf ActiveSheet Is Worksheet Then
                             Err.Raise vbObjectError + 2102, _
-                                      "M_DEMO_BUILDER.DEMO_Reset_Sheet", _
+                                      "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
                                       "ActiveSheet is not a worksheet."
                         End If
 
@@ -1165,13 +1163,13 @@ Public Sub DEMO_Reset_Sheet( _
 
                 Else
                     Err.Raise vbObjectError + 2103, _
-                              "M_DEMO_BUILDER.DEMO_Reset_Sheet", _
+                              "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
                               "WS_In must be a Worksheet when supplied."
                 End If
 
         Else
             Err.Raise vbObjectError + 2104, _
-                      "M_DEMO_BUILDER.DEMO_Reset_Sheet", _
+                      "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
                       "WS_In must be omitted or be a Worksheet object."
         End If
 
@@ -1190,7 +1188,7 @@ Public Sub DEMO_Reset_Sheet( _
                 WS.Unprotect Password:=ProtectPassword
             Else
                 Err.Raise vbObjectError + 2100, _
-                          "M_DEMO_BUILDER.DEMO_Reset_Sheet", _
+                          "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
                           "Worksheet is protected and no password was supplied."
             End If
         End If
@@ -1868,7 +1866,7 @@ Public Sub DEMO_Create_BoolList( _
 '   Raises errors normally.
 '
 ' DEPENDENCIES
-'   - DEMO_GetOrCreateSheet
+'   - DEMO_Sheet_GetOrCreate
 '   - DEMO_Hide_HelperColumns
 '
 ' NOTES
@@ -1892,7 +1890,7 @@ Public Sub DEMO_Create_BoolList( _
         Set WB = ThisWorkbook
 
     'Get or create the target worksheet
-        Set WS = DEMO_GetOrCreateSheet(WB, WS_Name)
+        Set WS = DEMO_Sheet_GetOrCreate(WB, WS_Name)
 
 '------------------------------------------------------------------------------
 ' WRITE HELPER LIST
@@ -2068,7 +2066,7 @@ Public Sub DEMO_Set_WorkbookName( _
                      RefersTo:="='" & TargetCell.Parent.Name & "'!" & TargetCell.Address
 End Sub
 
-Public Sub DEMO_Add_DemoButton( _
+Public Sub DEMO_Btn_Add( _
     ByVal WS As Worksheet, _
     ByVal ShapeName As String, _
     ByVal CaptionText As String, _
@@ -2076,63 +2074,68 @@ Public Sub DEMO_Add_DemoButton( _
     ByVal TopPos As Double, _
     ByVal ShapeWidth As Double, _
     ByVal ShapeHeight As Double, _
-    Optional ByVal ActionMacro As String = "DEMO_DEMOButton_NotAssigned")
+    Optional ByVal ActionMacro As String = "DEMO_DEMOButton_NotAssigned", _
+    Optional ByVal FillColor As Long = COLOR_BUTTON)
 '
 '==============================================================================
 '                             ADD DEMO BUTTON
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Creates one DEMO button as a worksheet Shape.
+'   Creates one DEMO button as a worksheet Shape
 '
 ' WHY THIS EXISTS
 '   Shape-based buttons are portable, easy to style, and easy to assign to a
-'   placeholder or real macro during workbook-layout generation.
+'   placeholder or real macro during workbook-layout generation
 '
 ' INPUTS
 '   WS
-'     Worksheet where the button should be created.
+'     Worksheet where the button should be created
 '
 '   ShapeName
-'     Internal shape name.
+'     Internal shape name
 '
 '   CaptionText
-'     Visible button caption.
+'     Visible button caption
 '
 '   LeftPos
-'     Button left position.
+'     Button left position
 '
 '   TopPos
-'     Button top position.
+'     Button top position
 '
 '   ShapeWidth
-'     Button width.
+'     Button width
 '
 '   ShapeHeight
-'     Button height.
+'     Button height
 '
 '   ActionMacro (optional)
-'     Macro name to assign to the shape's OnAction property.
+'     Macro name to assign to the shape's OnAction property
+'
+'   FillColor (optional)
+'     Fill color to apply to the button shape
 '
 ' RETURNS
-'   None.
+'   None
 '
 ' BEHAVIOR
 '   - Creates a rounded-rectangle shape
 '   - Applies button styling
+'   - Uses FillColor when provided, otherwise defaults to COLOR_BUTTON
 '   - Writes the requested caption
 '   - Assigns the requested action macro
 '
 ' ERROR POLICY
-'   Raises errors normally.
+'   Raises errors normally
 '
 ' UPDATED
-'   2026-04-19
+'   2026-04-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Shp As Shape   'Created button shape
+    Dim Shp                 As Shape   'Created button shape
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -2140,19 +2143,19 @@ Public Sub DEMO_Add_DemoButton( _
     'Reject a missing worksheet reference
         If WS Is Nothing Then
             Err.Raise vbObjectError + 2007, _
-                      "M_DEMO_BUILDER.DEMO_Add_DemoButton", _
+                      "M_DEMO_BUILDER.DEMO_Btn_Add", _
                       "Worksheet reference cannot be Nothing."
         End If
     'Reject a blank shape name
         If Len(Trim$(ShapeName)) = 0 Then
             Err.Raise vbObjectError + 2008, _
-                      "M_DEMO_BUILDER.DEMO_Add_DemoButton", _
+                      "M_DEMO_BUILDER.DEMO_Btn_Add", _
                       "Shape name cannot be blank."
         End If
     'Reject nonpositive dimensions
         If ShapeWidth <= 0 Or ShapeHeight <= 0 Then
             Err.Raise vbObjectError + 2009, _
-                      "M_DEMO_BUILDER.DEMO_Add_DemoButton", _
+                      "M_DEMO_BUILDER.DEMO_Btn_Add", _
                       "Button width and height must be positive."
         End If
 
@@ -2160,18 +2163,18 @@ Public Sub DEMO_Add_DemoButton( _
 ' CREATE SHAPE
 '------------------------------------------------------------------------------
     'Create a rounded-rectangle shape for the DEMO button
-        Set Shp = WS.Shapes.AddShape(Type:=msoShapeRoundedRectangle, _
-                                     Left:=LeftPos, _
-                                     Top:=TopPos, _
-                                     Width:=ShapeWidth, _
-                                     Height:=ShapeHeight)
+        Set Shp = WS.Shapes.AddShape( _
+                      Type:=msoShapeRoundedRectangle, _
+                      Left:=LeftPos, _
+                      Top:=TopPos, _
+                      Width:=ShapeWidth, _
+                      Height:=ShapeHeight)
 
 '------------------------------------------------------------------------------
 ' ASSIGN BASIC PROPERTIES
 '------------------------------------------------------------------------------
     'Assign the internal shape name
         Shp.Name = ShapeName
-
     'Assign the requested action macro
         If Len(Trim$(ActionMacro)) = 0 Then
             Shp.OnAction = "'" & ThisWorkbook.Name & "'!DEMO_DEMOButton_NotAssigned"
@@ -2180,23 +2183,33 @@ Public Sub DEMO_Add_DemoButton( _
         Else
             Shp.OnAction = "'" & ThisWorkbook.Name & "'!" & ActionMacro
         End If
-        
+
 '------------------------------------------------------------------------------
 ' FORMAT SHAPE
 '------------------------------------------------------------------------------
     'Apply button styling and visible caption text
         With Shp
-            .Fill.ForeColor.RGB = COLOR_BUTTON
-            .Line.ForeColor.RGB = RGB(90, 90, 90)
-            .TextFrame2.TextRange.Text = CaptionText
-            .TextFrame2.TextRange.Font.Size = 10
-            .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
-            .TextFrame2.TextRange.Font.Bold = msoTrue
-            .TextFrame2.VerticalAnchor = msoAnchorMiddle
-            .TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
-        End With
-End Sub
 
+            'Apply the requested fill color
+                .Fill.ForeColor.RGB = FillColor
+            'Apply the standard line color
+                .Line.ForeColor.RGB = RGB(90, 90, 90)
+            'Write the visible caption text
+                .TextFrame2.TextRange.Text = CaptionText
+            'Apply the standard font size
+                .TextFrame2.TextRange.Font.Size = 10
+            'Apply the standard font color
+                .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+            'Apply bold font styling
+                .TextFrame2.TextRange.Font.Bold = msoTrue
+            'Center the text vertically
+                .TextFrame2.VerticalAnchor = msoAnchorMiddle
+            'Center the text horizontally
+                .TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
+
+        End With
+
+End Sub
 Public Sub DEMO_Hide_HelperColumns( _
     ByVal WS As Worksheet, _
     ByVal ColumnAddress As String)
@@ -2694,7 +2707,7 @@ Public Sub DEMO_Write_NamedInputRow( _
 End Sub
 
 
-Public Sub DEMO_Add_ButtonGrid( _
+Public Sub DEMO_Btn_AddGrid( _
     ByVal WS As Worksheet, _
     ByVal AnchorCell As Range, _
     ByRef ButtonSpecs As Variant, _
@@ -2717,59 +2730,206 @@ Public Sub DEMO_Add_ButtonGrid( _
 '     - button name
 '     - button caption
 '     - optional action macro
+'     - optional fill color
 '     - grid position
 '
 ' INPUTS
+'   WS
+'     Worksheet receiving the button grid
+'
+'   AnchorCell
+'     Top-left anchor cell for the grid layout
+'
 '   ButtonSpecs
-'     Variant array where each item is either:
+'     Variant array where each item must itself be an array with one of these
+'     supported layouts:
+'
 '         Array(ButtonName, ButtonCaption)
-'     or:
 '         Array(ButtonName, ButtonCaption, ActionMacro)
+'         Array(ButtonName, ButtonCaption, FillColor)
+'         Array(ButtonName, ButtonCaption, ActionMacro, FillColor)
+'
+'     Notes
+'       - When the 3rd element is text, it is treated as ActionMacro
+'       - When the 3rd element is numeric, it is treated as FillColor
+'       - When the 4th element is present, it is treated as FillColor
+'
+'   ButtonsPerRow (optional)
+'     Number of buttons to place on each grid row
+'
+'   ButtonWidth (optional)
+'     Width of each button
+'
+'   ButtonHeight (optional)
+'     Height of each button
+'
+'   GapX (optional)
+'     Horizontal gap between buttons
+'
+'   GapY (optional)
+'     Vertical gap between buttons
+'
+'   OffsetLeft (optional)
+'     Left offset from AnchorCell
+'
+'   OffsetTop (optional)
+'     Top offset from AnchorCell
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Computes a regular button grid from AnchorCell
+'   - Resolves an optional action macro per button
+'   - Resolves an optional fill color per button
+'   - Creates each button through DEMO_Btn_Add
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' DEPENDENCIES
+'   - DEMO_Btn_Add
 '
 ' UPDATED
-'   2026-04-19
+'   2026-04-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i               As Long      'Loop index
-    Dim GridRow         As Long      'Zero-based button row
-    Dim GridCol         As Long      'Zero-based button column
-    Dim ButtonLeft      As Double    'Computed button left position
-    Dim ButtonTop       As Double    'Computed button top position
-    Dim ActionMacro     As String    'Optional button action macro
+    Dim i                   As Long      'Loop index
+    Dim GridRow             As Long      'Zero-based button row
+    Dim GridCol             As Long      'Zero-based button column
+    Dim ButtonLeft          As Double    'Computed button left position
+    Dim ButtonTop           As Double    'Computed button top position
+    Dim ActionMacro         As String    'Resolved button action macro
+    Dim FillColor           As Long      'Resolved button fill color
+    Dim SpecItem            As Variant   'Current button specification item
+    Dim SpecUBound          As Long      'Upper bound of the current spec item
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Reject a missing worksheet reference
+        If WS Is Nothing Then
+            Err.Raise vbObjectError + 2131, _
+                      "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                      "Worksheet reference cannot be Nothing."
+        End If
+
+    'Reject a missing anchor cell
+        If AnchorCell Is Nothing Then
+            Err.Raise vbObjectError + 2132, _
+                      "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                      "AnchorCell cannot be Nothing."
+        End If
+
+    'Reject a non-array button specification input
+        If Not IsArray(ButtonSpecs) Then
+            Err.Raise vbObjectError + 2133, _
+                      "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                      "ButtonSpecs must be an array."
+        End If
+
+    'Reject an invalid buttons-per-row value
+        If ButtonsPerRow < 1 Then
+            Err.Raise vbObjectError + 2134, _
+                      "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                      "ButtonsPerRow must be >= 1."
+        End If
+
+    'Reject nonpositive button dimensions
+        If ButtonWidth <= 0 Or ButtonHeight <= 0 Then
+            Err.Raise vbObjectError + 2135, _
+                      "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                      "ButtonWidth and ButtonHeight must be positive."
+        End If
 
 '------------------------------------------------------------------------------
 ' BUILD BUTTON GRID
 '------------------------------------------------------------------------------
-    For i = LBound(ButtonSpecs) To UBound(ButtonSpecs)
+    'Create each button from the supplied grid specification
+        For i = LBound(ButtonSpecs) To UBound(ButtonSpecs)
 
-        GridRow = (i - LBound(ButtonSpecs)) \ ButtonsPerRow
-        GridCol = (i - LBound(ButtonSpecs)) Mod ButtonsPerRow
+            'Read the current button specification item
+                SpecItem = ButtonSpecs(i)
 
-        ButtonLeft = AnchorCell.Left + OffsetLeft + (GridCol * (ButtonWidth + GapX))
-        ButtonTop = AnchorCell.Top + OffsetTop + (GridRow * (ButtonHeight + GapY))
+            'Reject a non-array button specification item
+                If Not IsArray(SpecItem) Then
+                    Err.Raise vbObjectError + 2136, _
+                              "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                              "Each ButtonSpecs item must be an array."
+                End If
 
-        'Resolve the optional action macro when supplied
-            If UBound(ButtonSpecs(i)) >= 2 Then
-                ActionMacro = CStr(ButtonSpecs(i)(2))
-            Else
+            'Capture the upper bound of the current specification item
+                SpecUBound = UBound(SpecItem)
+
+            'Reject a specification item with fewer than name + caption
+                If SpecUBound < 1 Then
+                    Err.Raise vbObjectError + 2137, _
+                              "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                              "Each ButtonSpecs item must contain at least ButtonName and ButtonCaption."
+                End If
+
+            'Compute the zero-based grid row
+                GridRow = (i - LBound(ButtonSpecs)) \ ButtonsPerRow
+
+            'Compute the zero-based grid column
+                GridCol = (i - LBound(ButtonSpecs)) Mod ButtonsPerRow
+
+            'Compute the left position of the current button
+                ButtonLeft = AnchorCell.Left + OffsetLeft + (GridCol * (ButtonWidth + GapX))
+
+            'Compute the top position of the current button
+                ButtonTop = AnchorCell.Top + OffsetTop + (GridRow * (ButtonHeight + GapY))
+
+'------------------------------------------------------------------------------
+' RESOLVE OPTIONAL ACTION MACRO / FILL COLOR
+'------------------------------------------------------------------------------
+            'Initialize the default action macro
                 ActionMacro = "DEMO_DEMOButton_NotAssigned"
-            End If
 
-        'Create the current button
-            DEMO_Add_DemoButton _
-                WS, _
-                CStr(ButtonSpecs(i)(0)), _
-                CStr(ButtonSpecs(i)(1)), _
-                ButtonLeft, _
-                ButtonTop, _
-                ButtonWidth, _
-                ButtonHeight, _
-                ActionMacro
+            'Initialize the default fill color
+                FillColor = COLOR_BUTTON
 
-    Next i
+            'Resolve the optional 3rd element
+                If SpecUBound >= 2 Then
+
+                    'Treat text as ActionMacro
+                        If VarType(SpecItem(2)) = vbString Then
+                            ActionMacro = CStr(SpecItem(2))
+
+                    'Treat numeric values as FillColor
+                        ElseIf IsNumeric(SpecItem(2)) Then
+                            FillColor = CLng(SpecItem(2))
+
+                        End If
+
+                End If
+
+            'Resolve the optional 4th element as FillColor
+                If SpecUBound >= 3 Then
+                    If IsNumeric(SpecItem(3)) Then
+                        FillColor = CLng(SpecItem(3))
+                    End If
+                End If
+
+'------------------------------------------------------------------------------
+' CREATE CURRENT BUTTON
+'------------------------------------------------------------------------------
+            'Create the current button with the resolved action macro and fill color
+                DEMO_Btn_Add _
+                    WS, _
+                    CStr(SpecItem(0)), _
+                    CStr(SpecItem(1)), _
+                    ButtonLeft, _
+                    ButtonTop, _
+                    ButtonWidth, _
+                    ButtonHeight, _
+                    ActionMacro, _
+                    FillColor
+
+        Next i
 
 End Sub
 Public Function DEMO_Create_TableSection( _
@@ -2985,7 +3145,7 @@ End Function
 
 
 
-Public Sub Btn_ApplyState( _
+Public Sub DEMO_Btn_ApplyState( _
     ByVal Shp As Shape, _
     ByVal StateName As String)
 '
@@ -3060,7 +3220,7 @@ Public Sub Btn_ApplyState( _
 End Sub
 
 
-Private Function Btn_CaptureAppearance( _
+Private Function DEMO_Btn_CaptureAppearance( _
     ByVal Shp As Shape) _
     As tButtonAppearance
 '
@@ -3137,12 +3297,12 @@ Private Function Btn_CaptureAppearance( _
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
-    Btn_CaptureAppearance = S
+    DEMO_Btn_CaptureAppearance = S
 
 End Function
 
 
-Private Sub Btn_RestoreAppearance( _
+Private Sub DEMO_Btn_RestoreAppearance( _
     ByVal Shp As Shape, _
     ByRef SavedState As tButtonAppearance)
 '
@@ -3211,7 +3371,7 @@ End Sub
 
 
 
-Public Sub Btn_Click()
+Public Sub DEMO_Btn_Click()
 '
 '==============================================================================
 '                                BUTTON CLICK
@@ -3243,9 +3403,9 @@ Public Sub Btn_Click()
 '   Best effort only; exits quietly when no valid caller shape can be resolved
 '
 ' DEPENDENCIES
-'   - Btn_CaptureAppearance
-'   - Btn_ApplyState
-'   - Btn_RestoreAppearance
+'   - DEMO_Btn_CaptureAppearance
+'   - DEMO_Btn_ApplyState
+'   - DEMO_Btn_RestoreAppearance
 '
 ' NOTES
 '   The short visual delay uses Timer() elapsed-delta logic so it remains safe
@@ -3285,13 +3445,13 @@ Public Sub Btn_Click()
 ' CAPTURE ORIGINAL APPEARANCE
 '------------------------------------------------------------------------------
     'Capture the exact original appearance before applying the pressed effect
-        SavedState = Btn_CaptureAppearance(Shp)
+        SavedState = DEMO_Btn_CaptureAppearance(Shp)
 
 '------------------------------------------------------------------------------
 ' APPLY PRESSED STATE
 '------------------------------------------------------------------------------
     'Apply the pressed color state
-        Btn_ApplyState Shp, "Pressed"
+        DEMO_Btn_ApplyState Shp, "Pressed"
     'Apply a small pressed-position effect
         Shp.Top = Shp.Top + 1
         Shp.Left = Shp.Left + 1
@@ -3329,22 +3489,22 @@ Public Sub Btn_Click()
 ' RESTORE ORIGINAL APPEARANCE
 '------------------------------------------------------------------------------
     'Restore the exact original appearance
-        Btn_RestoreAppearance Shp, SavedState
+        DEMO_Btn_RestoreAppearance Shp, SavedState
 
 End Sub
 
-Public Sub DEMO_PlayButtonFeedback()
+Public Sub DEMO_Btn_PlayFeedback()
 
 '
 '==============================================================================
-'                       DEMO_PlayButtonFeedback
+'                       DEMO_Btn_PlayFeedback
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Invoke the shared button-click feedback helper on a best-effort basis
 '
 ' WHY THIS EXISTS
 '   Several public demo actions want the same visual pressed-state feedback
-'   without duplicating local error suppression around Btn_Click
+'   without duplicating local error suppression around DEMO_Btn_Click
 '
 ' RETURNS
 '   None
@@ -3362,7 +3522,7 @@ Public Sub DEMO_PlayButtonFeedback()
 '------------------------------------------------------------------------------
     'Play the shared button-click visual feedback on a best-effort basis
         On Error Resume Next
-        Btn_Click
+        DEMO_Btn_Click
         On Error GoTo 0
 
 End Sub
@@ -3440,14 +3600,14 @@ Public Sub DEMO_SB_SetProgress( _
 
 End Sub
 
-Public Sub DEMO_AddFormsCheckBox( _
+Public Sub DEMO_CB_AddForms( _
     ByVal WS As Worksheet, _
     ByVal AnchorRange As Range, _
     Optional ByVal CheckBoxNames As Variant)
 
 '
 '==============================================================================
-'                           DEMO_AddFormsCheckBox
+'                           DEMO_CB_AddForms
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Add one Forms check box for each cell in the supplied anchor range
@@ -3519,28 +3679,28 @@ Public Sub DEMO_AddFormsCheckBox( _
     'Reject a missing worksheet reference
         If WS Is Nothing Then
             Err.Raise vbObjectError + 2141, _
-                      "M_DEMO_BUILDER.DEMO_AddFormsCheckBox", _
+                      "M_DEMO_BUILDER.DEMO_CB_AddForms", _
                       "Worksheet reference cannot be Nothing"
         End If
 
     'Reject a missing anchor range
         If AnchorRange Is Nothing Then
             Err.Raise vbObjectError + 2142, _
-                      "M_DEMO_BUILDER.DEMO_AddFormsCheckBox", _
+                      "M_DEMO_BUILDER.DEMO_CB_AddForms", _
                       "AnchorRange cannot be Nothing"
         End If
 
     'Reject anchor ranges that do not belong to the target worksheet
         If Not AnchorRange.Worksheet Is WS Then
             Err.Raise vbObjectError + 2143, _
-                      "M_DEMO_BUILDER.DEMO_AddFormsCheckBox", _
+                      "M_DEMO_BUILDER.DEMO_CB_AddForms", _
                       "AnchorRange must belong to the target worksheet"
         End If
 
     'Reject non-rectangular multi-area ranges
         If AnchorRange.Areas.Count > 1 Then
             Err.Raise vbObjectError + 2144, _
-                      "M_DEMO_BUILDER.DEMO_AddFormsCheckBox", _
+                      "M_DEMO_BUILDER.DEMO_CB_AddForms", _
                       "AnchorRange must be one contiguous rectangular range"
         End If
 
@@ -3554,7 +3714,7 @@ Public Sub DEMO_AddFormsCheckBox( _
 ' VALIDATE OPTIONAL NAMES INPUT
 '------------------------------------------------------------------------------
     'Validate the supplied naming input against the target-cell count
-        DEMO_ValidateCheckBoxNamesInput AnchorRange, CheckBoxNames
+        DEMO_CB_ValidateNamesInput AnchorRange, CheckBoxNames
 
 '------------------------------------------------------------------------------
 ' CREATE ONE CHECK BOX PER CELL
@@ -3568,7 +3728,7 @@ Public Sub DEMO_AddFormsCheckBox( _
                 CellIndex = CellIndex + 1
 
             'Resolve the checkbox name for the current target cell
-                ResolvedName = DEMO_ResolveCheckBoxName(TargetCell, CheckBoxNames, CellIndex)
+                ResolvedName = DEMO_CB_ResolveName(TargetCell, CheckBoxNames, CellIndex)
 
             'Create the current Forms check box
                 DEMO_AddOneFormsCheckBox WS, TargetCell, ResolvedName
@@ -3578,16 +3738,16 @@ Public Sub DEMO_AddFormsCheckBox( _
 End Sub
 
 
-Private Sub DEMO_ValidateCheckBoxNamesInput( _
+Private Sub DEMO_CB_ValidateNamesInput( _
     ByVal AnchorRange As Range, _
     ByVal CheckBoxNames As Variant)
 
 '
 '==============================================================================
-'                     DEMO_ValidateCheckBoxNamesInput
+'                     DEMO_CB_ValidateNamesInput
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Validate the optional CheckBoxNames input for DEMO_AddFormsCheckBox
+'   Validate the optional CheckBoxNames input for DEMO_CB_AddForms
 '
 ' WHY THIS EXISTS
 '   The public checkbox builder accepts several naming forms, so validation is
@@ -3655,7 +3815,7 @@ Private Sub DEMO_ValidateCheckBoxNamesInput( _
 
             'Reject all other input shapes
                 Err.Raise vbObjectError + 2145, _
-                          "M_DEMO_BUILDER.DEMO_ValidateCheckBoxNamesInput", _
+                          "M_DEMO_BUILDER.DEMO_CB_ValidateNamesInput", _
                           "For a single-cell anchor, CheckBoxNames must be omitted, be a String, or be a one-element array"
 
         End If
@@ -3666,7 +3826,7 @@ Private Sub DEMO_ValidateCheckBoxNamesInput( _
     'For a multi-cell anchor, require an array when names were supplied
         If Not IsArray(CheckBoxNames) Then
             Err.Raise vbObjectError + 2146, _
-                      "M_DEMO_BUILDER.DEMO_ValidateCheckBoxNamesInput", _
+                      "M_DEMO_BUILDER.DEMO_CB_ValidateNamesInput", _
                       "For a multi-cell anchor, CheckBoxNames must be omitted or be a one-dimensional array"
         End If
 
@@ -3676,14 +3836,14 @@ Private Sub DEMO_ValidateCheckBoxNamesInput( _
 
         If ArrHi - ArrLo + 1 <> CellCount Then
             Err.Raise vbObjectError + 2147, _
-                      "M_DEMO_BUILDER.DEMO_ValidateCheckBoxNamesInput", _
+                      "M_DEMO_BUILDER.DEMO_CB_ValidateNamesInput", _
                       "When supplied for a multi-cell anchor, CheckBoxNames must contain exactly one name per target cell"
         End If
 
 End Sub
 
 
-Private Function DEMO_ResolveCheckBoxName( _
+Private Function DEMO_CB_ResolveName( _
     ByVal TargetCell As Range, _
     ByVal CheckBoxNames As Variant, _
     ByVal CellIndex As Long) _
@@ -3691,7 +3851,7 @@ Private Function DEMO_ResolveCheckBoxName( _
 
 '
 '==============================================================================
-'                       DEMO_ResolveCheckBoxName
+'                       DEMO_CB_ResolveName
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolve the effective checkbox name for one target cell
@@ -3736,7 +3896,7 @@ Private Function DEMO_ResolveCheckBoxName( _
 '------------------------------------------------------------------------------
     'Auto-generate a name when the optional names input was omitted
         If IsMissing(CheckBoxNames) Then
-            DEMO_ResolveCheckBoxName = DEMO_DefaultCheckBoxName(TargetCell)
+            DEMO_CB_ResolveName = DEMO_CB_DefaultName(TargetCell)
             Exit Function
         End If
 
@@ -3745,7 +3905,7 @@ Private Function DEMO_ResolveCheckBoxName( _
 '------------------------------------------------------------------------------
     'Use the supplied scalar string for the single-cell case
         If VarType(CheckBoxNames) = vbString Then
-            DEMO_ResolveCheckBoxName = Trim$(CStr(CheckBoxNames))
+            DEMO_CB_ResolveName = Trim$(CStr(CheckBoxNames))
             Exit Function
         End If
 
@@ -3755,26 +3915,26 @@ Private Function DEMO_ResolveCheckBoxName( _
     'Use the corresponding array element for the current cell
         ArrLo = LBound(CheckBoxNames)
 
-        DEMO_ResolveCheckBoxName = Trim$(CStr(CheckBoxNames(ArrLo + CellIndex - 1)))
+        DEMO_CB_ResolveName = Trim$(CStr(CheckBoxNames(ArrLo + CellIndex - 1)))
 
 '------------------------------------------------------------------------------
 ' NORMALIZE BLANK NAME
 '------------------------------------------------------------------------------
     'Fall back to an auto-generated name when the resolved name is blank
-        If Len(DEMO_ResolveCheckBoxName) = 0 Then
-            DEMO_ResolveCheckBoxName = DEMO_DefaultCheckBoxName(TargetCell)
+        If Len(DEMO_CB_ResolveName) = 0 Then
+            DEMO_CB_ResolveName = DEMO_CB_DefaultName(TargetCell)
         End If
 
 End Function
 
 
-Private Function DEMO_DefaultCheckBoxName( _
+Private Function DEMO_CB_DefaultName( _
     ByVal TargetCell As Range) _
     As String
 
 '
 '==============================================================================
-'                        DEMO_DefaultCheckBoxName
+'                        DEMO_CB_DefaultName
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a deterministic default checkbox name from one target cell
@@ -3800,7 +3960,7 @@ Private Function DEMO_DefaultCheckBoxName( _
 ' RETURN DEFAULT NAME
 '------------------------------------------------------------------------------
     'Build a deterministic default name from the cell address
-        DEMO_DefaultCheckBoxName = "chk_" & Replace$(TargetCell.Address(False, False), "$", vbNullString)
+        DEMO_CB_DefaultName = "chk_" & Replace$(TargetCell.Address(False, False), "$", vbNullString)
 
 End Function
 
