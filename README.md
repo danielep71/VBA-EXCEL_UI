@@ -1,6 +1,6 @@
 <img width="1774" height="338" alt="excel_ui_Banner 2" src="https://github.com/user-attachments/assets/702a3603-3744-4012-8a4c-fcf44d39bba8" />
 
-# VBA-EXCEL_UI
+# VBA-EXCEL UI
 
 > Windows Excel UI control for VBA — show, hide, snapshot, and restore Ribbon, bars, worksheet aids, and title bar through a structured tri-state API
 
