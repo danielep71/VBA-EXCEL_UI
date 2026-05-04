@@ -5,11 +5,15 @@
 > Windows Excel UI control for VBA — show, hide, snapshot, and restore Ribbon, bars, worksheet aids, and title bar through a structured tri-state API
 
 ---
+
 <p align="center">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Excel_VBA-217346">
-  <img alt="Office" src="https://img.shields.io/badge/office-32%2F64--bit-blue">
-  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
-  <img alt="Status" src="https://img.shields.io/badge/status-active_development-orange">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-Excel_VBA-217346">
+  <img alt="Office" src="https://img.shields.io/badge/Office-32%2F64--bit-blue">
+  <img alt="Layer" src="https://img.shields.io/badge/Layer-UI controller-6f42c1">
+  <img alt="OS" src="https://img.shields.io/badge/OS-Windows-0078D6">
+  <img alt="API" src="https://img.shields.io/badge/API-WinAPI-blue">
+  <img alt="Status" src="https://img.shields.io/badge/Status-FINAL-brightgreen">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
 </p>
 
 ---
