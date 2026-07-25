@@ -17,8 +17,8 @@ Attribute VB_Name = "M_EXCEL_UI"
 '   (Ribbon, status bar, scroll bars, formula bar, headings, workbook tabs,
 '   gridlines), but it does not expose direct title-bar visibility control
 '
-'   This module unifies both approaches behind a safe, explicit API so callers
-'   do not need to duplicate scattered UI-handling code
+'   This module unifies both approaches behind a defensive, explicit API so
+'   callers do not need to duplicate scattered UI-handling code
 '
 ' PUBLIC SURFACE
 '   - UIVisibility                   Tri-state visibility enum
@@ -86,29 +86,30 @@ Attribute VB_Name = "M_EXCEL_UI"
 '     and bitness-safe WinAPI wrappers
 '
 ' NOTES
-'   - This module does NOT automatically snapshot and restore prior Excel
-'     object-model UI state
+'   - Selective and show-all operations do not capture prior state automatically
+'   - Use UI_CaptureExcelUIState explicitly when later restoration is required
 '   - UI_ShowExcelUI means "show all managed UI", not "restore previous state"
-'   - UI_SetExcelUI is the preferred entry point for selective control
-'   - UI_SetExcelUI_WithResult offers the same best-effort behavior while
-'     returning structured diagnostics without a class-module dependency
+'   - UI_SetExcelUI is the simple fire-and-forget selective entry point
+'   - UI_SetExcelUI_WithResult provides the same best-effort application with
+'     structured diagnostics and no class-module dependency
 '   - Ribbon control relies on Application.ExecuteExcel4Macro
 '   - Title-bar control affects the Excel window represented by
 '     Application.Hwnd, not a user-specific saved UI state
-'   - The original main-window style is snapshotted against the current window
-'     handle, so the restore path can follow Application.Hwnd safely if the
-'     main Excel window is recreated
+'   - The internal title-bar style snapshot is keyed to Application.Hwnd and is
+'     refreshed when the main-window handle changes
+'   - Restoring the exact captured style can replace intervening frame-style
+'     changes made by another component
 '   - The explicit snapshot / reset feature is separate from UI_ShowExcelUI and
-'     is best-effort for per-window restore
+'     restores per-window state by common collection index on a best-effort basis
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.0.0
+'   1.0.1
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -322,7 +323,7 @@ Public Sub UI_SetExcelUI(Optional ByVal Ribbon As UIVisibility = _
 '   - Changes affect the current Excel instance, not only the active workbook
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -337,14 +338,11 @@ Public Sub UI_SetExcelUI(Optional ByVal Ribbon As UIVisibility = _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
 ' APPLY STATE THROUGH INTERNAL WORKER
 '------------------------------------------------------------------------------
-    'Delegate the full best-effort application flow to the shared worker,
-    'requesting Immediate Window logging for any failures
         UI_ApplyExcelUIState ProcName:=PROC, Ribbon:=Ribbon, _
             StatusBar:=StatusBar, ScrollBars:=ScrollBars, FormulaBar:=FormulaBar, _
             Headings:=Headings, WorkbookTabs:=WorkbookTabs, Gridlines:=Gridlines, _
@@ -355,18 +353,14 @@ Public Sub UI_SetExcelUI(Optional ByVal Ribbon As UIVisibility = _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Leave quietly through the normal termination path
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write an unexpected-procedure-level diagnostic line without interrupting
-    'the caller
         UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
 
-    'Exit quietly after logging
         Resume SafeExit
 
 End Sub
@@ -411,7 +405,7 @@ Public Sub UI_HideExcelUI()
 '   - For selective control, use UI_SetExcelUI directly
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -423,7 +417,6 @@ Public Sub UI_HideExcelUI()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
@@ -438,18 +431,14 @@ Public Sub UI_HideExcelUI()
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Leave quietly through the normal termination path
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write an unexpected-procedure-level diagnostic line without interrupting
-    'the caller
         UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
 
-    'Exit quietly after logging
         Resume SafeExit
 
 End Sub
@@ -465,7 +454,7 @@ Public Sub UI_ShowExcelUI()
 '
 ' WHY THIS EXISTS
 '   Workbook solutions that temporarily suppress the Excel shell often need a
-'   single, deterministic call to restore all managed UI elements to visible
+'   single, deterministic call that forces all managed UI elements to visible
 '   state
 '
 ' RETURNS
@@ -497,7 +486,7 @@ Public Sub UI_ShowExcelUI()
 '   - For selective control, use UI_SetExcelUI directly
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -509,7 +498,6 @@ Public Sub UI_ShowExcelUI()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
@@ -524,17 +512,13 @@ Public Sub UI_ShowExcelUI()
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Leave quietly through the normal termination path
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write an unexpected-procedure-level diagnostic line without interrupting
-    'the caller
         UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
-    'Exit quietly after logging
         Resume SafeExit
 
 End Sub
@@ -659,7 +643,7 @@ Public Function UI_SetExcelUI_WithResult(Optional ByVal Ribbon As UIVisibility =
 '     or failure count do not need to manage an array
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -683,14 +667,11 @@ Public Function UI_SetExcelUI_WithResult(Optional ByVal Ribbon As UIVisibility =
             CaptureFailureList
         Succeeded = True
 
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
 ' APPLY STATE THROUGH INTERNAL WORKER
 '------------------------------------------------------------------------------
-    'Delegate the full best-effort application flow to the shared worker,
-    'requesting structured failure capture rather than Immediate Window logging
         Succeeded = UI_ApplyExcelUIState(ProcName:=PROC, Ribbon:=Ribbon, _
             StatusBar:=StatusBar, ScrollBars:=ScrollBars, FormulaBar:=FormulaBar, _
             Headings:=Headings, WorkbookTabs:=WorkbookTabs, Gridlines:=Gridlines, _
@@ -708,10 +689,8 @@ SafeExit:
             FailureList = InternalFailureList
         End If
 
-    'Return the overall success flag to the caller
         UI_SetExcelUI_WithResult = Succeeded
 
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
@@ -724,7 +703,6 @@ Fail:
             FailureList:=InternalFailureList, CaptureFailureList:=CaptureFailureList, _
             Stage:="Unexpected", Detail:=UI_BuildRuntimeErrorText
 
-    'Leave quietly through the normal termination path
         Resume SafeExit
 
 End Function
@@ -757,8 +735,8 @@ Public Sub UI_CaptureExcelUIState()
 '   - Captures application-level state
 '   - Captures per-window state by index
 '   - Captures title-bar state on a best-effort basis
-'   - Marks the snapshot as available even when Ribbon / TitleBar state could
-'     only be captured best-effort
+'   - Marks the snapshot as available after object-model capture completes
+'   - Restores Ribbon / TitleBar later only when their reads succeeded
 '
 ' ERROR POLICY
 '   - Does NOT raise to callers
@@ -771,7 +749,7 @@ Public Sub UI_CaptureExcelUIState()
 '   - UI_LogFailure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -786,7 +764,6 @@ Public Sub UI_CaptureExcelUIState()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
 '------------------------------------------------------------------------------
@@ -826,21 +803,15 @@ Public Sub UI_CaptureExcelUIState()
         m_SnapshotWindowCount = Application.Windows.Count
     'Allocate and fill per-window arrays only when at least one window exists
         If m_SnapshotWindowCount > 0 Then
-            'Allocate the headings array
                 ReDim m_SnapshotHeadingsVisible(1 To m_SnapshotWindowCount)
-            'Allocate the workbook-tabs array
                 ReDim m_SnapshotWorkbookTabsVisible(1 To m_SnapshotWindowCount)
-            'Allocate the gridlines array
                 ReDim m_SnapshotGridlinesVisible(1 To m_SnapshotWindowCount)
             'Capture the state of each current Excel window by index
                 For i = 1 To m_SnapshotWindowCount
-                    'Capture Headings visibility
                         m_SnapshotHeadingsVisible(i) = _
                             Application.Windows(i).DisplayHeadings
-                    'Capture WorkbookTabs visibility
                         m_SnapshotWorkbookTabsVisible(i) = _
                             Application.Windows(i).DisplayWorkbookTabs
-                    'Capture Gridlines visibility
                         m_SnapshotGridlinesVisible(i) = _
                             Application.Windows(i).DisplayGridlines
                 Next i
@@ -849,14 +820,12 @@ Public Sub UI_CaptureExcelUIState()
 '------------------------------------------------------------------------------
 ' MARK SNAPSHOT AVAILABLE
 '------------------------------------------------------------------------------
-    'Mark the snapshot as available after capture completes
         m_HasExcelUIStateSnapshot = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
@@ -885,14 +854,13 @@ Public Function UI_HasExcelUIStateSnapshot() As Boolean
 '   FALSE => no snapshot is available
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' RETURN SNAPSHOT AVAILABILITY
 '------------------------------------------------------------------------------
-    'Return whether a captured UI snapshot is currently available
         UI_HasExcelUIStateSnapshot = m_HasExcelUIStateSnapshot
 
 End Function
@@ -934,7 +902,7 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '   - UI_LogFailure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -952,7 +920,6 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
     'Do nothing when no explicit snapshot is available
@@ -1056,7 +1023,6 @@ SafeExit:
     'Leave the quiet-update scope and restore ScreenUpdating when needed
         UI_EndQuietUIUpdate OldScreenUpdating, QuietModeChanged
 
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
@@ -1091,7 +1057,7 @@ Public Sub UI_ClearExcelUIStateSnapshot()
 '   - Does NOT raise to callers
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1210,7 +1176,7 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
 '   - UI_BuildRuntimeErrorText
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1248,7 +1214,6 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
     'Initialize the result buffers in their clean-success state
         UI_ClearResultBuffer FailureCount, FailureList, CaptureFailureList
         Succeeded = True
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
     'Enter the quiet-update scope to reduce worksheet redraw where possible
         UI_BeginQuietUIUpdate OldScreenUpdating, QuietModeChanged
@@ -1319,11 +1284,7 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
     'Apply Ribbon visibility when requested and valid
         If ValidRibbon Then
             If Ribbon <> UI_LeaveUnchanged Then
-                'Convert the tri-state enum to the explicit Boolean state
-                'expected by the lower-level helper
                     ShowFlag = UI_VisibilityToBoolean(Ribbon)
-                'Attempt the Ribbon update only when needed and record any
-                'failure without interrupting later operations
                     If Not UI_TrySetRibbonVisibleIfNeeded(ShowFlag, Msg) Then
                         UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
                             FailureCount, FailureList, CaptureFailureList, "Ribbon", _
@@ -1335,11 +1296,7 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
     'Apply StatusBar visibility when requested and valid
         If ValidStatusBar Then
             If StatusBar <> UI_LeaveUnchanged Then
-                'Convert the tri-state enum to the explicit Boolean state
-                'expected by the lower-level helper
                     ShowFlag = UI_VisibilityToBoolean(StatusBar)
-                'Attempt the property write only when needed and record any
-                'failure without interrupting later operations
                     If Not UI_TrySetBooleanPropertyIfNeeded(Application, _
                         "DisplayStatusBar", ShowFlag, Msg) Then
                         UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
@@ -1352,11 +1309,7 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
     'Apply ScrollBars visibility when requested and valid
         If ValidScrollBars Then
             If ScrollBars <> UI_LeaveUnchanged Then
-                'Convert the tri-state enum to the explicit Boolean state
-                'expected by the lower-level helper
                     ShowFlag = UI_VisibilityToBoolean(ScrollBars)
-                'Attempt the property write only when needed and record any
-                'failure without interrupting later operations
                     If Not UI_TrySetBooleanPropertyIfNeeded(Application, _
                         "DisplayScrollBars", ShowFlag, Msg) Then
                         UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
@@ -1368,11 +1321,7 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
     'Apply FormulaBar visibility when requested and valid
         If ValidFormulaBar Then
             If FormulaBar <> UI_LeaveUnchanged Then
-                'Convert the tri-state enum to the explicit Boolean state
-                'expected by the lower-level helper
                     ShowFlag = UI_VisibilityToBoolean(FormulaBar)
-                'Attempt the property write only when needed and record any
-                'failure without interrupting later operations
                     If Not UI_TrySetBooleanPropertyIfNeeded(Application, _
                         "DisplayFormulaBar", ShowFlag, Msg) Then
                         UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
@@ -1412,9 +1361,6 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
                 For Each W In Application.Windows
                     'Apply headings visibility when requested
                         If DoHeadings Then
-                            'Attempt the property write only when needed and
-                            'record any failure without interrupting later
-                            'operations
                                 If Not UI_TrySetBooleanPropertyIfNeeded(W, _
                                     "DisplayHeadings", ShowHeadings, Msg) Then
                                     UI_HandleApplyFailure ProcName, LogFailures, _
@@ -1425,9 +1371,6 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
                         End If
                     'Apply workbook-tabs visibility when requested
                         If DoWorkbookTabs Then
-                            'Attempt the property write only when needed and
-                            'record any failure without interrupting later
-                            'operations
                                 If Not UI_TrySetBooleanPropertyIfNeeded(W, _
                                     "DisplayWorkbookTabs", ShowWorkbookTabs, Msg) _
                                     Then
@@ -1439,9 +1382,6 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
                         End If
                     'Apply gridlines visibility when requested
                         If DoGridlines Then
-                            'Attempt the property write only when needed and
-                            'record any failure without interrupting later
-                            'operations
                                 If Not UI_TrySetBooleanPropertyIfNeeded(W, _
                                     "DisplayGridlines", ShowGridlines, Msg) Then
                                     UI_HandleApplyFailure ProcName, LogFailures, _
@@ -1459,11 +1399,7 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
     'Apply title-bar visibility when requested and valid
         If ValidTitleBar Then
             If TitleBar <> UI_LeaveUnchanged Then
-                'Convert the tri-state enum to the explicit Boolean state
-                'expected by the lower-level helper
                     ShowFlag = UI_VisibilityToBoolean(TitleBar)
-                'Attempt the title-bar update only when needed and record any
-                'failure without interrupting later operations
                     If Not UI_TrySetTitleBarVisibleIfNeeded(ShowFlag, Msg) Then
                         UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
                             FailureCount, FailureList, CaptureFailureList, _
@@ -1478,9 +1414,7 @@ Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As 
 SafeExit:
     'Leave the quiet-update scope and restore ScreenUpdating when needed
         UI_EndQuietUIUpdate OldScreenUpdating, QuietModeChanged
-    'Return the overall success flag to the caller
         UI_ApplyExcelUIState = Succeeded
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
@@ -1491,7 +1425,6 @@ Fail:
     'optionally log it
         UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
             FailureList, CaptureFailureList, "Unexpected", UI_BuildRuntimeErrorText
-    'Leave quietly through the normal termination path
         Resume SafeExit
 
 End Function
@@ -1530,7 +1463,7 @@ Private Function UI_IsValidVisibility(ByVal Visibility As UIVisibility) As Boole
 '   - Does NOT raise
 '
 ' UPDATED
-'   2026-04-21
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1593,22 +1526,19 @@ Private Sub UI_HandleApplyFailure(ByVal ProcName As String, ByVal LogFailures As
 '   - UI_LogFailure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' RECORD FAILURE
 '------------------------------------------------------------------------------
-    'Record the failure into the structured result buffers
         UI_AddFailureToResult Succeeded, FailureCount, FailureList, _
             CaptureFailureList, Stage, Detail
 
 '------------------------------------------------------------------------------
 ' OPTIONAL LOGGING
 '------------------------------------------------------------------------------
-    'Write the failure to the Immediate Window only when requested by the
-    'caller path
         If LogFailures Then
             UI_LogFailure ProcName, Stage, Detail
         End If
@@ -1638,14 +1568,13 @@ Private Sub UI_ClearResultBuffer(ByRef FailureCount As Long, ByRef FailureList _
 '   - Does NOT raise
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Reset the recorded failure count to zero
         FailureCount = 0
 
     'Initialize the failure-list output only when the caller requested it
@@ -1710,7 +1639,7 @@ Private Sub UI_AddFailureToResult(ByRef Succeeded As Boolean, ByRef FailureCount
 '   - Does NOT raise
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1729,17 +1658,13 @@ Private Sub UI_AddFailureToResult(ByRef Succeeded As Boolean, ByRef FailureCount
 '------------------------------------------------------------------------------
 ' UPDATE RESULT STATUS
 '------------------------------------------------------------------------------
-    'Mark the overall result as unsuccessful
         Succeeded = False
 
-    'Increment the recorded failure count
         FailureCount = FailureCount + 1
 
 '------------------------------------------------------------------------------
 ' APPEND FAILURE TEXT
 '------------------------------------------------------------------------------
-    'Append the formatted failure text only when the caller requested the
-    'failure-list output
         If CaptureFailureList Then
 
             'Allocate the first entry when the failure list is still empty
@@ -1753,10 +1678,8 @@ Private Sub UI_AddFailureToResult(ByRef Succeeded As Boolean, ByRef FailureCount
                     ReDim Preserve Arr(1 To FailureCount)
                 End If
 
-            'Store the new failure entry at the current 1-based position
                 Arr(FailureCount) = FailureText
 
-            'Write the expanded array back into the Variant output
                 FailureList = Arr
 
         End If
@@ -1794,7 +1717,7 @@ Private Sub UI_BeginQuietUIUpdate(ByRef OldScreenUpdating As Boolean, ByRef _
 '   - Best-effort only
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1807,7 +1730,6 @@ Private Sub UI_BeginQuietUIUpdate(ByRef OldScreenUpdating As Boolean, ByRef _
     'Capture the current ScreenUpdating state
         OldScreenUpdating = Application.ScreenUpdating
 
-    'Initialize the changed flag
         QuietModeChanged = False
 
 '------------------------------------------------------------------------------
@@ -1849,7 +1771,7 @@ Private Sub UI_EndQuietUIUpdate(ByVal OldScreenUpdating As Boolean, ByVal _
 '   - Best-effort only
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1910,7 +1832,7 @@ Private Function UI_TrySetRibbonVisibleIfNeeded(ByVal IsVisible As Boolean, _
 '   - UI_TrySetRibbonVisible
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1922,10 +1844,8 @@ Private Function UI_TrySetRibbonVisibleIfNeeded(ByVal IsVisible As Boolean, _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the default result state
         UI_TrySetRibbonVisibleIfNeeded = False
         FailMsg = vbNullString
 
@@ -1944,7 +1864,6 @@ Private Function UI_TrySetRibbonVisibleIfNeeded(ByVal IsVisible As Boolean, _
 '------------------------------------------------------------------------------
 ' APPLY RIBBON WRITE
 '------------------------------------------------------------------------------
-    'Clear any prior read diagnostic and attempt the actual write
         FailMsg = vbNullString
         UI_TrySetRibbonVisibleIfNeeded = UI_TrySetRibbonVisible(IsVisible, _
             FailMsg)
@@ -1953,14 +1872,12 @@ Private Function UI_TrySetRibbonVisibleIfNeeded(ByVal IsVisible As Boolean, _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2006,7 +1923,7 @@ Private Function UI_TrySetTitleBarVisibleIfNeeded(ByVal IsVisible As Boolean, _
 '   - UI_TrySetTitleBarVisible
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2018,10 +1935,8 @@ Private Function UI_TrySetTitleBarVisibleIfNeeded(ByVal IsVisible As Boolean, _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the default result state
         UI_TrySetTitleBarVisibleIfNeeded = False
         FailMsg = vbNullString
 
@@ -2040,7 +1955,6 @@ Private Function UI_TrySetTitleBarVisibleIfNeeded(ByVal IsVisible As Boolean, _
 '------------------------------------------------------------------------------
 ' APPLY TITLE-BAR WRITE
 '------------------------------------------------------------------------------
-    'Clear any prior read diagnostic and attempt the actual write
         FailMsg = vbNullString
         UI_TrySetTitleBarVisibleIfNeeded = UI_TrySetTitleBarVisible(IsVisible, _
             FailMsg)
@@ -2049,14 +1963,12 @@ Private Function UI_TrySetTitleBarVisibleIfNeeded(ByVal IsVisible As Boolean, _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2109,7 +2021,7 @@ Private Function UI_TrySetBooleanPropertyIfNeeded(ByVal Target As Object, ByVal 
 '   - UI_TrySetBooleanProperty
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2121,10 +2033,8 @@ Private Function UI_TrySetBooleanPropertyIfNeeded(ByVal Target As Object, ByVal 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the default result state
         UI_TrySetBooleanPropertyIfNeeded = False
         FailMsg = vbNullString
 
@@ -2144,7 +2054,6 @@ Private Function UI_TrySetBooleanPropertyIfNeeded(ByVal Target As Object, ByVal 
 '------------------------------------------------------------------------------
 ' APPLY PROPERTY WRITE
 '------------------------------------------------------------------------------
-    'Clear any prior read diagnostic and attempt the actual write
         FailMsg = vbNullString
         UI_TrySetBooleanPropertyIfNeeded = UI_TrySetBooleanProperty(Target, _
             PropertyName, NewValue, FailMsg)
@@ -2153,14 +2062,12 @@ Private Function UI_TrySetBooleanPropertyIfNeeded(ByVal Target As Object, ByVal 
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2176,8 +2083,9 @@ Private Function UI_TryGetRibbonVisible(ByRef IsVisible As Boolean, ByRef _
 '   Attempt to read current Ribbon visibility
 '
 ' WHY THIS EXISTS
-'   The Ribbon is not best treated as a simple direct property read, so the
-'   module uses a dedicated best-effort reader
+'   Excel does not expose Ribbon visibility as a dedicated Application Boolean
+'   property, so the module uses a best-effort CommandBars read with an Excel4
+'   macro fallback
 '
 ' INPUTS
 '   IsVisible
@@ -2203,7 +2111,7 @@ Private Function UI_TryGetRibbonVisible(ByRef IsVisible As Boolean, ByRef _
 '   - Application.ExecuteExcel4Macro
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2215,10 +2123,8 @@ Private Function UI_TryGetRibbonVisible(ByRef IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize outputs and default result
         UI_TryGetRibbonVisible = False
         IsVisible = False
         FailMsg = vbNullString
@@ -2257,14 +2163,12 @@ Private Function UI_TryGetRibbonVisible(ByRef IsVisible As Boolean, ByRef _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2309,7 +2213,7 @@ Private Function UI_TryGetTitleBarVisible(ByRef IsVisible As Boolean, ByRef _
 '   - SetLastError
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2328,10 +2232,8 @@ Private Function UI_TryGetTitleBarVisible(ByRef IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize outputs and default result
         UI_TryGetTitleBarVisible = False
         IsVisible = False
         FailMsg = vbNullString
@@ -2389,21 +2291,18 @@ Private Function UI_TryGetTitleBarVisible(ByRef IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after a valid style read
         UI_TryGetTitleBarVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2420,11 +2319,8 @@ Private Function UI_TryGetBooleanProperty(ByVal Target As Object, ByVal _
 '   Attempt to read a Boolean property from an object using CallByName
 '
 ' WHY THIS EXISTS
-'   The module needs shared read helpers both for:
-'     - skip-if-already-correct write suppression
-'     - explicit capture / reset behavior
-'
-'   A shared property reader avoids duplicated boilerplate
+'   Skip-if-already-correct processing needs one reusable reader for Boolean
+'   properties exposed by Application and Window objects
 '
 ' INPUTS
 '   Target
@@ -2447,7 +2343,7 @@ Private Function UI_TryGetBooleanProperty(ByVal Target As Object, ByVal _
 '   - Does NOT raise to callers
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2459,10 +2355,8 @@ Private Function UI_TryGetBooleanProperty(ByVal Target As Object, ByVal _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize outputs and default result
         UI_TryGetBooleanProperty = False
         ValueOut = False
         FailMsg = vbNullString
@@ -2491,21 +2385,18 @@ Private Function UI_TryGetBooleanProperty(ByVal Target As Object, ByVal _
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after property access completes
         UI_TryGetBooleanProperty = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2558,6 +2449,8 @@ Private Function UI_TrySetTitleBarVisible(ByVal IsVisible As Boolean, ByRef _
 '   - Windows only
 '   - While hidden, the Excel window is intentionally less frame-like and may
 '     not be user-resizable in the normal way
+'   - Restoring the exact captured style may overwrite intervening frame-style
+'     changes made by another component
 '   - This routine intentionally does NOT toggle Application.DisplayFullScreen
 '
 ' DEPENDENCIES
@@ -2566,7 +2459,7 @@ Private Function UI_TrySetTitleBarVisible(ByVal IsVisible As Boolean, ByRef _
 '   - UI_TryRefreshWindowFrame
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2586,10 +2479,8 @@ Private Function UI_TrySetTitleBarVisible(ByVal IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the default result state
         UI_TrySetTitleBarVisible = False
         FailMsg = vbNullString
 
@@ -2684,21 +2575,18 @@ Private Function UI_TrySetTitleBarVisible(ByVal IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
 ' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark the operation as successful only after all required steps complete
         UI_TrySetTitleBarVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2740,7 +2628,7 @@ Private Function UI_TrySetRibbonVisible(ByVal IsVisible As Boolean, ByRef _
 '   - Availability may vary by Excel host / configuration
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2752,10 +2640,8 @@ Private Function UI_TrySetRibbonVisible(ByVal IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the default result state
         UI_TrySetRibbonVisible = False
         FailMsg = vbNullString
 
@@ -2778,21 +2664,18 @@ Private Function UI_TrySetRibbonVisible(ByVal IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
 ' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark the operation as successful after macro execution completes
         UI_TrySetRibbonVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Leave through the normal termination path
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2844,17 +2727,15 @@ Private Function UI_TrySetBooleanProperty(ByVal Target As Object, ByVal _
 '   - Intended for Application / Window Boolean property writes in this module
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the default result state
         UI_TrySetBooleanProperty = False
         FailMsg = vbNullString
 
@@ -2879,21 +2760,18 @@ Private Function UI_TrySetBooleanProperty(ByVal Target As Object, ByVal _
 '------------------------------------------------------------------------------
 ' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark the operation as successful after the property write completes
         UI_TrySetBooleanProperty = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Leave through the normal termination path
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -2942,7 +2820,7 @@ Private Function UI_TryGetWindowStyle(ByVal hWnd As Long, ByRef StyleOut As Long
 '   - SetLastError
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2954,10 +2832,8 @@ Private Function UI_TryGetWindowStyle(ByVal hWnd As Long, ByRef StyleOut As Long
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the outputs and default result state
         StyleOut = 0
         FailMsg = vbNullString
         UI_TryGetWindowStyle = False
@@ -3014,14 +2890,12 @@ Private Function UI_TryGetWindowStyle(ByVal hWnd As Long, ByRef StyleOut As Long
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Leave through the normal termination path
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -3071,7 +2945,7 @@ Private Function UI_TrySetWindowStyle(ByVal hWnd As Long, ByVal NewStyle As Long
 '   - SetLastError
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -3088,10 +2962,8 @@ Private Function UI_TrySetWindowStyle(ByVal hWnd As Long, ByVal NewStyle As Long
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the default result state
         FailMsg = vbNullString
         UI_TrySetWindowStyle = False
 
@@ -3140,21 +3012,18 @@ Private Function UI_TrySetWindowStyle(ByVal hWnd As Long, ByVal NewStyle As Long
 '------------------------------------------------------------------------------
 ' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark the operation as successful after a valid style write
         UI_TrySetWindowStyle = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Leave through the normal termination path
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -3204,7 +3073,7 @@ Private Function UI_TryRefreshWindowFrame(ByVal hWnd As Long, ByRef FailMsg As _
 '   - SetLastError
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -3217,10 +3086,8 @@ Private Function UI_TryRefreshWindowFrame(ByVal hWnd As Long, ByRef FailMsg As _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
-    'Initialize the default result state
         FailMsg = vbNullString
         UI_TryRefreshWindowFrame = False
 
@@ -3253,21 +3120,18 @@ Private Function UI_TryRefreshWindowFrame(ByVal hWnd As Long, ByRef FailMsg As _
 '------------------------------------------------------------------------------
 ' RETURN: SUCCESS
 '------------------------------------------------------------------------------
-    'Mark the operation as successful after a valid frame refresh
         UI_TryRefreshWindowFrame = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Leave through the normal termination path
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = UI_BuildRuntimeErrorText
 
 End Function
@@ -3299,7 +3163,8 @@ Private Function UI_VisibilityToBoolean(ByVal Visibility As UIVisibility) As _
 '
 ' BEHAVIOR
 '   - UI_Show maps to TRUE
-'   - Any other value maps to FALSE
+'   - UI_Hide maps to FALSE
+'   - Callers validate and exclude UI_LeaveUnchanged before invoking this helper
 '
 ' ERROR POLICY
 '   - Does NOT raise
@@ -3309,14 +3174,13 @@ Private Function UI_VisibilityToBoolean(ByVal Visibility As UIVisibility) As _
 '     UI_LeaveUnchanged
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' RETURN: BOOLEAN VISIBILITY
 '------------------------------------------------------------------------------
-    'Convert explicit SHOW to TRUE; otherwise return FALSE
         UI_VisibilityToBoolean = (Visibility = UI_Show)
 
 End Function
@@ -3347,7 +3211,7 @@ Private Function UI_BuildRuntimeErrorText() As String
 '   - Returns best-effort text
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -3360,7 +3224,6 @@ Private Function UI_BuildRuntimeErrorText() As String
 '------------------------------------------------------------------------------
 ' BUILD: RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
-    'Build a consistent diagnostic string from the current Err state
         UI_BuildRuntimeErrorText = CStr(Err.Number) & ": " & Err.Description & _
             IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
@@ -3398,7 +3261,7 @@ Private Sub UI_LogFailure(ByVal ProcName As String, ByVal Stage As String, ByVal
 '   - Suppresses any unexpected logging failure locally
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -3411,10 +3274,8 @@ Private Sub UI_LogFailure(ByVal ProcName As String, ByVal Stage As String, ByVal
 '------------------------------------------------------------------------------
 ' WRITE: DIAGNOSTIC LINE
 '------------------------------------------------------------------------------
-    'Write a consistent fail-soft diagnostic line to the Immediate Window
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub
-
 
 

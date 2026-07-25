@@ -62,8 +62,6 @@ Attribute VB_Name = "M_EXCEL_UI_DEMO"
 '   - Relies on the public API exposed by the EXCEL_UI module:
 '       * UIVisibility
 '       * UI_SetExcelUI
-'       * UI_HideExcelUI
-'       * UI_ShowExcelUI
 '       * UI_CaptureExcelUIState
 '       * UI_ResetExcelUIToSnapshot
 '       * UI_HasExcelUIStateSnapshot
@@ -76,10 +74,13 @@ Attribute VB_Name = "M_EXCEL_UI_DEMO"
 '   - Demo_CreateDemoSheet is the canonical builder
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '
 ' AUTHOR
 '   Daniele Penza
+'
+' VERSION
+'   1.0.1
 '
 '==============================================================================
 '
@@ -198,6 +199,7 @@ Public Sub Demo_CreateDemoSheet()
 '   - Cleanup is best-effort and should not overwrite the original error
 '
 ' DEPENDENCIES
+'   - DEMO_Btn_Click
 '   - DEMO_FastMode_Begin
 '   - DEMO_FastMode_End
 '   - DEMO_Sheet_BuildTemplate
@@ -211,7 +213,7 @@ Public Sub Demo_CreateDemoSheet()
 '   - Demo_SyncCheckBoxesToUI
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -236,7 +238,7 @@ Public Sub Demo_CreateDemoSheet()
         On Error GoTo Clean_Fail
     'Target the workbook that contains this module
         Set WB = ThisWorkbook
-    'Simulate Button click
+    'Play the standard demo-button click feedback
         DEMO_Btn_Click
     'Capture and apply fast-mode Application settings
         DEMO_FastMode_Begin FastModeState
@@ -259,16 +261,12 @@ Public Sub Demo_CreateDemoSheet()
 '------------------------------------------------------------------------------
 ' WRITE INPUT ROWS APPLICATION-LEVEL UI STATE
 '------------------------------------------------------------------------------
-    'Write the Ribbon input row
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G5"), WS.Range("H5"), _
             "Ribbon", ""
-    'Write the Status Bar input row
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G6"), WS.Range("H6"), _
             "Status bar", ""
-    'Write the Scroll Bars input row
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G7"), WS.Range("H7"), _
             "Scroll bars", ""
-    'Write the Formula Bar input row
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G8"), WS.Range("H8"), _
             "Formula bar", ""
     'Convert the application-level input cells to checkboxes
@@ -285,16 +283,12 @@ Public Sub Demo_CreateDemoSheet()
 '------------------------------------------------------------------------------
 ' WRITE INPUT ROWS WINDOW-LEVEL UI STATE
 '------------------------------------------------------------------------------
-    'Write the Headings input row
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G12"), WS.Range("H12"), _
             "Headings", ""
-    'Write the Workbook Tabs input row
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G13"), WS.Range("H13"), _
             "Workbook tabs", ""
-    'Write the Gridlines input row
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G14"), WS.Range("H14"), _
             "Gridlines", ""
-    'Write the Title Bar input row
         DEMO_Write_NamedInputRow WB, WS, WS.Range("G15"), WS.Range("H15"), _
             "Title bar", ""
     'Convert the window-level input cells to checkboxes
@@ -304,65 +298,52 @@ Public Sub Demo_CreateDemoSheet()
 '------------------------------------------------------------------------------
 ' BUILD ACTION BUTTONS
 '------------------------------------------------------------------------------
-    'Write the action section header
         DEMO_Write_BandHeader WS.Range("C4:E4"), "ACTIONS"
     'Define the action button grid
         ButtonSpecs = Array(Array("btn_UI_Show", "SHOW SELECTED UI", _
             "Demo_ShowSelectedUI"), Array("btn_UI_Hide", "HIDE SELECTED UI", _
             "Demo_HideSelectedUI"))
-    'Create the standard two-column action-button grid
         DEMO_Btn_AddGrid WS, WS.Range("C5"), ButtonSpecs, 2, 150, 25
-    'Apply a border around the full action-button area
         DEMO_Set_RangeBorder WS.Range("C4:E6")
 
 '------------------------------------------------------------------------------
 ' BUILD SELECT / CLEAR BUTTONS
 '------------------------------------------------------------------------------
-    'Write the select / clear section header
         DEMO_Write_BandHeader WS.Range("C8:E8"), "SELECT / CLEAR"
     'Define the select / clear button grid
         ButtonSpecs = Array(Array("btn_UI_SelectAll", "SELECT ALL", _
             "Demo_SelectAllUI"), Array("btn_UI_ClearAll", "CLEAR ALL", _
             "Demo_ClearAllUI"))
-    'Create the standard two-column select / clear button grid
         DEMO_Btn_AddGrid WS, WS.Range("C9"), ButtonSpecs, 2, 150, 25
-    'Apply a border around the full select / clear area
         DEMO_Set_RangeBorder WS.Range("C8:E10")
 
 '------------------------------------------------------------------------------
 ' BUILD PRESET / UTILITY BUTTONS
 '------------------------------------------------------------------------------
-    'Write the preset selection section header
         DEMO_Write_BandHeader WS.Range("C12:E12"), "PRESET SELECTION"
     'Define the preset / utility button grid
         ButtonSpecs = Array(Array("btn_UI_Kiosk", "KIOSK", "Demo_PresetKiosk"), _
             Array("btn_UI_Analyst", "ANALYST", "Demo_PresetAnalyst"), _
             Array("btn_UI_Minimal", "MINIMAL", "Demo_PresetMinimal"))
-    'Create the standard two-column preset / utility button grid
         DEMO_Btn_AddGrid WS, WS.Range("C13"), ButtonSpecs, 2, 150, 25, , 13, , _
             8
-    'Apply a border around the full preset / utility area
         DEMO_Set_RangeBorder WS.Range("C12:E16")
 
 '------------------------------------------------------------------------------
 ' BUILD CAPTURE / RESET STATE BUTTONS
 '------------------------------------------------------------------------------
-    'Write the capture / reset state section header
         DEMO_Write_BandHeader WS.Range("C18:E18"), "CAPTURE / RESET STATE"
     'Define the capture / reset button grid
         ButtonSpecs = Array(Array("btn_UI_CaptureState", "CAPTURE STATE", _
             "Demo_CaptureUIState"), Array("btn_UI_ResetState", "RESET STATE", _
             "Demo_ResetUIToCapturedState"))
-    'Create the standard two-column capture / reset button grid
         DEMO_Btn_AddGrid WS, WS.Range("C19"), ButtonSpecs, 2, 150, 25, , 13, , _
             8
-    'Apply a border around the full capture / reset area
         DEMO_Set_RangeBorder WS.Range("C18:E20")
         
 '------------------------------------------------------------------------------
 ' BUILD SYNC CHECK BOXES BUTTON
 '------------------------------------------------------------------------------
-    'Create the sync button anchored to a dedicated layout block
         DEMO_Btn_Add WS, "btn_UI_Sync", "SYNC CHECKBOXES", _
             WS.Range("G17").Left, WS.Range("G17").Top, WS.Range("G17:H18").Width, 25, _
             "Demo_SyncCheckBoxesToUI"
@@ -379,7 +360,6 @@ Public Sub Demo_CreateDemoSheet()
             .WrapText = True
             .VerticalAlignment = xlTop
         End With
-    'Apply borders to the scope / semantics note area
         DEMO_Set_RangeBorder WS.Range("B22:H25")
     'Format the restore note area
         With WS.Range("B26:H27")
@@ -390,27 +370,22 @@ Public Sub Demo_CreateDemoSheet()
             .WrapText = True
             .VerticalAlignment = xlTop
         End With
-    'Apply borders to the restore note area
         DEMO_Set_RangeBorder WS.Range("B26:H27")
 
 '------------------------------------------------------------------------------
 ' WRITE NOTES
 '------------------------------------------------------------------------------
-    'Write the scope / semantics note text
         WS.Range("B22").Value = NOTE_SCOPE_TEXT
-    'Write the restore note text
         WS.Range("B26").Value = NOTE_RESTORE_TEXT
 
 '------------------------------------------------------------------------------
 ' SYNCHRONIZE CHECK BOXES
 '------------------------------------------------------------------------------
-    'Synchronize the check boxes back to the current visible UI state
         Demo_SyncCheckBoxesToUI False
 
 '------------------------------------------------------------------------------
 ' BUILD RESET SHEET BUTTON
 '------------------------------------------------------------------------------
-    'Create the reset sheet button
         DEMO_Btn_Add WS, "btn_UI_ResetSheet", "RESET SHEET", _
             WS.Range("H2").Left + 1, WS.Range("H2").Top + 1, 105, 25, _
             "Demo_CreateDemoSheet"
@@ -421,7 +396,6 @@ Clean_Exit:
 '------------------------------------------------------------------------------
     'Protect cleanup so it cannot overwrite the original error
         On Error Resume Next
-    'Restore the normal cursor
         Application.Cursor = xlDefault
     'Restore the original Excel Application state only when fast mode was entered
         If FastModeOn Then
@@ -433,7 +407,6 @@ Clean_Exit:
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
-    'Normal termination point
         Exit Sub
 
 Clean_Fail:
@@ -444,7 +417,6 @@ Clean_Fail:
         SavedErrNumber = Err.Number
         SavedErrSource = IIf(Len(Err.Source) > 0, Err.Source, PROC)
         SavedErrDescription = Err.Description
-    'Continue through the centralized cleanup path
         Resume Clean_Exit
 
 End Sub
@@ -484,16 +456,14 @@ Public Sub Demo_ShowSelectedUI()
 '   - Demo_ApplySelectedUI
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY ACTION
 '------------------------------------------------------------------------------
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
-    'Delegate the action to the shared worker
         Demo_ApplySelectedUI UI_Show, "Demo_ShowSelectedUI"
 
 End Sub
@@ -524,16 +494,14 @@ Public Sub Demo_HideSelectedUI()
 '   - Demo_ApplySelectedUI
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY ACTION
 '------------------------------------------------------------------------------
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
-    'Delegate the action to the shared worker
         Demo_ApplySelectedUI UI_Hide, "Demo_HideSelectedUI"
 
 End Sub
@@ -577,7 +545,7 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '   Window-level sync uses ActiveWindow as the reference window
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -594,15 +562,12 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
     'Play the optional button-click visual feedback only when requested
         If PlayFeedback Then
             DEMO_Btn_PlayFeedback
         End If
-    'Resolve the demo worksheet
         Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
-    'Resolve the active Excel window used for window-level sync
         Set ActiveWin = Application.ActiveWindow
 
 '------------------------------------------------------------------------------
@@ -638,7 +603,6 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '------------------------------------------------------------------------------
     'Reject missing ActiveWindow deterministically for window-level sync
         If ActiveWin Is Nothing Then
-            'Log the missing ActiveWindow state
                 Demo_LogFailure PROC, "ActiveWindow", _
                     "no active window available for window-level sync"
         Else
@@ -676,16 +640,13 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write a diagnostic line without interrupting callers
         Demo_LogFailure PROC, "Unexpected", Demo_GetRuntimeErrorText
-    'Exit quietly after logging
         Resume SafeExit
 
 End Sub
@@ -711,14 +672,13 @@ Public Sub Demo_SelectAllUI()
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
 
     'Select all managed UI elements
@@ -751,14 +711,13 @@ Public Sub Demo_ClearAllUI()
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
     'Clear all managed UI selections
         Demo_SetSelectionProfile CallerProc:="Demo_ClearAllUI", _
@@ -794,14 +753,13 @@ Public Sub Demo_PresetKiosk()
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
     'Select all managed UI elements for a kiosk-style bundle
         Demo_SetSelectionProfile CallerProc:="Demo_PresetKiosk", _
@@ -837,14 +795,13 @@ Public Sub Demo_PresetAnalyst()
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
     'Select a worksheet-analysis-oriented bundle
         Demo_SetSelectionProfile CallerProc:="Demo_PresetAnalyst", _
@@ -881,14 +838,13 @@ Public Sub Demo_PresetMinimal()
 '   - Demo_SetSelectionProfile
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
 '------------------------------------------------------------------------------
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
     'Select a minimal-shell-oriented bundle
         Demo_SetSelectionProfile CallerProc:="Demo_PresetMinimal", _
@@ -932,7 +888,7 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
 '   - Demo_LogFailure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -944,21 +900,18 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
 
 '------------------------------------------------------------------------------
 ' CAPTURE SNAPSHOT
 '------------------------------------------------------------------------------
-    'Capture the current managed Excel UI state through the core module
         UI_CaptureExcelUIState
 
 '------------------------------------------------------------------------------
 ' INFORM USER
 '------------------------------------------------------------------------------
-    'Confirm that the state snapshot was captured when requested
+    'Show the demo capture confirmation when requested
         If ShowConfirmation Then
             MsgBox "Current Excel UI state captured.", vbInformation, _
                 "Excel UI Demo"
@@ -968,16 +921,13 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write a diagnostic line without interrupting callers
         Demo_LogFailure PROC, "Unexpected", Demo_GetRuntimeErrorText
-    'Exit quietly after logging
         Resume SafeExit
 
 End Sub
@@ -1009,13 +959,14 @@ Public Sub Demo_ResetUIToCapturedState()
 '   - Unexpected failures are written to the Immediate Window
 '
 ' DEPENDENCIES
+'   - DEMO_Btn_PlayFeedback
 '   - UI_HasExcelUIStateSnapshot
 '   - UI_ResetExcelUIToSnapshot
 '   - Demo_SyncCheckBoxesToUI
 '   - Demo_LogFailure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1027,9 +978,7 @@ Public Sub Demo_ResetUIToCapturedState()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
-    'Play the optional button-click visual feedback
         DEMO_Btn_PlayFeedback
         
 '------------------------------------------------------------------------------
@@ -1045,7 +994,6 @@ Public Sub Demo_ResetUIToCapturedState()
 '------------------------------------------------------------------------------
 ' RESET TO SNAPSHOT
 '------------------------------------------------------------------------------
-    'Restore the captured managed Excel UI state through the core module
         UI_ResetExcelUIToSnapshot
 
 '------------------------------------------------------------------------------
@@ -1058,16 +1006,13 @@ Public Sub Demo_ResetUIToCapturedState()
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write a diagnostic line without interrupting callers
         Demo_LogFailure PROC, "Unexpected", Demo_GetRuntimeErrorText
-    'Exit quietly after logging
         Resume SafeExit
 
 End Sub
@@ -1125,7 +1070,7 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
 '   - Demo_LogFailure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1145,9 +1090,7 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
-    'Resolve the demo worksheet
         Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
@@ -1188,7 +1131,6 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
             'Inform the user that no options were selected
                 MsgBox "No UI elements are selected.", vbInformation, _
                     "Excel UI Demo"
-            'Exit quietly
                 GoTo SafeExit
         End If
 
@@ -1205,16 +1147,13 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write a diagnostic line without interrupting callers
         Demo_LogFailure CallerProc, "Unexpected", Demo_GetRuntimeErrorText
-    'Exit quietly after logging
         Resume SafeExit
 
 End Sub
@@ -1260,7 +1199,7 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 '   - Demo_LogFailure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1273,50 +1212,40 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
-    'Resolve the demo worksheet
         Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
 ' WRITE SELECTION PROFILE
 '------------------------------------------------------------------------------
-    'Write the Ribbon selection state
         If Not Demo_TrySetCheckBoxState(WS, CB_RIBBON, RibbonSelected, FailMsg) _
             Then
             Demo_LogFailure CallerProc, CB_RIBBON, FailMsg
         End If
-    'Write the StatusBar selection state
         If Not Demo_TrySetCheckBoxState(WS, CB_STATUSBAR, StatusBarSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_STATUSBAR, FailMsg
         End If
-    'Write the ScrollBars selection state
         If Not Demo_TrySetCheckBoxState(WS, CB_SCROLLBARS, ScrollBarsSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_SCROLLBARS, FailMsg
         End If
-    'Write the FormulaBar selection state
         If Not Demo_TrySetCheckBoxState(WS, CB_FORMULABAR, FormulaBarSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_FORMULABAR, FailMsg
         End If
-    'Write the Headings selection state
         If Not Demo_TrySetCheckBoxState(WS, CB_HEADINGS, HeadingsSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_HEADINGS, FailMsg
         End If
-    'Write the WorkbookTabs selection state
         If Not Demo_TrySetCheckBoxState(WS, CB_WORKBOOKTABS, _
             WorkbookTabsSelected, FailMsg) Then
             Demo_LogFailure CallerProc, CB_WORKBOOKTABS, FailMsg
         End If
-    'Write the Gridlines selection state
         If Not Demo_TrySetCheckBoxState(WS, CB_GRIDLINES, GridlinesSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_GRIDLINES, FailMsg
         End If
-    'Write the TitleBar selection state
         If Not Demo_TrySetCheckBoxState(WS, CB_TITLEBAR, TitleBarSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_TITLEBAR, FailMsg
@@ -1326,16 +1255,13 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Write a diagnostic line without interrupting callers
         Demo_LogFailure CallerProc, "Unexpected", Demo_GetRuntimeErrorText
-    'Exit quietly after logging
         Resume SafeExit
 
 End Sub
@@ -1362,14 +1288,13 @@ Private Function Demo_HasAnySelectedChange(ByVal RibbonVis As UIVisibility, _
 '   FALSE => all arguments are UI_LeaveUnchanged
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' RETURN RESULT
 '------------------------------------------------------------------------------
-    'Return TRUE when at least one requested visibility is actionable
         Demo_HasAnySelectedChange = (RibbonVis <> UI_LeaveUnchanged Or _
             StatusBarVis <> UI_LeaveUnchanged Or ScrollBarsVis <> UI_LeaveUnchanged _
             Or FormulaBarVis <> UI_LeaveUnchanged Or HeadingsVis <> _
@@ -1434,7 +1359,7 @@ Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
 '   - Demo_LogFailure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1453,12 +1378,10 @@ Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
 '------------------------------------------------------------------------------
 ' READ CHECK-BOX STATE
 '------------------------------------------------------------------------------
-    'Attempt to read the requested check box
         If Not Demo_TryGetCheckBoxState(WS, CheckBoxName, IsChecked, FailMsg) _
             Then
             'Log the control-resolution failure and keep UI_LeaveUnchanged
                 Demo_LogFailure CallerProc, CheckBoxName, FailMsg
-            'Exit with default value
                 Exit Function
         End If
 
@@ -1514,7 +1437,7 @@ Private Function Demo_TryGetCheckBoxState(ByVal WS As Worksheet, ByVal _
 '   - Returns FALSE and populates FailMsg on failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1528,7 +1451,6 @@ Private Function Demo_TryGetCheckBoxState(ByVal WS As Worksheet, ByVal _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
     'Initialize outputs and default result
         Demo_TryGetCheckBoxState = False
@@ -1551,11 +1473,9 @@ Private Function Demo_TryGetCheckBoxState(ByVal WS As Worksheet, ByVal _
 '------------------------------------------------------------------------------
 ' TRY FORMS CHECK BOX
 '------------------------------------------------------------------------------
-    'Attempt to resolve the control as a worksheet shape
         On Error Resume Next
             Set Shp = WS.Shapes(ControlName)
         On Error GoTo Fail
-    'Process the shape when it exists
         If Not Shp Is Nothing Then
             'Reject shapes that are not Forms controls
                 If Shp.Type <> msoFormControl Then
@@ -1567,22 +1487,17 @@ Private Function Demo_TryGetCheckBoxState(ByVal WS As Worksheet, ByVal _
                     FailMsg = "Forms control exists but is not a CheckBox"
                     GoTo SafeExit
                 End If
-            'Read the checked state from the Forms check box
                 IsChecked = (Shp.ControlFormat.Value = xlOn)
-            'Mark success
                 Demo_TryGetCheckBoxState = True
-            'Exit after successful Forms-control read
                 GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
 ' TRY ACTIVEX CHECK BOX
 '------------------------------------------------------------------------------
-    'Attempt to resolve the control as an ActiveX OLEObject
         On Error Resume Next
             Set CheckBoxOle = WS.OLEObjects(ControlName)
         On Error GoTo Fail
-    'Process the OLEObject when it exists
         If Not CheckBoxOle Is Nothing Then
             'Reject ActiveX controls that are not check boxes
                 If InStr(1, CheckBoxOle.progID, "CheckBox", vbTextCompare) = 0 _
@@ -1590,12 +1505,9 @@ Private Function Demo_TryGetCheckBoxState(ByVal WS As Worksheet, ByVal _
                     FailMsg = "ActiveX control exists but is not a CheckBox"
                     GoTo SafeExit
                 End If
-            'Read the checked state through late-bound Value access
                 ValueOut = CallByName(CheckBoxOle.Object, "Value", VbGet)
                 IsChecked = CBool(ValueOut)
-            'Mark success
                 Demo_TryGetCheckBoxState = True
-            'Exit after successful ActiveX-control read
                 GoTo SafeExit
         End If
 
@@ -1609,14 +1521,12 @@ Private Function Demo_TryGetCheckBoxState(ByVal WS As Worksheet, ByVal _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = Demo_GetRuntimeErrorText
 
 End Function
@@ -1658,7 +1568,7 @@ Private Function Demo_TrySetCheckBoxState(ByVal WS As Worksheet, ByVal _
 '   - Returns FALSE and populates FailMsg on failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1671,7 +1581,6 @@ Private Function Demo_TrySetCheckBoxState(ByVal WS As Worksheet, ByVal _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
     'Initialize default result
         Demo_TrySetCheckBoxState = False
@@ -1694,11 +1603,9 @@ Private Function Demo_TrySetCheckBoxState(ByVal WS As Worksheet, ByVal _
 '------------------------------------------------------------------------------
 ' TRY FORMS CHECK BOX
 '------------------------------------------------------------------------------
-    'Attempt to resolve the control as a worksheet shape
         On Error Resume Next
             Set Shp = WS.Shapes(ControlName)
         On Error GoTo Fail
-    'Process the shape when it exists
         If Not Shp Is Nothing Then
             'Reject shapes that are not Forms controls
                 If Shp.Type <> msoFormControl Then
@@ -1710,26 +1617,21 @@ Private Function Demo_TrySetCheckBoxState(ByVal WS As Worksheet, ByVal _
                     FailMsg = "Forms control exists but is not a CheckBox"
                     GoTo SafeExit
                 End If
-            'Write the checked state to the Forms check box
                 If IsChecked Then
                     Shp.ControlFormat.Value = xlOn
                 Else
                     Shp.ControlFormat.Value = xlOff
                 End If
-            'Mark success
                 Demo_TrySetCheckBoxState = True
-            'Exit after successful Forms-control write
                 GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
 ' TRY ACTIVEX CHECK BOX
 '------------------------------------------------------------------------------
-    'Attempt to resolve the control as an ActiveX OLEObject
         On Error Resume Next
             Set CheckBoxOle = WS.OLEObjects(ControlName)
         On Error GoTo Fail
-    'Process the OLEObject when it exists
         If Not CheckBoxOle Is Nothing Then
             'Reject ActiveX controls that are not check boxes
                 If InStr(1, CheckBoxOle.progID, "CheckBox", vbTextCompare) = 0 _
@@ -1737,11 +1639,8 @@ Private Function Demo_TrySetCheckBoxState(ByVal WS As Worksheet, ByVal _
                     FailMsg = "ActiveX control exists but is not a CheckBox"
                     GoTo SafeExit
                 End If
-            'Write the checked state through late-bound Value access
                 CallByName CheckBoxOle.Object, "Value", VbLet, IsChecked
-            'Mark success
                 Demo_TrySetCheckBoxState = True
-            'Exit after successful ActiveX-control write
                 GoTo SafeExit
         End If
 
@@ -1755,14 +1654,12 @@ Private Function Demo_TrySetCheckBoxState(ByVal WS As Worksheet, ByVal _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = Demo_GetRuntimeErrorText
 
 End Function
@@ -1810,7 +1707,7 @@ Private Function Demo_TryGetRibbonVisibility(ByRef IsVisible As Boolean, ByRef _
 '   - Returns FALSE and populates FailMsg on failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1822,7 +1719,6 @@ Private Function Demo_TryGetRibbonVisibility(ByRef IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
     'Initialize outputs and default result
         Demo_TryGetRibbonVisibility = False
@@ -1864,14 +1760,12 @@ Private Function Demo_TryGetRibbonVisibility(ByRef IsVisible As Boolean, ByRef _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = Demo_GetRuntimeErrorText
 
 End Function
@@ -1907,7 +1801,7 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '   - Returns FALSE and populates FailMsg on failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -1926,13 +1820,11 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
     'Initialize outputs and default result
         Demo_TryGetTitleBarVisibility = False
         IsVisible = False
         FailMsg = vbNullString
-    'Read the Excel window handle
         xlHnd = Application.hWnd
     'Reject invalid window handle deterministically
         If xlHnd = 0 Then
@@ -1977,21 +1869,18 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after a valid style read
         Demo_TryGetTitleBarVisibility = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = Demo_GetRuntimeErrorText
 
 End Function
@@ -2025,7 +1914,7 @@ Private Function Demo_GetRuntimeErrorText() As String
 '   Does NOT raise
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2038,7 +1927,6 @@ Private Function Demo_GetRuntimeErrorText() As String
 '------------------------------------------------------------------------------
 ' BUILD ERROR TEXT
 '------------------------------------------------------------------------------
-    'Build a consistent diagnostic string from the current Err state
         Demo_GetRuntimeErrorText = CStr(Err.Number) & ": " & Err.Description & _
             IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
@@ -2077,7 +1965,7 @@ Private Sub Demo_LogFailure(ByVal ProcName As String, ByVal Stage As String, _
 '   Suppresses any unexpected logging failure locally
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 
@@ -2090,8 +1978,9 @@ Private Sub Demo_LogFailure(ByVal ProcName As String, ByVal Stage As String, _
 '------------------------------------------------------------------------------
 ' WRITE DIAGNOSTIC LINE
 '------------------------------------------------------------------------------
-    'Write a consistent diagnostic line to the Immediate Window
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub
+
+
 

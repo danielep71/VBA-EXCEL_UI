@@ -1,4 +1,5 @@
 Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
+
 '==============================================================================
 '                    MODULE: EXCEL_UI_REGRESSION_TESTS
 '------------------------------------------------------------------------------
@@ -42,10 +43,10 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '
 '   Snapshot / restore tests
 '     - explicit snapshot lifecycle
-'     - reset without snapshot is a no-op
-'     - skipped when an explicit EXCEL_UI snapshot already existed before the
-'       regression run because the harness cannot safely restore that prior
-'       snapshot object
+'     - reset without snapshot leaves managed UI unchanged and logs a diagnostic
+'     - lifecycle cases are skipped when an explicit EXCEL_UI snapshot already
+'       existed before the run because the harness cannot reconstruct that prior
+'       module-level snapshot object
 '
 '   Environment-preservation tests
 '     - ScreenUpdating restored to prior state
@@ -54,16 +55,18 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '     - hide / show round-trip
 '
 ' STATE MANAGEMENT
-'   - The harness snapshots the current Excel UI state before testing
-'   - The harness attempts to restore that state at the end, even if a test
-'     fails
-'   - The harness does not overwrite a pre-existing explicit EXCEL_UI snapshot
-'     lifecycle unless the snapshot-related cases are allowed to run
+'   - The harness snapshots the current managed Excel UI state before testing
+'   - The harness attempts a best-effort restore after success or failure
+'   - Per-window test state is captured and restored by Application.Windows index
+'   - A pre-existing explicit EXCEL_UI snapshot is left untouched by skipping
+'     the snapshot-destructive lifecycle cases
 '
 ' LIMITATIONS
 '   - Ribbon visibility is read using best-effort logic
-'   - Window-level assertions use the current Application.Windows collection at
-'     runtime
+'   - Window-level capture and restore use Application.Windows index order; a
+'     changed collection can prevent exact restoration to the original windows
+'   - The harness cannot preserve and reconstruct a pre-existing core-module
+'     snapshot object, so destructive snapshot cases are skipped in that state
 '   - Title-bar behavior remains the most OS / Excel-version-sensitive area
 '
 ' COMPATIBILITY
@@ -71,13 +74,13 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.0.0
+'   1.0.1
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -165,7 +168,7 @@ Public Sub Test_EXCEL_UI_RunAll()
 '   - TST_RunRegressionPack
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -208,7 +211,7 @@ Public Sub Test_EXCEL_UI_RunCore()
 '   - TST_RunRegressionPack
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -247,7 +250,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '   - TST_RunTitleBarOnlyPack
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -311,7 +314,7 @@ Private Sub TST_RunRegressionPack( _
 '   - TST_Log
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -341,7 +344,6 @@ Private Sub TST_RunRegressionPack( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
     'Capture whether an explicit EXCEL_UI snapshot already exists before the run
@@ -474,7 +476,6 @@ SafeExit:
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
@@ -491,7 +492,6 @@ Fail:
     'Log the failure immediately
         TST_Log CallerProc, "FAIL", TST_BuildRuntimeErrorText
 
-    'Proceed to restoration / re-raise path
         Resume SafeExit
 
 End Sub
@@ -526,7 +526,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarRoundTrip
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -555,7 +555,6 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
     'Cache and suppress screen updates during the regression run
@@ -619,7 +618,6 @@ SafeExit:
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-    'Normal termination point
         Exit Sub
 
 '------------------------------------------------------------------------------
@@ -636,7 +634,6 @@ Fail:
     'Log the failure immediately
         TST_Log CallerProc, "FAIL", TST_BuildRuntimeErrorText
 
-    'Proceed to restoration / re-raise path
         Resume SafeExit
 
 End Sub
@@ -672,13 +669,12 @@ Private Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_ShowAllBaseline", "START", "Setting all managed UI visible"
 
 '------------------------------------------------------------------------------
@@ -736,7 +732,6 @@ Private Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_ShowAllBaseline", "PASS", "All requested elements are visible"
 
 End Sub
@@ -764,13 +759,12 @@ Private Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_SelectiveHide", "START", "Hiding only selected elements"
 
 '------------------------------------------------------------------------------
@@ -833,7 +827,6 @@ Private Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_SelectiveHide", "PASS", "Selective hide behaved as expected"
 
 End Sub
@@ -861,13 +854,12 @@ Private Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_SelectiveShow", "START", "Showing only selected elements"
 
 '------------------------------------------------------------------------------
@@ -931,7 +923,6 @@ Private Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_SelectiveShow", "PASS", "Selective show behaved as expected"
 
 End Sub
@@ -958,13 +949,12 @@ Private Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_NoOpLeaveUnchanged", "START", "Validating no-op and leave-unchanged behavior"
 
 '------------------------------------------------------------------------------
@@ -1025,7 +1015,6 @@ Private Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_NoOpLeaveUnchanged", "PASS", "No-op behavior behaved as expected"
 
 End Sub
@@ -1053,13 +1042,12 @@ Private Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 '   None
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_ConvenienceWrappers", "START", "Validating UI_HideExcelUI and UI_ShowExcelUI"
 
 '------------------------------------------------------------------------------
@@ -1141,7 +1129,6 @@ Private Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_ConvenienceWrappers", "PASS", "Convenience wrappers behaved as expected"
 
 End Sub
@@ -1172,7 +1159,7 @@ Private Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean
 '   - Raises on assertion failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -1185,7 +1172,6 @@ Private Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_WithResult_AllSuccess", "START", "Validating structured-result success path"
 
 '------------------------------------------------------------------------------
@@ -1245,7 +1231,6 @@ Private Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_WithResult_AllSuccess", "PASS", "Structured-result success path behaved as expected"
 
 End Sub
@@ -1276,7 +1261,7 @@ Private Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolea
 '   - Raises on assertion failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -1289,7 +1274,6 @@ Private Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolea
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_WithResult_NoOpSuccess", "START", "Validating structured-result no-op path"
 
 '------------------------------------------------------------------------------
@@ -1359,7 +1343,6 @@ Private Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolea
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_WithResult_NoOpSuccess", "PASS", "Structured-result no-op path behaved as expected"
 
 End Sub
@@ -1390,7 +1373,7 @@ Private Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarT
 '   - Raises on assertion failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -1403,7 +1386,6 @@ Private Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarT
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_WithResult_SuccessWithoutFailureList", "START", _
             "Validating structured-result success path without FailureList capture"
 
@@ -1483,7 +1465,6 @@ Private Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarT
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_WithResult_SuccessWithoutFailureList", "PASS", _
             "Structured-result success path without FailureList behaved as expected"
 
@@ -1511,7 +1492,7 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
 '   - Raises on assertion failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -1524,7 +1505,6 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_WithResult_InvalidVisibility", "START", _
             "Validating structured failure reporting for invalid UIVisibility input"
 
@@ -1564,7 +1544,6 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_WithResult_InvalidVisibility", "PASS", _
             "Structured failure reporting for invalid UIVisibility behaved as expected"
 
@@ -1595,13 +1574,12 @@ Private Sub TST_Case_SnapshotLifecycle(ByVal IncludeTitleBarTests As Boolean)
 '   - Raises on assertion failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_SnapshotLifecycle", "START", "Validating explicit snapshot and reset lifecycle"
 
 '------------------------------------------------------------------------------
@@ -1709,7 +1687,6 @@ Private Sub TST_Case_SnapshotLifecycle(ByVal IncludeTitleBarTests As Boolean)
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_SnapshotLifecycle", "PASS", "Explicit snapshot and reset lifecycle behaved as expected"
 
 End Sub
@@ -1740,13 +1717,12 @@ Private Sub TST_Case_ResetWithoutSnapshot_NoOp(ByVal IncludeTitleBarTests As Boo
 '   - Raises on assertion failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_ResetWithoutSnapshot_NoOp", "START", _
             "Validating reset-to-snapshot no-op behavior when no snapshot exists"
 
@@ -1817,7 +1793,6 @@ Private Sub TST_Case_ResetWithoutSnapshot_NoOp(ByVal IncludeTitleBarTests As Boo
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_ResetWithoutSnapshot_NoOp", "PASS", _
             "Reset-to-snapshot no-op behavior without snapshot behaved as expected"
 
@@ -1845,7 +1820,7 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
 '   - Raises on assertion failure
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -1856,7 +1831,6 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_ScreenUpdatingPreserved", "START", _
             "Validating ScreenUpdating preservation across EXCEL_UI calls"
 
@@ -1900,7 +1874,6 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_ScreenUpdatingPreserved", "PASS", _
             "ScreenUpdating preservation behaved as expected"
 
@@ -1924,13 +1897,12 @@ Private Sub TST_Case_TitleBarRoundTrip()
 '   None
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Log the start of the case
         TST_Log "TST_Case_TitleBarRoundTrip", "START", "Validating title-bar hide and show round-trip"
 
 '------------------------------------------------------------------------------
@@ -1960,7 +1932,6 @@ Private Sub TST_Case_TitleBarRoundTrip()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-    'Log successful completion of the case
         TST_Log "TST_Case_TitleBarRoundTrip", "PASS", "Title-bar round-trip behaved as expected"
 
 End Sub
@@ -2010,7 +1981,7 @@ Private Sub TST_SnapshotState( _
 '   - Best-effort capture; unknown Ribbon or TitleBar state is marked via flags
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2110,7 +2081,7 @@ Private Sub TST_RestoreState( _
 '   - Best-effort restore only
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2225,7 +2196,7 @@ Private Sub TST_WaitUI(ByVal SecondsToWait As Double)
 '   - Handles Timer rollover at midnight
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2297,7 +2268,7 @@ Private Sub TST_AssertBooleanEquals( _
 '   - Raises on mismatch
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2345,7 +2316,7 @@ Private Sub TST_AssertApplicationProperty( _
 '   - Raises on read failure or mismatch
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2404,7 +2375,7 @@ Private Sub TST_AssertAllWindowsProperty( _
 '   - Raises on read failure or mismatch
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2463,7 +2434,7 @@ Private Sub TST_AssertRibbonVisible( _
 '   - Raises on read failure or mismatch
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2518,7 +2489,7 @@ Private Sub TST_AssertTitleBarVisible( _
 '   - Raises on read failure or mismatch
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2581,7 +2552,7 @@ Private Sub TST_AssertResultSuccess( _
 '   - Raises on mismatch
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2647,7 +2618,7 @@ Private Sub TST_AssertSnapshotAvailability( _
 '   - Raises on mismatch
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2705,7 +2676,7 @@ Private Function TST_TryGetBooleanProperty( _
 '   - Does NOT raise to callers
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2716,7 +2687,6 @@ Private Function TST_TryGetBooleanProperty( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
     'Initialize outputs and default result
@@ -2748,21 +2718,18 @@ Private Function TST_TryGetBooleanProperty( _
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after property access completes
         TST_TryGetBooleanProperty = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -2814,13 +2781,12 @@ Private Function TST_TrySetBooleanProperty( _
 '     module
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
     'Initialize default failure result
@@ -2848,21 +2814,18 @@ Private Function TST_TrySetBooleanProperty( _
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after property assignment completes
         TST_TrySetBooleanProperty = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -2894,7 +2857,7 @@ Private Function TST_TryGetRibbonVisible( _
 '   FALSE => read failed
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2905,7 +2868,6 @@ Private Function TST_TryGetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
     'Initialize outputs and default result
@@ -2947,14 +2909,12 @@ Private Function TST_TryGetRibbonVisible( _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -2986,7 +2946,7 @@ Private Function TST_TrySetRibbonVisible( _
 '   FALSE => Ribbon update failed
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2997,7 +2957,6 @@ Private Function TST_TrySetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
     'Initialize default failure result
@@ -3017,27 +2976,23 @@ Private Function TST_TrySetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' EXECUTE MACRO
 '------------------------------------------------------------------------------
-    'Execute the Ribbon visibility macro
         Application.ExecuteExcel4Macro MacroText
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after macro execution completes
         TST_TrySetRibbonVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure string without raising
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -3070,7 +3025,7 @@ Private Function TST_TryGetTitleBarVisible( _
 '   FALSE => read failed
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -3088,7 +3043,6 @@ Private Function TST_TryGetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the local failure handler
         On Error GoTo Fail
 
     'Initialize outputs and default result
@@ -3148,21 +3102,18 @@ Private Function TST_TryGetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Mark success after a valid style read
         TST_TryGetTitleBarVisible = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Normal termination point
         Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-    'Return a descriptive failure message without raising
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -3205,7 +3156,7 @@ Private Sub TST_TryRestoreWindowProp( _
 '   - TST_Log
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -3265,7 +3216,7 @@ Private Sub TST_Log( _
 '   - Suppresses any unexpected logging failure locally
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -3277,7 +3228,6 @@ Private Sub TST_Log( _
 '------------------------------------------------------------------------------
 ' WRITE DIAGNOSTIC LINE
 '------------------------------------------------------------------------------
-    'Write a consistent diagnostic line to the Immediate Window
         Debug.Print ProcName & " @ " & Stage & " | " & Detail
 
 End Sub
@@ -3307,7 +3257,7 @@ Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double
 '   - Does NOT raise
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -3318,7 +3268,6 @@ Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Read the current Timer value
         TimerNow = Timer
 
 '------------------------------------------------------------------------------
@@ -3366,7 +3315,7 @@ Private Function TST_TitleBarMode( _
 '   - Does NOT raise
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -3407,7 +3356,7 @@ Private Function TST_BuildRuntimeErrorText() As String
 '   - Returns best-effort text
 '
 ' UPDATED
-'   2026-04-19
+'   2026-07-25
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -3426,5 +3375,7 @@ Private Function TST_BuildRuntimeErrorText() As String
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
 End Function
+
+
 
 
