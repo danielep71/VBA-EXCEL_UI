@@ -722,6 +722,8 @@ Call the documented UI_... members from that project
 
 ```text
 VBA-EXCEL_UI/
+├─ .gitattributes
+├─ .gitignore
 ├─ demo/
 │  ├─ EXCEL_UI_DEMO.xlsm
 │  ├─ M_DEMO_BUILDER.bas
@@ -740,6 +742,8 @@ VBA-EXCEL_UI/
 
 | Path | Purpose |
 |---|---|
+| `.gitignore` | Excludes Office lock files, editor state, logs, generated output, caches, and local secrets |
+| `.gitattributes` | Enforces CRLF for exported VBA source and binary handling for Excel and image artifacts |
 | `src/M_EXCEL_UI.bas` | Production UI controller |
 | `demo/M_EXCEL_UI_DEMO.bas` | Demo actions and worksheet integration |
 | `demo/M_DEMO_BUILDER.bas` | Demo worksheet construction |
@@ -751,6 +755,12 @@ VBA-EXCEL_UI/
 | `CODE_OF_CONDUCT.md` | Standards for respectful and constructive project interaction |
 | `SECURITY.md` | Supported versions, private reporting, scope, and safe-use guidance |
 | `LICENSE` | MIT license |
+
+> [!NOTE]
+> `.gitattributes` deliberately enforces CRLF for exported `.bas`, `.cls`, and
+> `.frm` files. Excel workbooks, images, archives, and `.frx` form companions are
+> marked binary. `.gitignore` does **not** exclude exported VBA source or the
+> official `demo/EXCEL_UI_DEMO.xlsm` artifact.
 
 ---
 
@@ -1053,6 +1063,8 @@ A release candidate should satisfy all applicable items:
 [ ] Perform capture / hide / reset validation
 [ ] Verify 32-bit and 64-bit declarations where environments are available
 [ ] Re-export changed .bas modules
+[ ] Confirm .gitattributes preserved CRLF for exported VBA source
+[ ] Confirm Office, image, form-binary, and workbook artifacts remain binary
 [ ] Review the text diff
 [ ] Update module version metadata
 [ ] Update README and Wiki documentation

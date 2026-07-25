@@ -104,6 +104,8 @@ improvement is preferred to a broad change with ambiguous host behavior.
 
 ```text
 VBA-EXCEL_UI/
+├─ .gitattributes
+├─ .gitignore
 ├─ demo/
 │  ├─ EXCEL_UI_DEMO.xlsm
 │  ├─ M_DEMO_BUILDER.bas
@@ -167,6 +169,75 @@ Owns public test runners, assertions, state capture, restoration, and UI-specifi
 regression cases.
 
 ---
+
+
+## 🧹 Repository hygiene and line endings
+
+The repository includes:
+
+```text
+.gitignore
+.gitattributes
+```
+
+### `.gitignore`
+
+The ignore policy excludes:
+
+- Office lock, temporary, backup, and recovery files;
+- operating-system metadata;
+- local editor and IDE settings;
+- logs and diagnostic dumps;
+- generated build and test-output folders;
+- local virtual environments and caches;
+- private-key and certificate-container files.
+
+It deliberately does **not** ignore:
+
+- exported `.bas`, `.cls`, `.frm`, or `.frx` source assets;
+- the official `demo/EXCEL_UI_DEMO.xlsm` workbook;
+- Markdown documentation;
+- repository images.
+
+Do not add a broad rule such as:
+
+```text
+*.xlsm
+*.bas
+images/
+```
+
+because it would hide intentional repository assets.
+
+### `.gitattributes`
+
+The attributes policy enforces:
+
+```text
+*.bas  → CRLF
+*.cls  → CRLF
+*.frm  → CRLF
+```
+
+This matches the Windows VBA Editor workflow and avoids line-ending churn across
+contributors.
+
+The following are explicitly binary:
+
+- `.frx` UserForm companion files;
+- Excel and Office workbooks;
+- archives;
+- images;
+- PDFs.
+
+Markdown and repository configuration files use LF.
+
+When `.gitattributes` is introduced or materially changed, review the GitHub
+Desktop diff carefully. A one-time renormalization may make unchanged files
+appear modified if their prior line endings did not match the new policy. Do not
+commit a broad normalization change accidentally as part of an unrelated pull
+request.
+
 
 ## 🌿 Branch and pull-request workflow
 
@@ -683,6 +754,8 @@ Use this checklist in the pull-request description:
 [ ] ScreenUpdating is restored
 [ ] Excel / Office / Windows environment is reported
 [ ] Changed .bas modules were re-exported from the VBE
+[ ] VBA files retain CRLF line endings under .gitattributes
+[ ] Binary workbook and image files remain classified as binary
 [ ] Text diffs were reviewed
 [ ] Binary workbook changes are justified and validated
 [ ] README / Wiki / headers are updated

@@ -1,0 +1,136 @@
+#==============================================================================
+# VBA-EXCEL_UI .gitignore
+#------------------------------------------------------------------------------
+# PURPOSE
+#   Ignore local, temporary, generated, and sensitive development files while
+#   keeping exported VBA source, documentation, images, tests, and the official
+#   macro-enabled demo workbook trackable.
+#
+# POLICY
+#   - Exported VBA modules remain version-controlled.
+#   - The official demo/EXCEL_UI_DEMO.xlsm workbook remains version-controlled.
+#   - Office lock files, editor state, logs, build output, and local secrets do
+#     not belong in the repository.
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# MICROSOFT OFFICE TEMPORARY / LOCK / RECOVERY FILES
+#------------------------------------------------------------------------------
+~$*
+~$*.xls*
+~$*.doc*
+~$*.ppt*
+*.tmp
+*.temp
+*.bak
+*.backup
+*.xlk
+*.asd
+*.wbk
+
+# LibreOffice-style lock files that may appear during cross-tool inspection
+.~lock.*#
+
+#------------------------------------------------------------------------------
+# WINDOWS / MACOS / FILE-SYSTEM METADATA
+#------------------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+#------------------------------------------------------------------------------
+# EDITOR / IDE LOCAL SETTINGS
+#------------------------------------------------------------------------------
+.vscode/
+.idea/
+.vs/
+.history/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Notepad++ and similar editor backup/session files
+*.nppBackup
+session.xml
+
+#------------------------------------------------------------------------------
+# LOGS / DIAGNOSTIC DUMPS
+#------------------------------------------------------------------------------
+*.log
+*.dmp
+*.dump
+
+#------------------------------------------------------------------------------
+# GENERATED / LOCAL OUTPUT DIRECTORIES
+#------------------------------------------------------------------------------
+build/
+dist/
+output/
+outputs/
+temp/
+tmp/
+test-output/
+test-results/
+coverage/
+
+#------------------------------------------------------------------------------
+# LOCAL ENVIRONMENT / SECRET MATERIAL
+#------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+*.pfx
+*.p12
+*.pvk
+*.key
+
+#------------------------------------------------------------------------------
+# PYTHON CACHE / LOCAL ENVIRONMENTS
+#------------------------------------------------------------------------------
+# Kept here because release, validation, or repository-maintenance scripts may
+# be added later. Source scripts themselves remain trackable.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+#------------------------------------------------------------------------------
+# KEEP THESE REPOSITORY ASSETS TRACKABLE
+#------------------------------------------------------------------------------
+# Exported VBA source:
+#   *.bas
+#   *.cls
+#   *.frm
+#   *.frx
+#
+# Official Excel artifacts:
+#   demo/EXCEL_UI_DEMO.xlsm
+#   *.xlam when intentionally added
+#
+# Documentation and governance:
+#   *.md
+#   *.txt
+#
+# Repository configuration:
+#   .gitignore
+#   .gitattributes
+#
+# Images:
+#   images/*
+#
+# Do not add broad rules such as *.xlsm, *.bas, or images/ to this file.
