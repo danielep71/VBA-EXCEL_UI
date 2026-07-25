@@ -1099,34 +1099,6 @@ A release candidate should satisfy all applicable items:
 [ ] Publish the GitHub release
 ```
 
----
-
-## 🔗 Part of the Excel VBA Runtime Framework
-
-This repository is part of the broader:
-
-### [Excel VBA Runtime Framework](https://github.com/danielep71/excel-vba-runtime-framework)
-
-Within that framework, `VBA-EXCEL_UI` is responsible for:
-
-- Excel interface visibility;
-- controlled application presentation;
-- managed UI snapshots;
-- restoration of managed interface state;
-- UI-specific diagnostics and regression tests.
-
-It is intended to work alongside complementary components for:
-
-- execution control and performance management;
-- event-driven interaction;
-- workbook navigation;
-- logging and diagnostics;
-- broader application architecture.
-
-The repository remains independently usable and does not require the wider framework.
-
----
-
 <a id="status"></a>
 
 ## 📌 Status
