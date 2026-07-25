@@ -37,6 +37,10 @@
 &nbsp;·&nbsp;
 [Run the regression harness](test/M_EXCEL_UI_REGRESSION_TESTS.bas)
 &nbsp;·&nbsp;
+[Contributing](CONTRIBUTING.md)
+&nbsp;·&nbsp;
+[Security](SECURITY.md)
+&nbsp;·&nbsp;
 [View the Wiki](https://github.com/danielep71/VBA-EXCEL_UI/wiki)
 
 </div>
@@ -727,8 +731,11 @@ VBA-EXCEL_UI/
 │  └─ M_EXCEL_UI.bas
 ├─ test/
 │  └─ M_EXCEL_UI_REGRESSION_TESTS.bas
+├─ CODE_OF_CONDUCT.md
+├─ CONTRIBUTING.md
 ├─ LICENSE
-└─ README.md
+├─ README.md
+└─ SECURITY.md
 ```
 
 | Path | Purpose |
@@ -740,6 +747,9 @@ VBA-EXCEL_UI/
 | `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | Regression harness |
 | `images/` | Repository visual assets |
 | `README.md` | Main technical and usage guide |
+| `CONTRIBUTING.md` | Contribution workflow, code standards, tests, and PR expectations |
+| `CODE_OF_CONDUCT.md` | Standards for respectful and constructive project interaction |
+| `SECURITY.md` | Supported versions, private reporting, scope, and safe-use guidance |
 | `LICENSE` | MIT license |
 
 ---
@@ -755,6 +765,9 @@ VBA-EXCEL_UI/
 | [Demo builder](demo/M_DEMO_BUILDER.bas) | Reproducible demo-sheet construction |
 | [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification and release validation |
 | [Demo workbook](demo/EXCEL_UI_DEMO.xlsm) | Ready-to-run interactive example |
+| [Contributing Guidelines](CONTRIBUTING.md) | Branching, coding standards, testing, binary-workbook review, and PR checklist |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Respectful, evidence-led project interaction and reporting |
+| [Security Policy](SECURITY.md) | Private vulnerability reporting, supported versions, scope, and safe use |
 | [Excel VBA Runtime Framework](https://github.com/danielep71/excel-vba-runtime-framework) | Parent framework and related runtime components |
 
 ---
@@ -846,6 +859,24 @@ The emphasis is on inspectability, predictable behavior, and maintainability ins
 </details>
 
 ---
+
+---
+
+## 🔒 Security and safe use
+
+This project contains executable VBA and a macro-enabled demonstration workbook.
+
+- Obtain source and artifacts only from the official repository or a tagged release.
+- Review `.bas` modules before importing them.
+- Treat `.xlsm` files as executable content.
+- Keep organizational macro-security controls enabled.
+- Do not treat hidden Excel UI as an access-control or security boundary.
+- Maintain an accessible `UI_ShowExcelUI` recovery path in constrained-shell solutions.
+- Report suspected vulnerabilities privately under [SECURITY.md](SECURITY.md).
+
+The project does not require a third-party DLL, installer, background service, or
+automatic update mechanism.
+
 
 <a id="requirements"></a>
 
@@ -975,6 +1006,10 @@ Correctness, recovery behavior, compatibility, and regression coverage take prio
 
 ## 🤝 Contributing
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting non-trivial work.
+All participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Suspected vulnerabilities must follow [SECURITY.md](SECURITY.md).
+
 Contributions are welcome, particularly:
 
 - reproducible Excel-version or Windows-version defects;
@@ -1021,6 +1056,7 @@ A release candidate should satisfy all applicable items:
 [ ] Review the text diff
 [ ] Update module version metadata
 [ ] Update README and Wiki documentation
+[ ] Review CONTRIBUTING.md, CODE_OF_CONDUCT.md, and SECURITY.md when governance or scope changes
 [ ] Confirm no unintended binary workbook change
 [ ] Merge the release pull request
 [ ] Tag the merged commit
