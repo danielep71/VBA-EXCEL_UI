@@ -39,6 +39,15 @@ how the result was validated.
 Open an issue before beginning non-trivial work so the intended API, platform
 scope, UI ownership, and compatibility impact can be agreed in advance.
 
+Use:
+
+- [Bug report](.github/ISSUE_TEMPLATE/bug_report.md) for reproducible defects;
+- [Feature request](.github/ISSUE_TEMPLATE/feature_request.md) for enhancements;
+- [SECURITY.md](SECURITY.md) for suspected vulnerabilities.
+
+Blank public issues are disabled so that reports contain enough environment,
+state, recovery, and reproduction evidence to be actionable.
+
 Good issues include:
 
 - a reproducible failure on a specific Excel, Office-bitness, or Windows version;
@@ -105,6 +114,12 @@ improvement is preferred to a broad change with ambiguous host behavior.
 ```text
 VBA-EXCEL_UI/
 ├─ .gitattributes
+├─ .github/
+│  ├─ ISSUE_TEMPLATE/
+│  │  ├─ bug_report.md
+│  │  ├─ config.yml
+│  │  └─ feature_request.md
+│  └─ PULL_REQUEST_TEMPLATE.md
 ├─ .gitignore
 ├─ demo/
 │  ├─ EXCEL_UI_DEMO.xlsm
@@ -265,6 +280,11 @@ release/v1.0.1
 Do not make routine development changes directly on `main`.
 
 ### Keep pull requests focused
+
+GitHub automatically loads
+[`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) into new
+pull requests after the template is merged into the default branch. Complete all
+applicable sections rather than deleting required evidence.
 
 A pull request should normally address one coherent concern:
 
@@ -704,6 +724,8 @@ Depending on the change, update:
 README.md
 CONTRIBUTING.md
 SECURITY.md
+.github/ISSUE_TEMPLATE/*
+.github/PULL_REQUEST_TEMPLATE.md
 Wiki pages
 module and procedure headers
 release notes

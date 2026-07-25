@@ -37,6 +37,10 @@
 &nbsp;·&nbsp;
 [Run the regression harness](test/M_EXCEL_UI_REGRESSION_TESTS.bas)
 &nbsp;·&nbsp;
+[Report a bug](https://github.com/danielep71/VBA-EXCEL_UI/issues/new?template=bug_report.md)
+&nbsp;·&nbsp;
+[Request a feature](https://github.com/danielep71/VBA-EXCEL_UI/issues/new?template=feature_request.md)
+&nbsp;·&nbsp;
 [Contributing](CONTRIBUTING.md)
 &nbsp;·&nbsp;
 [Security](SECURITY.md)
@@ -723,6 +727,12 @@ Call the documented UI_... members from that project
 ```text
 VBA-EXCEL_UI/
 ├─ .gitattributes
+├─ .github/
+│  ├─ ISSUE_TEMPLATE/
+│  │  ├─ bug_report.md
+│  │  ├─ config.yml
+│  │  └─ feature_request.md
+│  └─ PULL_REQUEST_TEMPLATE.md
 ├─ .gitignore
 ├─ demo/
 │  ├─ EXCEL_UI_DEMO.xlsm
@@ -744,6 +754,10 @@ VBA-EXCEL_UI/
 |---|---|
 | `.gitignore` | Excludes Office lock files, editor state, logs, generated output, caches, and local secrets |
 | `.gitattributes` | Enforces CRLF for exported VBA source and binary handling for Excel and image artifacts |
+| `.github/ISSUE_TEMPLATE/bug_report.md` | Standardized compatibility, UI-state, diagnostic, and recovery bug reports |
+| `.github/ISSUE_TEMPLATE/feature_request.md` | Structured enhancement requests with scope and Semantic Versioning analysis |
+| `.github/ISSUE_TEMPLATE/config.yml` | Issue chooser configuration and private security-reporting link |
+| `.github/PULL_REQUEST_TEMPLATE.md` | Standardized API, WinAPI, snapshot, test, recovery, and release review checklist |
 | `src/M_EXCEL_UI.bas` | Production UI controller |
 | `demo/M_EXCEL_UI_DEMO.bas` | Demo actions and worksheet integration |
 | `demo/M_DEMO_BUILDER.bas` | Demo worksheet construction |
@@ -778,6 +792,9 @@ VBA-EXCEL_UI/
 | [Contributing Guidelines](CONTRIBUTING.md) | Branching, coding standards, testing, binary-workbook review, and PR checklist |
 | [Code of Conduct](CODE_OF_CONDUCT.md) | Respectful, evidence-led project interaction and reporting |
 | [Security Policy](SECURITY.md) | Private vulnerability reporting, supported versions, scope, and safe use |
+| [Bug Report Template](.github/ISSUE_TEMPLATE/bug_report.md) | Required environment, UI-state, reproduction, regression, and recovery evidence |
+| [Feature Request Template](.github/ISSUE_TEMPLATE/feature_request.md) | Proposed behavior, targeting, diagnostics, compatibility, and validation |
+| [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md) | Standard review contract for API, state ownership, WinAPI, tests, and documentation |
 | [Excel VBA Runtime Framework](https://github.com/danielep71/excel-vba-runtime-framework) | Parent framework and related runtime components |
 
 ---
@@ -1020,6 +1037,12 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting non-trivial work.
 All participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 Suspected vulnerabilities must follow [SECURITY.md](SECURITY.md).
 
+Use the repository templates:
+
+- [Bug report](.github/ISSUE_TEMPLATE/bug_report.md)
+- [Feature request](.github/ISSUE_TEMPLATE/feature_request.md)
+- [Pull request](.github/PULL_REQUEST_TEMPLATE.md)
+
 Contributions are welcome, particularly:
 
 - reproducible Excel-version or Windows-version defects;
@@ -1068,6 +1091,7 @@ A release candidate should satisfy all applicable items:
 [ ] Review the text diff
 [ ] Update module version metadata
 [ ] Update README and Wiki documentation
+[ ] Review issue and pull-request templates when API, diagnostics, recovery, or required evidence changes
 [ ] Review CONTRIBUTING.md, CODE_OF_CONDUCT.md, and SECURITY.md when governance or scope changes
 [ ] Confirm no unintended binary workbook change
 [ ] Merge the release pull request
