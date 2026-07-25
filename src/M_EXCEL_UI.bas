@@ -1015,34 +1015,47 @@ Private Function UI_TryResolveSnapshotWindow( _
 '                      UI_TryResolveSnapshotWindow
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Resolve one captured Excel Window against the current Application.Windows
-'   collection using object identity.
+'   Resolve one captured Excel Window by validating and returning the retained
+'   Window object reference captured in the snapshot
 '
 ' WHY
-'   Collection order is not a stable identity. Index-based restore can apply a
-'   captured window's state to a different window after close/open/reorder
-'   activity.
+'   Re-enumerating Application.Windows may return a different COM wrapper for
+'   the same live Excel window
+'
+'   Comparing that wrapper with the retained wrapper through the Is operator can
+'   therefore reject a valid surviving window
+'
+'   The retained object reference is the authoritative identity and should be
+'   used directly, provided it remains usable
 '
 ' INPUTS
 '   SnapshotIndex
-'     1-based index into the internal snapshot arrays.
+'     1-based index into the internal snapshot arrays
 '
 '   WindowOut
-'     Receives the matching current Excel Window object.
+'     Receives the retained captured Excel Window object
 '
 '   FailMsg
-'     Receives a diagnostic reason on failure.
+'     Receives a diagnostic reason on failure
 '
 ' RETURNS
-'   TRUE when the exact captured Window object remains open; otherwise FALSE.
+'   TRUE  => the retained captured Window reference remains usable
+'   FALSE => the captured Window was closed or its reference is unavailable
 '
 ' BEHAVIOR
-'   - Compares current Window objects with the retained captured object by `Is`.
-'   - Never falls back to caption, workbook name, collection index, or hWnd.
-'   - Therefore cannot redirect state to a newly created look-alike window.
+'   - Retrieves the exact Window object retained during snapshot capture
+'   - Performs a non-mutating property read to validate that the object remains
+'     usable
+'   - Never searches by collection index, caption, workbook name, or hWnd
+'   - Never redirects captured state to a newly created replacement window
 '
 ' ERROR POLICY
-'   - Does not raise to callers.
+'   - Does not raise to callers
+'   - Returns FALSE and populates FailMsg
+'
+' DEPENDENCIES
+'   - UI_TryGetBooleanProperty
+'   - UI_BuildRuntimeErrorText
 '
 ' UPDATED
 '   2026-07-25
@@ -1052,8 +1065,9 @@ Private Function UI_TryResolveSnapshotWindow( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CapturedWindow As Object
-    Dim Candidate      As Window
+    Dim CapturedWindow As Object     'Exact Window object retained during capture
+    Dim ProbeValue     As Boolean    'Non-mutating liveness-probe output
+    Dim ProbeMsg       As String     'Diagnostic returned by the liveness probe
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1064,11 +1078,17 @@ Private Function UI_TryResolveSnapshotWindow( _
         Set WindowOut = Nothing
         FailMsg = vbNullString
 
+'------------------------------------------------------------------------------
+' VALIDATE SNAPSHOT INDEX
+'------------------------------------------------------------------------------
         If SnapshotIndex < 1 Or SnapshotIndex > m_SnapshotWindowCount Then
             FailMsg = "snapshot index is outside the captured window range"
             GoTo SafeExit
         End If
 
+'------------------------------------------------------------------------------
+' RETRIEVE CAPTURED WINDOW REFERENCE
+'------------------------------------------------------------------------------
         Set CapturedWindow = m_SnapshotWindows(SnapshotIndex)
 
         If CapturedWindow Is Nothing Then
@@ -1077,18 +1097,31 @@ Private Function UI_TryResolveSnapshotWindow( _
         End If
 
 '------------------------------------------------------------------------------
-' MATCH CURRENT WINDOWS BY OBJECT IDENTITY
+' VALIDATE RETAINED WINDOW REFERENCE
 '------------------------------------------------------------------------------
-        For Each Candidate In Application.Windows
-            If Candidate Is CapturedWindow Then
-                Set WindowOut = Candidate
-                UI_TryResolveSnapshotWindow = True
-                GoTo SafeExit
-            End If
-        Next Candidate
+    'Use a non-mutating read of an existing managed property to confirm that the
+    'retained Excel Window object remains usable
+        If Not UI_TryGetBooleanProperty( _
+            Target:=CapturedWindow, _
+            PropertyName:="DisplayHeadings", _
+            ValueOut:=ProbeValue, _
+            FailMsg:=ProbeMsg) Then
 
-        FailMsg = _
-            "captured window is no longer open or was recreated; no state was applied"
+            FailMsg = _
+                "captured window is no longer open or usable; no state was applied"
+
+            If Len(ProbeMsg) > 0 Then
+                FailMsg = FailMsg & " | " & ProbeMsg
+            End If
+
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN EXACT CAPTURED WINDOW
+'------------------------------------------------------------------------------
+        Set WindowOut = CapturedWindow
+        UI_TryResolveSnapshotWindow = True
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -1101,8 +1134,12 @@ SafeExit:
 '------------------------------------------------------------------------------
 Fail:
         FailMsg = UI_BuildRuntimeErrorText
+        Set WindowOut = Nothing
+
+        Resume SafeExit
 
 End Function
+
 
 
 Private Function UI_BuildWindowIdentityText(ByVal TargetWindow As Object) As String
