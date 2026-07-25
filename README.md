@@ -12,7 +12,7 @@
   <img alt="Layer" src="https://img.shields.io/badge/Layer-UI controller-6f42c1">
   <img alt="OS" src="https://img.shields.io/badge/OS-Windows-0078D6">
   <img alt="API" src="https://img.shields.io/badge/API-WinAPI-blue">
-  <img alt="Status" src="https://img.shields.io/badge/Status-FINAL-brightgreen">
+  <img alt="Status" src="https://img.shields.io/badge/Status-Stable-brightgreen">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
 </p>
 
