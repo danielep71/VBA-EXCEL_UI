@@ -1,5 +1,4 @@
 Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
-
 '==============================================================================
 '                    MODULE: EXCEL_UI_REGRESSION_TESTS
 '------------------------------------------------------------------------------
@@ -23,6 +22,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Test_EXCEL_UI_RunAll
 '   - Test_EXCEL_UI_RunCore
 '   - Test_EXCEL_UI_RunTitleBarOnly
+'   - Test_EXCEL_UI_RunSnapshotIdentity
 '
 ' TEST SCOPE
 '   Core tests
@@ -44,6 +44,9 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   Snapshot / restore tests
 '     - explicit snapshot lifecycle
 '     - reset without snapshot leaves managed UI unchanged and logs a diagnostic
+'     - identity-safe restoration of surviving captured windows
+'     - closed captured-window handling
+'     - replacement-window non-interference
 '     - lifecycle cases are skipped when an explicit EXCEL_UI snapshot already
 '       existed before the run because the harness cannot reconstruct that prior
 '       module-level snapshot object
@@ -60,6 +63,8 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Per-window test state is captured and restored by Application.Windows index
 '   - A pre-existing explicit EXCEL_UI snapshot is left untouched by skipping
 '     the snapshot-destructive lifecycle cases
+'   - The focused snapshot-identity runner creates and closes temporary windows
+'     only after confirming that no explicit EXCEL_UI snapshot already exists
 '
 ' LIMITATIONS
 '   - Ribbon visibility is read using best-effort logic
@@ -80,7 +85,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   Daniele Penza
 '
 ' VERSION
-'   1.0.1
+'   1.1.0
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -94,6 +99,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '------------------------------------------------------------------------------
     Private Const TEST_WAIT_SECONDS   As Double = 0.15                'Small UI settle delay after each state change
     Private Const TEST_ERR_BASE       As Long = vbObjectError + 4700  'Base custom error number for test assertions
+    Private Const TEST_SNAPSHOT_ID_ERR_BASE As Long = vbObjectError + 4810  'Base custom error for snapshot-identity assertions
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -269,6 +275,264 @@ End Sub
 '
 '------------------------------------------------------------------------------
 '
+
+
+Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
+
+'
+'==============================================================================
+'                  Test_EXCEL_UI_RunSnapshotIdentity
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that snapshot restoration targets each exact captured Excel Window
+'   and never redirects saved state to a newly created replacement window
+'
+' WHY THIS EXISTS
+'   Collection position is not a stable window identity
+'
+'   A captured window can be closed and a newly created window can later occupy
+'   the same Application.Windows position
+'
+'   Snapshot restoration must therefore:
+'     - restore each surviving captured window
+'     - skip a captured window that no longer exists
+'     - leave a replacement window unchanged
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Refuses to run when an explicit EXCEL_UI snapshot already exists
+'   - Creates a temporary additional window for ThisWorkbook
+'   - Establishes different captured states on the anchor and temporary windows
+'   - Captures the EXCEL_UI snapshot
+'   - Closes the temporary captured window
+'   - Creates a replacement window with a sentinel state
+'   - Resets to the captured snapshot
+'   - Verifies the anchor restored and the replacement remained unchanged
+'   - Clears the test snapshot and closes temporary windows during cleanup
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup
+'   - Preserves the original test failure through cleanup
+'
+' DEPENDENCIES
+'   - UI_HasExcelUIStateSnapshot
+'   - UI_CaptureExcelUIState
+'   - UI_ResetExcelUIToSnapshot
+'   - UI_ClearExcelUIStateSnapshot
+'   - TST_AssertSnapshotWindowState
+'   - TST_AssertTrue
+'   - TST_SafeCloseWindow
+'
+' NOTES
+'   - The WindowIdentity diagnostic written by UI_ResetExcelUIToSnapshot for the
+'     deliberately closed captured window is expected in this test
+'
+' UPDATED
+'   2026-07-25
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow      As Window    'Original ThisWorkbook window that must restore
+    Dim CapturedWindow    As Window    'Temporary window included in the snapshot
+    Dim ReplacementWindow As Window    'New window created after capture
+
+    Dim SavedHeadings     As Boolean   'Original anchor Headings state
+    Dim SavedWorkbookTabs As Boolean   'Original anchor WorkbookTabs state
+    Dim SavedGridlines    As Boolean   'Original anchor Gridlines state
+
+    Dim HasFailure        As Boolean   'TRUE when the test raised before cleanup
+    Dim FailNumber        As Long      'Original failure number
+    Dim FailSource        As String    'Original failure source
+    Dim FailDescription   As String    'Original failure description
+
+    Const PROC As String = "Test_EXCEL_UI_RunSnapshotIdentity"   'Procedure name for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_Log PROC, "START", "Identity-safe snapshot test started"
+
+    'Do not overwrite or destroy a caller-owned explicit snapshot
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 1, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
+        End If
+
+    'Resolve a ThisWorkbook window as the stable surviving anchor
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 2, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+        If Not (AnchorWindow.Parent Is ThisWorkbook) Then
+            ThisWorkbook.Activate
+            Set AnchorWindow = ActiveWindow
+        End If
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 3, _
+                PROC, _
+                "ThisWorkbook could not provide an active Excel window"
+        End If
+
+    'Preserve the anchor window's original managed state for final cleanup
+        SavedHeadings = AnchorWindow.DisplayHeadings
+        SavedWorkbookTabs = AnchorWindow.DisplayWorkbookTabs
+        SavedGridlines = AnchorWindow.DisplayGridlines
+
+'------------------------------------------------------------------------------
+' CREATE TEMPORARY CAPTURED WINDOW
+'------------------------------------------------------------------------------
+    'Create a distinct Window object that will later be closed after capture
+        Set CapturedWindow = ThisWorkbook.NewWindow
+
+        If CapturedWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 4, _
+                PROC, _
+                "ThisWorkbook.NewWindow did not return a temporary captured window"
+        End If
+
+'------------------------------------------------------------------------------
+' ESTABLISH DISTINCT CAPTURE BASELINES
+'------------------------------------------------------------------------------
+    'Give the surviving anchor a recognisable captured state
+        AnchorWindow.DisplayHeadings = True
+        AnchorWindow.DisplayWorkbookTabs = False
+        AnchorWindow.DisplayGridlines = True
+
+    'Give the temporary captured window the opposite state
+        CapturedWindow.DisplayHeadings = False
+        CapturedWindow.DisplayWorkbookTabs = True
+        CapturedWindow.DisplayGridlines = False
+
+    'Capture both window identities and their managed state
+        UI_CaptureExcelUIState
+
+        TST_AssertTrue _
+            ActualValue:=UI_HasExcelUIStateSnapshot, _
+            AssertionName:=PROC & ".SnapshotAvailable"
+
+'------------------------------------------------------------------------------
+' MUTATE ANCHOR AND REPLACE CLOSED CAPTURED WINDOW
+'------------------------------------------------------------------------------
+    'Move the anchor away from its captured baseline
+        AnchorWindow.DisplayHeadings = False
+        AnchorWindow.DisplayWorkbookTabs = True
+        AnchorWindow.DisplayGridlines = False
+
+    'Close the captured temporary window so its identity is no longer live
+        CapturedWindow.Close
+        Set CapturedWindow = Nothing
+
+    'Create a replacement window after capture
+        Set ReplacementWindow = ThisWorkbook.NewWindow
+
+        If ReplacementWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 5, _
+                PROC, _
+                "ThisWorkbook.NewWindow did not return a replacement window"
+        End If
+
+    'Assign a sentinel state that must remain unchanged because this window did
+    'not exist when the snapshot was captured
+        ReplacementWindow.DisplayHeadings = True
+        ReplacementWindow.DisplayWorkbookTabs = False
+        ReplacementWindow.DisplayGridlines = True
+
+        TST_Log PROC, "INFO", _
+            "Captured window closed; replacement window created"
+
+'------------------------------------------------------------------------------
+' RESET AND ASSERT IDENTITY-SAFE BEHAVIOR
+'------------------------------------------------------------------------------
+    'Restore the captured snapshot
+        UI_ResetExcelUIToSnapshot
+
+    'The surviving anchor must return to its captured state
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=AnchorWindow, _
+            ExpectedHeadings:=True, _
+            ExpectedWorkbookTabs:=False, _
+            ExpectedGridlines:=True, _
+            AssertionName:=PROC & ".AnchorRestored"
+
+    'The replacement did not exist at capture time and must remain untouched
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=ReplacementWindow, _
+            ExpectedHeadings:=True, _
+            ExpectedWorkbookTabs:=False, _
+            ExpectedGridlines:=True, _
+            AssertionName:=PROC & ".ReplacementUnchanged"
+
+        TST_Log PROC, "PASS", _
+            "Captured window identity restored without touching replacement"
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Suppress cleanup failures locally so the original test failure is retained
+        On Error Resume Next
+
+        UI_ClearExcelUIStateSnapshot
+
+        TST_SafeCloseWindow ReplacementWindow
+        TST_SafeCloseWindow CapturedWindow
+
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.DisplayHeadings = SavedHeadings
+            AnchorWindow.DisplayWorkbookTabs = SavedWorkbookTabs
+            AnchorWindow.DisplayGridlines = SavedGridlines
+            AnchorWindow.Activate
+        End If
+
+    'End cleanup suppression before re-raising the original test failure
+        On Error GoTo 0
+
+        If HasFailure Then
+            TST_Log PROC, "FAIL", _
+                "Error " & CStr(FailNumber) & _
+                " | Source: " & FailSource & _
+                " | " & FailDescription
+
+            Err.Raise _
+                Number:=FailNumber, _
+                Source:=FailSource, _
+                Description:=FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+    'Preserve the original failure before entering best-effort cleanup
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume SafeExit
+
+End Sub
+
 
 Private Sub TST_RunRegressionPack( _
     ByVal IncludeTitleBarTests As Boolean, _
@@ -3330,6 +3594,171 @@ Private Function TST_TitleBarMode( _
 
 End Function
 
+
+Private Sub TST_AssertSnapshotWindowState( _
+    ByVal TargetWindow As Window, _
+    ByVal ExpectedHeadings As Boolean, _
+    ByVal ExpectedWorkbookTabs As Boolean, _
+    ByVal ExpectedGridlines As Boolean, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                  TST_AssertSnapshotWindowState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert the three window-level Boolean properties managed by EXCEL_UI
+'
+' INPUTS
+'   TargetWindow
+'     Window whose managed state is being asserted
+'
+'   ExpectedHeadings
+'     Expected DisplayHeadings state
+'
+'   ExpectedWorkbookTabs
+'     Expected DisplayWorkbookTabs state
+'
+'   ExpectedGridlines
+'     Expected DisplayGridlines state
+'
+'   AssertionName
+'     Diagnostic source used when an assertion fails
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on a missing target or property mismatch
+'
+' UPDATED
+'   2026-07-25
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' VALIDATE TARGET
+'------------------------------------------------------------------------------
+        If TargetWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 10, _
+                AssertionName, _
+                "target window is Nothing"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT MANAGED WINDOW STATE
+'------------------------------------------------------------------------------
+        If TargetWindow.DisplayHeadings <> ExpectedHeadings Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 11, _
+                AssertionName, _
+                "DisplayHeadings mismatch; expected=" & _
+                CStr(ExpectedHeadings) & "; actual=" & _
+                CStr(TargetWindow.DisplayHeadings)
+        End If
+
+        If TargetWindow.DisplayWorkbookTabs <> ExpectedWorkbookTabs Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 12, _
+                AssertionName, _
+                "DisplayWorkbookTabs mismatch; expected=" & _
+                CStr(ExpectedWorkbookTabs) & "; actual=" & _
+                CStr(TargetWindow.DisplayWorkbookTabs)
+        End If
+
+        If TargetWindow.DisplayGridlines <> ExpectedGridlines Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 13, _
+                AssertionName, _
+                "DisplayGridlines mismatch; expected=" & _
+                CStr(ExpectedGridlines) & "; actual=" & _
+                CStr(TargetWindow.DisplayGridlines)
+        End If
+
+End Sub
+
+
+Private Sub TST_AssertTrue( _
+    ByVal ActualValue As Boolean, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                             TST_AssertTrue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Raise when a Boolean assertion is FALSE
+'
+' INPUTS
+'   ActualValue
+'     Boolean result to assert
+'
+'   AssertionName
+'     Diagnostic source used when the assertion fails
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises when ActualValue is FALSE
+'
+' UPDATED
+'   2026-07-25
+'==============================================================================
+'
+
+        If Not ActualValue Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 20, _
+                AssertionName, _
+                "expected TRUE but received FALSE"
+        End If
+
+End Sub
+
+
+Private Sub TST_SafeCloseWindow(ByRef TargetWindow As Window)
+
+'
+'==============================================================================
+'                         TST_SafeCloseWindow
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Close and release one temporary Excel Window on a best-effort basis
+'
+' INPUTS / OUTPUTS
+'   TargetWindow
+'     Temporary Window to close and release
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Suppresses cleanup errors locally
+'
+' UPDATED
+'   2026-07-25
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' CLOSE AND RELEASE
+'------------------------------------------------------------------------------
+        If Not TargetWindow Is Nothing Then
+            TargetWindow.Close
+        End If
+
+        Set TargetWindow = Nothing
+
+End Sub
+
+
 Private Function TST_BuildRuntimeErrorText() As String
 
 '
@@ -3375,6 +3804,8 @@ Private Function TST_BuildRuntimeErrorText() As String
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
 End Function
+
+
 
 
 
