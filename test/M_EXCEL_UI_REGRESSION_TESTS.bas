@@ -40,6 +40,10 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '     - no-op / leave-unchanged success path
 '     - success path without FailureList capture
 '     - invalid UIVisibility structured failure path
+'     - snapshot capture clean-success result path
+'     - snapshot restoration clean-success result path
+'     - snapshot restoration no-snapshot failure path
+'     - closed captured-window ordered failure path
 '
 '   Snapshot / restore tests
 '     - explicit snapshot lifecycle
@@ -331,82 +335,65 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '                  Test_EXCEL_UI_RunSnapshotIdentity
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Verify that snapshot restoration targets each exact captured Excel Window
-'   and never redirects saved state to a newly created replacement window
-'
-' WHY THIS EXISTS
-'   Collection position is not a stable window identity
-'
-'   A captured window can be closed and a newly created window can later occupy
-'   the same Application.Windows position
-'
-'   Snapshot restoration must therefore:
-'     - restore each surviving captured window
-'     - skip a captured window that no longer exists
-'     - leave a replacement window unchanged
+'   Verify identity-safe restoration and structured reporting when a captured
+'   Excel Window is closed and replaced after snapshot capture.
 '
 ' RETURNS
 '   None
 '
 ' BEHAVIOR
-'   - Refuses to run when an explicit EXCEL_UI snapshot already exists
-'   - Creates a temporary additional window for ThisWorkbook
-'   - Establishes different captured states on the anchor and temporary windows
-'   - Captures the EXCEL_UI snapshot
-'   - Closes the temporary captured window
-'   - Creates a replacement window with a sentinel state
-'   - Resets to the captured snapshot
-'   - Verifies the anchor restored and the replacement remained unchanged
-'   - Clears the test snapshot and closes temporary windows during cleanup
+'   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
+'   - Captures a surviving anchor window and a temporary second window.
+'   - Closes the captured temporary window and creates a replacement.
+'   - Restores through UI_ResetExcelUIToSnapshot_WithResult.
+'   - Verifies the surviving anchor restores.
+'   - Verifies the replacement remains unchanged.
+'   - Verifies one ordered WindowIdentity failure is returned.
 '
 ' ERROR POLICY
-'   - Raises after best-effort cleanup
-'   - Preserves the original test failure through cleanup
+'   - Raises after best-effort cleanup.
+'   - Preserves the original test failure through cleanup.
 '
 ' DEPENDENCIES
-'   - UI_HasExcelUIStateSnapshot
-'   - UI_CaptureExcelUIState
-'   - UI_ResetExcelUIToSnapshot
-'   - UI_ClearExcelUIStateSnapshot
+'   - UI_CaptureExcelUIState_WithResult
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertSingleFailurePrefix
 '   - TST_AssertSnapshotWindowState
-'   - TST_AssertTrue
-'   - TST_SafeCloseWindow
-'
-' NOTES
-'   - The WindowIdentity diagnostic written by UI_ResetExcelUIToSnapshot for the
-'     deliberately closed captured window is expected in this test
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow      As Window    'Original ThisWorkbook window that must restore
-    Dim CapturedWindow    As Window    'Temporary window included in the snapshot
-    Dim ReplacementWindow As Window    'New window created after capture
+    Dim AnchorWindow       As Window
+    Dim CapturedWindow     As Window
+    Dim ReplacementWindow  As Window
 
-    Dim SavedHeadings     As Boolean   'Original anchor Headings state
-    Dim SavedWorkbookTabs As Boolean   'Original anchor WorkbookTabs state
-    Dim SavedGridlines    As Boolean   'Original anchor Gridlines state
+    Dim SavedHeadings      As Boolean
+    Dim SavedWorkbookTabs  As Boolean
+    Dim SavedGridlines     As Boolean
 
-    Dim HasFailure        As Boolean   'TRUE when the test raised before cleanup
-    Dim FailNumber        As Long      'Original failure number
-    Dim FailSource        As String    'Original failure source
-    Dim FailDescription   As String    'Original failure description
+    Dim OK                 As Boolean
+    Dim FailureCount       As Long
+    Dim FailureList        As Variant
 
-    Const PROC As String = "Test_EXCEL_UI_RunSnapshotIdentity"   'Procedure name for diagnostics
+    Dim HasFailure         As Boolean
+    Dim FailNumber         As Long
+    Dim FailSource         As String
+    Dim FailDescription    As String
+
+    Const PROC As String = "Test_EXCEL_UI_RunSnapshotIdentity"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
         On Error GoTo Fail
 
-        TST_Log PROC, "START", "Identity-safe snapshot test started"
-
-    'Do not overwrite or destroy a caller-owned explicit snapshot
+        TST_Log PROC, "START", "Identity-safe structured snapshot test started"
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_SNAPSHOT_ID_ERR_BASE + 1, _
@@ -442,7 +429,7 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
         SavedGridlines = AnchorWindow.DisplayGridlines
 
 '------------------------------------------------------------------------------
-' CREATE TEMPORARY CAPTURED WINDOW
+' CREATE AND CONFIGURE CAPTURED WINDOWS
 '------------------------------------------------------------------------------
     'Create a distinct Window object that will later be closed after capture
         Set CapturedWindow = ThisWorkbook.NewWindow
@@ -467,15 +454,28 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
         CapturedWindow.DisplayWorkbookTabs = True
         CapturedWindow.DisplayGridlines = False
 
-    'Capture both window identities and their managed state
-        UI_CaptureExcelUIState
+'------------------------------------------------------------------------------
+' CAPTURE THROUGH STRUCTURED-RESULT API
+'------------------------------------------------------------------------------
+        FailureCount = 99
+        FailureList = Array("stale capture failure")
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".CaptureResult"
 
         TST_AssertTrue _
             ActualValue:=UI_HasExcelUIStateSnapshot, _
             AssertionName:=PROC & ".SnapshotAvailable"
 
 '------------------------------------------------------------------------------
-' MUTATE ANCHOR AND REPLACE CLOSED CAPTURED WINDOW
+' MUTATE ANCHOR AND CREATE REPLACEMENT
 '------------------------------------------------------------------------------
     'Move the anchor away from its captured baseline
         AnchorWindow.DisplayHeadings = False
@@ -485,8 +485,6 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
     'Close the captured temporary window so its identity is no longer live
         CapturedWindow.Close
         Set CapturedWindow = Nothing
-
-    'Create a replacement window after capture
         Set ReplacementWindow = ThisWorkbook.NewWindow
 
         If ReplacementWindow Is Nothing Then
@@ -506,12 +504,21 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
             "Captured window closed; replacement window created"
 
 '------------------------------------------------------------------------------
-' RESET AND ASSERT IDENTITY-SAFE BEHAVIOR
+' RESTORE AND ASSERT STRUCTURED FAILURE
 '------------------------------------------------------------------------------
-    'Restore the captured snapshot
-        UI_ResetExcelUIToSnapshot
+        FailureCount = 99
+        FailureList = Array("stale restore failure")
 
-    'The surviving anchor must return to its captured state
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertSingleFailurePrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="WindowIdentity [", _
+            AssertionName:=PROC & ".RestoreResult"
         TST_AssertSnapshotWindowState _
             TargetWindow:=AnchorWindow, _
             ExpectedHeadings:=True, _
@@ -528,7 +535,8 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
             AssertionName:=PROC & ".ReplacementUnchanged"
 
         TST_Log PROC, "PASS", _
-            "Captured window identity restored without touching replacement"
+            TST_Log PROC, "PASS", _
+            "Identity-safe restore returned the expected ordered failure without touching replacement"
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -728,10 +736,19 @@ Private Sub TST_RunRegressionPack( _
 
         Else
 
-            'Run the explicit snapshot lifecycle case
+            'Run structured snapshot capture clean-success case
+                TST_Case_SnapshotCaptureResultSuccess IncludeTitleBarTests
+
+            'Run structured snapshot restoration clean-success case
+                TST_Case_SnapshotResetResultSuccess IncludeTitleBarTests
+
+            'Run structured restoration no-snapshot failure case
+                TST_Case_SnapshotResetResultNoSnapshot IncludeTitleBarTests
+
+            'Run the compatibility-wrapper snapshot lifecycle case
                 TST_Case_SnapshotLifecycle IncludeTitleBarTests
 
-            'Run the reset-without-snapshot no-op case
+            'Run the compatibility-wrapper reset-without-snapshot no-op case
                 TST_Case_ResetWithoutSnapshot_NoOp IncludeTitleBarTests
 
         End If
@@ -1868,6 +1885,366 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
             "Structured failure reporting for invalid UIVisibility behaved as expected"
 
 End Sub
+
+Private Sub TST_Case_SnapshotCaptureResultSuccess( _
+    ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'              TST_Case_SnapshotCaptureResultSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify the clean-success contract and deterministic output clearing of
+'   UI_CaptureExcelUIState_WithResult.
+'
+' WHY
+'   Snapshot capture now exposes the same Boolean/count/list contract as the
+'   existing structured apply API.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE to include title-bar baseline setup; FALSE to leave it unchanged.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Seeds stale output values.
+'   - Captures a deterministic mixed UI baseline.
+'   - Verifies clean success, zero failures, Empty FailureList, and snapshot
+'     availability.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - UI_CaptureExcelUIState_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertSnapshotAvailability
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK           As Boolean
+    Dim FailureCount As Long
+    Dim FailureList  As Variant
+
+    Const PROC As String = "TST_Case_SnapshotCaptureResultSuccess"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating structured snapshot capture clean-success path"
+
+        UI_ClearExcelUIStateSnapshot
+
+        UI_SetExcelUI _
+            Ribbon:=UI_Show, _
+            StatusBar:=UI_Hide, _
+            ScrollBars:=UI_Show, _
+            FormulaBar:=UI_Hide, _
+            Headings:=UI_Show, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, UI_Show)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        FailureCount = 99
+        FailureList = Array("stale capture failure")
+
+'------------------------------------------------------------------------------
+' CAPTURE AND ASSERT RESULT
+'------------------------------------------------------------------------------
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".Result"
+
+        TST_AssertSnapshotAvailability True, PROC & ".SnapshotAvailable"
+
+        UI_ClearExcelUIStateSnapshot
+
+        TST_Log PROC, "PASS", _
+            "Structured snapshot capture returned clean success and cleared stale outputs"
+
+End Sub
+
+
+Private Sub TST_Case_SnapshotResetResultSuccess( _
+    ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'               TST_Case_SnapshotResetResultSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify the clean-success contract and deterministic output clearing of
+'   UI_ResetExcelUIToSnapshot_WithResult.
+'
+' WHY
+'   Structured restoration must report success without changing the established
+'   snapshot lifecycle or host-state preservation contract.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE to include title-bar mutation/restoration; FALSE to leave it
+'     unchanged.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Captures a deterministic mixed baseline.
+'   - Mutates every managed UI surface.
+'   - Seeds stale output values.
+'   - Restores through the structured API.
+'   - Verifies clean result buffers, restored state, retained snapshot, and
+'     ScreenUpdating preservation.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - TST_AssertResultSuccess
+'   - managed-state assertion helpers
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
+    Dim SavedScreenUpdating As Boolean
+
+    Const PROC As String = "TST_Case_SnapshotResetResultSuccess"
+
+'------------------------------------------------------------------------------
+' INITIALIZE AND CAPTURE BASELINE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating structured snapshot restoration clean-success path"
+
+        UI_ClearExcelUIStateSnapshot
+
+        UI_SetExcelUI _
+            Ribbon:=UI_Show, _
+            StatusBar:=UI_Hide, _
+            ScrollBars:=UI_Show, _
+            FormulaBar:=UI_Hide, _
+            Headings:=UI_Show, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, UI_Show)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_CaptureExcelUIState
+        TST_AssertSnapshotAvailability True, PROC & ".SnapshotAvailable"
+
+'------------------------------------------------------------------------------
+' MUTATE AND RESTORE
+'------------------------------------------------------------------------------
+        UI_SetExcelUI _
+            Ribbon:=UI_Hide, _
+            StatusBar:=UI_Show, _
+            ScrollBars:=UI_Hide, _
+            FormulaBar:=UI_Show, _
+            Headings:=UI_Hide, _
+            WorkbookTabs:=UI_Show, _
+            Gridlines:=UI_Hide, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, UI_Hide)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        FailureCount = 99
+        FailureList = Array("stale restore failure")
+
+        SavedScreenUpdating = Application.ScreenUpdating
+        Application.ScreenUpdating = True
+
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        If Not Application.ScreenUpdating Then
+            Err.Raise TEST_ERR_BASE + 70, _
+                      PROC & ".ScreenUpdating", _
+                      "structured restoration did not preserve ScreenUpdating=True"
+        End If
+
+        Application.ScreenUpdating = SavedScreenUpdating
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".Result"
+
+'------------------------------------------------------------------------------
+' ASSERT RESTORED STATE
+'------------------------------------------------------------------------------
+        TST_AssertRibbonVisible True, PROC & ".Ribbon"
+        TST_AssertApplicationProperty False, "DisplayStatusBar", PROC & ".StatusBar"
+        TST_AssertApplicationProperty True, "DisplayScrollBars", PROC & ".ScrollBars"
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", PROC & ".FormulaBar"
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", PROC & ".Headings"
+        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", PROC & ".WorkbookTabs"
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", PROC & ".Gridlines"
+
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, PROC & ".TitleBar"
+        End If
+
+        TST_AssertSnapshotAvailability True, PROC & ".SnapshotRetained"
+
+        UI_ClearExcelUIStateSnapshot
+
+        TST_Log PROC, "PASS", _
+            "Structured snapshot restoration returned clean success and restored state"
+
+End Sub
+
+
+Private Sub TST_Case_SnapshotResetResultNoSnapshot( _
+    ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'              TST_Case_SnapshotResetResultNoSnapshot
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify deterministic structured failure reporting and no-op behavior when
+'   restoration is requested without an available snapshot.
+'
+' WHY
+'   The new result API must make the existing no-snapshot diagnostic
+'   machine-readable without altering host state.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE to include title-bar state assertions; FALSE to omit them.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Clears any existing snapshot.
+'   - Establishes a deterministic mixed baseline.
+'   - Seeds stale output values.
+'   - Verifies one ordered NoSnapshot failure.
+'   - Verifies all managed state and ScreenUpdating remain unchanged.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - TST_AssertSingleFailurePrefix
+'   - managed-state assertion helpers
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
+    Dim SavedScreenUpdating As Boolean
+
+    Const PROC As String = "TST_Case_SnapshotResetResultNoSnapshot"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating structured no-snapshot restoration failure"
+
+        UI_ClearExcelUIStateSnapshot
+
+        UI_SetExcelUI _
+            Ribbon:=UI_Show, _
+            StatusBar:=UI_Hide, _
+            ScrollBars:=UI_Show, _
+            FormulaBar:=UI_Hide, _
+            Headings:=UI_Show, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, UI_Show)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        FailureCount = 99
+        FailureList = Array("stale no-snapshot failure")
+
+        SavedScreenUpdating = Application.ScreenUpdating
+        Application.ScreenUpdating = True
+
+'------------------------------------------------------------------------------
+' RESTORE WITHOUT SNAPSHOT
+'------------------------------------------------------------------------------
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        If Not Application.ScreenUpdating Then
+            Err.Raise TEST_ERR_BASE + 71, _
+                      PROC & ".ScreenUpdating", _
+                      "no-snapshot restoration did not preserve ScreenUpdating=True"
+        End If
+
+        Application.ScreenUpdating = SavedScreenUpdating
+
+        TST_AssertSingleFailurePrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="NoSnapshot | ", _
+            AssertionName:=PROC & ".Result"
+
+'------------------------------------------------------------------------------
+' ASSERT NO-OP STATE
+'------------------------------------------------------------------------------
+        TST_AssertRibbonVisible True, PROC & ".Ribbon"
+        TST_AssertApplicationProperty False, "DisplayStatusBar", PROC & ".StatusBar"
+        TST_AssertApplicationProperty True, "DisplayScrollBars", PROC & ".ScrollBars"
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", PROC & ".FormulaBar"
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", PROC & ".Headings"
+        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", PROC & ".WorkbookTabs"
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", PROC & ".Gridlines"
+
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, PROC & ".TitleBar"
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Structured no-snapshot failure was ordered and host state remained unchanged"
+
+End Sub
+
 
 Private Sub TST_Case_SnapshotLifecycle(ByVal IncludeTitleBarTests As Boolean)
 
@@ -3078,6 +3455,86 @@ Private Sub TST_AssertResultSuccess( _
         End If
 
 End Sub
+
+Private Sub TST_AssertSingleFailurePrefix( _
+    ByVal Succeeded As Boolean, _
+    ByVal FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal ExpectedPrefix As String, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                    TST_AssertSingleFailurePrefix
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert a structured-result failure containing exactly one ordered entry
+'   whose text begins with the expected stage prefix.
+'
+' INPUTS
+'   Succeeded
+'     Boolean result returned by the structured API.
+'
+'   FailureCount / FailureList
+'     Structured-result outputs to validate.
+'
+'   ExpectedPrefix
+'     Required leading text for the single failure entry.
+'
+'   AssertionName
+'     Diagnostic source used when an assertion fails.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises on mismatch.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE FLAG AND COUNT
+'------------------------------------------------------------------------------
+        If Succeeded Then
+            Err.Raise TEST_ERR_BASE + 60, _
+                      AssertionName, _
+                      AssertionName & " expected=False actual=True"
+        End If
+
+        If FailureCount <> 1 Then
+            Err.Raise TEST_ERR_BASE + 61, _
+                      AssertionName, _
+                      AssertionName & " expected FailureCount=1 actual=" & _
+                      CStr(FailureCount)
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE LIST
+'------------------------------------------------------------------------------
+        If Not IsArray(FailureList) Then
+            Err.Raise TEST_ERR_BASE + 62, _
+                      AssertionName, _
+                      AssertionName & " expected FailureList array"
+        End If
+
+        If LBound(FailureList) <> 1 Or UBound(FailureList) <> 1 Then
+            Err.Raise TEST_ERR_BASE + 63, _
+                      AssertionName, _
+                      AssertionName & " expected one 1-based failure entry"
+        End If
+
+        If Left$(CStr(FailureList(1)), Len(ExpectedPrefix)) <> ExpectedPrefix Then
+            Err.Raise TEST_ERR_BASE + 64, _
+                      AssertionName, _
+                      AssertionName & " expected prefix='" & ExpectedPrefix & _
+                      "' actual='" & CStr(FailureList(1)) & "'"
+        End If
+
+End Sub
+
 
 Private Sub TST_AssertSnapshotAvailability( _
     ByVal Expected As Boolean, _
