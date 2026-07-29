@@ -1,5 +1,4 @@
 Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
-
 '==============================================================================
 '                    MODULE: EXCEL_UI_REGRESSION_TESTS
 '------------------------------------------------------------------------------
@@ -23,6 +22,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Test_EXCEL_UI_RunAll
 '   - Test_EXCEL_UI_RunCore
 '   - Test_EXCEL_UI_RunTitleBarOnly
+'   - Test_EXCEL_UI_RunSnapshotIdentity
 '
 ' TEST SCOPE
 '   Core tests
@@ -40,10 +40,17 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '     - no-op / leave-unchanged success path
 '     - success path without FailureList capture
 '     - invalid UIVisibility structured failure path
+'     - snapshot capture clean-success result path
+'     - snapshot restoration clean-success result path
+'     - snapshot restoration no-snapshot failure path
+'     - closed captured-window ordered failure path
 '
 '   Snapshot / restore tests
 '     - explicit snapshot lifecycle
 '     - reset without snapshot leaves managed UI unchanged and logs a diagnostic
+'     - identity-safe restoration of surviving captured windows
+'     - closed captured-window handling
+'     - replacement-window non-interference
 '     - lifecycle cases are skipped when an explicit EXCEL_UI snapshot already
 '       existed before the run because the harness cannot reconstruct that prior
 '       module-level snapshot object
@@ -53,6 +60,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '
 '   Title-bar tests
 '     - hide / show round-trip
+'     - preservation of unrelated GWL_STYLE bits across hide / show
 '
 ' STATE MANAGEMENT
 '   - The harness snapshots the current managed Excel UI state before testing
@@ -60,6 +68,8 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Per-window test state is captured and restored by Application.Windows index
 '   - A pre-existing explicit EXCEL_UI snapshot is left untouched by skipping
 '     the snapshot-destructive lifecycle cases
+'   - The focused snapshot-identity runner creates and closes temporary windows
+'     only after confirming that no explicit EXCEL_UI snapshot already exists
 '
 ' LIMITATIONS
 '   - Ribbon visibility is read using best-effort logic
@@ -74,13 +84,13 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.0.1
+'   1.1.0
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -94,10 +104,11 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '------------------------------------------------------------------------------
     Private Const TEST_WAIT_SECONDS   As Double = 0.15                'Small UI settle delay after each state change
     Private Const TEST_ERR_BASE       As Long = vbObjectError + 4700  'Base custom error number for test assertions
+    Private Const TEST_SNAPSHOT_ID_ERR_BASE As Long = vbObjectError + 4810  'Base custom error for snapshot-identity assertions
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
-' WIN32 / WIN64 API FOR TITLE-BAR STATE READ
+' WIN32 / WIN64 API FOR TITLE-BAR STYLE TESTS
 '------------------------------------------------------------------------------
     #If VBA7 Then
         #If Win64 Then
@@ -105,12 +116,35 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
                 ByVal hWnd As LongPtr, _
                 ByVal nIndex As Long) _
                 As LongPtr
+
+            Private Declare PtrSafe Function TST_SetWindowLongPtr Lib "user32" Alias "SetWindowLongPtrA" ( _
+                ByVal hWnd As LongPtr, _
+                ByVal nIndex As Long, _
+                ByVal dwNewLong As LongPtr) _
+                As LongPtr
         #Else
             Private Declare PtrSafe Function TST_GetWindowLong Lib "user32" Alias "GetWindowLongA" ( _
                 ByVal hWnd As LongPtr, _
                 ByVal nIndex As Long) _
                 As Long
+
+            Private Declare PtrSafe Function TST_SetWindowLong Lib "user32" Alias "SetWindowLongA" ( _
+                ByVal hWnd As LongPtr, _
+                ByVal nIndex As Long, _
+                ByVal dwNewLong As Long) _
+                As Long
         #End If
+
+        Private Declare PtrSafe Function TST_SetWindowPos Lib "user32" ( _
+            ByVal hWnd As LongPtr, _
+            ByVal hWndInsertAfter As LongPtr, _
+            ByVal X As Long, _
+            ByVal Y As Long, _
+            ByVal cx As Long, _
+            ByVal cy As Long, _
+            ByVal uFlags As Long) _
+            As Long
+
         Private Declare PtrSafe Function TST_GetLastError Lib "kernel32" Alias "GetLastError" () As Long
         Private Declare PtrSafe Sub TST_SetLastError Lib "kernel32" Alias "SetLastError" ( _
             ByVal dwErrCode As Long)
@@ -119,16 +153,41 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
             ByVal hWnd As Long, _
             ByVal nIndex As Long) _
             As Long
+
+        Private Declare Function TST_SetWindowLong Lib "user32" Alias "SetWindowLongA" ( _
+            ByVal hWnd As Long, _
+            ByVal nIndex As Long, _
+            ByVal dwNewLong As Long) _
+            As Long
+
+        Private Declare Function TST_SetWindowPos Lib "user32" ( _
+            ByVal hWnd As Long, _
+            ByVal hWndInsertAfter As Long, _
+            ByVal X As Long, _
+            ByVal Y As Long, _
+            ByVal cx As Long, _
+            ByVal cy As Long, _
+            ByVal uFlags As Long) _
+            As Long
+
         Private Declare Function TST_GetLastError Lib "kernel32" Alias "GetLastError" () As Long
         Private Declare Sub TST_SetLastError Lib "kernel32" Alias "SetLastError" ( _
             ByVal dwErrCode As Long)
     #End If
 
 '------------------------------------------------------------------------------
-' API CONSTANTS FOR TITLE-BAR STATE READ
+' API CONSTANTS FOR TITLE-BAR STYLE TESTS
 '------------------------------------------------------------------------------
-    Private Const TST_GWL_STYLE  As Long = -16       'Window style index
-    Private Const TST_WS_CAPTION As Long = &HC00000  'Caption / title-bar style bit
+    Private Const TST_GWL_STYLE             As Long = -16
+    Private Const TST_WS_CAPTION            As Long = &HC00000
+    Private Const TST_SYNTHETIC_UNRELATED_BIT As Long = &H2000000
+    Private Const TST_TITLEBAR_OWNED_MASK   As Long = &HCF0000
+
+    Private Const TST_SWP_NOSIZE            As Long = &H1
+    Private Const TST_SWP_NOMOVE            As Long = &H2
+    Private Const TST_SWP_NOZORDER          As Long = &H4
+    Private Const TST_SWP_FRAMECHANGED      As Long = &H20
+    Private Const TST_SWP_NOOWNERZORDER     As Long = &H200
 
 
 '
@@ -229,7 +288,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '                      Test_EXCEL_UI_RunTitleBarOnly
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Run only the dedicated title-bar regression case
+'   Run the dedicated title-bar regression cases
 '
 ' WHY THIS EXISTS
 '   Title-bar behavior is the most WinAPI-sensitive area and benefits from a
@@ -240,7 +299,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '
 ' BEHAVIOR
 '   - Snapshots current state
-'   - Runs only the title-bar round-trip case
+'   - Runs the title-bar round-trip and owned-style-bit preservation cases
 '   - Attempts to restore the original state
 '
 ' ERROR POLICY
@@ -250,7 +309,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '   - TST_RunTitleBarOnlyPack
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -260,8 +319,6 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
         TST_RunTitleBarOnlyPack CallerProc:="Test_EXCEL_UI_RunTitleBarOnly"
 
 End Sub
-
-
 '
 '------------------------------------------------------------------------------
 '
@@ -269,6 +326,251 @@ End Sub
 '
 '------------------------------------------------------------------------------
 '
+
+
+Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
+
+'
+'==============================================================================
+'                  Test_EXCEL_UI_RunSnapshotIdentity
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify identity-safe restoration and structured reporting when a captured
+'   Excel Window is closed and replaced after snapshot capture.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
+'   - Captures a surviving anchor window and a temporary second window.
+'   - Closes the captured temporary window and creates a replacement.
+'   - Restores through UI_ResetExcelUIToSnapshot_WithResult.
+'   - Verifies the surviving anchor restores.
+'   - Verifies the replacement remains unchanged.
+'   - Verifies one ordered WindowIdentity failure is returned.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup.
+'   - Preserves the original test failure through cleanup.
+'
+' DEPENDENCIES
+'   - UI_CaptureExcelUIState_WithResult
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertSingleFailurePrefix
+'   - TST_AssertSnapshotWindowState
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow       As Window
+    Dim CapturedWindow     As Window
+    Dim ReplacementWindow  As Window
+
+    Dim SavedHeadings      As Boolean
+    Dim SavedWorkbookTabs  As Boolean
+    Dim SavedGridlines     As Boolean
+
+    Dim OK                 As Boolean
+    Dim FailureCount       As Long
+    Dim FailureList        As Variant
+
+    Dim HasFailure         As Boolean
+    Dim FailNumber         As Long
+    Dim FailSource         As String
+    Dim FailDescription    As String
+
+    Const PROC As String = "Test_EXCEL_UI_RunSnapshotIdentity"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_Log PROC, "START", "Identity-safe structured snapshot test started"
+
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 1, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
+        End If
+
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 2, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+        If Not (AnchorWindow.Parent Is ThisWorkbook) Then
+            ThisWorkbook.Activate
+            Set AnchorWindow = ActiveWindow
+        End If
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 3, _
+                PROC, _
+                "ThisWorkbook could not provide an active Excel window"
+        End If
+
+        SavedHeadings = AnchorWindow.DisplayHeadings
+        SavedWorkbookTabs = AnchorWindow.DisplayWorkbookTabs
+        SavedGridlines = AnchorWindow.DisplayGridlines
+
+'------------------------------------------------------------------------------
+' CREATE AND CONFIGURE CAPTURED WINDOWS
+'------------------------------------------------------------------------------
+        Set CapturedWindow = ThisWorkbook.NewWindow
+
+        If CapturedWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 4, _
+                PROC, _
+                "ThisWorkbook.NewWindow did not return a temporary captured window"
+        End If
+
+        AnchorWindow.DisplayHeadings = True
+        AnchorWindow.DisplayWorkbookTabs = False
+        AnchorWindow.DisplayGridlines = True
+
+        CapturedWindow.DisplayHeadings = False
+        CapturedWindow.DisplayWorkbookTabs = True
+        CapturedWindow.DisplayGridlines = False
+
+'------------------------------------------------------------------------------
+' CAPTURE THROUGH STRUCTURED-RESULT API
+'------------------------------------------------------------------------------
+        FailureCount = 99
+        FailureList = Array("stale capture failure")
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".CaptureResult"
+
+        TST_AssertTrue _
+            ActualValue:=UI_HasExcelUIStateSnapshot, _
+            AssertionName:=PROC & ".SnapshotAvailable"
+
+'------------------------------------------------------------------------------
+' CLOSE CAPTURED WINDOW AND CREATE REPLACEMENT
+'------------------------------------------------------------------------------
+        AnchorWindow.DisplayHeadings = False
+        AnchorWindow.DisplayWorkbookTabs = True
+        AnchorWindow.DisplayGridlines = False
+
+        CapturedWindow.Close
+        Set CapturedWindow = Nothing
+
+        Set ReplacementWindow = ThisWorkbook.NewWindow
+
+        If ReplacementWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 5, _
+                PROC, _
+                "ThisWorkbook.NewWindow did not return a replacement window"
+        End If
+
+        ReplacementWindow.DisplayHeadings = True
+        ReplacementWindow.DisplayWorkbookTabs = False
+        ReplacementWindow.DisplayGridlines = True
+
+'------------------------------------------------------------------------------
+' RESTORE AND ASSERT STRUCTURED FAILURE
+'------------------------------------------------------------------------------
+        FailureCount = 99
+        FailureList = Array("stale restore failure")
+
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertSingleFailurePrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="WindowIdentity [", _
+            AssertionName:=PROC & ".RestoreResult"
+
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=AnchorWindow, _
+            ExpectedHeadings:=True, _
+            ExpectedWorkbookTabs:=False, _
+            ExpectedGridlines:=True, _
+            AssertionName:=PROC & ".AnchorRestored"
+
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=ReplacementWindow, _
+            ExpectedHeadings:=True, _
+            ExpectedWorkbookTabs:=False, _
+            ExpectedGridlines:=True, _
+            AssertionName:=PROC & ".ReplacementUnchanged"
+
+        TST_Log PROC, "PASS", _
+            "Identity-safe restore returned the expected ordered failure without touching replacement"
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        On Error Resume Next
+
+        UI_ClearExcelUIStateSnapshot
+
+        TST_SafeCloseWindow ReplacementWindow
+        TST_SafeCloseWindow CapturedWindow
+
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.DisplayHeadings = SavedHeadings
+            AnchorWindow.DisplayWorkbookTabs = SavedWorkbookTabs
+            AnchorWindow.DisplayGridlines = SavedGridlines
+            AnchorWindow.Activate
+        End If
+
+        On Error GoTo 0
+
+        If HasFailure Then
+            TST_Log PROC, "FAIL", _
+                "Error " & CStr(FailNumber) & _
+                " | Source: " & FailSource & _
+                " | " & FailDescription
+
+            Err.Raise _
+                Number:=FailNumber, _
+                Source:=FailSource, _
+                Description:=FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume SafeExit
+
+End Sub
+
 
 Private Sub TST_RunRegressionPack( _
     ByVal IncludeTitleBarTests As Boolean, _
@@ -289,7 +591,7 @@ Private Sub TST_RunRegressionPack( _
 ' INPUTS
 '   IncludeTitleBarTests
 '     TRUE  => include wrapper and title-bar round-trip cases
-'     FALSE => skip the wrapper case and the dedicated title-bar round-trip case
+'     FALSE => skip the wrapper case and the dedicated title-bar cases
 '
 '   CallerProc
 '     Public caller procedure name used for diagnostics
@@ -314,7 +616,7 @@ Private Sub TST_RunRegressionPack( _
 '   - TST_Log
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -417,10 +719,19 @@ Private Sub TST_RunRegressionPack( _
 
         Else
 
-            'Run the explicit snapshot lifecycle case
+            'Run structured snapshot capture clean-success case
+                TST_Case_SnapshotCaptureResultSuccess IncludeTitleBarTests
+
+            'Run structured snapshot restoration clean-success case
+                TST_Case_SnapshotResetResultSuccess IncludeTitleBarTests
+
+            'Run structured restoration no-snapshot failure case
+                TST_Case_SnapshotResetResultNoSnapshot IncludeTitleBarTests
+
+            'Run the compatibility-wrapper snapshot lifecycle case
                 TST_Case_SnapshotLifecycle IncludeTitleBarTests
 
-            'Run the reset-without-snapshot no-op case
+            'Run the compatibility-wrapper reset-without-snapshot no-op case
                 TST_Case_ResetWithoutSnapshot_NoOp IncludeTitleBarTests
 
         End If
@@ -437,9 +748,10 @@ Private Sub TST_RunRegressionPack( _
                 "Convenience-wrapper case skipped in core mode because the wrappers also toggle TitleBar"
         End If
 
-    'Run the dedicated title-bar case when requested
+    'Run the dedicated title-bar cases when requested
         If IncludeTitleBarTests Then
             TST_Case_TitleBarRoundTrip
+            TST_Case_TitleBarOwnedBitPreservation
         End If
 
 '------------------------------------------------------------------------------
@@ -490,11 +802,14 @@ Fail:
                           IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
     'Log the failure immediately
-        TST_Log CallerProc, "FAIL", TST_BuildRuntimeErrorText
+        TST_Log CallerProc, "FAIL", _
+            CStr(FailNumber) & ": " & FailDescription & _
+            IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
         Resume SafeExit
 
 End Sub
+
 
 Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 
@@ -503,7 +818,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '                        TST_RunTitleBarOnlyPack
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Execute only the dedicated title-bar regression case and restore the
+'   Execute the dedicated title-bar regression cases and restore the
 '   pre-test UI state afterward
 '
 ' WHY THIS EXISTS
@@ -524,9 +839,10 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_SnapshotState
 '   - TST_RestoreState
 '   - TST_Case_TitleBarRoundTrip
+'   - TST_Case_TitleBarOwnedBitPreservation
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -587,8 +903,12 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Run the dedicated title-bar round-trip case
         TST_Case_TitleBarRoundTrip
 
+    'Verify the exact production merge policy with deterministic style values
+        TST_Case_TitleBarOwnedBitPreservation
+
     'Log successful completion before restoration
-        TST_Log CallerProc, "PASS", "Title-bar round-trip case passed"
+        TST_Log CallerProc, "PASS", _
+            "Title-bar round-trip and owned-bit preservation cases passed"
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -631,14 +951,14 @@ Fail:
         FailDescription = Err.Description & _
                           IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
-    'Log the failure immediately
-        TST_Log CallerProc, "FAIL", TST_BuildRuntimeErrorText
+    'Log the captured failure without consulting the mutable Err object
+        TST_Log CallerProc, "FAIL", _
+            CStr(FailNumber) & ": " & FailDescription & _
+            IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
         Resume SafeExit
 
 End Sub
-
-
 '
 '------------------------------------------------------------------------------
 '
@@ -1549,6 +1869,366 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
 
 End Sub
 
+Private Sub TST_Case_SnapshotCaptureResultSuccess( _
+    ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'              TST_Case_SnapshotCaptureResultSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify the clean-success contract and deterministic output clearing of
+'   UI_CaptureExcelUIState_WithResult.
+'
+' WHY
+'   Snapshot capture now exposes the same Boolean/count/list contract as the
+'   existing structured apply API.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE to include title-bar baseline setup; FALSE to leave it unchanged.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Seeds stale output values.
+'   - Captures a deterministic mixed UI baseline.
+'   - Verifies clean success, zero failures, Empty FailureList, and snapshot
+'     availability.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - UI_CaptureExcelUIState_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertSnapshotAvailability
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK           As Boolean
+    Dim FailureCount As Long
+    Dim FailureList  As Variant
+
+    Const PROC As String = "TST_Case_SnapshotCaptureResultSuccess"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating structured snapshot capture clean-success path"
+
+        UI_ClearExcelUIStateSnapshot
+
+        UI_SetExcelUI _
+            Ribbon:=UI_Show, _
+            StatusBar:=UI_Hide, _
+            ScrollBars:=UI_Show, _
+            FormulaBar:=UI_Hide, _
+            Headings:=UI_Show, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, UI_Show)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        FailureCount = 99
+        FailureList = Array("stale capture failure")
+
+'------------------------------------------------------------------------------
+' CAPTURE AND ASSERT RESULT
+'------------------------------------------------------------------------------
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".Result"
+
+        TST_AssertSnapshotAvailability True, PROC & ".SnapshotAvailable"
+
+        UI_ClearExcelUIStateSnapshot
+
+        TST_Log PROC, "PASS", _
+            "Structured snapshot capture returned clean success and cleared stale outputs"
+
+End Sub
+
+
+Private Sub TST_Case_SnapshotResetResultSuccess( _
+    ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'               TST_Case_SnapshotResetResultSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify the clean-success contract and deterministic output clearing of
+'   UI_ResetExcelUIToSnapshot_WithResult.
+'
+' WHY
+'   Structured restoration must report success without changing the established
+'   snapshot lifecycle or host-state preservation contract.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE to include title-bar mutation/restoration; FALSE to leave it
+'     unchanged.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Captures a deterministic mixed baseline.
+'   - Mutates every managed UI surface.
+'   - Seeds stale output values.
+'   - Restores through the structured API.
+'   - Verifies clean result buffers, restored state, retained snapshot, and
+'     ScreenUpdating preservation.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - TST_AssertResultSuccess
+'   - managed-state assertion helpers
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
+    Dim SavedScreenUpdating As Boolean
+
+    Const PROC As String = "TST_Case_SnapshotResetResultSuccess"
+
+'------------------------------------------------------------------------------
+' INITIALIZE AND CAPTURE BASELINE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating structured snapshot restoration clean-success path"
+
+        UI_ClearExcelUIStateSnapshot
+
+        UI_SetExcelUI _
+            Ribbon:=UI_Show, _
+            StatusBar:=UI_Hide, _
+            ScrollBars:=UI_Show, _
+            FormulaBar:=UI_Hide, _
+            Headings:=UI_Show, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, UI_Show)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_CaptureExcelUIState
+        TST_AssertSnapshotAvailability True, PROC & ".SnapshotAvailable"
+
+'------------------------------------------------------------------------------
+' MUTATE AND RESTORE
+'------------------------------------------------------------------------------
+        UI_SetExcelUI _
+            Ribbon:=UI_Hide, _
+            StatusBar:=UI_Show, _
+            ScrollBars:=UI_Hide, _
+            FormulaBar:=UI_Show, _
+            Headings:=UI_Hide, _
+            WorkbookTabs:=UI_Show, _
+            Gridlines:=UI_Hide, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, UI_Hide)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        FailureCount = 99
+        FailureList = Array("stale restore failure")
+
+        SavedScreenUpdating = Application.ScreenUpdating
+        Application.ScreenUpdating = True
+
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        If Not Application.ScreenUpdating Then
+            Err.Raise TEST_ERR_BASE + 70, _
+                      PROC & ".ScreenUpdating", _
+                      "structured restoration did not preserve ScreenUpdating=True"
+        End If
+
+        Application.ScreenUpdating = SavedScreenUpdating
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".Result"
+
+'------------------------------------------------------------------------------
+' ASSERT RESTORED STATE
+'------------------------------------------------------------------------------
+        TST_AssertRibbonVisible True, PROC & ".Ribbon"
+        TST_AssertApplicationProperty False, "DisplayStatusBar", PROC & ".StatusBar"
+        TST_AssertApplicationProperty True, "DisplayScrollBars", PROC & ".ScrollBars"
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", PROC & ".FormulaBar"
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", PROC & ".Headings"
+        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", PROC & ".WorkbookTabs"
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", PROC & ".Gridlines"
+
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, PROC & ".TitleBar"
+        End If
+
+        TST_AssertSnapshotAvailability True, PROC & ".SnapshotRetained"
+
+        UI_ClearExcelUIStateSnapshot
+
+        TST_Log PROC, "PASS", _
+            "Structured snapshot restoration returned clean success and restored state"
+
+End Sub
+
+
+Private Sub TST_Case_SnapshotResetResultNoSnapshot( _
+    ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+'              TST_Case_SnapshotResetResultNoSnapshot
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify deterministic structured failure reporting and no-op behavior when
+'   restoration is requested without an available snapshot.
+'
+' WHY
+'   The new result API must make the existing no-snapshot diagnostic
+'   machine-readable without altering host state.
+'
+' INPUTS
+'   IncludeTitleBarTests
+'     TRUE to include title-bar state assertions; FALSE to omit them.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Clears any existing snapshot.
+'   - Establishes a deterministic mixed baseline.
+'   - Seeds stale output values.
+'   - Verifies one ordered NoSnapshot failure.
+'   - Verifies all managed state and ScreenUpdating remain unchanged.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - TST_AssertSingleFailurePrefix
+'   - managed-state assertion helpers
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
+    Dim SavedScreenUpdating As Boolean
+
+    Const PROC As String = "TST_Case_SnapshotResetResultNoSnapshot"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating structured no-snapshot restoration failure"
+
+        UI_ClearExcelUIStateSnapshot
+
+        UI_SetExcelUI _
+            Ribbon:=UI_Show, _
+            StatusBar:=UI_Hide, _
+            ScrollBars:=UI_Show, _
+            FormulaBar:=UI_Hide, _
+            Headings:=UI_Show, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Show, _
+            TitleBar:=TST_TitleBarMode(IncludeTitleBarTests, UI_Show)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        FailureCount = 99
+        FailureList = Array("stale no-snapshot failure")
+
+        SavedScreenUpdating = Application.ScreenUpdating
+        Application.ScreenUpdating = True
+
+'------------------------------------------------------------------------------
+' RESTORE WITHOUT SNAPSHOT
+'------------------------------------------------------------------------------
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        If Not Application.ScreenUpdating Then
+            Err.Raise TEST_ERR_BASE + 71, _
+                      PROC & ".ScreenUpdating", _
+                      "no-snapshot restoration did not preserve ScreenUpdating=True"
+        End If
+
+        Application.ScreenUpdating = SavedScreenUpdating
+
+        TST_AssertSingleFailurePrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="NoSnapshot | ", _
+            AssertionName:=PROC & ".Result"
+
+'------------------------------------------------------------------------------
+' ASSERT NO-OP STATE
+'------------------------------------------------------------------------------
+        TST_AssertRibbonVisible True, PROC & ".Ribbon"
+        TST_AssertApplicationProperty False, "DisplayStatusBar", PROC & ".StatusBar"
+        TST_AssertApplicationProperty True, "DisplayScrollBars", PROC & ".ScrollBars"
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", PROC & ".FormulaBar"
+        TST_AssertAllWindowsProperty True, "DisplayHeadings", PROC & ".Headings"
+        TST_AssertAllWindowsProperty False, "DisplayWorkbookTabs", PROC & ".WorkbookTabs"
+        TST_AssertAllWindowsProperty True, "DisplayGridlines", PROC & ".Gridlines"
+
+        If IncludeTitleBarTests Then
+            TST_AssertTitleBarVisible True, PROC & ".TitleBar"
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Structured no-snapshot failure was ordered and host state remained unchanged"
+
+End Sub
+
+
 Private Sub TST_Case_SnapshotLifecycle(ByVal IncludeTitleBarTests As Boolean)
 
 '
@@ -1937,6 +2617,177 @@ Private Sub TST_Case_TitleBarRoundTrip()
 End Sub
 
 
+
+Private Sub TST_Case_TitleBarOwnedBitPreservation()
+
+'
+'==============================================================================
+'                 TST_Case_TitleBarOwnedBitPreservation
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify deterministically that the production title-bar merge policy changes
+'   only the style bits owned by EXCEL_UI.
+'
+' WHY THIS EXISTS
+'   Windows may normalize or reject individual GWL_STYLE bits on Excel's
+'   top-level window. A test that writes an arbitrary sentinel bit to the live
+'   window can therefore fail even when the production merge algorithm is
+'   correct.
+'
+'   This case validates the exact production merge helper with synthetic style
+'   values, while TST_Case_TitleBarRoundTrip continues to exercise the live
+'   WinAPI hide/show path.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Verifies a show merge preserves every unrelated current-style bit.
+'   - Verifies a hide merge clears all and only the owned bits.
+'   - Verifies unrelated bits supplied through OwnedStyleBits are ignored.
+'   - Uses the production UI_InternalMergeTitleBarStyleBits helper.
+'
+' ERROR POLICY
+'   - Logs and raises on assertion failure.
+'
+' DEPENDENCIES
+'   - UI_InternalMergeTitleBarStyleBits
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim CurrentStyle      As LongPtr
+    Dim RequestedOwned    As LongPtr
+    Dim ExpectedStyle     As LongPtr
+    Dim ActualStyle       As LongPtr
+    Dim UnrelatedMask     As LongPtr
+#Else
+    Dim CurrentStyle      As Long
+    Dim RequestedOwned    As Long
+    Dim ExpectedStyle     As Long
+    Dim ActualStyle       As Long
+    Dim UnrelatedMask     As Long
+#End If
+
+    Dim FailNumber      As Long
+    Dim FailSource      As String
+    Dim FailDescription As String
+
+    Const PROC As String = "TST_Case_TitleBarOwnedBitPreservation"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_Log PROC, "START", _
+            "Validating deterministic title-bar style ownership"
+
+        CurrentStyle = &H10345678
+        RequestedOwned = TST_TITLEBAR_OWNED_MASK
+        UnrelatedMask = Not TST_TITLEBAR_OWNED_MASK
+
+'------------------------------------------------------------------------------
+' ASSERT SHOW MERGE
+'------------------------------------------------------------------------------
+        ExpectedStyle = _
+            (CurrentStyle And UnrelatedMask) Or _
+            (RequestedOwned And TST_TITLEBAR_OWNED_MASK)
+
+        ActualStyle = UI_InternalMergeTitleBarStyleBits( _
+            CurrentStyle:=CurrentStyle, _
+            OwnedStyleBits:=RequestedOwned)
+
+        If ActualStyle <> ExpectedStyle Then
+            Err.Raise _
+                TEST_ERR_BASE + 50, _
+                PROC, _
+                "show merge returned an unexpected style"
+        End If
+
+        If (ActualStyle And UnrelatedMask) <> _
+            (CurrentStyle And UnrelatedMask) Then
+
+            Err.Raise _
+                TEST_ERR_BASE + 51, _
+                PROC, _
+                "show merge changed unrelated current-style bits"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT HIDE MERGE
+'------------------------------------------------------------------------------
+        ActualStyle = UI_InternalMergeTitleBarStyleBits( _
+            CurrentStyle:=CurrentStyle, _
+            OwnedStyleBits:=0)
+
+        If (ActualStyle And TST_TITLEBAR_OWNED_MASK) <> 0 Then
+            Err.Raise _
+                TEST_ERR_BASE + 52, _
+                PROC, _
+                "hide merge did not clear every owned style bit"
+        End If
+
+        If (ActualStyle And UnrelatedMask) <> _
+            (CurrentStyle And UnrelatedMask) Then
+
+            Err.Raise _
+                TEST_ERR_BASE + 53, _
+                PROC, _
+                "hide merge changed unrelated current-style bits"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT DEFENSIVE MASKING
+'------------------------------------------------------------------------------
+    'Supply one unrelated bit through OwnedStyleBits. The helper must ignore it
+    'and continue to source unrelated bits exclusively from CurrentStyle.
+        RequestedOwned = _
+            TST_TITLEBAR_OWNED_MASK Or TST_SYNTHETIC_UNRELATED_BIT
+
+        ActualStyle = UI_InternalMergeTitleBarStyleBits( _
+            CurrentStyle:=CurrentStyle, _
+            OwnedStyleBits:=RequestedOwned)
+
+        If (ActualStyle And TST_SYNTHETIC_UNRELATED_BIT) <> _
+            (CurrentStyle And TST_SYNTHETIC_UNRELATED_BIT) Then
+
+            Err.Raise _
+                TEST_ERR_BASE + 54, _
+                PROC, _
+                "unrelated bits from OwnedStyleBits were not ignored"
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Unrelated bits preserved and owned bits merged correctly"
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description & _
+            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+
+        TST_Log PROC, "FAIL", _
+            CStr(FailNumber) & ": " & FailDescription & _
+            IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
+
+        Err.Raise _
+            Number:=FailNumber, _
+            Source:=FailSource, _
+            Description:=FailDescription
+
+End Sub
 '
 '------------------------------------------------------------------------------
 '
@@ -2588,6 +3439,86 @@ Private Sub TST_AssertResultSuccess( _
 
 End Sub
 
+Private Sub TST_AssertSingleFailurePrefix( _
+    ByVal Succeeded As Boolean, _
+    ByVal FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal ExpectedPrefix As String, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                    TST_AssertSingleFailurePrefix
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert a structured-result failure containing exactly one ordered entry
+'   whose text begins with the expected stage prefix.
+'
+' INPUTS
+'   Succeeded
+'     Boolean result returned by the structured API.
+'
+'   FailureCount / FailureList
+'     Structured-result outputs to validate.
+'
+'   ExpectedPrefix
+'     Required leading text for the single failure entry.
+'
+'   AssertionName
+'     Diagnostic source used when an assertion fails.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises on mismatch.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE FLAG AND COUNT
+'------------------------------------------------------------------------------
+        If Succeeded Then
+            Err.Raise TEST_ERR_BASE + 60, _
+                      AssertionName, _
+                      AssertionName & " expected=False actual=True"
+        End If
+
+        If FailureCount <> 1 Then
+            Err.Raise TEST_ERR_BASE + 61, _
+                      AssertionName, _
+                      AssertionName & " expected FailureCount=1 actual=" & _
+                      CStr(FailureCount)
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE LIST
+'------------------------------------------------------------------------------
+        If Not IsArray(FailureList) Then
+            Err.Raise TEST_ERR_BASE + 62, _
+                      AssertionName, _
+                      AssertionName & " expected FailureList array"
+        End If
+
+        If LBound(FailureList) <> 1 Or UBound(FailureList) <> 1 Then
+            Err.Raise TEST_ERR_BASE + 63, _
+                      AssertionName, _
+                      AssertionName & " expected one 1-based failure entry"
+        End If
+
+        If Left$(CStr(FailureList(1)), Len(ExpectedPrefix)) <> ExpectedPrefix Then
+            Err.Raise TEST_ERR_BASE + 64, _
+                      AssertionName, _
+                      AssertionName & " expected prefix='" & ExpectedPrefix & _
+                      "' actual='" & CStr(FailureList(1)) & "'"
+        End If
+
+End Sub
+
+
 Private Sub TST_AssertSnapshotAvailability( _
     ByVal Expected As Boolean, _
     ByVal AssertionName As String)
@@ -2997,6 +3928,287 @@ Fail:
 
 End Function
 
+#If VBA7 Then
+Private Function TST_TryGetWindowStyle( _
+    ByVal hWnd As LongPtr, _
+    ByRef StyleOut As LongPtr, _
+    ByRef FailMsg As String) As Boolean
+#Else
+Private Function TST_TryGetWindowStyle( _
+    ByVal hWnd As Long, _
+    ByRef StyleOut As Long, _
+    ByRef FailMsg As String) As Boolean
+#End If
+
+'
+'==============================================================================
+'                         TST_TryGetWindowStyle
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Read GWL_STYLE through the correct Win32 API for the current Office bitness.
+'
+' RETURNS
+'   TRUE on success.
+'
+' ERROR POLICY
+'   Uses GetLastError to distinguish a valid zero return from failure.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LastErr As Long
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_TryGetWindowStyle = False
+        StyleOut = 0
+        FailMsg = vbNullString
+
+        If hWnd = 0 Then
+            FailMsg = "invalid window handle"
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+        TST_SetLastError 0
+
+#If VBA7 Then
+    #If Win64 Then
+        StyleOut = TST_GetWindowLongPtr(hWnd, TST_GWL_STYLE)
+    #Else
+        StyleOut = TST_GetWindowLong(hWnd, TST_GWL_STYLE)
+    #End If
+#Else
+        StyleOut = TST_GetWindowLong(hWnd, TST_GWL_STYLE)
+#End If
+
+        LastErr = TST_GetLastError
+
+        If StyleOut = 0 And LastErr <> 0 Then
+            FailMsg = _
+                "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
+                CStr(LastErr)
+
+            GoTo SafeExit
+        End If
+
+        TST_TryGetWindowStyle = True
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        FailMsg = TST_BuildRuntimeErrorText
+        Resume SafeExit
+
+End Function
+
+
+#If VBA7 Then
+Private Function TST_TrySetWindowStyle( _
+    ByVal hWnd As LongPtr, _
+    ByVal NewStyle As LongPtr, _
+    ByRef FailMsg As String) As Boolean
+#Else
+Private Function TST_TrySetWindowStyle( _
+    ByVal hWnd As Long, _
+    ByVal NewStyle As Long, _
+    ByRef FailMsg As String) As Boolean
+#End If
+
+'
+'==============================================================================
+'                         TST_TrySetWindowStyle
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Write GWL_STYLE through the correct Win32 API for the current Office
+'   bitness.
+'
+' RETURNS
+'   TRUE on success.
+'
+' ERROR POLICY
+'   Uses GetLastError to distinguish a valid zero return from failure.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim PreviousStyle As LongPtr
+#Else
+    Dim PreviousStyle As Long
+#End If
+
+    Dim LastErr As Long
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_TrySetWindowStyle = False
+        FailMsg = vbNullString
+
+        If hWnd = 0 Then
+            FailMsg = "invalid window handle"
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' WRITE
+'------------------------------------------------------------------------------
+        TST_SetLastError 0
+
+#If VBA7 Then
+    #If Win64 Then
+        PreviousStyle = _
+            TST_SetWindowLongPtr(hWnd, TST_GWL_STYLE, NewStyle)
+    #Else
+        PreviousStyle = _
+            TST_SetWindowLong(hWnd, TST_GWL_STYLE, NewStyle)
+    #End If
+#Else
+        PreviousStyle = _
+            TST_SetWindowLong(hWnd, TST_GWL_STYLE, NewStyle)
+#End If
+
+        LastErr = TST_GetLastError
+
+        If PreviousStyle = 0 And LastErr <> 0 Then
+            FailMsg = _
+                "SetWindowLong/SetWindowLongPtr failed; GetLastError=" & _
+                CStr(LastErr)
+
+            GoTo SafeExit
+        End If
+
+        TST_TrySetWindowStyle = True
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        FailMsg = TST_BuildRuntimeErrorText
+        Resume SafeExit
+
+End Function
+
+
+#If VBA7 Then
+Private Function TST_TryRefreshWindowFrame( _
+    ByVal hWnd As LongPtr, _
+    ByRef FailMsg As String) As Boolean
+#Else
+Private Function TST_TryRefreshWindowFrame( _
+    ByVal hWnd As Long, _
+    ByRef FailMsg As String) As Boolean
+#End If
+
+'
+'==============================================================================
+'                      TST_TryRefreshWindowFrame
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Recalculate the non-client frame after an exact style restore.
+'
+' RETURNS
+'   TRUE on success.
+'
+' ERROR POLICY
+'   Returns FALSE and FailMsg on failure.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ApiOK   As Long
+    Dim LastErr As Long
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_TryRefreshWindowFrame = False
+        FailMsg = vbNullString
+
+        If hWnd = 0 Then
+            FailMsg = "invalid window handle"
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' REFRESH
+'------------------------------------------------------------------------------
+        TST_SetLastError 0
+
+        ApiOK = TST_SetWindowPos( _
+            hWnd, _
+            0, _
+            0, _
+            0, _
+            0, _
+            0, _
+            TST_SWP_NOMOVE Or TST_SWP_NOSIZE Or TST_SWP_NOZORDER Or _
+                TST_SWP_NOOWNERZORDER Or TST_SWP_FRAMECHANGED)
+
+        LastErr = TST_GetLastError
+
+        If ApiOK = 0 Then
+            FailMsg = _
+                "SetWindowPos failed; GetLastError=" & CStr(LastErr)
+
+            GoTo SafeExit
+        End If
+
+        TST_TryRefreshWindowFrame = True
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        FailMsg = TST_BuildRuntimeErrorText
+        Resume SafeExit
+
+End Function
+
 Private Function TST_TryGetTitleBarVisible( _
     ByRef IsVisible As Boolean, _
     ByRef FailMsg As String) As Boolean
@@ -3330,6 +4542,171 @@ Private Function TST_TitleBarMode( _
 
 End Function
 
+
+Private Sub TST_AssertSnapshotWindowState( _
+    ByVal TargetWindow As Window, _
+    ByVal ExpectedHeadings As Boolean, _
+    ByVal ExpectedWorkbookTabs As Boolean, _
+    ByVal ExpectedGridlines As Boolean, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                  TST_AssertSnapshotWindowState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert the three window-level Boolean properties managed by EXCEL_UI
+'
+' INPUTS
+'   TargetWindow
+'     Window whose managed state is being asserted
+'
+'   ExpectedHeadings
+'     Expected DisplayHeadings state
+'
+'   ExpectedWorkbookTabs
+'     Expected DisplayWorkbookTabs state
+'
+'   ExpectedGridlines
+'     Expected DisplayGridlines state
+'
+'   AssertionName
+'     Diagnostic source used when an assertion fails
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on a missing target or property mismatch
+'
+' UPDATED
+'   2026-07-25
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' VALIDATE TARGET
+'------------------------------------------------------------------------------
+        If TargetWindow Is Nothing Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 10, _
+                AssertionName, _
+                "target window is Nothing"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT MANAGED WINDOW STATE
+'------------------------------------------------------------------------------
+        If TargetWindow.DisplayHeadings <> ExpectedHeadings Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 11, _
+                AssertionName, _
+                "DisplayHeadings mismatch; expected=" & _
+                CStr(ExpectedHeadings) & "; actual=" & _
+                CStr(TargetWindow.DisplayHeadings)
+        End If
+
+        If TargetWindow.DisplayWorkbookTabs <> ExpectedWorkbookTabs Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 12, _
+                AssertionName, _
+                "DisplayWorkbookTabs mismatch; expected=" & _
+                CStr(ExpectedWorkbookTabs) & "; actual=" & _
+                CStr(TargetWindow.DisplayWorkbookTabs)
+        End If
+
+        If TargetWindow.DisplayGridlines <> ExpectedGridlines Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 13, _
+                AssertionName, _
+                "DisplayGridlines mismatch; expected=" & _
+                CStr(ExpectedGridlines) & "; actual=" & _
+                CStr(TargetWindow.DisplayGridlines)
+        End If
+
+End Sub
+
+
+Private Sub TST_AssertTrue( _
+    ByVal ActualValue As Boolean, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+'                             TST_AssertTrue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Raise when a Boolean assertion is FALSE
+'
+' INPUTS
+'   ActualValue
+'     Boolean result to assert
+'
+'   AssertionName
+'     Diagnostic source used when the assertion fails
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises when ActualValue is FALSE
+'
+' UPDATED
+'   2026-07-25
+'==============================================================================
+'
+
+        If Not ActualValue Then
+            Err.Raise _
+                TEST_SNAPSHOT_ID_ERR_BASE + 20, _
+                AssertionName, _
+                "expected TRUE but received FALSE"
+        End If
+
+End Sub
+
+
+Private Sub TST_SafeCloseWindow(ByRef TargetWindow As Window)
+
+'
+'==============================================================================
+'                         TST_SafeCloseWindow
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Close and release one temporary Excel Window on a best-effort basis
+'
+' INPUTS / OUTPUTS
+'   TargetWindow
+'     Temporary Window to close and release
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Suppresses cleanup errors locally
+'
+' UPDATED
+'   2026-07-25
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' CLOSE AND RELEASE
+'------------------------------------------------------------------------------
+        If Not TargetWindow Is Nothing Then
+            TargetWindow.Close
+        End If
+
+        Set TargetWindow = Nothing
+
+End Sub
+
+
 Private Function TST_BuildRuntimeErrorText() As String
 
 '
@@ -3375,6 +4752,7 @@ Private Function TST_BuildRuntimeErrorText() As String
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
 End Function
+
 
 
 
