@@ -66,7 +66,13 @@ Attribute VB_Name = "M_EXCEL_UI"
 '     minimize-box, and maximize-box style bits.
 '   - M_EXCEL_UI_TITLEBAR owns title-bar WinAPI declarations and mutable style
 '     state; this module remains the public facade.
+<<<<<<< Updated upstream
 
+=======
+'   - M_EXCEL_UI_SNAPSHOT owns snapshot state, retained Window identities, and
+'     capture / restoration orchestration.
+'   - M_EXCEL_UI_RUNTIME owns shared host operations and result diagnostics.
+>>>>>>> Stashed changes
 '   - Showing the title bar merges only those owned bits into the current style,
 '     preserving unrelated changes made by Excel or another component.
 '   - Snapshot capture and restoration expose optional structured-result APIs
@@ -97,6 +103,7 @@ Public Enum UIVisibility
     UI_Show = 1                'Show this UI element
 End Enum
 
+<<<<<<< Updated upstream
 '------------------------------------------------------------------------------
 ' DECLARE: PRIVATE MODULE STATE
 '------------------------------------------------------------------------------
@@ -128,6 +135,15 @@ End Enum
     Private m_SnapshotTitleBarKnown      As Boolean
     Private m_SnapshotTitleBarVisible    As Boolean
 
+=======
+
+'------------------------------------------------------------------------------
+' INTERNAL MODULE DEPENDENCIES
+'------------------------------------------------------------------------------
+'   - M_EXCEL_UI_RUNTIME for shared fail-soft host operations and diagnostics.
+'   - M_EXCEL_UI_TITLEBAR for WinAPI title-bar control.
+'   - M_EXCEL_UI_SNAPSHOT for snapshot state and lifecycle.
+>>>>>>> Stashed changes
 
 Public Sub UI_SetExcelUI( _
     Optional ByVal Ribbon As UIVisibility = UI_LeaveUnchanged, _
@@ -211,7 +227,11 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+<<<<<<< Updated upstream
         UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
+=======
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+>>>>>>> Stashed changes
         Resume SafeExit
 
 End Sub
@@ -277,7 +297,11 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+<<<<<<< Updated upstream
         UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
+=======
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+>>>>>>> Stashed changes
         Resume SafeExit
 
 End Sub
@@ -344,7 +368,7 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
         Resume SafeExit
 
 End Sub
@@ -391,7 +415,11 @@ Public Function UI_SetExcelUI_WithResult( _
 '
 ' DEPENDENCIES
 '   - UI_ApplyExcelUIState
+<<<<<<< Updated upstream
 '   - UI_HandleApplyFailure
+=======
+'   - UI_RuntimeHandleFailure
+>>>>>>> Stashed changes
 '
 ' UPDATED
 '   2026-07-25
@@ -412,7 +440,11 @@ Public Function UI_SetExcelUI_WithResult( _
 '------------------------------------------------------------------------------
         CaptureFailureList = Not IsMissing(FailureList)
 
+<<<<<<< Updated upstream
         UI_ClearResultBuffer _
+=======
+        UI_RuntimeClearResultBuffer _
+>>>>>>> Stashed changes
             FailureCount:=FailureCount, _
             FailureList:=InternalFailureList, _
             CaptureFailureList:=CaptureFailureList
@@ -454,7 +486,11 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+<<<<<<< Updated upstream
         UI_HandleApplyFailure _
+=======
+        UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
             ProcName:=PROC, _
             LogFailures:=False, _
             Succeeded:=Succeeded, _
@@ -462,7 +498,11 @@ Fail:
             FailureList:=InternalFailureList, _
             CaptureFailureList:=CaptureFailureList, _
             Stage:="Unexpected", _
+<<<<<<< Updated upstream
             Detail:=UI_BuildRuntimeErrorText
+=======
+            Detail:=UI_RuntimeBuildErrorText
+>>>>>>> Stashed changes
 
         Resume SafeExit
 
@@ -491,7 +531,11 @@ Public Sub UI_CaptureExcelUIState()
 '   - Leaves the snapshot unavailable after an unexpected capture failure.
 '
 ' DEPENDENCIES
+<<<<<<< Updated upstream
 '   - UI_CaptureExcelUIState_Core
+=======
+'   - UI_SnapshotCaptureCore
+>>>>>>> Stashed changes
 '
 ' UPDATED
 '   2026-07-29
@@ -514,12 +558,17 @@ Public Sub UI_CaptureExcelUIState()
 '------------------------------------------------------------------------------
 ' CAPTURE
 '------------------------------------------------------------------------------
+<<<<<<< Updated upstream
         UI_CaptureExcelUIState_Core _
+=======
+        UI_SnapshotCaptureCore _
+>>>>>>> Stashed changes
             ProcName:=PROC, _
             LogFailures:=True, _
             FailureCount:=IgnoredFailureCount, _
             FailureList:=IgnoredFailureList, _
             CaptureFailureList:=False
+<<<<<<< Updated upstream
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -816,6 +865,8 @@ Private Function UI_CaptureExcelUIState_Core( _
 ' MARK SNAPSHOT AVAILABLE
 '------------------------------------------------------------------------------
         m_HasExcelUIStateSnapshot = True
+=======
+>>>>>>> Stashed changes
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -828,12 +879,123 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+<<<<<<< Updated upstream
         UnexpectedDetail = UI_BuildRuntimeErrorText
         UI_ClearExcelUIStateSnapshot
 
         UI_HandleApplyFailure _
             ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
             CaptureFailureList, "Unexpected", UnexpectedDetail
+
+=======
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+>>>>>>> Stashed changes
+        Resume SafeExit
+
+End Function
+
+
+
+Public Function UI_CaptureExcelUIState_WithResult( _
+    Optional ByRef FailureCount As Long = 0, _
+    Optional ByRef FailureList As Variant) As Boolean
+
+'
+'==============================================================================
+'                    UI_CaptureExcelUIState_WithResult
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Capture the current managed Excel UI state and return structured diagnostics.
+'
+' INPUTS / OUTPUTS
+'   FailureCount (optional, ByRef)
+'     Receives the number of recorded capture failures.
+'
+'   FailureList (optional, ByRef)
+'     Receives a 1-based String array containing ordered "Stage | Detail"
+'     entries.
+'
+' RETURNS
+'   TRUE when the capture pass recorded no failure; otherwise FALSE.
+'
+' BEHAVIOR
+'   - Clears output buffers deterministically on entry.
+'   - Replaces any prior snapshot.
+'   - Preserves best-effort partial-capture semantics.
+'   - Marks the snapshot available after the capture pass completes, even when
+'     optional elements were unreadable.
+'
+' ERROR POLICY
+'   - Does not raise for ordinary capture failures.
+'   - Returns ordered element/window-specific diagnostics.
+'   - Leaves the snapshot unavailable after an unexpected capture failure.
+'
+' DEPENDENCIES
+'   - UI_SnapshotCaptureCore
+'   - UI_RuntimeHandleFailure
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Succeeded           As Boolean
+    Dim CaptureFailureList  As Boolean
+    Dim InternalFailureList As Variant
+
+    Const PROC As String = "UI_CaptureExcelUIState_WithResult"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        CaptureFailureList = Not IsMissing(FailureList)
+
+        UI_RuntimeClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+        Succeeded = True
+
+        On Error GoTo Fail
+
+'------------------------------------------------------------------------------
+' CAPTURE
+'------------------------------------------------------------------------------
+        Succeeded = UI_SnapshotCaptureCore( _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList)
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        If CaptureFailureList Then
+            FailureList = InternalFailureList
+        End If
+
+        UI_CaptureExcelUIState_WithResult = Succeeded
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        UI_RuntimeHandleFailure _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList, _
+            Stage:="Unexpected", _
+            Detail:=UI_RuntimeBuildErrorText
 
         Resume SafeExit
 
@@ -857,7 +1019,11 @@ Public Function UI_HasExcelUIStateSnapshot() As Boolean
 '==============================================================================
 '
 
+<<<<<<< Updated upstream
         UI_HasExcelUIStateSnapshot = m_HasExcelUIStateSnapshot
+=======
+        UI_HasExcelUIStateSnapshot = UI_SnapshotHasState
+>>>>>>> Stashed changes
 
 End Function
 
@@ -883,7 +1049,11 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '   - Logs restore failures and continues where possible.
 '
 ' DEPENDENCIES
+<<<<<<< Updated upstream
 '   - UI_ResetExcelUIToSnapshot_Core
+=======
+'   - UI_SnapshotRestoreCore
+>>>>>>> Stashed changes
 '
 ' UPDATED
 '   2026-07-29
@@ -906,7 +1076,11 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '------------------------------------------------------------------------------
 ' RESET
 '------------------------------------------------------------------------------
+<<<<<<< Updated upstream
         UI_ResetExcelUIToSnapshot_Core _
+=======
+        UI_SnapshotRestoreCore _
+>>>>>>> Stashed changes
             ProcName:=PROC, _
             LogFailures:=True, _
             FailureCount:=IgnoredFailureCount, _
@@ -923,7 +1097,11 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+<<<<<<< Updated upstream
         UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
+=======
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+>>>>>>> Stashed changes
         Resume SafeExit
 
 End Sub
@@ -965,8 +1143,13 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
 '   - Returns ordered element/window-specific diagnostics.
 '
 ' DEPENDENCIES
+<<<<<<< Updated upstream
 '   - UI_ResetExcelUIToSnapshot_Core
 '   - UI_HandleApplyFailure
+=======
+'   - UI_SnapshotRestoreCore
+'   - UI_RuntimeHandleFailure
+>>>>>>> Stashed changes
 '
 ' UPDATED
 '   2026-07-29
@@ -987,7 +1170,11 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
 '------------------------------------------------------------------------------
         CaptureFailureList = Not IsMissing(FailureList)
 
+<<<<<<< Updated upstream
         UI_ClearResultBuffer _
+=======
+        UI_RuntimeClearResultBuffer _
+>>>>>>> Stashed changes
             FailureCount:=FailureCount, _
             FailureList:=InternalFailureList, _
             CaptureFailureList:=CaptureFailureList
@@ -999,7 +1186,11 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
 '------------------------------------------------------------------------------
 ' RESET
 '------------------------------------------------------------------------------
+<<<<<<< Updated upstream
         Succeeded = UI_ResetExcelUIToSnapshot_Core( _
+=======
+        Succeeded = UI_SnapshotRestoreCore( _
+>>>>>>> Stashed changes
             ProcName:=PROC, _
             LogFailures:=False, _
             FailureCount:=FailureCount, _
@@ -1021,7 +1212,11 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+<<<<<<< Updated upstream
         UI_HandleApplyFailure _
+=======
+        UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
             ProcName:=PROC, _
             LogFailures:=False, _
             Succeeded:=Succeeded, _
@@ -1029,6 +1224,7 @@ Fail:
             FailureList:=InternalFailureList, _
             CaptureFailureList:=CaptureFailureList, _
             Stage:="Unexpected", _
+<<<<<<< Updated upstream
             Detail:=UI_BuildRuntimeErrorText
 
         Resume SafeExit
@@ -1265,6 +1461,9 @@ Fail:
         UI_HandleApplyFailure _
             ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
             CaptureFailureList, "Unexpected", UnexpectedDetail
+=======
+            Detail:=UI_RuntimeBuildErrorText
+>>>>>>> Stashed changes
 
         Resume SafeExit
 
@@ -1295,6 +1494,7 @@ Public Sub UI_ClearExcelUIStateSnapshot()
 '
 
 '------------------------------------------------------------------------------
+<<<<<<< Updated upstream
 ' RESET FLAGS
 '------------------------------------------------------------------------------
         m_HasExcelUIStateSnapshot = False
@@ -1335,12 +1535,36 @@ Private Function UI_TryResolveSnapshotWindow( _
     ByVal SnapshotIndex As Long, _
     ByRef WindowOut As Object, _
     ByRef FailMsg As String) As Boolean
+=======
+' CLEAR
+'------------------------------------------------------------------------------
+        On Error Resume Next
+
+        UI_SnapshotClear
+
+End Sub
+Private Function UI_ApplyExcelUIState( _
+    ByVal ProcName As String, _
+    ByVal Ribbon As UIVisibility, _
+    ByVal StatusBar As UIVisibility, _
+    ByVal ScrollBars As UIVisibility, _
+    ByVal FormulaBar As UIVisibility, _
+    ByVal Headings As UIVisibility, _
+    ByVal WorkbookTabs As UIVisibility, _
+    ByVal Gridlines As UIVisibility, _
+    ByVal TitleBar As UIVisibility, _
+    ByVal LogFailures As Boolean, _
+    ByRef FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal CaptureFailureList As Boolean) As Boolean
+>>>>>>> Stashed changes
 
 '
 '==============================================================================
 '                      UI_TryResolveSnapshotWindow
 '------------------------------------------------------------------------------
 ' PURPOSE
+<<<<<<< Updated upstream
 '   Resolve one captured Excel Window by validating and returning the retained
 '   Window object reference captured in the snapshot
 '
@@ -1382,6 +1606,23 @@ Private Function UI_TryResolveSnapshotWindow( _
 ' DEPENDENCIES
 '   - UI_TryGetBooleanProperty
 '   - UI_BuildRuntimeErrorText
+=======
+'   Apply requested UI state through the shared fire-and-forget / result worker.
+'
+' RETURNS
+'   TRUE when no failure was recorded; otherwise FALSE.
+'
+' BEHAVIOR
+'   - Validates every UIVisibility argument.
+'   - Skips UI_LeaveUnchanged values.
+'   - Avoids no-op writes where current state can be read.
+'   - Applies window-level state to every current Excel window.
+'   - Preserves ScreenUpdating.
+'
+' ERROR POLICY
+'   - Does not raise.
+'   - Records and optionally logs failures in insertion order.
+>>>>>>> Stashed changes
 '
 ' UPDATED
 '   2026-07-25
@@ -1391,13 +1632,41 @@ Private Function UI_TryResolveSnapshotWindow( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+<<<<<<< Updated upstream
     Dim CapturedWindow As Object     'Exact Window object retained during capture
     Dim ProbeValue     As Boolean    'Non-mutating liveness-probe output
     Dim ProbeMsg       As String     'Diagnostic returned by the liveness probe
+=======
+    Dim Succeeded           As Boolean
+    Dim W                   As Window
+    Dim ShowFlag            As Boolean
+    Dim Msg                 As String
+
+    Dim ValidRibbon         As Boolean
+    Dim ValidStatusBar      As Boolean
+    Dim ValidScrollBars     As Boolean
+    Dim ValidFormulaBar     As Boolean
+    Dim ValidHeadings       As Boolean
+    Dim ValidWorkbookTabs   As Boolean
+    Dim ValidGridlines      As Boolean
+    Dim ValidTitleBar       As Boolean
+
+    Dim DoHeadings          As Boolean
+    Dim DoWorkbookTabs      As Boolean
+    Dim DoGridlines         As Boolean
+
+    Dim ShowHeadings        As Boolean
+    Dim ShowWorkbookTabs    As Boolean
+    Dim ShowGridlines       As Boolean
+
+    Dim OldScreenUpdating   As Boolean
+    Dim QuietModeChanged    As Boolean
+>>>>>>> Stashed changes
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
+<<<<<<< Updated upstream
         On Error GoTo Fail
 
         UI_TryResolveSnapshotWindow = False
@@ -1606,11 +1875,31 @@ Private Function UI_ApplyExcelUIState( _
             QuietModeChanged:=QuietModeChanged
 
 '------------------------------------------------------------------------------
+=======
+        UI_RuntimeClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+        Succeeded = True
+
+        On Error GoTo Fail
+
+        UI_RuntimeBeginQuietUpdate _
+            OldScreenUpdating:=OldScreenUpdating, _
+            QuietModeChanged:=QuietModeChanged
+
+'------------------------------------------------------------------------------
+>>>>>>> Stashed changes
 ' VALIDATE INPUTS
 '------------------------------------------------------------------------------
         ValidRibbon = UI_IsValidVisibility(Ribbon)
         If Not ValidRibbon Then
+<<<<<<< Updated upstream
             UI_HandleApplyFailure _
+=======
+            UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "Ribbon", _
                 "invalid UIVisibility value: " & CStr(Ribbon)
@@ -1618,7 +1907,11 @@ Private Function UI_ApplyExcelUIState( _
 
         ValidStatusBar = UI_IsValidVisibility(StatusBar)
         If Not ValidStatusBar Then
+<<<<<<< Updated upstream
             UI_HandleApplyFailure _
+=======
+            UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "StatusBar", _
                 "invalid UIVisibility value: " & CStr(StatusBar)
@@ -1626,7 +1919,11 @@ Private Function UI_ApplyExcelUIState( _
 
         ValidScrollBars = UI_IsValidVisibility(ScrollBars)
         If Not ValidScrollBars Then
+<<<<<<< Updated upstream
             UI_HandleApplyFailure _
+=======
+            UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "ScrollBars", _
                 "invalid UIVisibility value: " & CStr(ScrollBars)
@@ -1634,7 +1931,11 @@ Private Function UI_ApplyExcelUIState( _
 
         ValidFormulaBar = UI_IsValidVisibility(FormulaBar)
         If Not ValidFormulaBar Then
+<<<<<<< Updated upstream
             UI_HandleApplyFailure _
+=======
+            UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "FormulaBar", _
                 "invalid UIVisibility value: " & CStr(FormulaBar)
@@ -1642,7 +1943,11 @@ Private Function UI_ApplyExcelUIState( _
 
         ValidHeadings = UI_IsValidVisibility(Headings)
         If Not ValidHeadings Then
+<<<<<<< Updated upstream
             UI_HandleApplyFailure _
+=======
+            UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "Headings", _
                 "invalid UIVisibility value: " & CStr(Headings)
@@ -1650,7 +1955,11 @@ Private Function UI_ApplyExcelUIState( _
 
         ValidWorkbookTabs = UI_IsValidVisibility(WorkbookTabs)
         If Not ValidWorkbookTabs Then
+<<<<<<< Updated upstream
             UI_HandleApplyFailure _
+=======
+            UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "WorkbookTabs", _
                 "invalid UIVisibility value: " & CStr(WorkbookTabs)
@@ -1658,7 +1967,11 @@ Private Function UI_ApplyExcelUIState( _
 
         ValidGridlines = UI_IsValidVisibility(Gridlines)
         If Not ValidGridlines Then
+<<<<<<< Updated upstream
             UI_HandleApplyFailure _
+=======
+            UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "Gridlines", _
                 "invalid UIVisibility value: " & CStr(Gridlines)
@@ -1666,7 +1979,11 @@ Private Function UI_ApplyExcelUIState( _
 
         ValidTitleBar = UI_IsValidVisibility(TitleBar)
         If Not ValidTitleBar Then
+<<<<<<< Updated upstream
             UI_HandleApplyFailure _
+=======
+            UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "TitleBar", _
                 "invalid UIVisibility value: " & CStr(TitleBar)
@@ -1678,8 +1995,13 @@ Private Function UI_ApplyExcelUIState( _
         If ValidRibbon And Ribbon <> UI_LeaveUnchanged Then
             ShowFlag = UI_VisibilityToBoolean(Ribbon)
 
+<<<<<<< Updated upstream
             If Not UI_TrySetRibbonVisibleIfNeeded(ShowFlag, Msg) Then
                 UI_HandleApplyFailure _
+=======
+            If Not UI_RuntimeTrySetRibbonVisibleIfNeeded(ShowFlag, Msg) Then
+                UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                     ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                     CaptureFailureList, "Ribbon", Msg
             End If
@@ -1688,10 +2010,17 @@ Private Function UI_ApplyExcelUIState( _
         If ValidStatusBar And StatusBar <> UI_LeaveUnchanged Then
             ShowFlag = UI_VisibilityToBoolean(StatusBar)
 
+<<<<<<< Updated upstream
             If Not UI_TrySetBooleanPropertyIfNeeded( _
                 Application, "DisplayStatusBar", ShowFlag, Msg) Then
 
                 UI_HandleApplyFailure _
+=======
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Application, "DisplayStatusBar", ShowFlag, Msg) Then
+
+                UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                     ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                     CaptureFailureList, "StatusBar", Msg
             End If
@@ -1700,10 +2029,17 @@ Private Function UI_ApplyExcelUIState( _
         If ValidScrollBars And ScrollBars <> UI_LeaveUnchanged Then
             ShowFlag = UI_VisibilityToBoolean(ScrollBars)
 
+<<<<<<< Updated upstream
             If Not UI_TrySetBooleanPropertyIfNeeded( _
                 Application, "DisplayScrollBars", ShowFlag, Msg) Then
 
                 UI_HandleApplyFailure _
+=======
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Application, "DisplayScrollBars", ShowFlag, Msg) Then
+
+                UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                     ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                     CaptureFailureList, "ScrollBars", Msg
             End If
@@ -1712,10 +2048,17 @@ Private Function UI_ApplyExcelUIState( _
         If ValidFormulaBar And FormulaBar <> UI_LeaveUnchanged Then
             ShowFlag = UI_VisibilityToBoolean(FormulaBar)
 
+<<<<<<< Updated upstream
             If Not UI_TrySetBooleanPropertyIfNeeded( _
                 Application, "DisplayFormulaBar", ShowFlag, Msg) Then
 
                 UI_HandleApplyFailure _
+=======
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Application, "DisplayFormulaBar", ShowFlag, Msg) Then
+
+                UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                     ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                     CaptureFailureList, "FormulaBar", Msg
             End If
@@ -1748,10 +2091,17 @@ Private Function UI_ApplyExcelUIState( _
             For Each W In Application.Windows
 
                 If DoHeadings Then
+<<<<<<< Updated upstream
                     If Not UI_TrySetBooleanPropertyIfNeeded( _
                         W, "DisplayHeadings", ShowHeadings, Msg) Then
 
                         UI_HandleApplyFailure _
+=======
+                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                        W, "DisplayHeadings", ShowHeadings, Msg) Then
+
+                        UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                             ProcName, LogFailures, Succeeded, FailureCount, _
                             FailureList, CaptureFailureList, _
                             "Headings [" & W.Caption & "]", Msg
@@ -1759,10 +2109,17 @@ Private Function UI_ApplyExcelUIState( _
                 End If
 
                 If DoWorkbookTabs Then
+<<<<<<< Updated upstream
                     If Not UI_TrySetBooleanPropertyIfNeeded( _
                         W, "DisplayWorkbookTabs", ShowWorkbookTabs, Msg) Then
 
                         UI_HandleApplyFailure _
+=======
+                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                        W, "DisplayWorkbookTabs", ShowWorkbookTabs, Msg) Then
+
+                        UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                             ProcName, LogFailures, Succeeded, FailureCount, _
                             FailureList, CaptureFailureList, _
                             "WorkbookTabs [" & W.Caption & "]", Msg
@@ -1770,10 +2127,17 @@ Private Function UI_ApplyExcelUIState( _
                 End If
 
                 If DoGridlines Then
+<<<<<<< Updated upstream
                     If Not UI_TrySetBooleanPropertyIfNeeded( _
                         W, "DisplayGridlines", ShowGridlines, Msg) Then
 
                         UI_HandleApplyFailure _
+=======
+                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                        W, "DisplayGridlines", ShowGridlines, Msg) Then
+
+                        UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                             ProcName, LogFailures, Succeeded, FailureCount, _
                             FailureList, CaptureFailureList, _
                             "Gridlines [" & W.Caption & "]", Msg
@@ -1790,7 +2154,11 @@ Private Function UI_ApplyExcelUIState( _
             ShowFlag = UI_VisibilityToBoolean(TitleBar)
 
             If Not UI_TrySetTitleBarVisibleIfNeeded(ShowFlag, Msg) Then
+<<<<<<< Updated upstream
                 UI_HandleApplyFailure _
+=======
+                UI_RuntimeHandleFailure _
+>>>>>>> Stashed changes
                     ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                     CaptureFailureList, "TitleBar", Msg
             End If
@@ -1800,7 +2168,11 @@ Private Function UI_ApplyExcelUIState( _
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
+<<<<<<< Updated upstream
         UI_EndQuietUIUpdate _
+=======
+        UI_RuntimeEndQuietUpdate _
+>>>>>>> Stashed changes
             OldScreenUpdating:=OldScreenUpdating, _
             QuietModeChanged:=QuietModeChanged
 
@@ -1811,9 +2183,15 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+<<<<<<< Updated upstream
         UI_HandleApplyFailure _
             ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
             CaptureFailureList, "Unexpected", UI_BuildRuntimeErrorText
+=======
+        UI_RuntimeHandleFailure _
+            ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+            CaptureFailureList, "Unexpected", UI_RuntimeBuildErrorText
+>>>>>>> Stashed changes
 
         Resume SafeExit
 
@@ -1847,6 +2225,7 @@ Private Function UI_IsValidVisibility( _
             (Visibility = UI_Show)
 
 End Function
+<<<<<<< Updated upstream
 
 
 Private Sub UI_HandleApplyFailure( _
@@ -2451,6 +2830,8 @@ Fail:
 
 End Function
 
+=======
+>>>>>>> Stashed changes
 Private Function UI_VisibilityToBoolean( _
     ByVal Visibility As UIVisibility) As Boolean
 
@@ -2477,6 +2858,7 @@ Private Function UI_VisibilityToBoolean( _
 End Function
 
 
+<<<<<<< Updated upstream
 Private Function UI_BuildRuntimeErrorText() As String
 
 '
@@ -2536,3 +2918,5 @@ Private Sub UI_LogFailure( _
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub
+=======
+>>>>>>> Stashed changes
