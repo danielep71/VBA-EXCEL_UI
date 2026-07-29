@@ -56,6 +56,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '
 '   Title-bar tests
 '     - hide / show round-trip
+'     - preservation of unrelated GWL_STYLE bits across hide / show
 '
 ' STATE MANAGEMENT
 '   - The harness snapshots the current managed Excel UI state before testing
@@ -79,7 +80,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '
 ' AUTHOR
 '   Daniele Penza
@@ -103,7 +104,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
-' WIN32 / WIN64 API FOR TITLE-BAR STATE READ
+' WIN32 / WIN64 API FOR TITLE-BAR STYLE TESTS
 '------------------------------------------------------------------------------
     #If VBA7 Then
         #If Win64 Then
@@ -111,12 +112,35 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
                 ByVal hWnd As LongPtr, _
                 ByVal nIndex As Long) _
                 As LongPtr
+
+            Private Declare PtrSafe Function TST_SetWindowLongPtr Lib "user32" Alias "SetWindowLongPtrA" ( _
+                ByVal hWnd As LongPtr, _
+                ByVal nIndex As Long, _
+                ByVal dwNewLong As LongPtr) _
+                As LongPtr
         #Else
             Private Declare PtrSafe Function TST_GetWindowLong Lib "user32" Alias "GetWindowLongA" ( _
                 ByVal hWnd As LongPtr, _
                 ByVal nIndex As Long) _
                 As Long
+
+            Private Declare PtrSafe Function TST_SetWindowLong Lib "user32" Alias "SetWindowLongA" ( _
+                ByVal hWnd As LongPtr, _
+                ByVal nIndex As Long, _
+                ByVal dwNewLong As Long) _
+                As Long
         #End If
+
+        Private Declare PtrSafe Function TST_SetWindowPos Lib "user32" ( _
+            ByVal hWnd As LongPtr, _
+            ByVal hWndInsertAfter As LongPtr, _
+            ByVal X As Long, _
+            ByVal Y As Long, _
+            ByVal cx As Long, _
+            ByVal cy As Long, _
+            ByVal uFlags As Long) _
+            As Long
+
         Private Declare PtrSafe Function TST_GetLastError Lib "kernel32" Alias "GetLastError" () As Long
         Private Declare PtrSafe Sub TST_SetLastError Lib "kernel32" Alias "SetLastError" ( _
             ByVal dwErrCode As Long)
@@ -125,16 +149,41 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
             ByVal hWnd As Long, _
             ByVal nIndex As Long) _
             As Long
+
+        Private Declare Function TST_SetWindowLong Lib "user32" Alias "SetWindowLongA" ( _
+            ByVal hWnd As Long, _
+            ByVal nIndex As Long, _
+            ByVal dwNewLong As Long) _
+            As Long
+
+        Private Declare Function TST_SetWindowPos Lib "user32" ( _
+            ByVal hWnd As Long, _
+            ByVal hWndInsertAfter As Long, _
+            ByVal X As Long, _
+            ByVal Y As Long, _
+            ByVal cx As Long, _
+            ByVal cy As Long, _
+            ByVal uFlags As Long) _
+            As Long
+
         Private Declare Function TST_GetLastError Lib "kernel32" Alias "GetLastError" () As Long
         Private Declare Sub TST_SetLastError Lib "kernel32" Alias "SetLastError" ( _
             ByVal dwErrCode As Long)
     #End If
 
 '------------------------------------------------------------------------------
-' API CONSTANTS FOR TITLE-BAR STATE READ
+' API CONSTANTS FOR TITLE-BAR STYLE TESTS
 '------------------------------------------------------------------------------
-    Private Const TST_GWL_STYLE  As Long = -16       'Window style index
-    Private Const TST_WS_CAPTION As Long = &HC00000  'Caption / title-bar style bit
+    Private Const TST_GWL_STYLE             As Long = -16
+    Private Const TST_WS_CAPTION            As Long = &HC00000
+    Private Const TST_SYNTHETIC_UNRELATED_BIT As Long = &H2000000
+    Private Const TST_TITLEBAR_OWNED_MASK   As Long = &HCF0000
+
+    Private Const TST_SWP_NOSIZE            As Long = &H1
+    Private Const TST_SWP_NOMOVE            As Long = &H2
+    Private Const TST_SWP_NOZORDER          As Long = &H4
+    Private Const TST_SWP_FRAMECHANGED      As Long = &H20
+    Private Const TST_SWP_NOOWNERZORDER     As Long = &H200
 
 
 '
@@ -235,7 +284,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '                      Test_EXCEL_UI_RunTitleBarOnly
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Run only the dedicated title-bar regression case
+'   Run the dedicated title-bar regression cases
 '
 ' WHY THIS EXISTS
 '   Title-bar behavior is the most WinAPI-sensitive area and benefits from a
@@ -246,7 +295,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '
 ' BEHAVIOR
 '   - Snapshots current state
-'   - Runs only the title-bar round-trip case
+'   - Runs the title-bar round-trip and owned-style-bit preservation cases
 '   - Attempts to restore the original state
 '
 ' ERROR POLICY
@@ -256,7 +305,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '   - TST_RunTitleBarOnlyPack
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -266,8 +315,6 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
         TST_RunTitleBarOnlyPack CallerProc:="Test_EXCEL_UI_RunTitleBarOnly"
 
 End Sub
-
-
 '
 '------------------------------------------------------------------------------
 '
@@ -553,7 +600,7 @@ Private Sub TST_RunRegressionPack( _
 ' INPUTS
 '   IncludeTitleBarTests
 '     TRUE  => include wrapper and title-bar round-trip cases
-'     FALSE => skip the wrapper case and the dedicated title-bar round-trip case
+'     FALSE => skip the wrapper case and the dedicated title-bar cases
 '
 '   CallerProc
 '     Public caller procedure name used for diagnostics
@@ -578,7 +625,7 @@ Private Sub TST_RunRegressionPack( _
 '   - TST_Log
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -701,9 +748,10 @@ Private Sub TST_RunRegressionPack( _
                 "Convenience-wrapper case skipped in core mode because the wrappers also toggle TitleBar"
         End If
 
-    'Run the dedicated title-bar case when requested
+    'Run the dedicated title-bar cases when requested
         If IncludeTitleBarTests Then
             TST_Case_TitleBarRoundTrip
+            TST_Case_TitleBarOwnedBitPreservation
         End If
 
 '------------------------------------------------------------------------------
@@ -754,11 +802,14 @@ Fail:
                           IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
     'Log the failure immediately
-        TST_Log CallerProc, "FAIL", TST_BuildRuntimeErrorText
+        TST_Log CallerProc, "FAIL", _
+            CStr(FailNumber) & ": " & FailDescription & _
+            IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
         Resume SafeExit
 
 End Sub
+
 
 Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 
@@ -767,7 +818,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '                        TST_RunTitleBarOnlyPack
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Execute only the dedicated title-bar regression case and restore the
+'   Execute the dedicated title-bar regression cases and restore the
 '   pre-test UI state afterward
 '
 ' WHY THIS EXISTS
@@ -788,9 +839,10 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_SnapshotState
 '   - TST_RestoreState
 '   - TST_Case_TitleBarRoundTrip
+'   - TST_Case_TitleBarOwnedBitPreservation
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -851,8 +903,12 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Run the dedicated title-bar round-trip case
         TST_Case_TitleBarRoundTrip
 
+    'Verify the exact production merge policy with deterministic style values
+        TST_Case_TitleBarOwnedBitPreservation
+
     'Log successful completion before restoration
-        TST_Log CallerProc, "PASS", "Title-bar round-trip case passed"
+        TST_Log CallerProc, "PASS", _
+            "Title-bar round-trip and owned-bit preservation cases passed"
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -895,14 +951,14 @@ Fail:
         FailDescription = Err.Description & _
                           IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
-    'Log the failure immediately
-        TST_Log CallerProc, "FAIL", TST_BuildRuntimeErrorText
+    'Log the captured failure without consulting the mutable Err object
+        TST_Log CallerProc, "FAIL", _
+            CStr(FailNumber) & ": " & FailDescription & _
+            IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
         Resume SafeExit
 
 End Sub
-
-
 '
 '------------------------------------------------------------------------------
 '
@@ -2201,6 +2257,177 @@ Private Sub TST_Case_TitleBarRoundTrip()
 End Sub
 
 
+
+Private Sub TST_Case_TitleBarOwnedBitPreservation()
+
+'
+'==============================================================================
+'                 TST_Case_TitleBarOwnedBitPreservation
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify deterministically that the production title-bar merge policy changes
+'   only the style bits owned by EXCEL_UI.
+'
+' WHY THIS EXISTS
+'   Windows may normalize or reject individual GWL_STYLE bits on Excel's
+'   top-level window. A test that writes an arbitrary sentinel bit to the live
+'   window can therefore fail even when the production merge algorithm is
+'   correct.
+'
+'   This case validates the exact production merge helper with synthetic style
+'   values, while TST_Case_TitleBarRoundTrip continues to exercise the live
+'   WinAPI hide/show path.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Verifies a show merge preserves every unrelated current-style bit.
+'   - Verifies a hide merge clears all and only the owned bits.
+'   - Verifies unrelated bits supplied through OwnedStyleBits are ignored.
+'   - Uses the production UI_InternalMergeTitleBarStyleBits helper.
+'
+' ERROR POLICY
+'   - Logs and raises on assertion failure.
+'
+' DEPENDENCIES
+'   - UI_InternalMergeTitleBarStyleBits
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim CurrentStyle      As LongPtr
+    Dim RequestedOwned    As LongPtr
+    Dim ExpectedStyle     As LongPtr
+    Dim ActualStyle       As LongPtr
+    Dim UnrelatedMask     As LongPtr
+#Else
+    Dim CurrentStyle      As Long
+    Dim RequestedOwned    As Long
+    Dim ExpectedStyle     As Long
+    Dim ActualStyle       As Long
+    Dim UnrelatedMask     As Long
+#End If
+
+    Dim FailNumber      As Long
+    Dim FailSource      As String
+    Dim FailDescription As String
+
+    Const PROC As String = "TST_Case_TitleBarOwnedBitPreservation"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_Log PROC, "START", _
+            "Validating deterministic title-bar style ownership"
+
+        CurrentStyle = &H10345678
+        RequestedOwned = TST_TITLEBAR_OWNED_MASK
+        UnrelatedMask = Not TST_TITLEBAR_OWNED_MASK
+
+'------------------------------------------------------------------------------
+' ASSERT SHOW MERGE
+'------------------------------------------------------------------------------
+        ExpectedStyle = _
+            (CurrentStyle And UnrelatedMask) Or _
+            (RequestedOwned And TST_TITLEBAR_OWNED_MASK)
+
+        ActualStyle = UI_InternalMergeTitleBarStyleBits( _
+            CurrentStyle:=CurrentStyle, _
+            OwnedStyleBits:=RequestedOwned)
+
+        If ActualStyle <> ExpectedStyle Then
+            Err.Raise _
+                TEST_ERR_BASE + 50, _
+                PROC, _
+                "show merge returned an unexpected style"
+        End If
+
+        If (ActualStyle And UnrelatedMask) <> _
+            (CurrentStyle And UnrelatedMask) Then
+
+            Err.Raise _
+                TEST_ERR_BASE + 51, _
+                PROC, _
+                "show merge changed unrelated current-style bits"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT HIDE MERGE
+'------------------------------------------------------------------------------
+        ActualStyle = UI_InternalMergeTitleBarStyleBits( _
+            CurrentStyle:=CurrentStyle, _
+            OwnedStyleBits:=0)
+
+        If (ActualStyle And TST_TITLEBAR_OWNED_MASK) <> 0 Then
+            Err.Raise _
+                TEST_ERR_BASE + 52, _
+                PROC, _
+                "hide merge did not clear every owned style bit"
+        End If
+
+        If (ActualStyle And UnrelatedMask) <> _
+            (CurrentStyle And UnrelatedMask) Then
+
+            Err.Raise _
+                TEST_ERR_BASE + 53, _
+                PROC, _
+                "hide merge changed unrelated current-style bits"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT DEFENSIVE MASKING
+'------------------------------------------------------------------------------
+    'Supply one unrelated bit through OwnedStyleBits. The helper must ignore it
+    'and continue to source unrelated bits exclusively from CurrentStyle.
+        RequestedOwned = _
+            TST_TITLEBAR_OWNED_MASK Or TST_SYNTHETIC_UNRELATED_BIT
+
+        ActualStyle = UI_InternalMergeTitleBarStyleBits( _
+            CurrentStyle:=CurrentStyle, _
+            OwnedStyleBits:=RequestedOwned)
+
+        If (ActualStyle And TST_SYNTHETIC_UNRELATED_BIT) <> _
+            (CurrentStyle And TST_SYNTHETIC_UNRELATED_BIT) Then
+
+            Err.Raise _
+                TEST_ERR_BASE + 54, _
+                PROC, _
+                "unrelated bits from OwnedStyleBits were not ignored"
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Unrelated bits preserved and owned bits merged correctly"
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description & _
+            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+
+        TST_Log PROC, "FAIL", _
+            CStr(FailNumber) & ": " & FailDescription & _
+            IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
+
+        Err.Raise _
+            Number:=FailNumber, _
+            Source:=FailSource, _
+            Description:=FailDescription
+
+End Sub
 '
 '------------------------------------------------------------------------------
 '
@@ -3261,6 +3488,287 @@ Fail:
 
 End Function
 
+#If VBA7 Then
+Private Function TST_TryGetWindowStyle( _
+    ByVal hWnd As LongPtr, _
+    ByRef StyleOut As LongPtr, _
+    ByRef FailMsg As String) As Boolean
+#Else
+Private Function TST_TryGetWindowStyle( _
+    ByVal hWnd As Long, _
+    ByRef StyleOut As Long, _
+    ByRef FailMsg As String) As Boolean
+#End If
+
+'
+'==============================================================================
+'                         TST_TryGetWindowStyle
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Read GWL_STYLE through the correct Win32 API for the current Office bitness.
+'
+' RETURNS
+'   TRUE on success.
+'
+' ERROR POLICY
+'   Uses GetLastError to distinguish a valid zero return from failure.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LastErr As Long
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_TryGetWindowStyle = False
+        StyleOut = 0
+        FailMsg = vbNullString
+
+        If hWnd = 0 Then
+            FailMsg = "invalid window handle"
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+        TST_SetLastError 0
+
+#If VBA7 Then
+    #If Win64 Then
+        StyleOut = TST_GetWindowLongPtr(hWnd, TST_GWL_STYLE)
+    #Else
+        StyleOut = TST_GetWindowLong(hWnd, TST_GWL_STYLE)
+    #End If
+#Else
+        StyleOut = TST_GetWindowLong(hWnd, TST_GWL_STYLE)
+#End If
+
+        LastErr = TST_GetLastError
+
+        If StyleOut = 0 And LastErr <> 0 Then
+            FailMsg = _
+                "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
+                CStr(LastErr)
+
+            GoTo SafeExit
+        End If
+
+        TST_TryGetWindowStyle = True
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        FailMsg = TST_BuildRuntimeErrorText
+        Resume SafeExit
+
+End Function
+
+
+#If VBA7 Then
+Private Function TST_TrySetWindowStyle( _
+    ByVal hWnd As LongPtr, _
+    ByVal NewStyle As LongPtr, _
+    ByRef FailMsg As String) As Boolean
+#Else
+Private Function TST_TrySetWindowStyle( _
+    ByVal hWnd As Long, _
+    ByVal NewStyle As Long, _
+    ByRef FailMsg As String) As Boolean
+#End If
+
+'
+'==============================================================================
+'                         TST_TrySetWindowStyle
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Write GWL_STYLE through the correct Win32 API for the current Office
+'   bitness.
+'
+' RETURNS
+'   TRUE on success.
+'
+' ERROR POLICY
+'   Uses GetLastError to distinguish a valid zero return from failure.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim PreviousStyle As LongPtr
+#Else
+    Dim PreviousStyle As Long
+#End If
+
+    Dim LastErr As Long
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_TrySetWindowStyle = False
+        FailMsg = vbNullString
+
+        If hWnd = 0 Then
+            FailMsg = "invalid window handle"
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' WRITE
+'------------------------------------------------------------------------------
+        TST_SetLastError 0
+
+#If VBA7 Then
+    #If Win64 Then
+        PreviousStyle = _
+            TST_SetWindowLongPtr(hWnd, TST_GWL_STYLE, NewStyle)
+    #Else
+        PreviousStyle = _
+            TST_SetWindowLong(hWnd, TST_GWL_STYLE, NewStyle)
+    #End If
+#Else
+        PreviousStyle = _
+            TST_SetWindowLong(hWnd, TST_GWL_STYLE, NewStyle)
+#End If
+
+        LastErr = TST_GetLastError
+
+        If PreviousStyle = 0 And LastErr <> 0 Then
+            FailMsg = _
+                "SetWindowLong/SetWindowLongPtr failed; GetLastError=" & _
+                CStr(LastErr)
+
+            GoTo SafeExit
+        End If
+
+        TST_TrySetWindowStyle = True
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        FailMsg = TST_BuildRuntimeErrorText
+        Resume SafeExit
+
+End Function
+
+
+#If VBA7 Then
+Private Function TST_TryRefreshWindowFrame( _
+    ByVal hWnd As LongPtr, _
+    ByRef FailMsg As String) As Boolean
+#Else
+Private Function TST_TryRefreshWindowFrame( _
+    ByVal hWnd As Long, _
+    ByRef FailMsg As String) As Boolean
+#End If
+
+'
+'==============================================================================
+'                      TST_TryRefreshWindowFrame
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Recalculate the non-client frame after an exact style restore.
+'
+' RETURNS
+'   TRUE on success.
+'
+' ERROR POLICY
+'   Returns FALSE and FailMsg on failure.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ApiOK   As Long
+    Dim LastErr As Long
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        TST_TryRefreshWindowFrame = False
+        FailMsg = vbNullString
+
+        If hWnd = 0 Then
+            FailMsg = "invalid window handle"
+            GoTo SafeExit
+        End If
+
+'------------------------------------------------------------------------------
+' REFRESH
+'------------------------------------------------------------------------------
+        TST_SetLastError 0
+
+        ApiOK = TST_SetWindowPos( _
+            hWnd, _
+            0, _
+            0, _
+            0, _
+            0, _
+            0, _
+            TST_SWP_NOMOVE Or TST_SWP_NOSIZE Or TST_SWP_NOZORDER Or _
+                TST_SWP_NOOWNERZORDER Or TST_SWP_FRAMECHANGED)
+
+        LastErr = TST_GetLastError
+
+        If ApiOK = 0 Then
+            FailMsg = _
+                "SetWindowPos failed; GetLastError=" & CStr(LastErr)
+
+            GoTo SafeExit
+        End If
+
+        TST_TryRefreshWindowFrame = True
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        FailMsg = TST_BuildRuntimeErrorText
+        Resume SafeExit
+
+End Function
+
 Private Function TST_TryGetTitleBarVisible( _
     ByRef IsVisible As Boolean, _
     ByRef FailMsg As String) As Boolean
@@ -3804,7 +4312,6 @@ Private Function TST_BuildRuntimeErrorText() As String
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
 End Function
-
 
 
 
