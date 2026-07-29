@@ -24,7 +24,6 @@ Attribute VB_Name = "M_EXCEL_UI"
 '   - UI_CaptureExcelUIState_WithResult
 '   - UI_ResetExcelUIToSnapshot
 '   - UI_ResetExcelUIToSnapshot_WithResult
-
 '   - UI_HasExcelUIStateSnapshot
 '   - UI_ClearExcelUIStateSnapshot
 '
@@ -46,7 +45,6 @@ Attribute VB_Name = "M_EXCEL_UI"
 '   - Fire-and-forget procedures log failures to the Immediate Window.
 '   - UI_SetExcelUI_WithResult and the snapshot WithResult APIs return
 '     structured failure information.
-
 '   - One failed element does not prevent later requested elements from being
 '     attempted.
 '
@@ -70,7 +68,6 @@ Attribute VB_Name = "M_EXCEL_UI"
 '     preserving unrelated changes made by Excel or another component.
 '   - Snapshot capture and restoration expose optional structured-result APIs
 '     while retaining the original fire-and-forget compatibility wrappers.
-
 '
 ' UPDATED
 '   2026-07-29
@@ -576,11 +573,6 @@ Public Sub UI_CaptureExcelUIState()
 ' PURPOSE
 '   Capture the current managed Excel UI state for later restoration.
 '
-' WHY
-'   A deliberate capture / mutate / restore lifecycle is distinct from the
-'   deterministic UI_ShowExcelUI operation.
-
-'
 ' RETURNS
 '   None.
 '
@@ -588,30 +580,13 @@ Public Sub UI_CaptureExcelUIState()
 '   Delegates to the shared capture worker and logs ordered best-effort failures
 '   to the Immediate Window.
 '
-'   - Clears any prior snapshot.
-'   - Captures application-level state.
-'   - Captures Ribbon and title-bar state on a best-effort basis.
-'   - Captures each window's object identity and managed Boolean properties.
-'   - Marks the snapshot available after the capture pass completes.
-'
 ' ERROR POLICY
 '   - Does not raise to callers.
 '   - Logs failures and continues where capture remains meaningful.
-'   - Logs unreadable optional elements and continues.
 '   - Leaves the snapshot unavailable after an unexpected capture failure.
 '
 ' DEPENDENCIES
 '   - UI_CaptureExcelUIState_Core
-'   - UI_ClearExcelUIStateSnapshot
-'   - UI_TryGetRibbonVisible
-'   - UI_TryGetTitleBarVisible
-'   - UI_TryGetBooleanProperty
-'   - UI_BuildWindowIdentityText
-'
-' NOTES
-'   Object identity, rather than Application.Windows index, is the authoritative
-'   matching key during restoration.
-
 '
 ' UPDATED
 '   2026-07-29
@@ -621,12 +596,8 @@ Public Sub UI_CaptureExcelUIState()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i   As Long
-    Dim W   As Window
-    Dim Msg As String
     Dim IgnoredFailureCount As Long
     Dim IgnoredFailureList  As Variant
-
 
     Const PROC As String = "UI_CaptureExcelUIState"
 
@@ -703,6 +674,7 @@ Public Function UI_CaptureExcelUIState_WithResult( _
 '   2026-07-29
 '==============================================================================
 '
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
@@ -814,6 +786,7 @@ Private Function UI_CaptureExcelUIState_Core( _
 '   2026-07-29
 '==============================================================================
 '
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
@@ -890,11 +863,7 @@ Private Function UI_CaptureExcelUIState_Core( _
             For Each W In Application.Windows
                 i = i + 1
 
-                'Retain the actual COM object identity used during restore.
                 Set m_SnapshotWindows(i) = W
-
-                'Capture a best-effort label only for diagnostics.
-
                 m_SnapshotWindowLabels(i) = UI_BuildWindowIdentityText(W)
 
                 m_SnapshotHeadingsKnown(i) = UI_TryGetBooleanProperty( _
@@ -908,7 +877,6 @@ Private Function UI_CaptureExcelUIState_Core( _
                         ProcName, LogFailures, Succeeded, FailureCount, _
                         FailureList, CaptureFailureList, _
                         "Headings [" & m_SnapshotWindowLabels(i) & "]", Msg
-
                 End If
 
                 m_SnapshotWorkbookTabsKnown(i) = UI_TryGetBooleanProperty( _
@@ -922,7 +890,6 @@ Private Function UI_CaptureExcelUIState_Core( _
                         ProcName, LogFailures, Succeeded, FailureCount, _
                         FailureList, CaptureFailureList, _
                         "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", Msg
-
                 End If
 
                 m_SnapshotGridlinesKnown(i) = UI_TryGetBooleanProperty( _
@@ -936,7 +903,6 @@ Private Function UI_CaptureExcelUIState_Core( _
                         ProcName, LogFailures, Succeeded, FailureCount, _
                         FailureList, CaptureFailureList, _
                         "Gridlines [" & m_SnapshotWindowLabels(i) & "]", Msg
-
                 End If
             Next W
         End If
@@ -964,11 +930,9 @@ Fail:
             ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
             CaptureFailureList, "Unexpected", UnexpectedDetail
 
-
         Resume SafeExit
 
 End Function
-
 
 
 Public Function UI_HasExcelUIStateSnapshot() As Boolean
@@ -1009,25 +973,12 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '   Delegates to the shared restoration worker and logs ordered best-effort
 '   failures to the Immediate Window.
 '
-'   - Restores title bar and Ribbon when their captured states were readable.
-'   - Restores application-level object-model properties.
-'   - Resolves each captured Window by retained object identity.
-'   - Restores state only to the matching still-open Window.
-'   - Leaves newly opened windows unchanged.
-'   - Skips closed or recreated windows and logs the missing identity.
-'   - Uses a quiet ScreenUpdating scope where possible.
-'
 ' ERROR POLICY
 '   - Does not raise to callers.
 '   - Logs restore failures and continues where possible.
 '
 ' DEPENDENCIES
 '   - UI_ResetExcelUIToSnapshot_Core
-'   - UI_TryResolveSnapshotWindow
-'   - UI_TrySetTitleBarVisibleIfNeeded
-'   - UI_TrySetRibbonVisibleIfNeeded
-'   - UI_TrySetBooleanPropertyIfNeeded
-
 '
 ' UPDATED
 '   2026-07-29
@@ -1037,14 +988,8 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long
-    Dim MatchedWindow       As Object
-    Dim Msg                 As String
-    Dim OldScreenUpdating   As Boolean
-    Dim QuietModeChanged    As Boolean
     Dim IgnoredFailureCount As Long
     Dim IgnoredFailureList  As Variant
-
 
     Const PROC As String = "UI_ResetExcelUIToSnapshot"
 
@@ -1062,7 +1007,6 @@ Public Sub UI_ResetExcelUIToSnapshot()
             FailureCount:=IgnoredFailureCount, _
             FailureList:=IgnoredFailureList, _
             CaptureFailureList:=False
-
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
@@ -1123,6 +1067,7 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
 '   2026-07-29
 '==============================================================================
 '
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
@@ -1233,6 +1178,7 @@ Private Function UI_ResetExcelUIToSnapshot_Core( _
 '   2026-07-29
 '==============================================================================
 '
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
@@ -1418,7 +1364,6 @@ Fail:
         Resume SafeExit
 
 End Function
-
 
 
 Public Sub UI_ClearExcelUIStateSnapshot()
@@ -2019,7 +1964,6 @@ Private Sub UI_HandleApplyFailure( _
 ' NOTES
 '   The procedure name is retained for compatibility with the established
 '   internal apply path, but the helper is also used by snapshot operations.
-
 '
 ' ERROR POLICY
 '   Does not raise.
