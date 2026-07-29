@@ -339,7 +339,7 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '   Excel Window is closed and replaced after snapshot capture.
 '
 ' RETURNS
-'   None.
+'   None
 '
 ' BEHAVIOR
 '   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
@@ -394,7 +394,6 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
         On Error GoTo Fail
 
         TST_Log PROC, "START", "Identity-safe structured snapshot test started"
-
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_SNAPSHOT_ID_ERR_BASE + 1, _
@@ -402,6 +401,7 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
                 "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
         End If
 
+    'Resolve a ThisWorkbook window as the stable surviving anchor
         Set AnchorWindow = ActiveWindow
 
         If AnchorWindow Is Nothing Then
@@ -423,6 +423,7 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
                 "ThisWorkbook could not provide an active Excel window"
         End If
 
+    'Preserve the anchor window's original managed state for final cleanup
         SavedHeadings = AnchorWindow.DisplayHeadings
         SavedWorkbookTabs = AnchorWindow.DisplayWorkbookTabs
         SavedGridlines = AnchorWindow.DisplayGridlines
@@ -430,6 +431,7 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '------------------------------------------------------------------------------
 ' CREATE AND CONFIGURE CAPTURED WINDOWS
 '------------------------------------------------------------------------------
+    'Create a distinct Window object that will later be closed after capture
         Set CapturedWindow = ThisWorkbook.NewWindow
 
         If CapturedWindow Is Nothing Then
@@ -439,10 +441,15 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
                 "ThisWorkbook.NewWindow did not return a temporary captured window"
         End If
 
+'------------------------------------------------------------------------------
+' ESTABLISH DISTINCT CAPTURE BASELINES
+'------------------------------------------------------------------------------
+    'Give the surviving anchor a recognisable captured state
         AnchorWindow.DisplayHeadings = True
         AnchorWindow.DisplayWorkbookTabs = False
         AnchorWindow.DisplayGridlines = True
 
+    'Give the temporary captured window the opposite state
         CapturedWindow.DisplayHeadings = False
         CapturedWindow.DisplayWorkbookTabs = True
         CapturedWindow.DisplayGridlines = False
@@ -468,15 +475,16 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
             AssertionName:=PROC & ".SnapshotAvailable"
 
 '------------------------------------------------------------------------------
-' CLOSE CAPTURED WINDOW AND CREATE REPLACEMENT
+' MUTATE ANCHOR AND CREATE REPLACEMENT
 '------------------------------------------------------------------------------
+    'Move the anchor away from its captured baseline
         AnchorWindow.DisplayHeadings = False
         AnchorWindow.DisplayWorkbookTabs = True
         AnchorWindow.DisplayGridlines = False
 
+    'Close the captured temporary window so its identity is no longer live
         CapturedWindow.Close
         Set CapturedWindow = Nothing
-
         Set ReplacementWindow = ThisWorkbook.NewWindow
 
         If ReplacementWindow Is Nothing Then
@@ -486,9 +494,14 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
                 "ThisWorkbook.NewWindow did not return a replacement window"
         End If
 
+    'Assign a sentinel state that must remain unchanged because this window did
+    'not exist when the snapshot was captured
         ReplacementWindow.DisplayHeadings = True
         ReplacementWindow.DisplayWorkbookTabs = False
         ReplacementWindow.DisplayGridlines = True
+
+        TST_Log PROC, "INFO", _
+            "Captured window closed; replacement window created"
 
 '------------------------------------------------------------------------------
 ' RESTORE AND ASSERT STRUCTURED FAILURE
@@ -506,7 +519,6 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
             FailureList:=FailureList, _
             ExpectedPrefix:="WindowIdentity [", _
             AssertionName:=PROC & ".RestoreResult"
-
         TST_AssertSnapshotWindowState _
             TargetWindow:=AnchorWindow, _
             ExpectedHeadings:=True, _
@@ -514,6 +526,7 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
             ExpectedGridlines:=True, _
             AssertionName:=PROC & ".AnchorRestored"
 
+    'The replacement did not exist at capture time and must remain untouched
         TST_AssertSnapshotWindowState _
             TargetWindow:=ReplacementWindow, _
             ExpectedHeadings:=True, _
@@ -522,12 +535,14 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
             AssertionName:=PROC & ".ReplacementUnchanged"
 
         TST_Log PROC, "PASS", _
+            TST_Log PROC, "PASS", _
             "Identity-safe restore returned the expected ordered failure without touching replacement"
 
 '------------------------------------------------------------------------------
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
+    'Suppress cleanup failures locally so the original test failure is retained
         On Error Resume Next
 
         UI_ClearExcelUIStateSnapshot
@@ -542,6 +557,7 @@ SafeExit:
             AnchorWindow.Activate
         End If
 
+    'End cleanup suppression before re-raising the original test failure
         On Error GoTo 0
 
         If HasFailure Then
@@ -562,6 +578,7 @@ SafeExit:
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+    'Preserve the original failure before entering best-effort cleanup
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
