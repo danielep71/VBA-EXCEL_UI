@@ -59,11 +59,13 @@ Attribute VB_Name = "M_EXCEL_UI"
 '     them.
 '   - Closed or recreated captured windows are skipped rather than allowing
 '     their state to be applied to a different window.
-'   - Title-bar style ownership remains unchanged in this step and will be
-'     hardened separately for v1.1.0.
+'   - Title-bar ownership is limited to the caption, system-menu, sizing-frame,
+'     minimize-box, and maximize-box style bits.
+'   - Showing the title bar merges only those owned bits into the current style,
+'     preserving unrelated changes made by Excel or another component.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '
 ' AUTHOR
 '   Daniele Penza
@@ -165,6 +167,11 @@ End Enum
     Private Const WS_MINIMIZEBOX     As Long = &H20000
     Private Const WS_MAXIMIZEBOX     As Long = &H10000
 
+    'Exact GWL_STYLE bits owned by title-bar control:
+    'WS_CAPTION Or WS_SYSMENU Or WS_THICKFRAME Or WS_MINIMIZEBOX Or
+    'WS_MAXIMIZEBOX.
+    Private Const TITLEBAR_OWNED_STYLE_MASK As Long = &HCF0000
+
     Private Const SWP_NOSIZE         As Long = &H1
     Private Const SWP_NOMOVE         As Long = &H2
     Private Const SWP_NOZORDER       As Long = &H4
@@ -175,14 +182,14 @@ End Enum
 ' DECLARE: PRIVATE MODULE STATE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Private m_OriginalMainWindowStyle As LongPtr
-    Private m_OriginalMainWindowHwnd  As LongPtr
+    Private m_OriginalMainWindowOwnedStyleBits As LongPtr
+    Private m_OriginalMainWindowHwnd           As LongPtr
 #Else
-    Private m_OriginalMainWindowStyle As Long
-    Private m_OriginalMainWindowHwnd  As Long
+    Private m_OriginalMainWindowOwnedStyleBits As Long
+    Private m_OriginalMainWindowHwnd           As Long
 #End If
 
-    Private m_HasOriginalMainWindowStyle As Boolean
+    Private m_HasOriginalMainWindowOwnedStyleBits As Boolean
 
     Private m_HasExcelUIStateSnapshot    As Boolean
 
@@ -1781,23 +1788,27 @@ Private Function UI_TrySetTitleBarVisibleIfNeeded( _
 '                    UI_TrySetTitleBarVisibleIfNeeded
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Set title-bar visibility only when required.
+'   Apply the requested title-bar state through the owned-style-bit worker.
+'
+' WHY
+'   Title-bar visibility alone is not sufficient for no-op detection because
+'   another owned frame bit may also require restoration. The worker computes
+'   the exact merged style and short-circuits only when no owned bit would
+'   change.
 '
 ' RETURNS
-'   TRUE when already correct or successfully updated.
+'   TRUE when the current owned bits already match or were successfully updated.
 '
 ' ERROR POLICY
 '   Returns FALSE and FailMsg on failure.
 '
+' DEPENDENCIES
+'   - UI_TrySetTitleBarVisible
+'
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim CurrentVisible As Boolean
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1808,20 +1819,8 @@ Private Function UI_TrySetTitleBarVisibleIfNeeded( _
         FailMsg = vbNullString
 
 '------------------------------------------------------------------------------
-' SHORT-CIRCUIT
-'------------------------------------------------------------------------------
-        If UI_TryGetTitleBarVisible(CurrentVisible, FailMsg) Then
-            If CurrentVisible = IsVisible Then
-                UI_TrySetTitleBarVisibleIfNeeded = True
-                GoTo SafeExit
-            End If
-        End If
-
-'------------------------------------------------------------------------------
 ' APPLY
 '------------------------------------------------------------------------------
-        FailMsg = vbNullString
-
         UI_TrySetTitleBarVisibleIfNeeded = _
             UI_TrySetTitleBarVisible(IsVisible, FailMsg)
 
@@ -1836,6 +1835,7 @@ SafeExit:
 '------------------------------------------------------------------------------
 Fail:
         FailMsg = UI_BuildRuntimeErrorText
+        Resume SafeExit
 
 End Function
 
@@ -2162,6 +2162,67 @@ Fail:
 End Function
 
 
+#If VBA7 Then
+Public Function UI_InternalMergeTitleBarStyleBits( _
+    ByVal CurrentStyle As LongPtr, _
+    ByVal OwnedStyleBits As LongPtr) As LongPtr
+#Else
+Public Function UI_InternalMergeTitleBarStyleBits( _
+    ByVal CurrentStyle As Long, _
+    ByVal OwnedStyleBits As Long) As Long
+#End If
+
+'
+'==============================================================================
+'                 UI_InternalMergeTitleBarStyleBits
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Merge the title-bar style bits owned by this module into a current
+'   GWL_STYLE value without altering unrelated style bits.
+'
+' WHY
+'   The merge policy is deliberately isolated from the WinAPI write so it can
+'   be validated deterministically without depending on Windows normalizing
+'   particular style bits on Excel's top-level window.
+'
+' INPUTS
+'   CurrentStyle
+'     Current GWL_STYLE value whose unrelated bits must be preserved.
+'
+'   OwnedStyleBits
+'     Desired values for TITLEBAR_OWNED_STYLE_MASK. Any bits outside that mask
+'     are ignored defensively.
+'
+' RETURNS
+'   CurrentStyle with only TITLEBAR_OWNED_STYLE_MASK replaced.
+'
+' BEHAVIOR
+'   - Clears only TITLEBAR_OWNED_STYLE_MASK from CurrentStyle.
+'   - Applies only TITLEBAR_OWNED_STYLE_MASK from OwnedStyleBits.
+'   - Preserves every unrelated bit exactly.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' NOTES
+'   - Public only for same-project regression access.
+'   - Option Private Module prevents exposure to external VBA projects.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' MERGE OWNED BITS
+'------------------------------------------------------------------------------
+        UI_InternalMergeTitleBarStyleBits = _
+            (CurrentStyle And Not TITLEBAR_OWNED_STYLE_MASK) Or _
+            (OwnedStyleBits And TITLEBAR_OWNED_STYLE_MASK)
+
+End Function
+
+
 Private Function UI_TrySetTitleBarVisible( _
     ByVal IsVisible As Boolean, _
     ByRef FailMsg As String) As Boolean
@@ -2174,22 +2235,39 @@ Private Function UI_TrySetTitleBarVisible( _
 '   Show or hide the title bar of the Excel main window represented by
 '   Application.Hwnd.
 '
-' BEHAVIOR
-'   - Preserves the existing v1.0.1 exact-style snapshot/restore behavior.
-'   - Removes caption and frame-related bits while hidden.
-'   - Refreshes the non-client frame after a write.
+' WHY
+'   Restoring an entire previously captured GWL_STYLE value can overwrite
+'   unrelated style changes made later by Excel, another add-in, or caller code.
 '
 ' RETURNS
 '   TRUE on success.
 '
+' BEHAVIOR
+'   - Owns only TITLEBAR_OWNED_STYLE_MASK:
+'       * WS_CAPTION
+'       * WS_SYSMENU
+'       * WS_THICKFRAME
+'       * WS_MINIMIZEBOX
+'       * WS_MAXIMIZEBOX
+'   - Captures only those owned bits on first use for the current
+'     Application.Hwnd.
+'   - Recaptures owned bits when Application.Hwnd changes.
+'   - Hiding clears only the owned bits from the current style.
+'   - Showing merges the captured owned bits into the current style.
+'   - Preserves every unrelated current style bit.
+'   - Refreshes the non-client frame only after an actual style write.
+'
 ' ERROR POLICY
 '   Returns FALSE and FailMsg on failure.
 '
-' NOTES
-'   Exact title-bar style ownership will be hardened in the next v1.1.0 step.
+' DEPENDENCIES
+'   - UI_TryGetWindowStyle
+'   - UI_InternalMergeTitleBarStyleBits
+'   - UI_TrySetWindowStyle
+'   - UI_TryRefreshWindowFrame
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 
@@ -2229,39 +2307,31 @@ Private Function UI_TrySetTitleBarVisible( _
         End If
 
 '------------------------------------------------------------------------------
-' SNAPSHOT ORIGINAL STYLE
+' CAPTURE OWNED STYLE BITS FOR THE CURRENT HANDLE
 '------------------------------------------------------------------------------
-        If (Not m_HasOriginalMainWindowStyle) Or _
+        If (Not m_HasOriginalMainWindowOwnedStyleBits) Or _
             (m_OriginalMainWindowHwnd <> xlHnd) Then
 
-            m_OriginalMainWindowStyle = CurrentStyle
+            m_OriginalMainWindowOwnedStyleBits = _
+                CurrentStyle And TITLEBAR_OWNED_STYLE_MASK
+
             m_OriginalMainWindowHwnd = xlHnd
-            m_HasOriginalMainWindowStyle = True
+            m_HasOriginalMainWindowOwnedStyleBits = True
         End If
 
 '------------------------------------------------------------------------------
 ' COMPUTE NEW STYLE
 '------------------------------------------------------------------------------
+    'Showing restores only the captured owned bits. Hiding supplies zero owned
+    'bits. The helper preserves every unrelated bit from CurrentStyle.
         If IsVisible Then
-            If m_HasOriginalMainWindowStyle And _
-                m_OriginalMainWindowHwnd = xlHnd Then
-
-                NewStyle = m_OriginalMainWindowStyle
-            Else
-                NewStyle = CurrentStyle
-                NewStyle = NewStyle Or WS_SYSMENU
-                NewStyle = NewStyle Or WS_MINIMIZEBOX
-                NewStyle = NewStyle Or WS_MAXIMIZEBOX
-                NewStyle = NewStyle Or WS_CAPTION
-                NewStyle = NewStyle Or WS_THICKFRAME
-            End If
+            NewStyle = UI_InternalMergeTitleBarStyleBits( _
+                CurrentStyle:=CurrentStyle, _
+                OwnedStyleBits:=m_OriginalMainWindowOwnedStyleBits)
         Else
-            NewStyle = CurrentStyle
-            NewStyle = NewStyle And Not WS_SYSMENU
-            NewStyle = NewStyle And Not WS_MINIMIZEBOX
-            NewStyle = NewStyle And Not WS_MAXIMIZEBOX
-            NewStyle = NewStyle And Not WS_CAPTION
-            NewStyle = NewStyle And Not WS_THICKFRAME
+            NewStyle = UI_InternalMergeTitleBarStyleBits( _
+                CurrentStyle:=CurrentStyle, _
+                OwnedStyleBits:=0)
         End If
 
 '------------------------------------------------------------------------------
@@ -2296,6 +2366,7 @@ SafeExit:
 '------------------------------------------------------------------------------
 Fail:
         FailMsg = UI_BuildRuntimeErrorText
+        Resume SafeExit
 
 End Function
 
@@ -2784,3 +2855,5 @@ Private Sub UI_LogFailure( _
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub
+
+
