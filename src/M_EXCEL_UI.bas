@@ -21,7 +21,10 @@ Attribute VB_Name = "M_EXCEL_UI"
 '   - UI_HideExcelUI
 '   - UI_ShowExcelUI
 '   - UI_CaptureExcelUIState
+'   - UI_CaptureExcelUIState_WithResult
 '   - UI_ResetExcelUIToSnapshot
+'   - UI_ResetExcelUIToSnapshot_WithResult
+
 '   - UI_HasExcelUIStateSnapshot
 '   - UI_ClearExcelUIStateSnapshot
 '
@@ -41,7 +44,9 @@ Attribute VB_Name = "M_EXCEL_UI"
 ' ERROR POLICY
 '   - Public entry points are fail-soft.
 '   - Fire-and-forget procedures log failures to the Immediate Window.
-'   - UI_SetExcelUI_WithResult returns structured failure information.
+'   - UI_SetExcelUI_WithResult and the snapshot WithResult APIs return
+'     structured failure information.
+
 '   - One failed element does not prevent later requested elements from being
 '     attempted.
 '
@@ -63,6 +68,9 @@ Attribute VB_Name = "M_EXCEL_UI"
 '     minimize-box, and maximize-box style bits.
 '   - Showing the title bar merges only those owned bits into the current style,
 '     preserving unrelated changes made by Excel or another component.
+'   - Snapshot capture and restoration expose optional structured-result APIs
+'     while retaining the original fire-and-forget compatibility wrappers.
+
 '
 ' UPDATED
 '   2026-07-29
@@ -571,11 +579,15 @@ Public Sub UI_CaptureExcelUIState()
 ' WHY
 '   A deliberate capture / mutate / restore lifecycle is distinct from the
 '   deterministic UI_ShowExcelUI operation.
+
 '
 ' RETURNS
 '   None.
 '
 ' BEHAVIOR
+'   Delegates to the shared capture worker and logs ordered best-effort failures
+'   to the Immediate Window.
+'
 '   - Clears any prior snapshot.
 '   - Captures application-level state.
 '   - Captures Ribbon and title-bar state on a best-effort basis.
@@ -584,10 +596,12 @@ Public Sub UI_CaptureExcelUIState()
 '
 ' ERROR POLICY
 '   - Does not raise to callers.
+'   - Logs failures and continues where capture remains meaningful.
 '   - Logs unreadable optional elements and continues.
 '   - Leaves the snapshot unavailable after an unexpected capture failure.
 '
 ' DEPENDENCIES
+'   - UI_CaptureExcelUIState_Core
 '   - UI_ClearExcelUIStateSnapshot
 '   - UI_TryGetRibbonVisible
 '   - UI_TryGetTitleBarVisible
@@ -597,9 +611,10 @@ Public Sub UI_CaptureExcelUIState()
 ' NOTES
 '   Object identity, rather than Application.Windows index, is the authoritative
 '   matching key during restoration.
+
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 
@@ -609,12 +624,215 @@ Public Sub UI_CaptureExcelUIState()
     Dim i   As Long
     Dim W   As Window
     Dim Msg As String
+    Dim IgnoredFailureCount As Long
+    Dim IgnoredFailureList  As Variant
+
 
     Const PROC As String = "UI_CaptureExcelUIState"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+'------------------------------------------------------------------------------
+' CAPTURE
+'------------------------------------------------------------------------------
+        UI_CaptureExcelUIState_Core _
+            ProcName:=PROC, _
+            LogFailures:=True, _
+            FailureCount:=IgnoredFailureCount, _
+            FailureList:=IgnoredFailureList, _
+            CaptureFailureList:=False
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
+        Resume SafeExit
+
+End Sub
+
+
+Public Function UI_CaptureExcelUIState_WithResult( _
+    Optional ByRef FailureCount As Long = 0, _
+    Optional ByRef FailureList As Variant) As Boolean
+
+'
+'==============================================================================
+'                    UI_CaptureExcelUIState_WithResult
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Capture the current managed Excel UI state and return structured diagnostics.
+'
+' INPUTS / OUTPUTS
+'   FailureCount (optional, ByRef)
+'     Receives the number of recorded capture failures.
+'
+'   FailureList (optional, ByRef)
+'     Receives a 1-based String array containing ordered "Stage | Detail"
+'     entries.
+'
+' RETURNS
+'   TRUE when the capture pass recorded no failure; otherwise FALSE.
+'
+' BEHAVIOR
+'   - Clears output buffers deterministically on entry.
+'   - Replaces any prior snapshot.
+'   - Preserves best-effort partial-capture semantics.
+'   - Marks the snapshot available after the capture pass completes, even when
+'     optional elements were unreadable.
+'
+' ERROR POLICY
+'   - Does not raise for ordinary capture failures.
+'   - Returns ordered element/window-specific diagnostics.
+'   - Leaves the snapshot unavailable after an unexpected capture failure.
+'
+' DEPENDENCIES
+'   - UI_CaptureExcelUIState_Core
+'   - UI_HandleApplyFailure
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Succeeded           As Boolean
+    Dim CaptureFailureList  As Boolean
+    Dim InternalFailureList As Variant
+
+    Const PROC As String = "UI_CaptureExcelUIState_WithResult"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        CaptureFailureList = Not IsMissing(FailureList)
+
+        UI_ClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+        Succeeded = True
+
+        On Error GoTo Fail
+
+'------------------------------------------------------------------------------
+' CAPTURE
+'------------------------------------------------------------------------------
+        Succeeded = UI_CaptureExcelUIState_Core( _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList)
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        If CaptureFailureList Then
+            FailureList = InternalFailureList
+        End If
+
+        UI_CaptureExcelUIState_WithResult = Succeeded
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        UI_HandleApplyFailure _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList, _
+            Stage:="Unexpected", _
+            Detail:=UI_BuildRuntimeErrorText
+
+        Resume SafeExit
+
+End Function
+
+
+Private Function UI_CaptureExcelUIState_Core( _
+    ByVal ProcName As String, _
+    ByVal LogFailures As Boolean, _
+    ByRef FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal CaptureFailureList As Boolean) As Boolean
+
+'
+'==============================================================================
+'                    UI_CaptureExcelUIState_Core
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Execute the shared snapshot-capture pass for the compatibility wrapper and
+'   structured-result API.
+'
+' INPUTS
+'   ProcName
+'     Public caller name used for diagnostics.
+'
+'   LogFailures
+'     TRUE to emit Immediate Window diagnostics; FALSE for result-only use.
+'
+'   FailureCount / FailureList
+'     Standard structured-result buffers.
+'
+'   CaptureFailureList
+'     TRUE when FailureList should be populated.
+'
+' RETURNS
+'   TRUE when no failure was recorded; otherwise FALSE.
+'
+' BEHAVIOR
+'   - Clears any prior snapshot.
+'   - Captures application-level state.
+'   - Captures Ribbon and title-bar state on a best-effort basis.
+'   - Captures each window's retained object identity and managed properties.
+'   - Records failures in deterministic capture order.
+'   - Marks the snapshot available after the capture pass completes.
+'
+' ERROR POLICY
+'   - Does not raise.
+'   - Optional-element failures are recorded and capture continues.
+'   - Unexpected failures clear the partial snapshot and record one failure.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim i                As Long
+    Dim W                As Window
+    Dim Msg              As String
+    Dim UnexpectedDetail As String
+    Dim Succeeded        As Boolean
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        UI_ClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+        Succeeded = True
+
         On Error GoTo Fail
 
         UI_ClearExcelUIStateSnapshot
@@ -634,7 +852,9 @@ Public Sub UI_CaptureExcelUIState()
             FailMsg:=Msg)
 
         If Not m_SnapshotRibbonKnown Then
-            UI_LogFailure PROC, "Ribbon", Msg
+            UI_HandleApplyFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "Ribbon", Msg
         End If
 
         m_SnapshotTitleBarKnown = UI_TryGetTitleBarVisible( _
@@ -642,7 +862,9 @@ Public Sub UI_CaptureExcelUIState()
             FailMsg:=Msg)
 
         If Not m_SnapshotTitleBarKnown Then
-            UI_LogFailure PROC, "TitleBar", Msg
+            UI_HandleApplyFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "TitleBar", Msg
         End If
 
 '------------------------------------------------------------------------------
@@ -672,6 +894,7 @@ Public Sub UI_CaptureExcelUIState()
                 Set m_SnapshotWindows(i) = W
 
                 'Capture a best-effort label only for diagnostics.
+
                 m_SnapshotWindowLabels(i) = UI_BuildWindowIdentityText(W)
 
                 m_SnapshotHeadingsKnown(i) = UI_TryGetBooleanProperty( _
@@ -681,9 +904,11 @@ Public Sub UI_CaptureExcelUIState()
                     FailMsg:=Msg)
 
                 If Not m_SnapshotHeadingsKnown(i) Then
-                    UI_LogFailure PROC, _
-                        "Headings [" & m_SnapshotWindowLabels(i) & "]", _
-                        Msg
+                    UI_HandleApplyFailure _
+                        ProcName, LogFailures, Succeeded, FailureCount, _
+                        FailureList, CaptureFailureList, _
+                        "Headings [" & m_SnapshotWindowLabels(i) & "]", Msg
+
                 End If
 
                 m_SnapshotWorkbookTabsKnown(i) = UI_TryGetBooleanProperty( _
@@ -693,9 +918,11 @@ Public Sub UI_CaptureExcelUIState()
                     FailMsg:=Msg)
 
                 If Not m_SnapshotWorkbookTabsKnown(i) Then
-                    UI_LogFailure PROC, _
-                        "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", _
-                        Msg
+                    UI_HandleApplyFailure _
+                        ProcName, LogFailures, Succeeded, FailureCount, _
+                        FailureList, CaptureFailureList, _
+                        "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", Msg
+
                 End If
 
                 m_SnapshotGridlinesKnown(i) = UI_TryGetBooleanProperty( _
@@ -705,9 +932,11 @@ Public Sub UI_CaptureExcelUIState()
                     FailMsg:=Msg)
 
                 If Not m_SnapshotGridlinesKnown(i) Then
-                    UI_LogFailure PROC, _
-                        "Gridlines [" & m_SnapshotWindowLabels(i) & "]", _
-                        Msg
+                    UI_HandleApplyFailure _
+                        ProcName, LogFailures, Succeeded, FailureCount, _
+                        FailureList, CaptureFailureList, _
+                        "Gridlines [" & m_SnapshotWindowLabels(i) & "]", Msg
+
                 End If
             Next W
         End If
@@ -721,17 +950,25 @@ Public Sub UI_CaptureExcelUIState()
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-        Exit Sub
+        UI_CaptureExcelUIState_Core = Succeeded
+        Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
+        UnexpectedDetail = UI_BuildRuntimeErrorText
         UI_ClearExcelUIStateSnapshot
-        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
+
+        UI_HandleApplyFailure _
+            ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+            CaptureFailureList, "Unexpected", UnexpectedDetail
+
+
         Resume SafeExit
 
-End Sub
+End Function
+
 
 
 Public Function UI_HasExcelUIStateSnapshot() As Boolean
@@ -769,6 +1006,9 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '   None.
 '
 ' BEHAVIOR
+'   Delegates to the shared restoration worker and logs ordered best-effort
+'   failures to the Immediate Window.
+'
 '   - Restores title bar and Ribbon when their captured states were readable.
 '   - Restores application-level object-model properties.
 '   - Resolves each captured Window by retained object identity.
@@ -779,17 +1019,18 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '
 ' ERROR POLICY
 '   - Does not raise to callers.
-'   - Logs restore failures to the Immediate Window.
-'   - Continues after a missing or unreadable window.
+'   - Logs restore failures and continues where possible.
 '
 ' DEPENDENCIES
+'   - UI_ResetExcelUIToSnapshot_Core
 '   - UI_TryResolveSnapshotWindow
 '   - UI_TrySetTitleBarVisibleIfNeeded
 '   - UI_TrySetRibbonVisibleIfNeeded
 '   - UI_TrySetBooleanPropertyIfNeeded
+
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 
@@ -801,6 +1042,9 @@ Public Sub UI_ResetExcelUIToSnapshot()
     Dim Msg                 As String
     Dim OldScreenUpdating   As Boolean
     Dim QuietModeChanged    As Boolean
+    Dim IgnoredFailureCount As Long
+    Dim IgnoredFailureList  As Variant
+
 
     Const PROC As String = "UI_ResetExcelUIToSnapshot"
 
@@ -809,9 +1053,213 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '------------------------------------------------------------------------------
         On Error GoTo Fail
 
+'------------------------------------------------------------------------------
+' RESET
+'------------------------------------------------------------------------------
+        UI_ResetExcelUIToSnapshot_Core _
+            ProcName:=PROC, _
+            LogFailures:=True, _
+            FailureCount:=IgnoredFailureCount, _
+            FailureList:=IgnoredFailureList, _
+            CaptureFailureList:=False
+
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
+        Resume SafeExit
+
+End Sub
+
+
+Public Function UI_ResetExcelUIToSnapshot_WithResult( _
+    Optional ByRef FailureCount As Long = 0, _
+    Optional ByRef FailureList As Variant) As Boolean
+
+'
+'==============================================================================
+'                 UI_ResetExcelUIToSnapshot_WithResult
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restore the managed Excel UI to the current snapshot and return structured
+'   diagnostics.
+'
+' INPUTS / OUTPUTS
+'   FailureCount (optional, ByRef)
+'     Receives the number of recorded restoration failures.
+'
+'   FailureList (optional, ByRef)
+'     Receives a 1-based String array containing ordered "Stage | Detail"
+'     entries.
+'
+' RETURNS
+'   TRUE when restoration recorded no failure; otherwise FALSE.
+'
+' BEHAVIOR
+'   - Clears output buffers deterministically on entry.
+'   - Restores every available captured element on a best-effort basis.
+'   - Leaves newly opened windows unchanged.
+'   - Reports closed, recreated, or unusable captured windows without applying
+'     their state to a replacement window.
+'   - Retains the snapshot after the restoration attempt.
+'
+' ERROR POLICY
+'   - Does not raise for ordinary restoration failures.
+'   - Returns ordered element/window-specific diagnostics.
+'
+' DEPENDENCIES
+'   - UI_ResetExcelUIToSnapshot_Core
+'   - UI_HandleApplyFailure
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Succeeded           As Boolean
+    Dim CaptureFailureList  As Boolean
+    Dim InternalFailureList As Variant
+
+    Const PROC As String = "UI_ResetExcelUIToSnapshot_WithResult"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        CaptureFailureList = Not IsMissing(FailureList)
+
+        UI_ClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+        Succeeded = True
+
+        On Error GoTo Fail
+
+'------------------------------------------------------------------------------
+' RESET
+'------------------------------------------------------------------------------
+        Succeeded = UI_ResetExcelUIToSnapshot_Core( _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList)
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        If CaptureFailureList Then
+            FailureList = InternalFailureList
+        End If
+
+        UI_ResetExcelUIToSnapshot_WithResult = Succeeded
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        UI_HandleApplyFailure _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList, _
+            Stage:="Unexpected", _
+            Detail:=UI_BuildRuntimeErrorText
+
+        Resume SafeExit
+
+End Function
+
+
+Private Function UI_ResetExcelUIToSnapshot_Core( _
+    ByVal ProcName As String, _
+    ByVal LogFailures As Boolean, _
+    ByRef FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal CaptureFailureList As Boolean) As Boolean
+
+'
+'==============================================================================
+'                 UI_ResetExcelUIToSnapshot_Core
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Execute the shared snapshot-restoration pass for the compatibility wrapper
+'   and structured-result API.
+'
+' INPUTS
+'   ProcName
+'     Public caller name used for diagnostics.
+'
+'   LogFailures
+'     TRUE to emit Immediate Window diagnostics; FALSE for result-only use.
+'
+'   FailureCount / FailureList
+'     Standard structured-result buffers.
+'
+'   CaptureFailureList
+'     TRUE when FailureList should be populated.
+'
+' RETURNS
+'   TRUE when no failure was recorded; otherwise FALSE.
+'
+' BEHAVIOR
+'   - Restores title bar and Ribbon when their captured states were readable.
+'   - Restores application-level object-model properties.
+'   - Resolves each captured Window by retained object identity.
+'   - Restores state only to matching still-usable Windows.
+'   - Records failures in deterministic restoration order.
+'   - Preserves ScreenUpdating through a quiet-update scope.
+'
+' ERROR POLICY
+'   - Does not raise.
+'   - Continues after element/window-level failure.
+'
+' UPDATED
+'   2026-07-29
+'==============================================================================
+'
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim i                   As Long
+    Dim MatchedWindow       As Object
+    Dim Msg                 As String
+    Dim UnexpectedDetail    As String
+    Dim OldScreenUpdating   As Boolean
+    Dim QuietModeChanged    As Boolean
+    Dim Succeeded           As Boolean
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        UI_ClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+        Succeeded = True
+
+        On Error GoTo Fail
+
         If Not m_HasExcelUIStateSnapshot Then
-            UI_LogFailure PROC, _
-                "NoSnapshot", _
+            UI_HandleApplyFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "NoSnapshot", _
                 "no captured Excel UI snapshot is available"
 
             GoTo SafeExit
@@ -829,7 +1277,9 @@ Public Sub UI_ResetExcelUIToSnapshot()
                 IsVisible:=m_SnapshotTitleBarVisible, _
                 FailMsg:=Msg) Then
 
-                UI_LogFailure PROC, "TitleBar", Msg
+                UI_HandleApplyFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "TitleBar", Msg
             End If
         End If
 
@@ -841,7 +1291,9 @@ Public Sub UI_ResetExcelUIToSnapshot()
                 IsVisible:=m_SnapshotRibbonVisible, _
                 FailMsg:=Msg) Then
 
-                UI_LogFailure PROC, "Ribbon", Msg
+                UI_HandleApplyFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "Ribbon", Msg
             End If
         End If
 
@@ -854,7 +1306,9 @@ Public Sub UI_ResetExcelUIToSnapshot()
             NewValue:=m_SnapshotStatusBarVisible, _
             FailMsg:=Msg) Then
 
-            UI_LogFailure PROC, "StatusBar", Msg
+            UI_HandleApplyFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "StatusBar", Msg
         End If
 
         If Not UI_TrySetBooleanPropertyIfNeeded( _
@@ -863,7 +1317,9 @@ Public Sub UI_ResetExcelUIToSnapshot()
             NewValue:=m_SnapshotScrollBarsVisible, _
             FailMsg:=Msg) Then
 
-            UI_LogFailure PROC, "ScrollBars", Msg
+            UI_HandleApplyFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "ScrollBars", Msg
         End If
 
         If Not UI_TrySetBooleanPropertyIfNeeded( _
@@ -872,7 +1328,9 @@ Public Sub UI_ResetExcelUIToSnapshot()
             NewValue:=m_SnapshotFormulaBarVisible, _
             FailMsg:=Msg) Then
 
-            UI_LogFailure PROC, "FormulaBar", Msg
+            UI_HandleApplyFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "FormulaBar", Msg
         End If
 
 '------------------------------------------------------------------------------
@@ -893,9 +1351,10 @@ Public Sub UI_ResetExcelUIToSnapshot()
                         NewValue:=m_SnapshotHeadingsVisible(i), _
                         FailMsg:=Msg) Then
 
-                        UI_LogFailure PROC, _
-                            "Headings [" & m_SnapshotWindowLabels(i) & "]", _
-                            Msg
+                        UI_HandleApplyFailure _
+                            ProcName, LogFailures, Succeeded, FailureCount, _
+                            FailureList, CaptureFailureList, _
+                            "Headings [" & m_SnapshotWindowLabels(i) & "]", Msg
                     End If
                 End If
 
@@ -906,9 +1365,10 @@ Public Sub UI_ResetExcelUIToSnapshot()
                         NewValue:=m_SnapshotWorkbookTabsVisible(i), _
                         FailMsg:=Msg) Then
 
-                        UI_LogFailure PROC, _
-                            "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", _
-                            Msg
+                        UI_HandleApplyFailure _
+                            ProcName, LogFailures, Succeeded, FailureCount, _
+                            FailureList, CaptureFailureList, _
+                            "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", Msg
                     End If
                 End If
 
@@ -919,16 +1379,18 @@ Public Sub UI_ResetExcelUIToSnapshot()
                         NewValue:=m_SnapshotGridlinesVisible(i), _
                         FailMsg:=Msg) Then
 
-                        UI_LogFailure PROC, _
-                            "Gridlines [" & m_SnapshotWindowLabels(i) & "]", _
-                            Msg
+                        UI_HandleApplyFailure _
+                            ProcName, LogFailures, Succeeded, FailureCount, _
+                            FailureList, CaptureFailureList, _
+                            "Gridlines [" & m_SnapshotWindowLabels(i) & "]", Msg
                     End If
                 End If
 
             Else
-                UI_LogFailure PROC, _
-                    "WindowIdentity [" & m_SnapshotWindowLabels(i) & "]", _
-                    Msg
+                UI_HandleApplyFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, _
+                    "WindowIdentity [" & m_SnapshotWindowLabels(i) & "]", Msg
             End If
         Next i
 
@@ -940,16 +1402,23 @@ SafeExit:
             OldScreenUpdating:=OldScreenUpdating, _
             QuietModeChanged:=QuietModeChanged
 
-        Exit Sub
+        UI_ResetExcelUIToSnapshot_Core = Succeeded
+        Exit Function
 
 '------------------------------------------------------------------------------
 ' FAIL
 '------------------------------------------------------------------------------
 Fail:
-        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
+        UnexpectedDetail = UI_BuildRuntimeErrorText
+
+        UI_HandleApplyFailure _
+            ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+            CaptureFailureList, "Unexpected", UnexpectedDetail
+
         Resume SafeExit
 
-End Sub
+End Function
+
 
 
 Public Sub UI_ClearExcelUIStateSnapshot()
@@ -1545,13 +2014,18 @@ Private Sub UI_HandleApplyFailure( _
 '                           UI_HandleApplyFailure
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Record one failure and optionally log it.
+'   Record one best-effort operation failure and optionally log it.
+'
+' NOTES
+'   The procedure name is retained for compatibility with the established
+'   internal apply path, but the helper is also used by snapshot operations.
+
 '
 ' ERROR POLICY
 '   Does not raise.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-07-29
 '==============================================================================
 '
 
