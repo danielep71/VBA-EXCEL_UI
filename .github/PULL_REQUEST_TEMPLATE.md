@@ -1,40 +1,26 @@
-<!--
-Thank you for contributing to VBA-EXCEL_UI.
-
-Keep the pull request focused: one logical UI behavior, recovery, API, testing,
-documentation, or repository-maintenance change per PR.
-
-Read CONTRIBUTING.md, CODE_OF_CONDUCT.md, and SECURITY.md before completing this
-template.
--->
-
-## 📋 Summary
+## Summary
 
 Describe the change and why it is needed.
 
-## 🔗 Related issue
+## Related issue
 
 ```text
 Closes #
 ```
 
-Remove this section when no issue applies.
+## Type of change
 
-## 🧩 Type of change
+- [ ] Functional or compatibility fix
+- [ ] Recovery or host-state fix
+- [ ] Backward-compatible feature
+- [ ] Internal refactor with no intended public behavior change
+- [ ] Regression-test change
+- [ ] Demo change
+- [ ] Documentation-only change
+- [ ] Repository or release maintenance
+- [ ] Security-related change
 
-- [ ] 🐞 Functional or compatibility bug fix
-- [ ] 🆘 Recovery or host-state preservation fix
-- [ ] ✨ Backward-compatible feature
-- [ ] ♻️ Refactor with no intended public behavior change
-- [ ] 🧪 Regression-harness or test change
-- [ ] 🖼️ Demo workbook or demo-builder change
-- [ ] 📚 Documentation-only change
-- [ ] 🔒 Security-related change
-- [ ] 🔧 Repository or release-maintenance change
-
-## 🎛️ Affected UI surface
-
-Check all that apply:
+## Affected surface
 
 - [ ] Ribbon
 - [ ] Status Bar
@@ -43,29 +29,17 @@ Check all that apply:
 - [ ] Headings
 - [ ] Workbook Tabs
 - [ ] Gridlines
-- [ ] Title Bar / WinAPI frame
+- [ ] Title Bar / WinAPI
 - [ ] Snapshot capture
 - [ ] Snapshot restoration
 - [ ] Structured diagnostics
 - [ ] `ScreenUpdating`
+- [ ] Module dependencies
 - [ ] Demo
 - [ ] Tests
-- [ ] Repository configuration only
+- [ ] Documentation only
 
-## 📐 Public API and Semantic Versioning
-
-Describe changes to:
-
-- public procedure or function names;
-- signatures or parameter order;
-- optional-parameter defaults;
-- enum values;
-- show / hide / leave-unchanged semantics;
-- fire-and-forget behavior;
-- structured-result behavior;
-- application or window targeting;
-- snapshot meaning;
-- recovery behavior.
+## Public API and Semantic Versioning
 
 ```text
 Public behavior changed:
@@ -74,190 +48,142 @@ Suggested release: patch / minor / major
 Migration required:
 ```
 
-Write `No public behavior change` where applicable.
+Confirm changes to names, signatures, parameter order/defaults, enum values, targeting, snapshot meaning, diagnostics, and recovery. Write `No public behavior change` where applicable.
 
-## 🧭 Scope and state ownership
-
-Describe which Excel surface is affected:
+## Module ownership and dependencies
 
 ```text
-Application-level:
-Window-level:
-Excel main window:
-All open windows / active window / specified target:
+M_EXCEL_UI:
+M_EXCEL_UI_RUNTIME:
+M_EXCEL_UI_SNAPSHOT:
+M_EXCEL_UI_TITLEBAR:
+Dependency graph changed:
+Circular dependency introduced: no / explain
+Mutable state duplicated: no / explain
 ```
 
-Explain:
-
-- whether the change affects the current Excel process or one workbook;
-- what state this module owns;
-- how the change interacts with other macros or add-ins;
-- how prior state is captured or preserved;
-- what happens when the target window collection changes.
-
-## 🪟 Ribbon or WinAPI method
-
-For Ribbon or title-bar changes, explain:
-
-```text
-API or command used:
-Style bits read or written:
-32-bit path:
-64-bit path:
-GetLastError treatment:
-Frame-refresh treatment:
-Application.Hwnd treatment:
-Interaction with other add-ins:
-```
-
-Write `Not applicable` when the change does not touch these areas.
-
-## 📸 Snapshot and recovery behavior
-
-For snapshot, reset, or constrained-shell changes, explain:
+## Snapshot and recovery
 
 ```text
 Captured state:
-Complete or partial capture:
 Window identity strategy:
+Behavior for new windows:
+Behavior for missing/closed/recreated windows:
 Behavior after VBA reset:
-Behavior when windows change:
+Failure ordering:
 Emergency recovery path:
 ```
 
-Confirm whether `UI_ShowExcelUI` remains a usable fallback.
+## Ribbon or WinAPI method
 
-## 📋 Diagnostics and failure policy
+```text
+API or command used:
+Owned style bits:
+32-bit path:
+64-bit path:
+GetLastError treatment:
+Frame refresh:
+Application.Hwnd treatment:
+Unrelated style bits preserved:
+```
 
-Describe:
+Write `Not applicable` when appropriate.
 
-- whether failures are logged, returned, or raised;
-- whether best-effort continuation is preserved;
-- whether failure ordering changes;
-- whether new machine-readable categories are introduced;
-- how unexpected runtime errors are represented;
-- how modified host state is restored after failure.
+## Diagnostics and failure policy
 
 ```text
 Failure contract:
 Logging contract:
 Structured-result contract:
+ScreenUpdating restoration:
 ```
 
-## 🧪 Testing performed
+## Testing performed
 
 ```text
-Debug → Compile VBAProject       →
-Test_EXCEL_UI_RunCore            →
-Test_EXCEL_UI_RunTitleBarOnly    →
-Test_EXCEL_UI_RunAll             →
-Manual hide/show recovery        →
-Manual capture/hide/reset        →
+Debug → Compile VBAProject            →
+Test_EXCEL_UI_RunCore                 →
+Test_EXCEL_UI_RunTitleBarOnly         →
+Test_EXCEL_UI_RunSnapshotIdentity     →
+Test_EXCEL_UI_RunAll                  →
+Manual UI_HideExcelUI / UI_ShowExcelUI →
+Manual capture / hide / reset         →
 ```
 
-Include relevant Immediate Window output for a functional fix or substantial
-behavioral change.
-
-## 💻 Validation environment
+## Validation environment
 
 ```text
-Excel product:
-Excel version:
-Excel build:
+Excel product/version/build:
 Office bitness:
 Windows version:
 Workbook type:
 Excel window state:
 Open Excel windows:
-Other add-ins active:
+Other add-ins:
 ```
 
-List every environment actually tested. Do not imply untested environments were
-validated.
+List only environments actually tested.
 
-## ✅ Contract checklist
+## Source checklist
 
-### Source and compilation
-
-- [ ] The VBA project compiles cleanly.
-- [ ] Changed modules were re-exported to the correct repository paths.
-- [ ] Exported VBA files retain CRLF line endings under `.gitattributes`.
+- [ ] Current branch was confirmed before committing.
+- [ ] All four required production modules were present during compilation.
+- [ ] Changed modules were exported to the correct repository paths.
+- [ ] CRLF was preserved for exported VBA source.
+- [ ] No conflict markers or duplicate procedures remain.
 - [ ] The textual diff contains only intended changes.
-- [ ] No Office lock, backup, editor-state, or generated file is included.
-- [ ] No confidential, personal, credential, client, or production data is included.
+- [ ] No lock, backup, generated, confidential, credential, client, or production-data file is included.
 
-### Public behavior and compatibility
+## Compatibility checklist
 
-- [ ] Existing public names and signatures remain compatible, or the breaking
-      change and major-version rationale are explicit.
-- [ ] Existing enum values retain their meaning.
-- [ ] `UI_ShowExcelUI` still means show all unless a deliberate major-version
-      contract change is proposed.
-- [ ] Application-level and window-level scope is documented.
-- [ ] New public members use the established `UI_...` namespace.
-- [ ] `Option Private Module` exposure remains intentional.
-
-### Error and host-state behavior
-
-- [ ] Best-effort continuation remains deliberate and documented.
+- [ ] Existing public names, signatures, defaults, and enum values remain compatible, or the breaking rationale is explicit.
+- [ ] `UI_ShowExcelUI` remains an emergency show-all path.
+- [ ] Best-effort continuation remains deliberate.
 - [ ] Failures are not silently discarded.
-- [ ] `Application.ScreenUpdating` is restored.
-- [ ] No production procedure introduces an unsolicited `MsgBox`.
-- [ ] Narrow `On Error Resume Next` blocks restore the intended handler promptly.
-- [ ] Emergency recovery remains available.
-- [ ] Invalid `UIVisibility` values remain controlled.
+- [ ] `ScreenUpdating` is restored.
+- [ ] No unsolicited production `MsgBox` was introduced.
+- [ ] Invalid enum values remain controlled.
 
-### WinAPI and Ribbon safety
+## Module-boundary checklist
 
+- [ ] `M_EXCEL_UI` remains the public facade.
+- [ ] Runtime and title-bar modules have no project-module dependencies.
+- [ ] Snapshot state exists only in `M_EXCEL_UI_SNAPSHOT`.
+- [ ] Title-bar mutable state exists only in `M_EXCEL_UI_TITLEBAR`.
+- [ ] No circular dependency was introduced.
+- [ ] Internal modules retain `Option Private Module`.
+
+## Snapshot checklist
+
+- [ ] Per-window restore does not use collection index.
+- [ ] Retained Window identity behavior is documented and tested.
+- [ ] New windows remain unchanged.
+- [ ] Missing captured windows produce controlled diagnostics.
+- [ ] Reset-without-snapshot remains controlled.
+- [ ] In-memory lifetime remains documented.
+
+## Title-bar checklist
+
+- [ ] Exact owned style mask is preserved or deliberately reviewed.
+- [ ] Unrelated current style bits are preserved.
 - [ ] 32-bit and 64-bit declarations are correct.
-- [ ] Handles and pointer-sized values use appropriate types.
-- [ ] Valid zero WinAPI returns are distinguished from failures.
-- [ ] Style ownership and restoration are documented.
+- [ ] Valid zero returns are distinguished from failures.
 - [ ] Required frame refresh is performed.
-- [ ] No user-controlled dynamic macro command or arbitrary OS execution is added.
 
-### Snapshot behavior
-
-- [ ] Snapshot completeness and unavailable reads are handled explicitly.
-- [ ] Window identity or index behavior is documented and tested.
-- [ ] Changes in window count or order are covered where relevant.
-- [ ] In-memory lifetime and VBA-reset behavior remain accurate.
-- [ ] Reset-without-snapshot behavior remains controlled.
-
-### Tests and documentation
-
-- [ ] A corrected defect has a permanent regression test.
-- [ ] Focused and complete applicable suites pass.
-- [ ] Manual recovery was tested.
-- [ ] README and Wiki pages were updated where relevant.
-- [ ] `CONTRIBUTING.md`, `SECURITY.md`, or templates were updated when project
-      process or risk boundaries changed.
-- [ ] Version metadata and release notes are synchronized where applicable.
-
-### Binary demo workbook
-
-- [ ] No binary workbook change is included.
-- [ ] Or: the binary change is intentional, described, and accompanied by source.
-- [ ] The workbook opens without repair warnings.
-- [ ] The embedded VBA project compiles.
-- [ ] Screenshots are supplied for visible layout changes.
-- [ ] No unintended external links, connections, names, or hidden data were added.
-
-## 📚 Documentation updated
-
-Check all that apply:
+## Documentation and demo
 
 - [ ] README
-- [ ] Wiki
-- [ ] Module or procedure headers
+- [ ] INSTALLATION
 - [ ] CONTRIBUTING
-- [ ] SECURITY
-- [ ] Issue or pull-request templates
+- [ ] CHANGELOG / release notes
+- [ ] Wiki
+- [ ] Module headers
 - [ ] Demo guidance
-- [ ] Release notes
 - [ ] No documentation change required
 
-## 📎 Reviewer notes
+- [ ] No binary demo workbook change is included.
+- [ ] Or: the binary change is intentional, described, synchronized with exported source, and tested.
 
-Describe trade-offs, known limitations, unresolved environment coverage, or
-follow-up work.
+## Reviewer notes
+
+Describe trade-offs, known limitations, untested environments, and follow-up work.
