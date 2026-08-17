@@ -14,6 +14,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '     - WinAPI-based title-bar control
 '     - the structured-result path
 '     - the explicit snapshot / reset lifecycle
+'     - window-target scope behavior
 '
 '   A repeatable regression harness reduces the risk of silent regressions and
 '   makes the repository more maintainable and release-ready
@@ -40,10 +41,16 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '     - no-op / leave-unchanged success path
 '     - success path without FailureList capture
 '     - invalid UIVisibility structured failure path
+'     - invalid UIWindowTargetScope structured failure path
 '     - snapshot capture clean-success result path
 '     - snapshot restoration clean-success result path
 '     - snapshot restoration no-snapshot failure path
 '     - closed captured-window ordered failure path
+'
+'   Target-scope tests
+'     - active-window-only application
+'     - active-workbook-window application
+'     - invalid-scope failure with application-level continuation
 '
 '   Snapshot / restore tests
 '     - explicit snapshot lifecycle
@@ -84,7 +91,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
-'   2026-07-29
+'   2026-08-01
 '
 ' AUTHOR
 '   Daniele Penza
@@ -105,6 +112,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
     Private Const TEST_WAIT_SECONDS   As Double = 0.15                'Small UI settle delay after each state change
     Private Const TEST_ERR_BASE       As Long = vbObjectError + 4700  'Base custom error number for test assertions
     Private Const TEST_SNAPSHOT_ID_ERR_BASE As Long = vbObjectError + 4810  'Base custom error for snapshot-identity assertions
+    Private Const TEST_TARGET_ERR_BASE As Long = vbObjectError + 4900  'Base custom error for target-scope tests
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -701,6 +709,15 @@ Private Sub TST_RunRegressionPack( _
 
     'Run the structured-result invalid-visibility failure case
         TST_Case_WithResult_InvalidVisibility
+
+    'Run active-window targeting
+        TST_Case_TargetScope_ActiveWindow
+
+    'Run active-workbook-window targeting
+        TST_Case_TargetScope_ActiveWorkbookWindows
+
+    'Run invalid-target-scope structured failure and continuation
+        TST_Case_TargetScope_InvalidValue
 
     'Run the ScreenUpdating preservation case
         TST_Case_ScreenUpdatingPreserved
@@ -1868,6 +1885,453 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
             "Structured failure reporting for invalid UIVisibility behaved as expected"
 
 End Sub
+
+Private Sub TST_Case_TargetScope_ActiveWindow()
+
+'
+'==============================================================================
+'                  TST_Case_TargetScope_ActiveWindow
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that UI_TargetActiveWindow changes only the active Excel Window while
+'   application-level requests still apply normally.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup.
+'
+' UPDATED
+'   2026-08-01
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow          As Window
+    Dim TargetWindow          As Window
+    Dim SavedHeadings         As Boolean
+    Dim SavedWorkbookTabs     As Boolean
+    Dim SavedGridlines        As Boolean
+    Dim SavedStatusBar        As Boolean
+    Dim OK                    As Boolean
+    Dim FailureCount          As Long
+    Dim FailureList           As Variant
+    Dim HasFailure            As Boolean
+    Dim FailNumber            As Long
+    Dim FailSource            As String
+    Dim FailDescription       As String
+
+    Const PROC As String = "TST_Case_TargetScope_ActiveWindow"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        ThisWorkbook.Activate
+        Set AnchorWindow = Application.ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise TEST_TARGET_ERR_BASE + 1, PROC, _
+                "ThisWorkbook could not provide an active Excel window"
+        End If
+
+        SavedHeadings = AnchorWindow.DisplayHeadings
+        SavedWorkbookTabs = AnchorWindow.DisplayWorkbookTabs
+        SavedGridlines = AnchorWindow.DisplayGridlines
+        SavedStatusBar = Application.DisplayStatusBar
+
+        Set TargetWindow = ThisWorkbook.NewWindow
+
+        If TargetWindow Is Nothing Then
+            Err.Raise TEST_TARGET_ERR_BASE + 2, PROC, _
+                "ThisWorkbook.NewWindow did not return a target window"
+        End If
+
+'------------------------------------------------------------------------------
+' ESTABLISH BASELINE
+'------------------------------------------------------------------------------
+        AnchorWindow.DisplayHeadings = True
+        AnchorWindow.DisplayWorkbookTabs = True
+        AnchorWindow.DisplayGridlines = True
+
+        TargetWindow.DisplayHeadings = True
+        TargetWindow.DisplayWorkbookTabs = True
+        TargetWindow.DisplayGridlines = True
+        TargetWindow.Activate
+
+        Application.DisplayStatusBar = True
+
+'------------------------------------------------------------------------------
+' APPLY ACTIVE-WINDOW SCOPE
+'------------------------------------------------------------------------------
+        FailureCount = 99
+        FailureList = Array("stale target failure")
+
+        OK = UI_SetExcelUI_WithResult( _
+            StatusBar:=UI_Hide, _
+            Headings:=UI_Hide, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Hide, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            TargetScope:=UI_TargetActiveWindow)
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".Result"
+
+'------------------------------------------------------------------------------
+' ASSERT SCOPE
+'------------------------------------------------------------------------------
+        TST_AssertApplicationProperty _
+            Expected:=False, _
+            PropertyName:="DisplayStatusBar", _
+            AssertionName:=PROC & ".ApplicationLevelUnaffectedByScope"
+
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=TargetWindow, _
+            ExpectedHeadings:=False, _
+            ExpectedWorkbookTabs:=False, _
+            ExpectedGridlines:=False, _
+            AssertionName:=PROC & ".TargetWindow"
+
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=AnchorWindow, _
+            ExpectedHeadings:=True, _
+            ExpectedWorkbookTabs:=True, _
+            ExpectedGridlines:=True, _
+            AssertionName:=PROC & ".NonTargetWindow"
+
+        TST_Log PROC, "PASS", _
+            "Only the active window received window-level changes"
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        On Error Resume Next
+
+        TST_SafeCloseWindow TargetWindow
+
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.DisplayHeadings = SavedHeadings
+            AnchorWindow.DisplayWorkbookTabs = SavedWorkbookTabs
+            AnchorWindow.DisplayGridlines = SavedGridlines
+            AnchorWindow.Activate
+        End If
+
+        Application.DisplayStatusBar = SavedStatusBar
+
+        On Error GoTo 0
+
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Resume SafeExit
+
+End Sub
+
+
+Private Sub TST_Case_TargetScope_ActiveWorkbookWindows()
+
+'
+'==============================================================================
+'            TST_Case_TargetScope_ActiveWorkbookWindows
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that UI_TargetActiveWorkbookWindows changes every Window belonging to
+'   the active workbook and leaves another workbook's Window unchanged.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup.
+'
+' UPDATED
+'   2026-08-01
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OriginalWindow        As Window
+    Dim TargetBook            As Workbook
+    Dim OtherBook             As Workbook
+    Dim TargetWindowOne       As Window
+    Dim TargetWindowTwo       As Window
+    Dim OtherWindow           As Window
+    Dim OK                    As Boolean
+    Dim FailureCount          As Long
+    Dim FailureList           As Variant
+    Dim HasFailure            As Boolean
+    Dim FailNumber            As Long
+    Dim FailSource            As String
+    Dim FailDescription       As String
+
+    Const PROC As String = "TST_Case_TargetScope_ActiveWorkbookWindows"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        Set OriginalWindow = Application.ActiveWindow
+
+        Set TargetBook = Application.Workbooks.Add
+        Set TargetWindowOne = TargetBook.Windows(1)
+        Set TargetWindowTwo = TargetBook.NewWindow
+
+        Set OtherBook = Application.Workbooks.Add
+        Set OtherWindow = OtherBook.Windows(1)
+
+        If TargetWindowOne Is Nothing Or _
+           TargetWindowTwo Is Nothing Or _
+           OtherWindow Is Nothing Then
+
+            Err.Raise TEST_TARGET_ERR_BASE + 3, PROC, _
+                "temporary workbook windows could not be created"
+        End If
+
+'------------------------------------------------------------------------------
+' ESTABLISH BASELINE
+'------------------------------------------------------------------------------
+        TargetWindowOne.DisplayHeadings = True
+        TargetWindowOne.DisplayWorkbookTabs = True
+        TargetWindowOne.DisplayGridlines = True
+
+        TargetWindowTwo.DisplayHeadings = True
+        TargetWindowTwo.DisplayWorkbookTabs = True
+        TargetWindowTwo.DisplayGridlines = True
+
+        OtherWindow.DisplayHeadings = True
+        OtherWindow.DisplayWorkbookTabs = True
+        OtherWindow.DisplayGridlines = True
+
+        TargetWindowOne.Activate
+
+        If Not (Application.ActiveWorkbook Is TargetBook) Then
+            Err.Raise TEST_TARGET_ERR_BASE + 4, PROC, _
+                "temporary target workbook could not be activated"
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY ACTIVE-WORKBOOK SCOPE
+'------------------------------------------------------------------------------
+        FailureCount = 99
+        FailureList = Array("stale target failure")
+
+        OK = UI_SetExcelUI_WithResult( _
+            Headings:=UI_Hide, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Hide, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            TargetScope:=UI_TargetActiveWorkbookWindows)
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".Result"
+
+'------------------------------------------------------------------------------
+' ASSERT SCOPE
+'------------------------------------------------------------------------------
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=TargetWindowOne, _
+            ExpectedHeadings:=False, _
+            ExpectedWorkbookTabs:=False, _
+            ExpectedGridlines:=False, _
+            AssertionName:=PROC & ".TargetWindowOne"
+
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=TargetWindowTwo, _
+            ExpectedHeadings:=False, _
+            ExpectedWorkbookTabs:=False, _
+            ExpectedGridlines:=False, _
+            AssertionName:=PROC & ".TargetWindowTwo"
+
+        TST_AssertSnapshotWindowState _
+            TargetWindow:=OtherWindow, _
+            ExpectedHeadings:=True, _
+            ExpectedWorkbookTabs:=True, _
+            ExpectedGridlines:=True, _
+            AssertionName:=PROC & ".OtherWorkbookWindow"
+
+        TST_Log PROC, "PASS", _
+            "Only windows belonging to the active workbook were changed"
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        On Error Resume Next
+
+        TST_SafeCloseWorkbook TargetBook
+        TST_SafeCloseWorkbook OtherBook
+
+        If Not OriginalWindow Is Nothing Then
+            OriginalWindow.Activate
+        End If
+
+        On Error GoTo 0
+
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Resume SafeExit
+
+End Sub
+
+
+Private Sub TST_Case_TargetScope_InvalidValue()
+
+'
+'==============================================================================
+'                   TST_Case_TargetScope_InvalidValue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify ordered invalid-scope diagnostics, application-level continuation,
+'   and suppression of window-level writes when TargetScope is invalid.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup.
+'
+' UPDATED
+'   2026-08-01
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow          As Window
+    Dim InvalidScope          As UIWindowTargetScope
+    Dim SavedHeadings         As Boolean
+    Dim SavedStatusBar        As Boolean
+    Dim OK                    As Boolean
+    Dim FailureCount          As Long
+    Dim FailureList           As Variant
+    Dim HasFailure            As Boolean
+    Dim FailNumber            As Long
+    Dim FailSource            As String
+    Dim FailDescription       As String
+
+    Const PROC As String = "TST_Case_TargetScope_InvalidValue"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Fail
+
+        ThisWorkbook.Activate
+        Set AnchorWindow = Application.ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise TEST_TARGET_ERR_BASE + 5, PROC, _
+                "ThisWorkbook could not provide an active Excel window"
+        End If
+
+        SavedHeadings = AnchorWindow.DisplayHeadings
+        SavedStatusBar = Application.DisplayStatusBar
+
+        AnchorWindow.DisplayHeadings = True
+        Application.DisplayStatusBar = True
+        InvalidScope = 999
+
+'------------------------------------------------------------------------------
+' APPLY INVALID SCOPE
+'------------------------------------------------------------------------------
+        FailureCount = 99
+        FailureList = Array("stale target failure")
+
+        OK = UI_SetExcelUI_WithResult( _
+            StatusBar:=UI_Hide, _
+            Headings:=UI_Hide, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            TargetScope:=InvalidScope)
+
+        TST_AssertSingleFailurePrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="TargetScope | invalid UIWindowTargetScope value: 999", _
+            AssertionName:=PROC & ".Result"
+
+'------------------------------------------------------------------------------
+' ASSERT CONTINUATION AND WINDOW SUPPRESSION
+'------------------------------------------------------------------------------
+        TST_AssertApplicationProperty _
+            Expected:=False, _
+            PropertyName:="DisplayStatusBar", _
+            AssertionName:=PROC & ".ApplicationLevelContinued"
+
+        TST_AssertBooleanEquals _
+            Expected:=True, _
+            Actual:=AnchorWindow.DisplayHeadings, _
+            AssertionName:=PROC & ".WindowLevelSkipped"
+
+        TST_Log PROC, "PASS", _
+            "Invalid scope was reported while application-level work continued"
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+        On Error Resume Next
+
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.DisplayHeadings = SavedHeadings
+            AnchorWindow.Activate
+        End If
+
+        Application.DisplayStatusBar = SavedStatusBar
+
+        On Error GoTo 0
+
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL
+'------------------------------------------------------------------------------
+Fail:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Resume SafeExit
+
+End Sub
+
 
 Private Sub TST_Case_SnapshotCaptureResultSuccess( _
     ByVal IncludeTitleBarTests As Boolean)
@@ -4666,6 +5130,34 @@ Private Sub TST_AssertTrue( _
 End Sub
 
 
+Private Sub TST_SafeCloseWorkbook(ByRef TargetWorkbook As Workbook)
+
+'
+'==============================================================================
+'                        TST_SafeCloseWorkbook
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Close and release one temporary workbook without saving.
+'
+' ERROR POLICY
+'   - Suppresses cleanup errors locally.
+'
+' UPDATED
+'   2026-08-01
+'==============================================================================
+'
+
+        On Error Resume Next
+
+        If Not TargetWorkbook Is Nothing Then
+            TargetWorkbook.Close SaveChanges:=False
+        End If
+
+        Set TargetWorkbook = Nothing
+
+End Sub
+
+
 Private Sub TST_SafeCloseWindow(ByRef TargetWindow As Window)
 
 '
@@ -4752,8 +5244,6 @@ Private Function TST_BuildRuntimeErrorText() As String
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
 End Function
-
-
 
 
 

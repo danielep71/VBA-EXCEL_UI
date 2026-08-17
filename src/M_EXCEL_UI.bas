@@ -16,6 +16,7 @@ Attribute VB_Name = "M_EXCEL_UI"
 '
 ' PUBLIC SURFACE
 '   - UIVisibility
+'   - UIWindowTargetScope
 '   - UI_SetExcelUI
 '   - UI_SetExcelUI_WithResult
 '   - UI_HideExcelUI
@@ -73,9 +74,11 @@ Attribute VB_Name = "M_EXCEL_UI"
 '     preserving unrelated changes made by Excel or another component.
 '   - Snapshot capture and restoration expose optional structured-result APIs
 '     while retaining the original fire-and-forget compatibility wrappers.
+'   - Selective apply APIs accept an optional trailing TargetScope that affects
+'     only Headings, Workbook Tabs, and Gridlines.
 '
 ' UPDATED
-'   2026-07-29
+'   2026-08-01
 '
 ' AUTHOR
 '   Daniele Penza
@@ -99,6 +102,12 @@ Public Enum UIVisibility
     UI_Show = 1                'Show this UI element
 End Enum
 
+Public Enum UIWindowTargetScope
+    UI_TargetAllExcelWindows = 0          'Apply to every current Excel window
+    UI_TargetActiveWindow = 1             'Apply only to Application.ActiveWindow
+    UI_TargetActiveWorkbookWindows = 2    'Apply to ActiveWorkbook.Windows
+End Enum
+
 
 '------------------------------------------------------------------------------
 ' INTERNAL MODULE DEPENDENCIES
@@ -115,7 +124,9 @@ Public Sub UI_SetExcelUI( _
     Optional ByVal Headings As UIVisibility = UI_LeaveUnchanged, _
     Optional ByVal WorkbookTabs As UIVisibility = UI_LeaveUnchanged, _
     Optional ByVal Gridlines As UIVisibility = UI_LeaveUnchanged, _
-    Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged)
+    Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal TargetScope As UIWindowTargetScope = _
+        UI_TargetAllExcelWindows)
 
 '
 '==============================================================================
@@ -125,14 +136,18 @@ Public Sub UI_SetExcelUI( _
 '   Apply the requested visibility state to the managed Excel UI elements.
 '
 ' INPUTS
-'   Each optional argument accepts UI_Show, UI_Hide, or UI_LeaveUnchanged.
+'   Visibility arguments accept UI_Show, UI_Hide, or UI_LeaveUnchanged.
+'
+'   TargetScope
+'     Controls only Headings, Workbook Tabs, and Gridlines. The default remains
+'     UI_TargetAllExcelWindows for backward compatibility.
 '
 ' RETURNS
 '   None.
 '
 ' BEHAVIOR
 '   - Applies application-level settings to the current Excel instance.
-'   - Applies window-level settings to every current Excel window.
+'   - Applies window-level settings to the requested target scope.
 '   - Applies title-bar visibility to Application.Hwnd.
 '   - Continues after element-level failure.
 '
@@ -144,7 +159,7 @@ Public Sub UI_SetExcelUI( _
 '   - UI_ApplyExcelUIState
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-01
 '==============================================================================
 '
 
@@ -174,6 +189,7 @@ Public Sub UI_SetExcelUI( _
             WorkbookTabs:=WorkbookTabs, _
             Gridlines:=Gridlines, _
             TitleBar:=TitleBar, _
+            TargetScope:=TargetScope, _
             LogFailures:=True, _
             FailureCount:=IgnoredFailureCount, _
             FailureList:=IgnoredFailureList, _
@@ -338,7 +354,9 @@ Public Function UI_SetExcelUI_WithResult( _
     Optional ByVal Gridlines As UIVisibility = UI_LeaveUnchanged, _
     Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged, _
     Optional ByRef FailureCount As Long = 0, _
-    Optional ByRef FailureList As Variant) As Boolean
+    Optional ByRef FailureList As Variant, _
+    Optional ByVal TargetScope As UIWindowTargetScope = _
+        UI_TargetAllExcelWindows) As Boolean
 
 '
 '==============================================================================
@@ -350,6 +368,10 @@ Public Function UI_SetExcelUI_WithResult( _
 ' INPUTS
 '   Visibility arguments
 '     UI_Show, UI_Hide, or UI_LeaveUnchanged.
+'
+'   TargetScope
+'     Controls only Headings, Workbook Tabs, and Gridlines. The default remains
+'     UI_TargetAllExcelWindows.
 '
 '   FailureCount (optional, ByRef)
 '     Receives the number of recorded failures.
@@ -372,7 +394,7 @@ Public Function UI_SetExcelUI_WithResult( _
 '   - UI_RuntimeHandleFailure
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-01
 '==============================================================================
 '
 
@@ -412,6 +434,7 @@ Public Function UI_SetExcelUI_WithResult( _
             WorkbookTabs:=WorkbookTabs, _
             Gridlines:=Gridlines, _
             TitleBar:=TitleBar, _
+            TargetScope:=TargetScope, _
             LogFailures:=False, _
             FailureCount:=FailureCount, _
             FailureList:=InternalFailureList, _
@@ -858,6 +881,7 @@ Private Function UI_ApplyExcelUIState( _
     ByVal WorkbookTabs As UIVisibility, _
     ByVal Gridlines As UIVisibility, _
     ByVal TitleBar As UIVisibility, _
+    ByVal TargetScope As UIWindowTargetScope, _
     ByVal LogFailures As Boolean, _
     ByRef FailureCount As Long, _
     ByRef FailureList As Variant, _
@@ -874,18 +898,27 @@ Private Function UI_ApplyExcelUIState( _
 '   TRUE when no failure was recorded; otherwise FALSE.
 '
 ' BEHAVIOR
-'   - Validates every UIVisibility argument.
+'   - Validates every UIVisibility argument and TargetScope.
 '   - Skips UI_LeaveUnchanged values.
 '   - Avoids no-op writes where current state can be read.
-'   - Applies window-level state to every current Excel window.
+'   - Applies window-level state to all Excel windows, the active window, or all
+'     windows belonging to the active workbook.
+'   - TargetScope never changes Ribbon, application-level properties, or the
+'     Excel main-window title bar.
 '   - Preserves ScreenUpdating.
 '
 ' ERROR POLICY
 '   - Does not raise.
 '   - Records and optionally logs failures in insertion order.
 '
+' DEPENDENCIES
+'   - UI_ApplyWindowLevelState
+'   - UI_IsValidTargetScope
+'   - M_EXCEL_UI_RUNTIME
+'   - M_EXCEL_UI_TITLEBAR
+'
 ' UPDATED
-'   2026-07-25
+'   2026-08-01
 '==============================================================================
 '
 
@@ -894,6 +927,8 @@ Private Function UI_ApplyExcelUIState( _
 '------------------------------------------------------------------------------
     Dim Succeeded           As Boolean
     Dim W                   As Window
+    Dim ActiveTargetWindow  As Window
+    Dim ActiveTargetBook    As Workbook
     Dim ShowFlag            As Boolean
     Dim Msg                 As String
 
@@ -905,10 +940,12 @@ Private Function UI_ApplyExcelUIState( _
     Dim ValidWorkbookTabs   As Boolean
     Dim ValidGridlines      As Boolean
     Dim ValidTitleBar       As Boolean
+    Dim ValidTargetScope    As Boolean
 
     Dim DoHeadings          As Boolean
     Dim DoWorkbookTabs      As Boolean
     Dim DoGridlines         As Boolean
+    Dim DoWindowState       As Boolean
 
     Dim ShowHeadings        As Boolean
     Dim ShowWorkbookTabs    As Boolean
@@ -1000,6 +1037,14 @@ Private Function UI_ApplyExcelUIState( _
                 "invalid UIVisibility value: " & CStr(TitleBar)
         End If
 
+        ValidTargetScope = UI_IsValidTargetScope(TargetScope)
+        If Not ValidTargetScope Then
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "TargetScope", _
+                "invalid UIWindowTargetScope value: " & CStr(TargetScope)
+        End If
+
 '------------------------------------------------------------------------------
 ' APPLY APPLICATION-LEVEL STATE
 '------------------------------------------------------------------------------
@@ -1056,6 +1101,7 @@ Private Function UI_ApplyExcelUIState( _
         DoWorkbookTabs = _
             ValidWorkbookTabs And (WorkbookTabs <> UI_LeaveUnchanged)
         DoGridlines = ValidGridlines And (Gridlines <> UI_LeaveUnchanged)
+        DoWindowState = DoHeadings Or DoWorkbookTabs Or DoGridlines
 
         If DoHeadings Then
             ShowHeadings = UI_VisibilityToBoolean(Headings)
@@ -1072,43 +1118,80 @@ Private Function UI_ApplyExcelUIState( _
 '------------------------------------------------------------------------------
 ' APPLY WINDOW-LEVEL STATE
 '------------------------------------------------------------------------------
-        If DoHeadings Or DoWorkbookTabs Or DoGridlines Then
-            For Each W In Application.Windows
+        If DoWindowState And ValidTargetScope Then
+            Select Case TargetScope
 
-                If DoHeadings Then
-                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-                        W, "DisplayHeadings", ShowHeadings, Msg) Then
+                Case UI_TargetAllExcelWindows
+                    For Each W In Application.Windows
+                        UI_ApplyWindowLevelState _
+                            ProcName:=ProcName, _
+                            TargetWindow:=W, _
+                            DoHeadings:=DoHeadings, _
+                            ShowHeadings:=ShowHeadings, _
+                            DoWorkbookTabs:=DoWorkbookTabs, _
+                            ShowWorkbookTabs:=ShowWorkbookTabs, _
+                            DoGridlines:=DoGridlines, _
+                            ShowGridlines:=ShowGridlines, _
+                            LogFailures:=LogFailures, _
+                            Succeeded:=Succeeded, _
+                            FailureCount:=FailureCount, _
+                            FailureList:=FailureList, _
+                            CaptureFailureList:=CaptureFailureList
+                    Next W
 
+                Case UI_TargetActiveWindow
+                    Set ActiveTargetWindow = Application.ActiveWindow
+
+                    If ActiveTargetWindow Is Nothing Then
                         UI_RuntimeHandleFailure _
                             ProcName, LogFailures, Succeeded, FailureCount, _
-                            FailureList, CaptureFailureList, _
-                            "Headings [" & W.Caption & "]", Msg
+                            FailureList, CaptureFailureList, "TargetScope", _
+                            "active Excel window is unavailable"
+                    Else
+                        UI_ApplyWindowLevelState _
+                            ProcName:=ProcName, _
+                            TargetWindow:=ActiveTargetWindow, _
+                            DoHeadings:=DoHeadings, _
+                            ShowHeadings:=ShowHeadings, _
+                            DoWorkbookTabs:=DoWorkbookTabs, _
+                            ShowWorkbookTabs:=ShowWorkbookTabs, _
+                            DoGridlines:=DoGridlines, _
+                            ShowGridlines:=ShowGridlines, _
+                            LogFailures:=LogFailures, _
+                            Succeeded:=Succeeded, _
+                            FailureCount:=FailureCount, _
+                            FailureList:=FailureList, _
+                            CaptureFailureList:=CaptureFailureList
                     End If
-                End If
 
-                If DoWorkbookTabs Then
-                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-                        W, "DisplayWorkbookTabs", ShowWorkbookTabs, Msg) Then
+                Case UI_TargetActiveWorkbookWindows
+                    Set ActiveTargetBook = Application.ActiveWorkbook
 
+                    If ActiveTargetBook Is Nothing Then
                         UI_RuntimeHandleFailure _
                             ProcName, LogFailures, Succeeded, FailureCount, _
-                            FailureList, CaptureFailureList, _
-                            "WorkbookTabs [" & W.Caption & "]", Msg
+                            FailureList, CaptureFailureList, "TargetScope", _
+                            "active workbook is unavailable"
+                    Else
+                        For Each W In ActiveTargetBook.Windows
+                            UI_ApplyWindowLevelState _
+                                ProcName:=ProcName, _
+                                TargetWindow:=W, _
+                                DoHeadings:=DoHeadings, _
+                                ShowHeadings:=ShowHeadings, _
+                                DoWorkbookTabs:=DoWorkbookTabs, _
+                                ShowWorkbookTabs:=ShowWorkbookTabs, _
+                                DoGridlines:=DoGridlines, _
+                                ShowGridlines:=ShowGridlines, _
+                                LogFailures:=LogFailures, _
+                                Succeeded:=Succeeded, _
+                                FailureCount:=FailureCount, _
+                                FailureList:=FailureList, _
+                                CaptureFailureList:=CaptureFailureList
+                        Next W
                     End If
-                End If
 
-                If DoGridlines Then
-                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-                        W, "DisplayGridlines", ShowGridlines, Msg) Then
-
-                        UI_RuntimeHandleFailure _
-                            ProcName, LogFailures, Succeeded, FailureCount, _
-                            FailureList, CaptureFailureList, _
-                            "Gridlines [" & W.Caption & "]", Msg
-                    End If
-                End If
-
-            Next W
+            End Select
         End If
 
 '------------------------------------------------------------------------------
@@ -1144,6 +1227,116 @@ Fail:
             CaptureFailureList, "Unexpected", UI_RuntimeBuildErrorText
 
         Resume SafeExit
+
+End Function
+
+
+Private Sub UI_ApplyWindowLevelState( _
+    ByVal ProcName As String, _
+    ByVal TargetWindow As Window, _
+    ByVal DoHeadings As Boolean, _
+    ByVal ShowHeadings As Boolean, _
+    ByVal DoWorkbookTabs As Boolean, _
+    ByVal ShowWorkbookTabs As Boolean, _
+    ByVal DoGridlines As Boolean, _
+    ByVal ShowGridlines As Boolean, _
+    ByVal LogFailures As Boolean, _
+    ByRef Succeeded As Boolean, _
+    ByRef FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal CaptureFailureList As Boolean)
+
+'
+'==============================================================================
+'                     UI_ApplyWindowLevelState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Apply the requested managed Window properties to one resolved Excel Window.
+'
+' ERROR POLICY
+'   - Records property-level failures and continues with later properties.
+'   - Unexpected errors return to the caller's fail-soft handler.
+'
+' UPDATED
+'   2026-08-01
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Msg As String
+
+'------------------------------------------------------------------------------
+' APPLY HEADINGS
+'------------------------------------------------------------------------------
+        If DoHeadings Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                TargetWindow, "DisplayHeadings", ShowHeadings, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, _
+                    "Headings [" & TargetWindow.Caption & "]", Msg
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY WORKBOOK TABS
+'------------------------------------------------------------------------------
+        If DoWorkbookTabs Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                TargetWindow, "DisplayWorkbookTabs", ShowWorkbookTabs, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, _
+                    "WorkbookTabs [" & TargetWindow.Caption & "]", Msg
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY GRIDLINES
+'------------------------------------------------------------------------------
+        If DoGridlines Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                TargetWindow, "DisplayGridlines", ShowGridlines, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, _
+                    "Gridlines [" & TargetWindow.Caption & "]", Msg
+            End If
+        End If
+
+End Sub
+
+
+Private Function UI_IsValidTargetScope( _
+    ByVal TargetScope As UIWindowTargetScope) As Boolean
+
+'
+'==============================================================================
+'                       UI_IsValidTargetScope
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validate a UIWindowTargetScope value defensively.
+'
+' RETURNS
+'   TRUE only for the three documented targeting scopes.
+'
+' ERROR POLICY
+'   Does not raise.
+'
+' UPDATED
+'   2026-08-01
+'==============================================================================
+'
+
+        UI_IsValidTargetScope = _
+            (TargetScope = UI_TargetAllExcelWindows) Or _
+            (TargetScope = UI_TargetActiveWindow) Or _
+            (TargetScope = UI_TargetActiveWorkbookWindows)
 
 End Function
 
