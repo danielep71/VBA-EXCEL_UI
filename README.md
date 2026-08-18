@@ -4,7 +4,7 @@
 
 ### A structured Windows Excel UI controller for application-style workbooks
 
-**Tri-state visibility control · Best-effort execution · Structured diagnostics · Identity-safe snapshot restore · Owned-bit title-bar management · Modular internal architecture**
+**Tri-state visibility control · Targeted window scopes · Best-effort execution · Structured diagnostics · Identity-safe snapshot restore · Owned-bit title-bar management · Modular architecture**
 
 <br>
 
@@ -30,13 +30,13 @@
 &nbsp;·&nbsp;
 [Public API](#public-api)
 &nbsp;·&nbsp;
+[Target scopes](#target-scopes)
+&nbsp;·&nbsp;
 [Architecture](#architecture)
 &nbsp;·&nbsp;
 [Regression tests](#regression-testing)
 &nbsp;·&nbsp;
-[Contributing](CONTRIBUTING.md)
-&nbsp;·&nbsp;
-[Security](SECURITY.md)
+[Download demo release assets](https://github.com/danielep71/VBA-EXCEL_UI/releases)
 
 </div>
 
@@ -46,6 +46,10 @@
 > Version 1.1.0 uses a **four-module production package**. Importing only
 > `M_EXCEL_UI.bas` is not a valid installation. See [INSTALLATION.md](INSTALLATION.md).
 
+> [!NOTE]
+> The macro-enabled demo workbook is **not versioned in the repository**.
+> Tested `.xlsm` demo builds are distributed only as GitHub Release assets.
+
 ## ✨ What this project is
 
 **VBA Excel UI** is a focused VBA component for controlling the visible Excel shell on Windows.
@@ -54,6 +58,7 @@ It provides one stable project-facing API for:
 
 - showing, hiding, or leaving unchanged individual Excel UI elements;
 - applying application-level and window-level settings consistently;
+- targeting all Excel windows, only the active window, or all windows of the active workbook;
 - controlling the Excel title bar through bitness-safe WinAPI calls;
 - capturing and restoring an in-memory UI baseline;
 - restoring each captured Excel window by retained object identity rather than collection index;
@@ -68,18 +73,18 @@ The public API remains concentrated in `M_EXCEL_UI`. Internal responsibilities a
 
 ## 🎚️ Managed UI surface
 
-| UI element | Scope | Mechanism | Public control |
-|---|---|---|---|
-| Ribbon | Excel application | Ribbon command with best-effort state reads | Show / Hide / Leave unchanged |
-| Status Bar | Excel application | `Application.DisplayStatusBar` | Show / Hide / Leave unchanged |
-| Scroll Bars | Excel application | `Application.DisplayScrollBars` | Show / Hide / Leave unchanged |
-| Formula Bar | Excel application | `Application.DisplayFormulaBar` | Show / Hide / Leave unchanged |
-| Headings | Every current Excel window | `Window.DisplayHeadings` | Show / Hide / Leave unchanged |
-| Workbook Tabs | Every current Excel window | `Window.DisplayWorkbookTabs` | Show / Hide / Leave unchanged |
-| Gridlines | Every current Excel window | `Window.DisplayGridlines` | Show / Hide / Leave unchanged |
-| Title Bar | Excel main window | Owned-bit WinAPI update on `Application.Hwnd` | Show / Hide / Leave unchanged |
+| UI element | Scope | Mechanism | Targetable |
+|---|---|---|:---:|
+| Ribbon | Excel application | Ribbon command with best-effort state reads | No |
+| Status Bar | Excel application | `Application.DisplayStatusBar` | No |
+| Scroll Bars | Excel application | `Application.DisplayScrollBars` | No |
+| Formula Bar | Excel application | `Application.DisplayFormulaBar` | No |
+| Headings | Excel window | `Window.DisplayHeadings` | Yes |
+| Workbook Tabs | Excel window | `Window.DisplayWorkbookTabs` | Yes |
+| Gridlines | Excel window | `Window.DisplayGridlines` | Yes |
+| Title Bar | Excel main window | Owned-bit WinAPI update on `Application.Hwnd` | No |
 
-Application-level changes affect the current Excel process. Window-level requests apply to every window in `Application.Windows` under the current compatibility scope.
+Application-level changes affect the current Excel process. `TargetScope` applies only to Headings, Workbook Tabs, and Gridlines.
 
 ---
 
@@ -131,7 +136,34 @@ UI_SetExcelUI _
 
 Only explicitly requested elements are changed.
 
-## 3. Request structured diagnostics
+The default target scope remains all current Excel windows, preserving pre-v1.1.0 behavior.
+
+## 3. Target a specific window scope
+
+Only window-level elements are affected by `TargetScope`.
+
+Active window only:
+
+```vb
+UI_SetExcelUI _
+    Headings:=UI_Hide, _
+    WorkbookTabs:=UI_Hide, _
+    Gridlines:=UI_Hide, _
+    TargetScope:=UI_TargetActiveWindow
+```
+
+All windows belonging to the active workbook:
+
+```vb
+UI_SetExcelUI _
+    Headings:=UI_Show, _
+    Gridlines:=UI_Show, _
+    TargetScope:=UI_TargetActiveWorkbookWindows
+```
+
+Application-level elements still operate at their established scope even when a restricted target is selected.
+
+## 4. Request structured diagnostics
 
 ```vb
 Dim OK As Boolean
@@ -140,12 +172,12 @@ Dim FailureList As Variant
 Dim i As Long
 
 OK = UI_SetExcelUI_WithResult( _
-        Ribbon:=UI_Hide, _
         StatusBar:=UI_Show, _
         Headings:=UI_Hide, _
-        TitleBar:=UI_Hide, _
+        Gridlines:=UI_Hide, _
         FailureCount:=FailureCount, _
-        FailureList:=FailureList)
+        FailureList:=FailureList, _
+        TargetScope:=UI_TargetActiveWindow)
 
 If Not OK Then
     For i = 1 To FailureCount
@@ -160,7 +192,7 @@ Failure entries use:
 Stage | Detail
 ```
 
-## 4. Hide or show the complete managed shell
+## 5. Hide or show the complete managed shell
 
 ```vb
 UI_HideExcelUI
@@ -169,7 +201,7 @@ UI_ShowExcelUI
 
 `UI_ShowExcelUI` means **show every managed element**. It does not restore a captured custom baseline.
 
-## 5. Capture and restore a managed baseline
+## 6. Capture and restore a managed baseline
 
 ```vb
 UI_CaptureExcelUIState
@@ -199,13 +231,15 @@ When the snapshot is no longer needed:
 UI_ClearExcelUIStateSnapshot
 ```
 
+Snapshot capture/restore retains its established all-managed-windows semantics. `TargetScope` applies to selective UI application, not to snapshot capture or restore.
+
 ---
 
 <a id="public-api"></a>
 
 # 🧩 Public API
 
-## Public enum
+## Public enums
 
 ```vb
 Public Enum UIVisibility
@@ -215,11 +249,20 @@ Public Enum UIVisibility
 End Enum
 ```
 
+```vb
+Public Enum UIWindowTargetScope
+    UI_TargetAllExcelWindows = 0
+    UI_TargetActiveWindow = 1
+    UI_TargetActiveWorkbookWindows = 2
+End Enum
+```
+
 ## API reference
 
 | Member | Type | Purpose | Diagnostic behavior |
 |---|---|---|---|
 | `UIVisibility` | Public enum | Show, hide, or leave unchanged | Not applicable |
+| `UIWindowTargetScope` | Public enum | Select window-level target scope | Invalid values are controlled by the apply path |
 | `UI_SetExcelUI` | Public `Sub` | Apply selective managed UI state | Logs failures |
 | `UI_SetExcelUI_WithResult` | Public `Function` | Apply selective state with structured result | Boolean + count + optional list |
 | `UI_HideExcelUI` | Public `Sub` | Hide all managed UI elements | Fail-soft; logs failures |
@@ -231,7 +274,39 @@ End Enum
 | `UI_HasExcelUIStateSnapshot` | Public `Function` | Report snapshot availability | Returns `Boolean` |
 | `UI_ClearExcelUIStateSnapshot` | Public `Sub` | Discard snapshot state | No return value |
 
-All existing v1.0.x public names, enum values, defaults, and calling semantics remain compatible.
+The v1.1.0 targeting extension is backward compatible:
+
+- existing public names are preserved;
+- existing parameter order is preserved;
+- `TargetScope` is optional and trailing;
+- the default is `UI_TargetAllExcelWindows`;
+- existing calls therefore keep their previous behavior.
+
+---
+
+<a id="target-scopes"></a>
+
+# 🎯 Target scopes
+
+`UIWindowTargetScope` controls only:
+
+```text
+Headings
+Workbook Tabs
+Gridlines
+```
+
+Supported values:
+
+| Value | Meaning |
+|---|---|
+| `UI_TargetAllExcelWindows` | Apply to every current Excel window; compatibility default |
+| `UI_TargetActiveWindow` | Apply only to `Application.ActiveWindow` |
+| `UI_TargetActiveWorkbookWindows` | Apply to all windows in `ActiveWorkbook.Windows` |
+
+Ribbon, Status Bar, Scroll Bars, Formula Bar, and Title Bar keep their existing application/main-window scope.
+
+An unsupported target value is handled through the established best-effort diagnostics contract. Valid application-level operations can still proceed, while window-level writes are suppressed when no safe scope can be resolved.
 
 ---
 
@@ -242,7 +317,7 @@ All existing v1.0.x public names, enum values, defaults, and calling semantics r
 ```mermaid
 flowchart TD
     CALLER[Workbook, add-in, demo, or tests]
-    FACADE[M_EXCEL_UI<br/>public facade]
+    FACADE[M_EXCEL_UI<br/>public facade and targeting]
     RUNTIME[M_EXCEL_UI_RUNTIME<br/>host operations and diagnostics]
     SNAPSHOT[M_EXCEL_UI_SNAPSHOT<br/>snapshot state and identity-safe restore]
     TITLEBAR[M_EXCEL_UI_TITLEBAR<br/>WinAPI and owned style bits]
@@ -263,12 +338,12 @@ flowchart TD
 
 | Module | Responsibility | Caller-facing API |
 |---|---|---|
-| `M_EXCEL_UI` | Public facade, tri-state validation, general apply orchestration | Yes |
+| `M_EXCEL_UI` | Public facade, enums, tri-state validation, target resolution, general apply orchestration | Yes |
 | `M_EXCEL_UI_RUNTIME` | Shared diagnostics, result buffers, Ribbon/property helpers, quiet-update scope | No |
 | `M_EXCEL_UI_SNAPSHOT` | Snapshot state, capture, restore, retained Window identity resolution | No |
 | `M_EXCEL_UI_TITLEBAR` | WinAPI declarations, title-bar state, owned-bit merging and frame refresh | Internal test seam only |
 
-All four modules use `Option Explicit` and `Option Private Module`. Public procedures in private modules remain callable within the same VBA project but are not exposed as a conventional cross-project automation surface.
+All four modules use `Option Explicit` and `Option Private Module`.
 
 ## Dependency constraints
 
@@ -369,26 +444,50 @@ UI_HideExcelUI
 UI_ShowExcelUI
 ```
 
-The suite covers tri-state behavior, wrappers, structured diagnostics, snapshot lifecycle, no-snapshot handling, closed captured-window behavior, identity-safe restoration, title-bar owned-bit preservation, and real WinAPI round-trips.
+The suite covers:
+
+- tri-state behavior and wrappers;
+- structured diagnostics;
+- snapshot lifecycle and no-snapshot handling;
+- identity-safe restoration and replacement-window non-interference;
+- title-bar owned-bit preservation and real WinAPI round-trips;
+- active-window targeting;
+- active-workbook-window targeting;
+- invalid-target-scope diagnostics and application-level continuation.
 
 > [!IMPORTANT]
 > Tests manipulate the real Excel UI of the current process. Run them in a controlled Excel instance.
 
 ---
 
-## 🖼️ Demo
+## 🖼️ Demo and release assets
 
-Optional demo assets:
+Version-controlled demo source:
 
 ```text
 demo/M_EXCEL_UI_DEMO.bas
 demo/M_DEMO_BUILDER.bas
-demo/EXCEL_UI_DEMO.xlsm
 ```
 
-When building a demo project from exported source, first import the complete four-module production package, then the demo modules.
+The macro-enabled demo workbook is intentionally **not committed to Git**.
 
-The binary workbook must be synchronized separately; changing exported `.bas` files does not update the VBA project embedded in `EXCEL_UI_DEMO.xlsm`.
+For tagged releases, a tested workbook should be published as a GitHub Release asset, for example:
+
+```text
+EXCEL_UI_DEMO_v1.1.0.xlsm
+```
+
+Release-asset preparation should include:
+
+1. import the exact production and demo source from the tagged release candidate;
+2. compile the VBA project;
+3. run the applicable regression sequence;
+4. perform manual UI recovery checks;
+5. save the `.xlsm`;
+6. optionally calculate and publish a SHA-256 checksum;
+7. attach the workbook to the GitHub Release.
+
+Users who want a ready-to-run workbook should obtain it from the repository's **Releases** page rather than from the source tree.
 
 ---
 
@@ -402,8 +501,6 @@ UI_ShowExcelUI
 
 This does not require an existing snapshot and is the preferred recovery command after interrupted development, missing snapshot state, or a VBA reset.
 
-Keep a recovery macro available while developing constrained-shell workbooks.
-
 ---
 
 ## 📦 Repository structure
@@ -412,7 +509,6 @@ Keep a recovery macro available while developing constrained-shell workbooks.
 VBA-EXCEL_UI/
 ├─ .github/
 ├─ demo/
-│  ├─ EXCEL_UI_DEMO.xlsm
 │  ├─ M_DEMO_BUILDER.bas
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ src/
@@ -431,16 +527,19 @@ VBA-EXCEL_UI/
 └─ SECURITY.md
 ```
 
+The source repository intentionally contains no versioned demo `.xlsm`. Release binaries are attached to tagged GitHub Releases.
+
 ## Documentation map
 
 | Document | Purpose |
 |---|---|
-| [INSTALLATION.md](INSTALLATION.md) | Fresh install, upgrade, required modules, validation, troubleshooting |
+| [INSTALLATION.md](INSTALLATION.md) | Fresh install, upgrade, required modules, targeting, validation, troubleshooting |
 | [README.md](README.md) | Project overview, API, architecture, behavior, limitations |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow and module-boundary rules |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [SECURITY.md](SECURITY.md) | Security reporting and safe-use boundaries |
 | [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |
+| [GitHub Releases](https://github.com/danielep71/VBA-EXCEL_UI/releases) | Tested binary demo workbooks and release notes |
 
 ---
 
@@ -469,31 +568,37 @@ No third-party DLL, COM component, package manager, or non-standard VBA referenc
 
 - **Windows only.** Title-bar control depends on WinAPI.
 - **Current Excel instance.** Application-level properties affect the running Excel process.
-- **All current Excel windows.** Window-level application requests use the established compatibility scope.
-- **Identity-safe but in-memory.** Window identity is retained by object reference, but snapshots do not survive VBA reset or Excel restart.
-- **Changed window set.** New windows are unchanged; missing captured windows produce diagnostics.
+- **Targeted window operations.** Headings, Workbook Tabs, and Gridlines support all windows, active window, or active-workbook windows.
+- **Identity-safe but in-memory snapshots.** Window identity is retained by object reference, but snapshots do not survive VBA reset or Excel restart.
+- **Changed window set after capture.** New windows are unchanged; missing captured windows produce diagnostics.
 - **Best-effort Ribbon and frame behavior.** Excel, Windows, add-ins, and window mode can affect visible results.
 - **No durable transaction.** Process termination can prevent restoration.
 - **Not a security boundary.** Hidden Excel UI does not prevent other code or informed users from changing state.
+- **Binary demo not source-controlled.** The ready-to-run `.xlsm` is a release asset, not part of the repository tree.
 
 ---
 
-## 🧭 Roadmap
+## 🧭 v1.1.0 scope status
 
-Completed for v1.1.0:
+Completed:
 
 - identity-safe per-window snapshot restoration;
 - owned-bit title-bar restoration;
 - structured snapshot capture and restore results;
 - internal four-module decomposition;
-- installation and dependency documentation.
-
-Next candidate work:
-
+- installation and dependency documentation;
 - additional public window-targeting scopes;
-- targeting-specific diagnostics and regression tests;
-- demo synchronization;
-- release notes and final release maintenance.
+- active-window and active-workbook-window regression coverage;
+- invalid-target-scope structured diagnostics.
+
+Remaining release-maintenance work:
+
+- synchronize the demo source/workbook for the final release candidate;
+- publish the validated `.xlsm` as a GitHub Release asset;
+- update `CHANGELOG.md` and final release notes;
+- review the complete release branch diff;
+- open and review the release pull request;
+- merge, tag `v1.1.0`, and publish the release.
 
 ---
 
@@ -510,12 +615,17 @@ Next candidate work:
 [ ] Run Test_EXCEL_UI_RunAll
 [ ] Perform UI_HideExcelUI / UI_ShowExcelUI recovery
 [ ] Perform capture / hide / reset validation
+[ ] Validate active-window targeting
+[ ] Validate active-workbook-window targeting
 [ ] Review exported .bas diffs and CRLF handling
-[ ] Synchronize demo workbook when required
+[ ] Build and validate EXCEL_UI_DEMO_v1.1.0.xlsm outside Git tracking
+[ ] Calculate demo SHA-256 if published in release notes
 [ ] Update README, INSTALLATION, CHANGELOG, and release notes
 [ ] Review the complete release branch diff
 [ ] Open and review the release pull request
-[ ] Merge, tag v1.1.0, and publish the release
+[ ] Merge and tag v1.1.0
+[ ] Publish GitHub Release
+[ ] Attach validated EXCEL_UI_DEMO_v1.1.0.xlsm as release asset
 ```
 
 ---
@@ -524,7 +634,7 @@ Next candidate work:
 
 ## 📌 Status
 
-The `release/v1.1.0` line preserves the established public `UI_...` surface while introducing identity-safe snapshots, safer title-bar ownership, structured snapshot results, and a cohesive four-module internal architecture.
+The `release/v1.1.0` line preserves the established public `UI_...` surface while adding identity-safe snapshots, safer title-bar ownership, structured snapshot results, a cohesive four-module internal architecture, and backward-compatible window targeting.
 
 ---
 

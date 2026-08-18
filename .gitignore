@@ -2,13 +2,15 @@
 # VBA-EXCEL_UI .gitignore
 #------------------------------------------------------------------------------
 # PURPOSE
-#   Ignore local, temporary, generated, and sensitive development files while
-#   keeping exported VBA source, documentation, images, tests, and the official
-#   macro-enabled demo workbook trackable.
+#   Ignore local, temporary, generated, sensitive, and release-binary files
+#   while keeping exported VBA source, documentation, tests, and repository
+#   assets reviewable as text wherever practical.
 #
 # POLICY
 #   - Exported VBA modules remain version-controlled.
-#   - The official demo/EXCEL_UI_DEMO.xlsm workbook remains version-controlled.
+#   - Demo .xlsm workbooks are NOT version-controlled.
+#   - Tested macro-enabled demo workbooks are distributed as GitHub Release
+#     assets only.
 #   - Office lock files, editor state, logs, build output, and local secrets do
 #     not belong in the repository.
 #==============================================================================
@@ -30,6 +32,16 @@
 
 # LibreOffice-style lock files that may appear during cross-tool inspection
 .~lock.*#
+
+#------------------------------------------------------------------------------
+# DEMO / RELEASE BINARY WORKBOOKS
+#------------------------------------------------------------------------------
+# Keep demo source modules in Git, but publish tested macro-enabled workbooks
+# only as GitHub Release assets.
+demo/*.xlsm
+
+# Optional local staging area for release binaries/checksums.
+release-assets/
 
 #------------------------------------------------------------------------------
 # WINDOWS / MACOS / FILE-SYSTEM METADATA
@@ -98,8 +110,8 @@ coverage/
 #------------------------------------------------------------------------------
 # PYTHON CACHE / LOCAL ENVIRONMENTS
 #------------------------------------------------------------------------------
-# Kept here because release, validation, or repository-maintenance scripts may
-# be added later. Source scripts themselves remain trackable.
+# Release, validation, or repository-maintenance scripts may be added later.
+# Source scripts themselves remain trackable.
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -118,9 +130,9 @@ venv/
 #   *.frm
 #   *.frx
 #
-# Official Excel artifacts:
-#   demo/EXCEL_UI_DEMO.xlsm
-#   *.xlam when intentionally added
+# Demo source:
+#   demo/M_EXCEL_UI_DEMO.bas
+#   demo/M_DEMO_BUILDER.bas
 #
 # Documentation and governance:
 #   *.md
@@ -133,4 +145,5 @@ venv/
 # Images:
 #   images/*
 #
-# Do not add broad rules such as *.xlsm, *.bas, or images/ to this file.
+# Do not add broad rules such as *.bas or images/ to this file.
+# Do not commit demo .xlsm files; distribute them as GitHub Release assets.
