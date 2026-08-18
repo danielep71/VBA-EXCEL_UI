@@ -1,39 +1,85 @@
 Attribute VB_Name = "M_EXCEL_UI_TITLEBAR"
+Option Explicit
+Option Private Module
+
 '==============================================================================
-'                      MODULE: M_EXCEL_UI_TITLEBAR
+' M_EXCEL_UI_TITLEBAR
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Own all WinAPI, state, and style-merging responsibilities required to show
-'   or hide the Excel main-window title bar.
+'   Owns every WinAPI declaration, mutable frame state and style-merging rule
+'   required to show or hide the title bar of the Excel main window represented
+'   by Application.Hwnd.
 '
-' WHY
-'   Isolating the non-client-frame subsystem keeps M_EXCEL_UI focused on its
-'   public facade and prevents WinAPI details and mutable handle-specific state
-'   from being mixed with object-model and snapshot orchestration.
+' WHY THIS EXISTS
+'   Excel provides no object-model control over title-bar visibility, so the
+'   only route is a GWL_STYLE update on the top-level window. That makes this
+'   the single operating-system-sensitive part of the package.
+'
+'   Isolating it keeps M_EXCEL_UI free of WinAPI declarations and handle-scoped
+'   mutable state, and confines the blast radius of any Windows or Office
+'   behavior change to one module. It also lets the style-merge policy be tested
+'   as pure arithmetic, with no window and no host required.
 '
 ' INTERNAL SURFACE
 '   - UI_TryGetTitleBarVisible
 '   - UI_TrySetTitleBarVisibleIfNeeded
 '   - UI_InternalMergeTitleBarStyleBits
 '
-' BEHAVIOR
-'   - Owns only WS_CAPTION, WS_SYSMENU, WS_THICKFRAME, WS_MINIMIZEBOX, and
-'     WS_MAXIMIZEBOX.
-'   - Captures owned bits per Application.Hwnd.
-'   - Merges only owned bits into the current GWL_STYLE value.
-'   - Preserves unrelated style changes.
-'   - Refreshes the non-client frame only after an actual style write.
+' OWNERSHIP MODEL
+'   This module claims exactly five GWL_STYLE bits and nothing else:
+'
+'       WS_CAPTION      &HC00000    caption bar
+'       WS_SYSMENU      &H80000     system menu
+'       WS_THICKFRAME   &H40000     sizing frame
+'       WS_MINIMIZEBOX  &H20000     minimize box
+'       WS_MAXIMIZEBOX  &H10000     maximize box
+'
+'   Their union is TITLEBAR_OWNED_STYLE_MASK (&HCF0000).
+'
+'   Restoring a whole previously captured GWL_STYLE value would overwrite
+'   unrelated style changes made later by Excel, another add-in or caller code.
+'   Every write therefore merges only the owned bits into the CURRENT style and
+'   leaves every other bit exactly as found.
+'
+' DESIGN PRINCIPLES
+'   - The merge policy is a pure function, deliberately separated from the
+'     WinAPI write so it can be validated deterministically.
+'   - Owned bits are captured once per Application.Hwnd and re-captured only
+'     when the handle changes.
+'   - The non-client frame is refreshed only after a style write actually
+'     occurred, never after a no-op.
+'   - Entry points are fail-soft and report through a ByRef FailMsg.
 '
 ' ERROR POLICY
-'   - Internal entry points are fail-soft and return FALSE plus diagnostic text.
-'   - No user-interface messages are displayed.
+'   - Internal entry points return False plus diagnostic text.
+'   - A zero API return is disambiguated from a genuine failure before being
+'     reported.
+'   - No user-interface message is displayed.
+'
+' DEPENDENCIES
+'   None. This module deliberately has no project-module dependency, which is
+'   why it carries its own error-text builder rather than calling the one in
+'   M_EXCEL_UI_RUNTIME.
 '
 ' PLATFORM / COMPATIBILITY
 '   - Windows only.
-'   - Supports 32-bit and 64-bit Office / VBA through conditional compilation.
+'   - Supports 32-bit and 64-bit Office through conditional compilation:
+'       VBA7 + Win64  => GetWindowLongPtr / SetWindowLongPtr
+'       VBA7 + Win32  => GetWindowLong / SetWindowLong with LongPtr handles
+'       pre-VBA7      => GetWindowLong / SetWindowLong with Long handles
+'
+' NOTES
+'   - Title-bar behavior can vary with Excel version, window state, Windows
+'     desktop-composition settings and other loaded add-ins. It is documented
+'     as best effort throughout.
+'   - The merge arithmetic relies on GWL_STYLE never setting bit 31 on Excel's
+'     main window, which holds because that window is not WS_POPUP. Were it
+'     set, the Long mask would sign-extend when widened to LongPtr.
+'   - Module state is lost on a VBA project reset while the window style
+'     itself survives, because the style belongs to the running Excel process.
 '
 ' UPDATED
-'   2026-07-29
+'   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
@@ -42,15 +88,10 @@ Attribute VB_Name = "M_EXCEL_UI_TITLEBAR"
 '   1.1.0
 '==============================================================================
 
-'------------------------------------------------------------------------------
-' MODULE SETTINGS
-'------------------------------------------------------------------------------
-    Option Explicit
-    Option Private Module
+'==============================================================================
+' WIN32 / WIN64 API DECLARATIONS
+'==============================================================================
 
-'------------------------------------------------------------------------------
-' DECLARE: WIN32 / WIN64 API
-'------------------------------------------------------------------------------
 #If VBA7 Then
 
     #If Win64 Then
@@ -115,29 +156,38 @@ Attribute VB_Name = "M_EXCEL_UI_TITLEBAR"
 
 #End If
 
-'------------------------------------------------------------------------------
-' DECLARE: PRIVATE CONSTANTS
-'------------------------------------------------------------------------------
-    Private Const GWL_STYLE          As Long = -16
+'==============================================================================
+' PRIVATE CONSTANTS
+'==============================================================================
 
-    Private Const WS_CAPTION         As Long = &HC00000
-    Private Const WS_SYSMENU         As Long = &H80000
-    Private Const WS_THICKFRAME      As Long = &H40000
-    Private Const WS_MINIMIZEBOX     As Long = &H20000
-    Private Const WS_MAXIMIZEBOX     As Long = &H10000
+'Window-style index passed to the GetWindowLong / SetWindowLong family.
+Private Const GWL_STYLE                 As Long = -16
 
-    'Exact GWL_STYLE bits owned by title-bar control.
-    Private Const TITLEBAR_OWNED_STYLE_MASK As Long = &HCF0000
+'The five frame bits this module claims. Nothing outside this set is written.
+Private Const WS_CAPTION                As Long = &HC00000
+Private Const WS_SYSMENU                As Long = &H80000
+Private Const WS_THICKFRAME             As Long = &H40000
+Private Const WS_MINIMIZEBOX            As Long = &H20000
+Private Const WS_MAXIMIZEBOX            As Long = &H10000
 
-    Private Const SWP_NOSIZE         As Long = &H1
-    Private Const SWP_NOMOVE         As Long = &H2
-    Private Const SWP_NOZORDER       As Long = &H4
-    Private Const SWP_FRAMECHANGED   As Long = &H20
-    Private Const SWP_NOOWNERZORDER  As Long = &H200
+'Union of the five owned bits above, held as a literal so the merge helper
+'needs a single mask rather than five OR-ed constants on every call.
+Private Const TITLEBAR_OWNED_STYLE_MASK As Long = &HCF0000
 
-'------------------------------------------------------------------------------
-' DECLARE: PRIVATE MODULE STATE
-'------------------------------------------------------------------------------
+'SetWindowPos flags. Only the frame is recalculated: position, size, Z-order
+'and owner Z-order are all left untouched.
+Private Const SWP_NOSIZE                As Long = &H1
+Private Const SWP_NOMOVE                As Long = &H2
+Private Const SWP_NOZORDER              As Long = &H4
+Private Const SWP_FRAMECHANGED          As Long = &H20
+Private Const SWP_NOOWNERZORDER         As Long = &H200
+
+'==============================================================================
+' PRIVATE MODULE STATE
+'==============================================================================
+
+'Owned style bits captured for the current Excel main window, plus the handle
+'they belong to. Held only in memory and lost on a VBA project reset.
 #If VBA7 Then
     Private m_OriginalMainWindowOwnedStyleBits As LongPtr
     Private m_OriginalMainWindowHwnd           As LongPtr
@@ -146,88 +196,150 @@ Attribute VB_Name = "M_EXCEL_UI_TITLEBAR"
     Private m_OriginalMainWindowHwnd           As Long
 #End If
 
-    Private m_HasOriginalMainWindowOwnedStyleBits As Boolean
+'True once owned bits have been captured for m_OriginalMainWindowHwnd.
+Private m_HasOriginalMainWindowOwnedStyleBits  As Boolean
 
 
 Public Function UI_TrySetTitleBarVisibleIfNeeded( _
     ByVal IsVisible As Boolean, _
-    ByRef FailMsg As String) As Boolean
-
+    ByRef FailMsg As String) _
+    As Boolean
 '
 '==============================================================================
-'                    UI_TrySetTitleBarVisibleIfNeeded
+' UI_TrySetTitleBarVisibleIfNeeded
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Apply the requested title-bar state through the owned-style-bit worker.
+'   Applies the requested title-bar state through the owned-style-bit worker.
 '
-' WHY
-'   Title-bar visibility alone is not sufficient for no-op detection because
-'   another owned frame bit may also require restoration. The worker computes
-'   the exact merged style and short-circuits only when no owned bit would
-'   change.
+' WHY THIS EXISTS
+'   Title-bar visibility alone is not a sufficient basis for no-op detection,
+'   because another owned frame bit may still require restoration while
+'   WS_CAPTION already matches. The worker computes the exact merged style and
+'   short-circuits only when no owned bit would change, so the decision is made
+'   on the full owned set rather than on one bit.
+'
+' INPUTS
+'   IsVisible
+'     Requested title-bar visibility.
+'
+'   FailMsg
+'     ByRef diagnostic message. Empty on success.
 '
 ' RETURNS
-'   TRUE when the current owned bits already match or were successfully updated.
+'   Boolean
+'     True  => owned bits already match, or were successfully updated.
+'     False => the update was attempted and failed.
+'
+' BEHAVIOR
+'   - Delegates to UI_TrySetTitleBarVisible.
 '
 ' ERROR POLICY
-'   Returns FALSE and FailMsg on failure.
+'   - Does not raise.
+'   - Returns False and populates FailMsg on failure.
 '
 ' DEPENDENCIES
 '   - UI_TrySetTitleBarVisible
+'   - UI_TitleBarBuildRuntimeErrorText
+'
+' CALLED FROM
+'   - M_EXCEL_UI
+'   - M_EXCEL_UI_SNAPSHOT
+'
+' NOTES
+'   The IfNeeded decision itself lives in the worker; this entry point exists to
+'   present the same naming shape as the M_EXCEL_UI_RUNTIME helpers.
 '
 ' UPDATED
-'   2026-07-29
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
+    'Assume failure until the worker reports otherwise
         UI_TrySetTitleBarVisibleIfNeeded = False
+
+    'Initialize the failure message buffer
         FailMsg = vbNullString
 
 '------------------------------------------------------------------------------
 ' APPLY
 '------------------------------------------------------------------------------
+    'Delegate the owned-bit merge, write and frame refresh
         UI_TrySetTitleBarVisibleIfNeeded = _
             UI_TrySetTitleBarVisible(IsVisible, FailMsg)
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
+    'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Function
 
+
 Public Function UI_TryGetTitleBarVisible( _
     ByRef IsVisible As Boolean, _
-    ByRef FailMsg As String) As Boolean
-
+    ByRef FailMsg As String) _
+    As Boolean
 '
 '==============================================================================
-'                        UI_TryGetTitleBarVisible
+' UI_TryGetTitleBarVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Read title-bar visibility from the Application.Hwnd window style.
+'   Reads title-bar visibility from the Application.Hwnd window style.
+'
+' WHY THIS EXISTS
+'   The snapshot engine must record whether the title bar was visible at capture
+'   time. There is no object-model property to read, so visibility is inferred
+'   from the presence of WS_CAPTION in the live window style.
+'
+' INPUTS
+'   IsVisible
+'     ByRef. Receives True when WS_CAPTION is set.
+'
+'   FailMsg
+'     ByRef diagnostic message. Empty on success.
 '
 ' RETURNS
-'   TRUE when read succeeds.
+'   Boolean
+'     True  => the style was read and IsVisible is meaningful.
+'     False => the handle or the style read was unusable.
+'
+' BEHAVIOR
+'   - Validates the Excel main-window handle.
+'   - Reads GWL_STYLE using the API matching the host bitness.
+'   - Reports visibility from the WS_CAPTION bit alone.
 '
 ' ERROR POLICY
-'   Returns FALSE and FailMsg on failure.
+'   - Does not raise.
+'   - Returns False and populates FailMsg on failure.
+'
+' DEPENDENCIES
+'   - UI_TitleBarBuildRuntimeErrorText
+'
+' CALLED FROM
+'   - M_EXCEL_UI_SNAPSHOT
+'
+' NOTES
+'   WS_CAPTION is the visibility signal; the other four owned bits travel with
+'   it but do not participate in this decision.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
@@ -235,36 +347,46 @@ Public Function UI_TryGetTitleBarVisible( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim xlHnd      As LongPtr
-    Dim StyleValue As LongPtr
+    Dim xlHnd               As LongPtr         'Excel main-window handle
+    Dim StyleValue          As LongPtr         'Live GWL_STYLE value
 #Else
-    Dim xlHnd      As Long
-    Dim StyleValue As Long
+    Dim xlHnd               As Long            'Excel main-window handle
+    Dim StyleValue          As Long            'Live GWL_STYLE value
 #End If
 
-    Dim LastErr As Long
+    Dim LastErr             As Long            'Win32 last-error after the read
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
+    'Assume failure until the style has been read
         UI_TryGetTitleBarVisible = False
+
+    'Initialize the output and the failure message buffer
         IsVisible = False
         FailMsg = vbNullString
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Resolve and validate the Excel main-window handle
         xlHnd = Application.hWnd
 
         If xlHnd = 0 Then
             FailMsg = "invalid Excel window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
 ' READ STYLE
 '------------------------------------------------------------------------------
+    'Clear the thread last-error so a zero return can be disambiguated
         SetLastError 0
 
+    'Read GWL_STYLE using the API matching the host bitness
 #If VBA7 Then
     #If Win64 Then
         StyleValue = GetWindowLongPtr(xlHnd, GWL_STYLE)
@@ -275,66 +397,76 @@ Public Function UI_TryGetTitleBarVisible( _
         StyleValue = GetWindowLong(xlHnd, GWL_STYLE)
 #End If
 
+    'Capture the last-error immediately after the call
         LastErr = GetLastError
 
+    'A zero return is only a failure when the last-error also reports one
         If StyleValue = 0 And LastErr <> 0 Then
             FailMsg = _
                 "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
                 CStr(LastErr)
 
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
-' RETURN
+' RETURN RESULT
 '------------------------------------------------------------------------------
+    'Visibility is carried by the caption bit alone
         IsVisible = ((StyleValue And WS_CAPTION) <> 0)
         UI_TryGetTitleBarVisible = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
+    'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
 
 End Function
 
+
 #If VBA7 Then
 Public Function UI_InternalMergeTitleBarStyleBits( _
     ByVal CurrentStyle As LongPtr, _
-    ByVal OwnedStyleBits As LongPtr) As LongPtr
+    ByVal OwnedStyleBits As LongPtr) _
+    As LongPtr
 #Else
 Public Function UI_InternalMergeTitleBarStyleBits( _
     ByVal CurrentStyle As Long, _
-    ByVal OwnedStyleBits As Long) As Long
+    ByVal OwnedStyleBits As Long) _
+    As Long
 #End If
-
 '
 '==============================================================================
-'                 UI_InternalMergeTitleBarStyleBits
+' UI_InternalMergeTitleBarStyleBits
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Merge the title-bar style bits owned by this module into a current
-'   GWL_STYLE value without altering unrelated style bits.
+'   Merges the title-bar style bits owned by this module into a current
+'   GWL_STYLE value without altering any unrelated style bit.
 '
-' WHY
-'   The merge policy is deliberately isolated from the WinAPI write so it can
-'   be validated deterministically without depending on Windows normalizing
-'   particular style bits on Excel's top-level window.
+' WHY THIS EXISTS
+'   The merge policy is the whole correctness argument for title-bar control, so
+'   it is deliberately isolated from the WinAPI write. As pure arithmetic it can
+'   be validated deterministically by the regression harness, with no window, no
+'   host and no dependence on Windows normalizing particular bits on Excel's
+'   top-level window.
 '
 ' INPUTS
 '   CurrentStyle
-'     Current GWL_STYLE value whose unrelated bits must be preserved.
+'     Live GWL_STYLE value whose unrelated bits must be preserved exactly.
 '
 '   OwnedStyleBits
-'     Desired values for TITLEBAR_OWNED_STYLE_MASK. Any bits outside that mask
-'     are ignored defensively.
+'     Desired values for TITLEBAR_OWNED_STYLE_MASK. Bits outside that mask are
+'     ignored defensively, so a caller cannot widen this module's ownership by
+'     passing a richer value.
 '
 ' RETURNS
 '   CurrentStyle with only TITLEBAR_OWNED_STYLE_MASK replaced.
@@ -345,71 +477,98 @@ Public Function UI_InternalMergeTitleBarStyleBits( _
 '   - Preserves every unrelated bit exactly.
 '
 ' ERROR POLICY
-'   - Does not raise.
+'   - Does not raise. The operation is pure arithmetic on two style values.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_TrySetTitleBarVisible
+'   - M_EXCEL_UI_REGRESSION_TESTS
 '
 ' NOTES
-'   - Public only for same-project regression access.
-'   - Option Private Module prevents exposure to external VBA projects.
+'   - Public only for same-project regression access. Option Private Module
+'     keeps it out of the cross-project automation namespace.
+'   - Passing zero owned bits is the hide case; passing captured bits is the
+'     show case. The helper itself has no notion of show or hide.
 '
 ' UPDATED
-'   2026-07-29
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' MERGE OWNED BITS
 '------------------------------------------------------------------------------
+    'Keep every unrelated bit, then overlay only the owned bits requested
         UI_InternalMergeTitleBarStyleBits = _
             (CurrentStyle And Not TITLEBAR_OWNED_STYLE_MASK) Or _
             (OwnedStyleBits And TITLEBAR_OWNED_STYLE_MASK)
 
 End Function
 
+
 Private Function UI_TrySetTitleBarVisible( _
     ByVal IsVisible As Boolean, _
-    ByRef FailMsg As String) As Boolean
-
+    ByRef FailMsg As String) _
+    As Boolean
 '
 '==============================================================================
-'                           UI_TrySetTitleBarVisible
+' UI_TrySetTitleBarVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Show or hide the title bar of the Excel main window represented by
+'   Shows or hides the title bar of the Excel main window represented by
 '   Application.Hwnd.
 '
-' WHY
-'   Restoring an entire previously captured GWL_STYLE value can overwrite
-'   unrelated style changes made later by Excel, another add-in, or caller code.
+' WHY THIS EXISTS
+'   Restoring an entire previously captured GWL_STYLE value would overwrite
+'   unrelated style changes made later by Excel, another add-in or caller code.
+'   This routine therefore reads the live style on every call and rewrites only
+'   the five bits this module claims.
+'
+' INPUTS
+'   IsVisible
+'     Requested title-bar visibility.
+'
+'   FailMsg
+'     ByRef diagnostic message. Empty on success.
 '
 ' RETURNS
-'   TRUE on success.
+'   Boolean
+'     True  => owned bits already match, or were successfully updated.
+'     False => the read, the write or the frame refresh failed.
 '
 ' BEHAVIOR
-'   - Owns only TITLEBAR_OWNED_STYLE_MASK:
-'       * WS_CAPTION
-'       * WS_SYSMENU
-'       * WS_THICKFRAME
-'       * WS_MINIMIZEBOX
-'       * WS_MAXIMIZEBOX
-'   - Captures only those owned bits on first use for the current
-'     Application.Hwnd.
-'   - Recaptures owned bits when Application.Hwnd changes.
-'   - Hiding clears only the owned bits from the current style.
-'   - Showing merges the captured owned bits into the current style.
-'   - Preserves every unrelated current style bit.
-'   - Refreshes the non-client frame only after an actual style write.
+'   - Validates the Excel main-window handle.
+'   - Reads the live GWL_STYLE value.
+'   - Captures the owned bits on first use for the current handle, and
+'     re-captures them when Application.Hwnd changes.
+'   - Hiding supplies zero owned bits; showing supplies the captured bits.
+'   - Short-circuits when the merged style equals the current style.
+'   - Writes the style and refreshes the non-client frame only after an actual
+'     change.
 '
 ' ERROR POLICY
-'   Returns FALSE and FailMsg on failure.
+'   - Does not raise.
+'   - Returns False and populates FailMsg on the first failing step.
 '
 ' DEPENDENCIES
 '   - UI_TryGetWindowStyle
 '   - UI_InternalMergeTitleBarStyleBits
 '   - UI_TrySetWindowStyle
 '   - UI_TryRefreshWindowFrame
+'   - UI_TitleBarBuildRuntimeErrorText
+'
+' CALLED FROM
+'   - UI_TrySetTitleBarVisibleIfNeeded
+'
+' NOTES
+'   The captured baseline lives only in module memory. A VBA project reset
+'   discards it while the window style itself survives in the running Excel
+'   process, so the two can disagree after a reset.
 '
 ' UPDATED
-'   2026-07-29
+'   2026-08-18
 '==============================================================================
 '
 
@@ -417,40 +576,50 @@ Private Function UI_TrySetTitleBarVisible( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim xlHnd        As LongPtr
-    Dim CurrentStyle As LongPtr
-    Dim NewStyle     As LongPtr
+    Dim xlHnd               As LongPtr         'Excel main-window handle
+    Dim CurrentStyle        As LongPtr         'Live GWL_STYLE value
+    Dim NewStyle            As LongPtr         'Merged GWL_STYLE value to write
 #Else
-    Dim xlHnd        As Long
-    Dim CurrentStyle As Long
-    Dim NewStyle     As Long
+    Dim xlHnd               As Long            'Excel main-window handle
+    Dim CurrentStyle        As Long            'Live GWL_STYLE value
+    Dim NewStyle            As Long            'Merged GWL_STYLE value to write
 #End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
+    'Assume failure until every step has completed
         UI_TrySetTitleBarVisible = False
+
+    'Initialize the failure message buffer
         FailMsg = vbNullString
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Resolve and validate the Excel main-window handle
         xlHnd = Application.hWnd
 
         If xlHnd = 0 Then
             FailMsg = "invalid Excel window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
 ' READ CURRENT STYLE
 '------------------------------------------------------------------------------
+    'Read the live style; unrelated bits will be preserved from this value
         If Not UI_TryGetWindowStyle(xlHnd, CurrentStyle, FailMsg) Then
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
 ' CAPTURE OWNED STYLE BITS FOR THE CURRENT HANDLE
 '------------------------------------------------------------------------------
+    'Capture on first use, and again whenever the main window handle changes
         If (Not m_HasOriginalMainWindowOwnedStyleBits) Or _
             (m_OriginalMainWindowHwnd <> xlHnd) Then
 
@@ -464,8 +633,8 @@ Private Function UI_TrySetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' COMPUTE NEW STYLE
 '------------------------------------------------------------------------------
-    'Showing restores only the captured owned bits. Hiding supplies zero owned
-    'bits. The helper preserves every unrelated bit from CurrentStyle.
+    'Showing restores the captured owned bits; hiding supplies none. Either way
+    'the helper preserves every unrelated bit from CurrentStyle.
         If IsVisible Then
             NewStyle = UI_InternalMergeTitleBarStyleBits( _
                 CurrentStyle:=CurrentStyle, _
@@ -479,93 +648,139 @@ Private Function UI_TrySetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' SHORT-CIRCUIT
 '------------------------------------------------------------------------------
+    'Skip the write and the frame refresh when no owned bit would change
         If NewStyle = CurrentStyle Then
             UI_TrySetTitleBarVisible = True
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
 ' WRITE AND REFRESH
 '------------------------------------------------------------------------------
+    'Write the merged style
         If Not UI_TrySetWindowStyle(xlHnd, NewStyle, FailMsg) Then
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
+    'Recalculate and repaint the non-client frame
         If Not UI_TryRefreshWindowFrame(xlHnd, FailMsg) Then
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
+    'Report success
         UI_TrySetTitleBarVisible = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
+    'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Function
+
 
 #If VBA7 Then
 Private Function UI_TryGetWindowStyle( _
     ByVal hWnd As LongPtr, _
     ByRef StyleOut As LongPtr, _
-    ByRef FailMsg As String) As Boolean
+    ByRef FailMsg As String) _
+    As Boolean
 #Else
 Private Function UI_TryGetWindowStyle( _
     ByVal hWnd As Long, _
     ByRef StyleOut As Long, _
-    ByRef FailMsg As String) As Boolean
+    ByRef FailMsg As String) _
+    As Boolean
 #End If
-
 '
 '==============================================================================
-'                            UI_TryGetWindowStyle
+' UI_TryGetWindowStyle
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Read GWL_STYLE using the correct API for Office bitness.
+'   Reads GWL_STYLE using the API matching the host bitness.
+'
+' WHY THIS EXISTS
+'   Keeping the bitness branch in one place means the callers work with a single
+'   Boolean contract and never repeat the conditional compilation.
+'
+' INPUTS
+'   hWnd
+'     Target window handle.
+'
+'   StyleOut
+'     ByRef. Receives the style value. Zero when the read fails.
+'
+'   FailMsg
+'     ByRef diagnostic message. Empty on success.
 '
 ' RETURNS
-'   TRUE on success.
+'   Boolean
+'     True  => the style was read.
+'     False => the handle was invalid or the API reported a failure.
+'
+' BEHAVIOR
+'   - Rejects a zero handle explicitly.
+'   - Clears the thread last-error before the call so that a zero return can be
+'     told apart from a genuine failure.
 '
 ' ERROR POLICY
-'   Uses GetLastError to distinguish a valid zero from failure.
+'   - Does not raise.
+'   - Uses GetLastError to distinguish a valid zero from a failure.
+'
+' DEPENDENCIES
+'   - UI_TitleBarBuildRuntimeErrorText
+'
+' CALLED FROM
+'   - UI_TrySetTitleBarVisible
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LastErr As Long
+    Dim LastErr             As Long            'Win32 last-error after the read
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
+    'Assume failure until the style has been read
         UI_TryGetWindowStyle = False
+
+    'Initialize the output and the failure message buffer
         StyleOut = 0
         FailMsg = vbNullString
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Validate the window handle
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
-' READ
+' READ STYLE
 '------------------------------------------------------------------------------
+    'Clear the thread last-error so a zero return can be disambiguated
         SetLastError 0
 
+    'Read GWL_STYLE using the API matching the host bitness
 #If VBA7 Then
     #If Win64 Then
         StyleOut = GetWindowLongPtr(hWnd, GWL_STYLE)
@@ -576,59 +791,95 @@ Private Function UI_TryGetWindowStyle( _
         StyleOut = GetWindowLong(hWnd, GWL_STYLE)
 #End If
 
+    'Capture the last-error immediately after the call
         LastErr = GetLastError
 
+    'A zero return is only a failure when the last-error also reports one
         If StyleOut = 0 And LastErr <> 0 Then
             FailMsg = _
                 "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
                 CStr(LastErr)
 
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
+    'Report success
         UI_TryGetWindowStyle = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
+    'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
 
 End Function
+
 
 #If VBA7 Then
 Private Function UI_TrySetWindowStyle( _
     ByVal hWnd As LongPtr, _
     ByVal NewStyle As LongPtr, _
-    ByRef FailMsg As String) As Boolean
+    ByRef FailMsg As String) _
+    As Boolean
 #Else
 Private Function UI_TrySetWindowStyle( _
     ByVal hWnd As Long, _
     ByVal NewStyle As Long, _
-    ByRef FailMsg As String) As Boolean
+    ByRef FailMsg As String) _
+    As Boolean
 #End If
-
 '
 '==============================================================================
-'                            UI_TrySetWindowStyle
+' UI_TrySetWindowStyle
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Write GWL_STYLE using the correct API for Office bitness.
+'   Writes GWL_STYLE using the API matching the host bitness.
+'
+' WHY THIS EXISTS
+'   SetWindowLong returns the PREVIOUS style, so zero is an ambiguous result:
+'   it means either "the previous style was zero" or "the call failed". The
+'   last-error is cleared beforehand so the two can be told apart.
+'
+' INPUTS
+'   hWnd
+'     Target window handle.
+'
+'   NewStyle
+'     Merged style value to write.
+'
+'   FailMsg
+'     ByRef diagnostic message. Empty on success.
 '
 ' RETURNS
-'   TRUE on success.
+'   Boolean
+'     True  => the style was written.
+'     False => the handle was invalid or the API reported a failure.
+'
+' BEHAVIOR
+'   - Rejects a zero handle explicitly.
+'   - Clears the thread last-error before the call.
+'   - Treats a zero return as a failure only when the last-error agrees.
 '
 ' ERROR POLICY
-'   Uses GetLastError to distinguish a valid zero from failure.
+'   - Does not raise.
+'   - Uses GetLastError to distinguish a valid zero from a failure.
+'
+' DEPENDENCIES
+'   - UI_TitleBarBuildRuntimeErrorText
+'
+' CALLED FROM
+'   - UI_TrySetTitleBarVisible
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
@@ -636,31 +887,41 @@ Private Function UI_TrySetWindowStyle( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim PrevStyle As LongPtr
+    Dim PrevStyle           As LongPtr         'Style value replaced by the write
 #Else
-    Dim PrevStyle As Long
+    Dim PrevStyle           As Long            'Style value replaced by the write
 #End If
 
-    Dim LastErr As Long
+    Dim LastErr             As Long            'Win32 last-error after the write
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
+    'Assume failure until the style has been written
         UI_TrySetWindowStyle = False
+
+    'Initialize the failure message buffer
         FailMsg = vbNullString
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Validate the window handle
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
-' WRITE
+' WRITE STYLE
 '------------------------------------------------------------------------------
+    'Clear the thread last-error so a zero return can be disambiguated
         SetLastError 0
 
+    'Write GWL_STYLE using the API matching the host bitness
 #If VBA7 Then
     #If Win64 Then
         PrevStyle = SetWindowLongPtr(hWnd, GWL_STYLE, NewStyle)
@@ -671,84 +932,131 @@ Private Function UI_TrySetWindowStyle( _
         PrevStyle = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
 #End If
 
+    'Capture the last-error immediately after the call
         LastErr = GetLastError
 
+    'A zero previous style is only a failure when the last-error agrees
         If PrevStyle = 0 And LastErr <> 0 Then
             FailMsg = _
                 "SetWindowLong/SetWindowLongPtr failed; GetLastError=" & _
                 CStr(LastErr)
 
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
+    'Report success
         UI_TrySetWindowStyle = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
+    'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
 
 End Function
 
+
 #If VBA7 Then
 Private Function UI_TryRefreshWindowFrame( _
     ByVal hWnd As LongPtr, _
-    ByRef FailMsg As String) As Boolean
+    ByRef FailMsg As String) _
+    As Boolean
 #Else
 Private Function UI_TryRefreshWindowFrame( _
     ByVal hWnd As Long, _
-    ByRef FailMsg As String) As Boolean
+    ByRef FailMsg As String) _
+    As Boolean
 #End If
-
 '
 '==============================================================================
-'                           UI_TryRefreshWindowFrame
+' UI_TryRefreshWindowFrame
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Recalculate and repaint the non-client frame after a style change.
+'   Recalculates and repaints the non-client frame after a style change.
+'
+' WHY THIS EXISTS
+'   Writing GWL_STYLE alone does not make Windows re-measure the non-client
+'   area. Without an explicit SWP_FRAMECHANGED the caption can remain drawn
+'   after it has already been removed from the style.
+'
+' INPUTS
+'   hWnd
+'     Target window handle.
+'
+'   FailMsg
+'     ByRef diagnostic message. Empty on success.
 '
 ' RETURNS
-'   TRUE on success.
+'   Boolean
+'     True  => the frame was recalculated.
+'     False => the handle was invalid or SetWindowPos failed.
+'
+' BEHAVIOR
+'   - Rejects a zero handle explicitly.
+'   - Requests a frame change while suppressing move, size, Z-order and owner
+'     Z-order effects, so only the frame is affected.
 '
 ' ERROR POLICY
-'   Returns FALSE and FailMsg on failure.
+'   - Does not raise.
+'   - Returns False and populates FailMsg on failure.
+'
+' DEPENDENCIES
+'   - UI_TitleBarBuildRuntimeErrorText
+'
+' CALLED FROM
+'   - UI_TrySetTitleBarVisible
+'
+' NOTES
+'   SetWindowPos returns a BOOL, so zero is unambiguously a failure here and no
+'   last-error disambiguation is required.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ApiOK   As Long
-    Dim LastErr As Long
+    Dim ApiOK               As Long            'SetWindowPos BOOL result
+    Dim LastErr             As Long            'Win32 last-error after the call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
+    'Assume failure until the frame has been recalculated
         UI_TryRefreshWindowFrame = False
+
+    'Initialize the failure message buffer
         FailMsg = vbNullString
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Validate the window handle
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
-' REFRESH
+' REFRESH FRAME
 '------------------------------------------------------------------------------
+    'Clear the thread last-error so the diagnostic reports this call
         SetLastError 0
 
+    'Request a frame change only; position, size and Z-order are untouched
         ApiOK = SetWindowPos( _
             hWnd, _
             0, _
@@ -759,51 +1067,75 @@ Private Function UI_TryRefreshWindowFrame( _
             SWP_NOMOVE Or SWP_NOSIZE Or SWP_NOZORDER Or _
                 SWP_NOOWNERZORDER Or SWP_FRAMECHANGED)
 
+    'Capture the last-error immediately after the call
         LastErr = GetLastError
 
+    'SetWindowPos returns a BOOL, so zero is unambiguously a failure
         If ApiOK = 0 Then
             FailMsg = "SetWindowPos failed; GetLastError=" & CStr(LastErr)
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
+    'Report success
         UI_TryRefreshWindowFrame = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
+    'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
 
 End Function
 
-Private Function UI_TitleBarBuildRuntimeErrorText() As String
 
+Private Function UI_TitleBarBuildRuntimeErrorText() _
+    As String
 '
 '==============================================================================
-'                    UI_TitleBarBuildRuntimeErrorText
+' UI_TitleBarBuildRuntimeErrorText
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Build a consistent diagnostic from the active Err object.
+'   Builds a consistent diagnostic string from the active Err object.
+'
+' WHY THIS EXISTS
+'   Functionally identical to UI_RuntimeBuildErrorText, but duplicated here on
+'   purpose: it is what keeps M_EXCEL_UI_TITLEBAR free of any project-module
+'   dependency, so the WinAPI subsystem can be reasoned about and tested on its
+'   own. The duplication is the price of that isolation and is intentional.
 '
 ' RETURNS
-'   Best-effort error number, description, source, and Erl text.
+'   String
+'     Best-effort error number, description, source and Erl text.
 '
 ' ERROR POLICY
-'   Suppresses formatting errors locally.
+'   - Suppresses formatting errors locally.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - This module
 '
 ' UPDATED
-'   2026-07-29
+'   2026-08-18
 '==============================================================================
 '
 
+'------------------------------------------------------------------------------
+' BUILD DIAGNOSTIC TEXT
+'------------------------------------------------------------------------------
+    'Never let diagnostic formatting raise inside an error handler
         On Error Resume Next
 
+    'Compose number, description, and the optional source and line fragments
         UI_TitleBarBuildRuntimeErrorText = _
             CStr(Err.Number) & ": " & Err.Description & _
             IIf(Len(Err.Source) > 0, _

@@ -1,6 +1,9 @@
 Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
+Option Explicit
+Option Private Module
+
 '==============================================================================
-'                    MODULE: EXCEL_UI_REGRESSION_TESTS
+' M_EXCEL_UI_REGRESSION_TESTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Provide a regression-test harness for the EXCEL_UI module
@@ -91,7 +94,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
-'   2026-08-01
+'   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
@@ -100,12 +103,7 @@ Attribute VB_Name = "M_EXCEL_UI_REGRESSION_TESTS"
 '   1.1.0
 '==============================================================================
 
-'------------------------------------------------------------------------------
-' MODULE SETTINGS
-'------------------------------------------------------------------------------
-    Option Explicit         'Force explicit declaration of all variables
-    Option Private Module
-    
+
 '------------------------------------------------------------------------------
 ' TEST CONFIGURATION
 '------------------------------------------------------------------------------
@@ -210,7 +208,7 @@ Public Sub Test_EXCEL_UI_RunAll()
 
 '
 '==============================================================================
-'                         Test_EXCEL_UI_RunAll
+' Test_EXCEL_UI_RunAll
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the full regression-test pack for EXCEL_UI, including title-bar tests
@@ -250,7 +248,7 @@ Public Sub Test_EXCEL_UI_RunCore()
 
 '
 '==============================================================================
-'                         Test_EXCEL_UI_RunCore
+' Test_EXCEL_UI_RunCore
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the core regression-test pack for EXCEL_UI, excluding the dedicated
@@ -293,7 +291,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 
 '
 '==============================================================================
-'                      Test_EXCEL_UI_RunTitleBarOnly
+' Test_EXCEL_UI_RunTitleBarOnly
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the dedicated title-bar regression cases
@@ -340,7 +338,7 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 
 '
 '==============================================================================
-'                  Test_EXCEL_UI_RunSnapshotIdentity
+' Test_EXCEL_UI_RunSnapshotIdentity
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify identity-safe restoration and structured reporting when a captured
@@ -377,29 +375,29 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow       As Window
-    Dim CapturedWindow     As Window
-    Dim ReplacementWindow  As Window
+    Dim AnchorWindow        As Window
+    Dim CapturedWindow      As Window
+    Dim ReplacementWindow   As Window
 
-    Dim SavedHeadings      As Boolean
-    Dim SavedWorkbookTabs  As Boolean
-    Dim SavedGridlines     As Boolean
+    Dim SavedHeadings       As Boolean
+    Dim SavedWorkbookTabs   As Boolean
+    Dim SavedGridlines      As Boolean
 
-    Dim OK                 As Boolean
-    Dim FailureCount       As Long
-    Dim FailureList        As Variant
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
 
-    Dim HasFailure         As Boolean
-    Dim FailNumber         As Long
-    Dim FailSource         As String
-    Dim FailDescription    As String
+    Dim HasFailure          As Boolean
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
 
     Const PROC As String = "Test_EXCEL_UI_RunSnapshotIdentity"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
         TST_Log PROC, "START", "Identity-safe structured snapshot test started"
 
@@ -533,9 +531,9 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
             "Identity-safe restore returned the expected ordered failure without touching replacement"
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         On Error Resume Next
 
         UI_ClearExcelUIStateSnapshot
@@ -567,15 +565,15 @@ SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Sub
 
@@ -586,7 +584,7 @@ Private Sub TST_RunRegressionPack( _
 
 '
 '==============================================================================
-'                         TST_RunRegressionPack
+' TST_RunRegressionPack
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute the requested regression-test pack and restore the pre-test UI
@@ -630,31 +628,31 @@ Private Sub TST_RunRegressionPack( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SavedRibbonKnown            As Boolean   'TRUE when pre-test Ribbon state was read successfully
-    Dim SavedRibbonVisible          As Boolean   'Pre-test Ribbon visibility
-    Dim SavedStatusBarVisible       As Boolean   'Pre-test StatusBar visibility
-    Dim SavedScrollBarsVisible      As Boolean   'Pre-test ScrollBars visibility
-    Dim SavedFormulaBarVisible      As Boolean   'Pre-test FormulaBar visibility
+    Dim SavedRibbonKnown    As Boolean         'TRUE when pre-test Ribbon state was read successfully
+    Dim SavedRibbonVisible  As Boolean         'Pre-test Ribbon visibility
+    Dim SavedStatusBarVisible As Boolean         'Pre-test StatusBar visibility
+    Dim SavedScrollBarsVisible As Boolean         'Pre-test ScrollBars visibility
+    Dim SavedFormulaBarVisible As Boolean         'Pre-test FormulaBar visibility
 
-    Dim SavedWindowCount            As Long      'Pre-test Application.Windows.Count
-    Dim SavedHeadingsVisible()      As Boolean   'Pre-test per-window Headings visibility
-    Dim SavedWorkbookTabsVisible()  As Boolean   'Pre-test per-window WorkbookTabs visibility
-    Dim SavedGridlinesVisible()     As Boolean   'Pre-test per-window Gridlines visibility
+    Dim SavedWindowCount    As Long            'Pre-test Application.Windows.Count
+    Dim SavedHeadingsVisible() As Boolean         'Pre-test per-window Headings visibility
+    Dim SavedWorkbookTabsVisible() As Boolean         'Pre-test per-window WorkbookTabs visibility
+    Dim SavedGridlinesVisible() As Boolean         'Pre-test per-window Gridlines visibility
 
-    Dim SavedTitleBarKnown          As Boolean   'TRUE when pre-test title-bar state was read successfully
-    Dim SavedTitleBarVisible        As Boolean   'Pre-test title-bar visibility
+    Dim SavedTitleBarKnown  As Boolean         'TRUE when pre-test title-bar state was read successfully
+    Dim SavedTitleBarVisible As Boolean         'Pre-test title-bar visibility
 
-    Dim HadExplicitSnapshot         As Boolean   'TRUE when an explicit EXCEL_UI snapshot already existed before the run
-    Dim OldScreenUpdating           As Boolean   'Cached ScreenUpdating state
-    Dim HasFailure                  As Boolean   'TRUE when a test failure occurred
-    Dim FailNumber                  As Long      'Captured failure number
-    Dim FailSource                  As String    'Captured failure source
-    Dim FailDescription             As String    'Captured failure description
+    Dim HadExplicitSnapshot As Boolean         'TRUE when an explicit EXCEL_UI snapshot already existed before the run
+    Dim OldScreenUpdating   As Boolean         'Cached ScreenUpdating state
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
     'Capture whether an explicit EXCEL_UI snapshot already exists before the run
         HadExplicitSnapshot = UI_HasExcelUIStateSnapshot
@@ -778,9 +776,9 @@ Private Sub TST_RunRegressionPack( _
         TST_Log CallerProc, "PASS", "All requested regression cases passed"
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
     'Attempt to restore the original pre-test UI state
         On Error Resume Next
             TST_RestoreState _
@@ -808,9 +806,9 @@ SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
     'Capture failure information so it can be re-raised after restoration
         HasFailure = True
         FailNumber = Err.Number
@@ -823,7 +821,7 @@ Fail:
             CStr(FailNumber) & ": " & FailDescription & _
             IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Sub
 
@@ -832,7 +830,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 
 '
 '==============================================================================
-'                        TST_RunTitleBarOnlyPack
+' TST_RunTitleBarOnlyPack
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute the dedicated title-bar regression cases and restore the
@@ -865,30 +863,30 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SavedRibbonKnown            As Boolean   'TRUE when pre-test Ribbon state was read successfully
-    Dim SavedRibbonVisible          As Boolean   'Pre-test Ribbon visibility
-    Dim SavedStatusBarVisible       As Boolean   'Pre-test StatusBar visibility
-    Dim SavedScrollBarsVisible      As Boolean   'Pre-test ScrollBars visibility
-    Dim SavedFormulaBarVisible      As Boolean   'Pre-test FormulaBar visibility
+    Dim SavedRibbonKnown    As Boolean         'TRUE when pre-test Ribbon state was read successfully
+    Dim SavedRibbonVisible  As Boolean         'Pre-test Ribbon visibility
+    Dim SavedStatusBarVisible As Boolean         'Pre-test StatusBar visibility
+    Dim SavedScrollBarsVisible As Boolean         'Pre-test ScrollBars visibility
+    Dim SavedFormulaBarVisible As Boolean         'Pre-test FormulaBar visibility
 
-    Dim SavedWindowCount            As Long      'Pre-test Application.Windows.Count
-    Dim SavedHeadingsVisible()      As Boolean   'Pre-test per-window Headings visibility
-    Dim SavedWorkbookTabsVisible()  As Boolean   'Pre-test per-window WorkbookTabs visibility
-    Dim SavedGridlinesVisible()     As Boolean   'Pre-test per-window Gridlines visibility
+    Dim SavedWindowCount    As Long            'Pre-test Application.Windows.Count
+    Dim SavedHeadingsVisible() As Boolean         'Pre-test per-window Headings visibility
+    Dim SavedWorkbookTabsVisible() As Boolean         'Pre-test per-window WorkbookTabs visibility
+    Dim SavedGridlinesVisible() As Boolean         'Pre-test per-window Gridlines visibility
 
-    Dim SavedTitleBarKnown          As Boolean   'TRUE when pre-test title-bar state was read successfully
-    Dim SavedTitleBarVisible        As Boolean   'Pre-test title-bar visibility
+    Dim SavedTitleBarKnown  As Boolean         'TRUE when pre-test title-bar state was read successfully
+    Dim SavedTitleBarVisible As Boolean         'Pre-test title-bar visibility
 
-    Dim OldScreenUpdating           As Boolean   'Cached ScreenUpdating state
-    Dim HasFailure                  As Boolean   'TRUE when a test failure occurred
-    Dim FailNumber                  As Long      'Captured failure number
-    Dim FailSource                  As String    'Captured failure source
-    Dim FailDescription             As String    'Captured failure description
+    Dim OldScreenUpdating   As Boolean         'Cached ScreenUpdating state
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
     'Cache and suppress screen updates during the regression run
         OldScreenUpdating = Application.ScreenUpdating
@@ -928,9 +926,9 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
             "Title-bar round-trip and owned-bit preservation cases passed"
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
     'Attempt to restore the original pre-test UI state
         On Error Resume Next
             TST_RestoreState _
@@ -958,9 +956,9 @@ SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
     'Capture failure information so it can be re-raised after restoration
         HasFailure = True
         FailNumber = Err.Number
@@ -973,7 +971,7 @@ Fail:
             CStr(FailNumber) & ": " & FailDescription & _
             IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Sub
 '
@@ -988,7 +986,7 @@ Private Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '==============================================================================
-'                        TST_Case_ShowAllBaseline
+' TST_Case_ShowAllBaseline
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the module can drive all managed UI elements to visible state
@@ -1077,7 +1075,7 @@ Private Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '==============================================================================
-'                          TST_Case_SelectiveHide
+' TST_Case_SelectiveHide
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that selective hide requests affect only the requested UI elements
@@ -1172,7 +1170,7 @@ Private Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '==============================================================================
-'                          TST_Case_SelectiveShow
+' TST_Case_SelectiveShow
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that selective show requests affect only the requested UI elements
@@ -1268,7 +1266,7 @@ Private Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '==============================================================================
-'                        TST_Case_NoOpLeaveUnchanged
+' TST_Case_NoOpLeaveUnchanged
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a no-argument UI_SetExcelUI call behaves as a no-op
@@ -1360,7 +1358,7 @@ Private Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '==============================================================================
-'                       TST_Case_ConvenienceWrappers
+' TST_Case_ConvenienceWrappers
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_HideExcelUI and UI_ShowExcelUI drive all managed UI elements
@@ -1474,7 +1472,7 @@ Private Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean
 
 '
 '==============================================================================
-'                       TST_Case_WithResult_AllSuccess
+' TST_Case_WithResult_AllSuccess
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult returns a clean-success outcome when
@@ -1502,9 +1500,9 @@ Private Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean   'Boolean success flag returned by the API
-    Dim FailureCount        As Long      'Number of recorded failures
-    Dim FailureList         As Variant   'Optional array of recorded failures
+    Dim OK                  As Boolean         'Boolean success flag returned by the API
+    Dim FailureCount        As Long            'Number of recorded failures
+    Dim FailureList         As Variant         'Optional array of recorded failures
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1576,7 +1574,7 @@ Private Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolea
 
 '
 '==============================================================================
-'                       TST_Case_WithResult_NoOpSuccess
+' TST_Case_WithResult_NoOpSuccess
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult returns a clean-success outcome when
@@ -1604,9 +1602,9 @@ Private Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolea
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean   'Boolean success flag returned by the API
-    Dim FailureCount        As Long      'Number of recorded failures
-    Dim FailureList         As Variant   'Optional array of recorded failures
+    Dim OK                  As Boolean         'Boolean success flag returned by the API
+    Dim FailureCount        As Long            'Number of recorded failures
+    Dim FailureList         As Variant         'Optional array of recorded failures
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1688,7 +1686,7 @@ Private Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarT
 
 '
 '==============================================================================
-'              TST_Case_WithResult_SuccessWithoutFailureList
+' TST_Case_WithResult_SuccessWithoutFailureList
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult succeeds cleanly when the caller omits
@@ -1716,9 +1714,9 @@ Private Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarT
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean   'Boolean success flag returned by the API
-    Dim FailureCount        As Long      'Number of recorded failures
-    Dim FailureList         As Variant   'Local untouched Variant proving omission path
+    Dim OK                  As Boolean         'Boolean success flag returned by the API
+    Dim FailureCount        As Long            'Number of recorded failures
+    Dim FailureList         As Variant         'Local untouched Variant proving omission path
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1811,7 +1809,7 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
 
 '
 '==============================================================================
-'                   TST_Case_WithResult_InvalidVisibility
+' TST_Case_WithResult_InvalidVisibility
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult reports a structured failure when an
@@ -1835,9 +1833,9 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean   'Boolean success flag returned by the API
-    Dim FailureCount        As Long      'Number of recorded failures
-    Dim FailureList         As Variant   'Recorded structured failures
+    Dim OK                  As Boolean         'Boolean success flag returned by the API
+    Dim FailureCount        As Long            'Number of recorded failures
+    Dim FailureList         As Variant         'Recorded structured failures
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1890,7 +1888,7 @@ Private Sub TST_Case_TargetScope_ActiveWindow()
 
 '
 '==============================================================================
-'                  TST_Case_TargetScope_ActiveWindow
+' TST_Case_TargetScope_ActiveWindow
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_TargetActiveWindow changes only the active Excel Window while
@@ -1907,26 +1905,26 @@ Private Sub TST_Case_TargetScope_ActiveWindow()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow          As Window
-    Dim TargetWindow          As Window
-    Dim SavedHeadings         As Boolean
-    Dim SavedWorkbookTabs     As Boolean
-    Dim SavedGridlines        As Boolean
-    Dim SavedStatusBar        As Boolean
-    Dim OK                    As Boolean
-    Dim FailureCount          As Long
-    Dim FailureList           As Variant
-    Dim HasFailure            As Boolean
-    Dim FailNumber            As Long
-    Dim FailSource            As String
-    Dim FailDescription       As String
+    Dim AnchorWindow        As Window
+    Dim TargetWindow        As Window
+    Dim SavedHeadings       As Boolean
+    Dim SavedWorkbookTabs   As Boolean
+    Dim SavedGridlines      As Boolean
+    Dim SavedStatusBar      As Boolean
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
+    Dim HasFailure          As Boolean
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
 
     Const PROC As String = "TST_Case_TargetScope_ActiveWindow"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
         ThisWorkbook.Activate
         Set AnchorWindow = Application.ActiveWindow
@@ -2009,9 +2007,9 @@ Private Sub TST_Case_TargetScope_ActiveWindow()
             "Only the active window received window-level changes"
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         On Error Resume Next
 
         TST_SafeCloseWindow TargetWindow
@@ -2034,14 +2032,14 @@ SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Sub
 
@@ -2050,7 +2048,7 @@ Private Sub TST_Case_TargetScope_ActiveWorkbookWindows()
 
 '
 '==============================================================================
-'            TST_Case_TargetScope_ActiveWorkbookWindows
+' TST_Case_TargetScope_ActiveWorkbookWindows
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_TargetActiveWorkbookWindows changes every Window belonging to
@@ -2067,26 +2065,26 @@ Private Sub TST_Case_TargetScope_ActiveWorkbookWindows()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OriginalWindow        As Window
-    Dim TargetBook            As Workbook
-    Dim OtherBook             As Workbook
-    Dim TargetWindowOne       As Window
-    Dim TargetWindowTwo       As Window
-    Dim OtherWindow           As Window
-    Dim OK                    As Boolean
-    Dim FailureCount          As Long
-    Dim FailureList           As Variant
-    Dim HasFailure            As Boolean
-    Dim FailNumber            As Long
-    Dim FailSource            As String
-    Dim FailDescription       As String
+    Dim OriginalWindow      As Window
+    Dim TargetBook          As Workbook
+    Dim OtherBook           As Workbook
+    Dim TargetWindowOne     As Window
+    Dim TargetWindowTwo     As Window
+    Dim OtherWindow         As Window
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
+    Dim HasFailure          As Boolean
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
 
     Const PROC As String = "TST_Case_TargetScope_ActiveWorkbookWindows"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
         Set OriginalWindow = Application.ActiveWindow
 
@@ -2175,9 +2173,9 @@ Private Sub TST_Case_TargetScope_ActiveWorkbookWindows()
             "Only windows belonging to the active workbook were changed"
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         On Error Resume Next
 
         TST_SafeCloseWorkbook TargetBook
@@ -2196,14 +2194,14 @@ SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Sub
 
@@ -2212,7 +2210,7 @@ Private Sub TST_Case_TargetScope_InvalidValue()
 
 '
 '==============================================================================
-'                   TST_Case_TargetScope_InvalidValue
+' TST_Case_TargetScope_InvalidValue
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify ordered invalid-scope diagnostics, application-level continuation,
@@ -2229,24 +2227,24 @@ Private Sub TST_Case_TargetScope_InvalidValue()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow          As Window
-    Dim InvalidScope          As UIWindowTargetScope
-    Dim SavedHeadings         As Boolean
-    Dim SavedStatusBar        As Boolean
-    Dim OK                    As Boolean
-    Dim FailureCount          As Long
-    Dim FailureList           As Variant
-    Dim HasFailure            As Boolean
-    Dim FailNumber            As Long
-    Dim FailSource            As String
-    Dim FailDescription       As String
+    Dim AnchorWindow        As Window
+    Dim InvalidScope        As UIWindowTargetScope
+    Dim SavedHeadings       As Boolean
+    Dim SavedStatusBar      As Boolean
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
+    Dim HasFailure          As Boolean
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
 
     Const PROC As String = "TST_Case_TargetScope_InvalidValue"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
         ThisWorkbook.Activate
         Set AnchorWindow = Application.ActiveWindow
@@ -2300,9 +2298,9 @@ Private Sub TST_Case_TargetScope_InvalidValue()
             "Invalid scope was reported while application-level work continued"
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         On Error Resume Next
 
         If Not AnchorWindow Is Nothing Then
@@ -2321,14 +2319,14 @@ SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Sub
 
@@ -2338,7 +2336,7 @@ Private Sub TST_Case_SnapshotCaptureResultSuccess( _
 
 '
 '==============================================================================
-'              TST_Case_SnapshotCaptureResultSuccess
+' TST_Case_SnapshotCaptureResultSuccess
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the clean-success contract and deterministic output clearing of
@@ -2377,9 +2375,9 @@ Private Sub TST_Case_SnapshotCaptureResultSuccess( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK           As Boolean
-    Dim FailureCount As Long
-    Dim FailureList  As Variant
+    Dim OK                  As Boolean
+    Dim FailureCount        As Long
+    Dim FailureList         As Variant
 
     Const PROC As String = "TST_Case_SnapshotCaptureResultSuccess"
 
@@ -2434,7 +2432,7 @@ Private Sub TST_Case_SnapshotResetResultSuccess( _
 
 '
 '==============================================================================
-'               TST_Case_SnapshotResetResultSuccess
+' TST_Case_SnapshotResetResultSuccess
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the clean-success contract and deterministic output clearing of
@@ -2577,7 +2575,7 @@ Private Sub TST_Case_SnapshotResetResultNoSnapshot( _
 
 '
 '==============================================================================
-'              TST_Case_SnapshotResetResultNoSnapshot
+' TST_Case_SnapshotResetResultNoSnapshot
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify deterministic structured failure reporting and no-op behavior when
@@ -2697,7 +2695,7 @@ Private Sub TST_Case_SnapshotLifecycle(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '==============================================================================
-'                      TST_Case_SnapshotLifecycle
+' TST_Case_SnapshotLifecycle
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the explicit snapshot and reset lifecycle exposed by the core module
@@ -2839,7 +2837,7 @@ Private Sub TST_Case_ResetWithoutSnapshot_NoOp(ByVal IncludeTitleBarTests As Boo
 
 '
 '==============================================================================
-'                 TST_Case_ResetWithoutSnapshot_NoOp
+' TST_Case_ResetWithoutSnapshot_NoOp
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_ResetExcelUIToSnapshot behaves as a no-op when no explicit
@@ -2946,7 +2944,7 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
 
 '
 '==============================================================================
-'                    TST_Case_ScreenUpdatingPreserved
+' TST_Case_ScreenUpdatingPreserved
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the EXCEL_UI apply path restores Application.ScreenUpdating to
@@ -2970,7 +2968,7 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SavedScreenUpdating As Boolean   'Caller-visible ScreenUpdating baseline
+    Dim SavedScreenUpdating As Boolean         'Caller-visible ScreenUpdating baseline
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3027,7 +3025,7 @@ Private Sub TST_Case_TitleBarRoundTrip()
 
 '
 '==============================================================================
-'                        TST_Case_TitleBarRoundTrip
+' TST_Case_TitleBarRoundTrip
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the title bar can be hidden and then shown again through the
@@ -3081,12 +3079,11 @@ Private Sub TST_Case_TitleBarRoundTrip()
 End Sub
 
 
-
 Private Sub TST_Case_TitleBarOwnedBitPreservation()
 
 '
 '==============================================================================
-'                 TST_Case_TitleBarOwnedBitPreservation
+' TST_Case_TitleBarOwnedBitPreservation
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify deterministically that the production title-bar merge policy changes
@@ -3126,29 +3123,29 @@ Private Sub TST_Case_TitleBarOwnedBitPreservation()
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim CurrentStyle      As LongPtr
-    Dim RequestedOwned    As LongPtr
-    Dim ExpectedStyle     As LongPtr
-    Dim ActualStyle       As LongPtr
-    Dim UnrelatedMask     As LongPtr
+    Dim CurrentStyle        As LongPtr
+    Dim RequestedOwned      As LongPtr
+    Dim ExpectedStyle       As LongPtr
+    Dim ActualStyle         As LongPtr
+    Dim UnrelatedMask       As LongPtr
 #Else
-    Dim CurrentStyle      As Long
-    Dim RequestedOwned    As Long
-    Dim ExpectedStyle     As Long
-    Dim ActualStyle       As Long
-    Dim UnrelatedMask     As Long
+    Dim CurrentStyle        As Long
+    Dim RequestedOwned      As Long
+    Dim ExpectedStyle       As Long
+    Dim ActualStyle         As Long
+    Dim UnrelatedMask       As Long
 #End If
 
-    Dim FailNumber      As Long
-    Dim FailSource      As String
-    Dim FailDescription As String
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
 
     Const PROC As String = "TST_Case_TitleBarOwnedBitPreservation"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
         TST_Log PROC, "START", _
             "Validating deterministic title-bar style ownership"
@@ -3234,9 +3231,9 @@ Private Sub TST_Case_TitleBarOwnedBitPreservation()
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description & _
@@ -3275,7 +3272,7 @@ Private Sub TST_SnapshotState( _
 
 '
 '==============================================================================
-'                           TST_SnapshotState
+' TST_SnapshotState
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Capture the current Excel UI state before the regression harness mutates it
@@ -3302,8 +3299,8 @@ Private Sub TST_SnapshotState( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long      'Current window index during snapshot
-    Dim Msg                 As String    'Diagnostic message from reader helpers
+    Dim i                   As Long            'Current window index during snapshot
+    Dim Msg                 As String          'Diagnostic message from reader helpers
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3376,7 +3373,7 @@ Private Sub TST_RestoreState( _
 
 '
 '==============================================================================
-'                            TST_RestoreState
+' TST_RestoreState
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to restore the pre-test Excel UI state after the regression run
@@ -3402,9 +3399,9 @@ Private Sub TST_RestoreState( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long      'Current window index during restore
-    Dim WindowLimit         As Long      'Minimum of saved and current window counts
-    Dim Msg                 As String    'Diagnostic message from helper routines
+    Dim i                   As Long            'Current window index during restore
+    Dim WindowLimit         As Long            'Minimum of saved and current window counts
+    Dim Msg                 As String          'Diagnostic message from helper routines
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3488,7 +3485,7 @@ Private Sub TST_WaitUI(ByVal SecondsToWait As Double)
 
 '
 '==============================================================================
-'                               TST_WaitUI
+' TST_WaitUI
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Give Excel and Windows a short opportunity to settle after a UI state change
@@ -3517,7 +3514,7 @@ Private Sub TST_WaitUI(ByVal SecondsToWait As Double)
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim t0                  As Double    'Timer baseline
+    Dim t0                  As Double          'Timer baseline
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3557,7 +3554,7 @@ Private Sub TST_AssertBooleanEquals( _
 
 '
 '==============================================================================
-'                         TST_AssertBooleanEquals
+' TST_AssertBooleanEquals
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raise a descriptive assertion failure when two Boolean values differ
@@ -3605,7 +3602,7 @@ Private Sub TST_AssertApplicationProperty( _
 
 '
 '==============================================================================
-'                     TST_AssertApplicationProperty
+' TST_AssertApplicationProperty
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Boolean value of an Application-level property
@@ -3637,8 +3634,8 @@ Private Sub TST_AssertApplicationProperty( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Actual              As Boolean   'Actual property value
-    Dim Msg                 As String    'Diagnostic message from the reader helper
+    Dim Actual              As Boolean         'Actual property value
+    Dim Msg                 As String          'Diagnostic message from the reader helper
 
 '------------------------------------------------------------------------------
 ' READ PROPERTY
@@ -3663,7 +3660,7 @@ Private Sub TST_AssertAllWindowsProperty( _
 
 '
 '==============================================================================
-'                       TST_AssertAllWindowsProperty
+' TST_AssertAllWindowsProperty
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Boolean value of a Window-level property across all open
@@ -3696,9 +3693,9 @@ Private Sub TST_AssertAllWindowsProperty( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim W                   As Window    'Current Excel window during assertion
-    Dim Actual              As Boolean   'Actual property value
-    Dim Msg                 As String    'Diagnostic message from the reader helper
+    Dim W                   As Window          'Current Excel window during assertion
+    Dim Actual              As Boolean         'Actual property value
+    Dim Msg                 As String          'Diagnostic message from the reader helper
 
 '------------------------------------------------------------------------------
 ' ASSERT EACH WINDOW
@@ -3726,7 +3723,7 @@ Private Sub TST_AssertRibbonVisible( _
 
 '
 '==============================================================================
-'                           TST_AssertRibbonVisible
+' TST_AssertRibbonVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Ribbon visibility
@@ -3755,8 +3752,8 @@ Private Sub TST_AssertRibbonVisible( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Actual              As Boolean   'Actual Ribbon visibility
-    Dim Msg                 As String    'Diagnostic message from the reader helper
+    Dim Actual              As Boolean         'Actual Ribbon visibility
+    Dim Msg                 As String          'Diagnostic message from the reader helper
 
 '------------------------------------------------------------------------------
 ' READ RIBBON STATE
@@ -3780,7 +3777,7 @@ Private Sub TST_AssertTitleBarVisible( _
 
 '
 '==============================================================================
-'                         TST_AssertTitleBarVisible
+' TST_AssertTitleBarVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current title-bar visibility for the Excel window represented by
@@ -3810,8 +3807,8 @@ Private Sub TST_AssertTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Actual              As Boolean   'Actual title-bar visibility
-    Dim Msg                 As String    'Diagnostic message from the reader helper
+    Dim Actual              As Boolean         'Actual title-bar visibility
+    Dim Msg                 As String          'Diagnostic message from the reader helper
 
 '------------------------------------------------------------------------------
 ' READ TITLE-BAR STATE
@@ -3837,7 +3834,7 @@ Private Sub TST_AssertResultSuccess( _
 
 '
 '==============================================================================
-'                         TST_AssertResultSuccess
+' TST_AssertResultSuccess
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that the standard-module result buffers represent a clean success
@@ -3912,7 +3909,7 @@ Private Sub TST_AssertSingleFailurePrefix( _
 
 '
 '==============================================================================
-'                    TST_AssertSingleFailurePrefix
+' TST_AssertSingleFailurePrefix
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert a structured-result failure containing exactly one ordered entry
@@ -3989,7 +3986,7 @@ Private Sub TST_AssertSnapshotAvailability( _
 
 '
 '==============================================================================
-'                      TST_AssertSnapshotAvailability
+' TST_AssertSnapshotAvailability
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the availability flag returned by UI_HasExcelUIStateSnapshot
@@ -4041,7 +4038,7 @@ Private Function TST_TryGetBooleanProperty( _
 
 '
 '==============================================================================
-'                       TST_TryGetBooleanProperty
+' TST_TryGetBooleanProperty
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read a Boolean property from an object using CallByName
@@ -4077,12 +4074,12 @@ Private Function TST_TryGetBooleanProperty( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim V                   As Variant   'Late-bound property value
+    Dim V                   As Variant         'Late-bound property value
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
     'Initialize outputs and default result
         TST_TryGetBooleanProperty = False
@@ -4092,13 +4089,13 @@ Private Function TST_TryGetBooleanProperty( _
     'Reject invalid object input deterministically
         If Target Is Nothing Then
             FailMsg = "target object is Nothing"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
     'Reject empty property name deterministically
         If Len(PropertyName) = 0 Then
             FailMsg = "property name is empty"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
@@ -4116,15 +4113,15 @@ Private Function TST_TryGetBooleanProperty( _
         TST_TryGetBooleanProperty = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -4137,7 +4134,7 @@ Private Function TST_TrySetBooleanProperty( _
 
 '
 '==============================================================================
-'                       TST_TrySetBooleanProperty
+' TST_TrySetBooleanProperty
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to assign a Boolean property on an object using a common,
@@ -4182,7 +4179,7 @@ Private Function TST_TrySetBooleanProperty( _
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
     'Initialize default failure result
         TST_TrySetBooleanProperty = False
@@ -4191,13 +4188,13 @@ Private Function TST_TrySetBooleanProperty( _
     'Reject invalid object input deterministically
         If Target Is Nothing Then
             FailMsg = "target object is Nothing"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
     'Reject empty property name deterministically
         If Len(PropertyName) = 0 Then
             FailMsg = "property name is empty"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
@@ -4212,15 +4209,15 @@ Private Function TST_TrySetBooleanProperty( _
         TST_TrySetBooleanProperty = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -4231,7 +4228,7 @@ Private Function TST_TryGetRibbonVisible( _
 
 '
 '==============================================================================
-'                         TST_TryGetRibbonVisible
+' TST_TryGetRibbonVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current Ribbon visibility
@@ -4258,12 +4255,12 @@ Private Function TST_TryGetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim V                   As Variant   'Fallback Excel4 macro result
+    Dim V                   As Variant         'Fallback Excel4 macro result
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
     'Initialize outputs and default result
         TST_TryGetRibbonVisible = False
@@ -4277,12 +4274,12 @@ Private Function TST_TryGetRibbonVisible( _
         On Error Resume Next
             IsVisible = Application.CommandBars("Ribbon").Visible
         If Err.Number = 0 Then
-            On Error GoTo Fail
+            On Error GoTo Err_Handler
             TST_TryGetRibbonVisible = True
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
         Err.Clear
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
 ' TRY EXCEL4 MACRO FALLBACK
@@ -4291,25 +4288,25 @@ Private Function TST_TryGetRibbonVisible( _
         On Error Resume Next
             V = Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
         If Err.Number = 0 Then
-            On Error GoTo Fail
+            On Error GoTo Err_Handler
             IsVisible = CBool(V)
             TST_TryGetRibbonVisible = True
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
         FailMsg = CStr(Err.Number) & ": " & Err.Description
         Err.Clear
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -4320,7 +4317,7 @@ Private Function TST_TrySetRibbonVisible( _
 
 '
 '==============================================================================
-'                         TST_TrySetRibbonVisible
+' TST_TrySetRibbonVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to set Ribbon visibility from the regression harness
@@ -4347,12 +4344,12 @@ Private Function TST_TrySetRibbonVisible( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim MacroText           As String    'Excel4 macro text for Ribbon visibility
+    Dim MacroText           As String          'Excel4 macro text for Ribbon visibility
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
     'Initialize default failure result
         TST_TrySetRibbonVisible = False
@@ -4379,15 +4376,15 @@ Private Function TST_TrySetRibbonVisible( _
         TST_TrySetRibbonVisible = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -4406,7 +4403,7 @@ Private Function TST_TryGetWindowStyle( _
 
 '
 '==============================================================================
-'                         TST_TryGetWindowStyle
+' TST_TryGetWindowStyle
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read GWL_STYLE through the correct Win32 API for the current Office bitness.
@@ -4425,12 +4422,12 @@ Private Function TST_TryGetWindowStyle( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LastErr As Long
+    Dim LastErr             As Long
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
         TST_TryGetWindowStyle = False
         StyleOut = 0
@@ -4438,7 +4435,7 @@ Private Function TST_TryGetWindowStyle( _
 
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
@@ -4463,23 +4460,23 @@ Private Function TST_TryGetWindowStyle( _
                 "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
                 CStr(LastErr)
 
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
         TST_TryGetWindowStyle = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailMsg = TST_BuildRuntimeErrorText
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Function
 
@@ -4498,7 +4495,7 @@ Private Function TST_TrySetWindowStyle( _
 
 '
 '==============================================================================
-'                         TST_TrySetWindowStyle
+' TST_TrySetWindowStyle
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write GWL_STYLE through the correct Win32 API for the current Office
@@ -4519,24 +4516,24 @@ Private Function TST_TrySetWindowStyle( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim PreviousStyle As LongPtr
+    Dim PreviousStyle       As LongPtr
 #Else
-    Dim PreviousStyle As Long
+    Dim PreviousStyle       As Long
 #End If
 
-    Dim LastErr As Long
+    Dim LastErr             As Long
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
         TST_TrySetWindowStyle = False
         FailMsg = vbNullString
 
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
@@ -4564,23 +4561,23 @@ Private Function TST_TrySetWindowStyle( _
                 "SetWindowLong/SetWindowLongPtr failed; GetLastError=" & _
                 CStr(LastErr)
 
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
         TST_TrySetWindowStyle = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailMsg = TST_BuildRuntimeErrorText
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Function
 
@@ -4597,7 +4594,7 @@ Private Function TST_TryRefreshWindowFrame( _
 
 '
 '==============================================================================
-'                      TST_TryRefreshWindowFrame
+' TST_TryRefreshWindowFrame
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Recalculate the non-client frame after an exact style restore.
@@ -4616,20 +4613,20 @@ Private Function TST_TryRefreshWindowFrame( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ApiOK   As Long
-    Dim LastErr As Long
+    Dim ApiOK               As Long
+    Dim LastErr             As Long
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
         TST_TryRefreshWindowFrame = False
         FailMsg = vbNullString
 
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
@@ -4653,23 +4650,23 @@ Private Function TST_TryRefreshWindowFrame( _
             FailMsg = _
                 "SetWindowPos failed; GetLastError=" & CStr(LastErr)
 
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
         TST_TryRefreshWindowFrame = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailMsg = TST_BuildRuntimeErrorText
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Function
 
@@ -4679,7 +4676,7 @@ Private Function TST_TryGetTitleBarVisible( _
 
 '
 '==============================================================================
-'                      TST_TryGetTitleBarVisible
+' TST_TryGetTitleBarVisible
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current title-bar visibility for the Excel window
@@ -4708,18 +4705,18 @@ Private Function TST_TryGetTitleBarVisible( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim xlHnd               As LongPtr   'Excel window handle from Application.Hwnd
-    Dim StyleValue          As LongPtr   'Current window style value
+    Dim xlHnd               As LongPtr         'Excel window handle from Application.Hwnd
+    Dim StyleValue          As LongPtr         'Current window style value
 #Else
-    Dim xlHnd               As Long      'Excel window handle from Application.Hwnd
-    Dim StyleValue          As Long      'Current window style value
+    Dim xlHnd               As Long            'Excel window handle from Application.Hwnd
+    Dim StyleValue          As Long            'Current window style value
 #End If
-    Dim LastErr             As Long      'Last Win32 error after API call
+    Dim LastErr             As Long            'Last Win32 error after API call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+        On Error GoTo Err_Handler
 
     'Initialize outputs and default result
         TST_TryGetTitleBarVisible = False
@@ -4732,7 +4729,7 @@ Private Function TST_TryGetTitleBarVisible( _
     'Reject invalid window handle deterministically
         If xlHnd = 0 Then
             FailMsg = "invalid Excel window handle"
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
@@ -4766,7 +4763,7 @@ Private Function TST_TryGetTitleBarVisible( _
     'Treat zero plus nonzero last error as failure
         If StyleValue = 0 And LastErr <> 0 Then
             FailMsg = "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & CStr(LastErr)
-            GoTo SafeExit
+            GoTo Safe_Exit
         End If
 
 '------------------------------------------------------------------------------
@@ -4781,15 +4778,15 @@ Private Function TST_TryGetTitleBarVisible( _
         TST_TryGetTitleBarVisible = True
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
+Err_Handler:
         FailMsg = TST_BuildRuntimeErrorText
 
 End Function
@@ -4801,7 +4798,7 @@ Private Sub TST_TryRestoreWindowProp( _
 
 '
 '==============================================================================
-'                         TST_TryRestoreWindowProp
+' TST_TryRestoreWindowProp
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to restore a specific Boolean Window property during test cleanup
@@ -4838,7 +4835,7 @@ Private Sub TST_TryRestoreWindowProp( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Msg                 As String    'Diagnostic message from the property-write helper
+    Dim Msg                 As String          'Diagnostic message from the property-write helper
 
 '------------------------------------------------------------------------------
 ' APPLY PROPERTY RESTORE
@@ -4866,7 +4863,7 @@ Private Sub TST_Log( _
 
 '
 '==============================================================================
-'                                TST_Log
+' TST_Log
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write a consistent diagnostic line to the Immediate Window for the
@@ -4912,7 +4909,7 @@ Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double
 
 '
 '==============================================================================
-'                         TST_TimerElapsedSeconds
+' TST_TimerElapsedSeconds
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return elapsed seconds since a Timer baseline, handling midnight rollover
@@ -4939,7 +4936,7 @@ Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim TimerNow            As Double    'Current Timer reading
+    Dim TimerNow            As Double          'Current Timer reading
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -4965,7 +4962,7 @@ Private Function TST_TitleBarMode( _
 
 '
 '==============================================================================
-'                            TST_TitleBarMode
+' TST_TitleBarMode
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the effective TitleBar mode for a test case based on whether the
@@ -5016,7 +5013,7 @@ Private Sub TST_AssertSnapshotWindowState( _
 
 '
 '==============================================================================
-'                  TST_AssertSnapshotWindowState
+' TST_AssertSnapshotWindowState
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the three window-level Boolean properties managed by EXCEL_UI
@@ -5097,7 +5094,7 @@ Private Sub TST_AssertTrue( _
 
 '
 '==============================================================================
-'                             TST_AssertTrue
+' TST_AssertTrue
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raise when a Boolean assertion is FALSE
@@ -5134,7 +5131,7 @@ Private Sub TST_SafeCloseWorkbook(ByRef TargetWorkbook As Workbook)
 
 '
 '==============================================================================
-'                        TST_SafeCloseWorkbook
+' TST_SafeCloseWorkbook
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Close and release one temporary workbook without saving.
@@ -5162,7 +5159,7 @@ Private Sub TST_SafeCloseWindow(ByRef TargetWindow As Window)
 
 '
 '==============================================================================
-'                         TST_SafeCloseWindow
+' TST_SafeCloseWindow
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Close and release one temporary Excel Window on a best-effort basis
@@ -5203,7 +5200,7 @@ Private Function TST_BuildRuntimeErrorText() As String
 
 '
 '==============================================================================
-'                       TST_BuildRuntimeErrorText
+' TST_BuildRuntimeErrorText
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a consistent runtime diagnostic string from the active Err object
