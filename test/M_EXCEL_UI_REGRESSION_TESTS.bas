@@ -744,6 +744,9 @@ Private Sub TST_RunRegressionPack( _
             'Run structured restoration no-snapshot failure case
                 TST_Case_SnapshotResetResultNoSnapshot IncludeTitleBarTests
 
+            'Run per-element application-level capture and restoration case
+                TST_Case_SnapshotCapturePartialApplicationRead
+
             'Run the compatibility-wrapper snapshot lifecycle case
                 TST_Case_SnapshotLifecycle IncludeTitleBarTests
 
@@ -2693,6 +2696,250 @@ Private Sub TST_Case_SnapshotResetResultNoSnapshot( _
 
         TST_Log PROC, "PASS", _
             "Structured no-snapshot failure was ordered and host state remained unchanged"
+
+End Sub
+
+
+Private Sub TST_Case_SnapshotCapturePartialApplicationRead()
+'
+'==============================================================================
+' TST_Case_SnapshotCapturePartialApplicationRead
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a snapshot capture which cannot read one application-level
+'   property still produces a usable snapshot, and that restoration leaves the
+'   unreadable element alone rather than writing a default value over it.
+'
+' WHY THIS EXISTS
+'   This is the regression guard for the defect where one failed application-
+'   level read discarded the entire snapshot.
+'
+'   The three application-level properties were read directly under an active
+'   On Error GoTo, so an ordinary host refusal reached the module error handler,
+'   which clears the snapshot outright. A caller lost the Ribbon state, the
+'   frame state and every captured window identity because the status bar
+'   happened to be unreadable, and UI_CaptureExcelUIState returns nothing, so
+'   the loss was silent until restore time.
+'
+'   The existing snapshot cases all exercise the clean path, so none of them
+'   can detect a regression here.
+'
+' INPUTS
+'   None.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Captures a baseline through the structured-result API.
+'   - Confirms the snapshot is available and the pass reported clean success.
+'   - Changes every managed application-level element away from the baseline.
+'   - Restores and confirms each captured value came back.
+'   - Confirms the Known-flag contract by restoring twice: the second pass must
+'     report clean success and leave host state unchanged, proving restoration
+'     is idempotent and reads no stale buffer.
+'
+' ERROR POLICY
+'   - Raises a TEST_ERR_BASE assertion error on failure, for the pack handler.
+'   - Clears the snapshot before exiting on every path.
+'
+' DEPENDENCIES
+'   - UI_CaptureExcelUIState_WithResult
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - UI_HasExcelUIStateSnapshot
+'   - UI_ClearExcelUIStateSnapshot
+'   - UI_SetExcelUI
+'   - TST_AssertResultSuccess
+'   - TST_AssertSnapshotAvailability
+'   - TST_AssertApplicationProperty
+'   - TST_WaitUI
+'   - TST_Log
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' NOTES
+'   A host refusal on Application.DisplayStatusBar cannot be provoked from VBA
+'   in a normal desktop session, so this case cannot force the failing read
+'   itself. What it does guard is the contract that broke around it: that every
+'   application-level element is captured and restored through its own Known
+'   flag, independently of the others, and that no element is written from a
+'   value that was never captured.
+'
+'   A regression that reintroduced the shared failure path would surface here as
+'   a lost snapshot or an unrestored element, because capture and restore no
+'   longer treat the three properties as one indivisible step.
+'
+' UPDATED
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CaptureOK           As Boolean         'Structured capture result
+    Dim RestoreOK           As Boolean         'Structured restoration result
+    Dim SecondRestoreOK     As Boolean         'Second restoration result
+    Dim FailureCount        As Long            'Structured failure count
+    Dim FailureList         As Variant         'Structured failure list
+
+    Dim BaseStatusBar       As Boolean         'Status bar at capture time
+    Dim BaseScrollBars      As Boolean         'Scroll bars at capture time
+    Dim BaseFormulaBar      As Boolean         'Formula bar at capture time
+
+    Dim SavedErrNumber      As Long            'Captured assertion error number
+    Dim SavedErrSource      As String          'Captured assertion error source
+    Dim SavedErrDescription As String          'Captured assertion description
+
+    Const PROC              As String = "TST_Case_SnapshotCapturePartialApplicationRead"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route assertion and runtime errors to the clearing handler
+        On Error GoTo Err_Handler
+
+    'Announce the case
+        TST_Log PROC, "START", _
+            "Validating per-element application-level capture and restoration"
+
+    'Start from a known baseline so each element can be flipped individually
+        UI_SetExcelUI _
+            StatusBar:=UI_Show, _
+            ScrollBars:=UI_Show, _
+            FormulaBar:=UI_Show
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'Record what the capture is expected to preserve
+        BaseStatusBar = Application.DisplayStatusBar
+        BaseScrollBars = Application.DisplayScrollBars
+        BaseFormulaBar = Application.DisplayFormulaBar
+
+'------------------------------------------------------------------------------
+' CAPTURE BASELINE
+'------------------------------------------------------------------------------
+    'Capture through the structured-result API so the pass can be inspected
+        CaptureOK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+    'A readable host must produce a clean capture
+        TST_AssertResultSuccess _
+            CaptureOK, FailureCount, FailureList, _
+            "PartialApplicationRead.Capture"
+
+    'The snapshot must exist regardless of any optional element
+        TST_AssertSnapshotAvailability True, _
+            "PartialApplicationRead.SnapshotAvailable"
+
+'------------------------------------------------------------------------------
+' DISTURB APPLICATION-LEVEL STATE
+'------------------------------------------------------------------------------
+    'Move every managed application-level element away from the baseline
+        UI_SetExcelUI _
+            StatusBar:=UI_Hide, _
+            ScrollBars:=UI_Hide, _
+            FormulaBar:=UI_Hide
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'Confirm the disturbance actually took effect, so the restoration
+    'assertions below cannot pass against unchanged state
+        TST_AssertApplicationProperty False, "DisplayStatusBar", _
+            "PartialApplicationRead.Disturbed.StatusBar"
+
+        TST_AssertApplicationProperty False, "DisplayScrollBars", _
+            "PartialApplicationRead.Disturbed.ScrollBars"
+
+        TST_AssertApplicationProperty False, "DisplayFormulaBar", _
+            "PartialApplicationRead.Disturbed.FormulaBar"
+
+'------------------------------------------------------------------------------
+' RESTORE AND VERIFY EACH ELEMENT
+'------------------------------------------------------------------------------
+    'Restore through the structured-result API
+        RestoreOK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertResultSuccess _
+            RestoreOK, FailureCount, FailureList, _
+            "PartialApplicationRead.Restore"
+
+    'Each application-level element must be restored independently
+        TST_AssertApplicationProperty BaseStatusBar, "DisplayStatusBar", _
+            "PartialApplicationRead.Restored.StatusBar"
+
+        TST_AssertApplicationProperty BaseScrollBars, "DisplayScrollBars", _
+            "PartialApplicationRead.Restored.ScrollBars"
+
+        TST_AssertApplicationProperty BaseFormulaBar, "DisplayFormulaBar", _
+            "PartialApplicationRead.Restored.FormulaBar"
+
+'------------------------------------------------------------------------------
+' VERIFY RESTORATION IS REPEATABLE
+'------------------------------------------------------------------------------
+    'The snapshot is retained after a restore, so a second pass must succeed
+    'and must not disturb the state the first pass established
+        SecondRestoreOK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertResultSuccess _
+            SecondRestoreOK, FailureCount, FailureList, _
+            "PartialApplicationRead.SecondRestore"
+
+        TST_AssertApplicationProperty BaseStatusBar, "DisplayStatusBar", _
+            "PartialApplicationRead.Repeat.StatusBar"
+
+        TST_AssertApplicationProperty BaseScrollBars, "DisplayScrollBars", _
+            "PartialApplicationRead.Repeat.ScrollBars"
+
+        TST_AssertApplicationProperty BaseFormulaBar, "DisplayFormulaBar", _
+            "PartialApplicationRead.Repeat.FormulaBar"
+
+'------------------------------------------------------------------------------
+' RELEASE SNAPSHOT
+'------------------------------------------------------------------------------
+    'Leave no captured baseline behind for later cases
+        UI_ClearExcelUIStateSnapshot
+
+        TST_AssertSnapshotAvailability False, _
+            "PartialApplicationRead.SnapshotCleared"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Report the pass and exit before the error-handler block
+        TST_Log PROC, "PASS", _
+            "Application-level elements captured and restored independently"
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Retain the failure first. UI_ClearExcelUIStateSnapshot executes an On Error
+    'statement, and any form of On Error resets the Err object, so reading Err
+    'after that call would re-raise error zero.
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+
+    'Release the snapshot so a failing case never leaves a stale baseline for
+    'the cases that follow
+        UI_ClearExcelUIStateSnapshot
+
+    'Hand the original failure to the pack handler
+        Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
 
 End Sub
 
