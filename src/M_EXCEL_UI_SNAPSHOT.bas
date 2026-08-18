@@ -80,7 +80,8 @@ Option Private Module
 '     they visibly settle.
 '
 ' UPDATED
-'   2026-08-18 - Reformatted to the project house style. No behavior change.
+'   2026-08-18 - Application-level capture made fail-soft; Known flags added
+'                for Status Bar, Scroll Bars and Formula Bar.
 '
 ' AUTHOR
 '   Daniele Penza
@@ -96,12 +97,18 @@ Option Private Module
 'True once a capture pass has completed, whether or not it was complete.
 Private m_HasExcelUIStateSnapshot       As Boolean
 
-'Application-level captured values. The Ribbon carries a Known flag because it
-'cannot always be read; the other three are read directly.
+'Application-level captured values. Every one carries a Known flag so that a
+'read the host refused is never replayed as a False value on restore.
 Private m_SnapshotRibbonKnown           As Boolean
 Private m_SnapshotRibbonVisible         As Boolean
+
+Private m_SnapshotStatusBarKnown        As Boolean
 Private m_SnapshotStatusBarVisible      As Boolean
+
+Private m_SnapshotScrollBarsKnown       As Boolean
 Private m_SnapshotScrollBarsVisible     As Boolean
+
+Private m_SnapshotFormulaBarKnown       As Boolean
 Private m_SnapshotFormulaBarVisible     As Boolean
 
 'Number of windows captured, and the upper bound of every parallel array below.
@@ -171,9 +178,8 @@ Public Function UI_SnapshotCaptureCore( _
 '
 ' BEHAVIOR
 '   - Clears any prior snapshot before capturing.
-'   - Captures application-level state.
-'   - Captures Ribbon and title-bar state on a best-effort basis, recording a
-'     Known flag for each.
+'   - Captures every application-level element, the Ribbon and the title bar on
+'     a best-effort basis, recording a Known flag for each.
 '   - Captures each window's retained object identity, its diagnostic label and
 '     its managed properties.
 '   - Records failures in deterministic capture order.
@@ -182,9 +188,11 @@ Public Function UI_SnapshotCaptureCore( _
 '
 ' ERROR POLICY
 '   - Does not raise.
-'   - Optional-element failures are recorded and capture continues.
-'   - An unexpected failure clears the partial snapshot and records one entry,
-'     so no caller can restore from a half-built baseline.
+'   - Element-level failures are recorded and capture continues, so one
+'     unreadable property never costs the caller the rest of the baseline.
+'   - Only a genuinely unexpected failure reaches the error handler, which
+'     clears the partial snapshot so no caller can restore from a half-built
+'     baseline.
 '
 ' DEPENDENCIES
 '   - UI_SnapshotClear
@@ -234,10 +242,45 @@ Public Function UI_SnapshotCaptureCore( _
 '------------------------------------------------------------------------------
 ' CAPTURE: APPLICATION-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Capture the three directly readable application-level properties
-        m_SnapshotStatusBarVisible = Application.DisplayStatusBar
-        m_SnapshotScrollBarsVisible = Application.DisplayScrollBars
-        m_SnapshotFormulaBarVisible = Application.DisplayFormulaBar
+    'Every application-level read goes through the fail-soft helper. Reading
+    'these three directly would send an ordinary host refusal to the error
+    'handler, which clears the whole snapshot: one unreadable status bar would
+    'then cost the caller the Ribbon, the frame and every captured window.
+        m_SnapshotStatusBarKnown = UI_RuntimeTryGetBooleanProperty( _
+            Target:=Application, _
+            PropertyName:="DisplayStatusBar", _
+            ValueOut:=m_SnapshotStatusBarVisible, _
+            FailMsg:=Msg)
+
+        If Not m_SnapshotStatusBarKnown Then
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "StatusBar", Msg
+        End If
+
+        m_SnapshotScrollBarsKnown = UI_RuntimeTryGetBooleanProperty( _
+            Target:=Application, _
+            PropertyName:="DisplayScrollBars", _
+            ValueOut:=m_SnapshotScrollBarsVisible, _
+            FailMsg:=Msg)
+
+        If Not m_SnapshotScrollBarsKnown Then
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "ScrollBars", Msg
+        End If
+
+        m_SnapshotFormulaBarKnown = UI_RuntimeTryGetBooleanProperty( _
+            Target:=Application, _
+            PropertyName:="DisplayFormulaBar", _
+            ValueOut:=m_SnapshotFormulaBarVisible, _
+            FailMsg:=Msg)
+
+        If Not m_SnapshotFormulaBarKnown Then
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "FormulaBar", Msg
+        End If
 
 '------------------------------------------------------------------------------
 ' CAPTURE: RIBBON AND TITLE BAR
@@ -467,9 +510,8 @@ Public Function UI_SnapshotRestoreCore( _
 '
 ' BEHAVIOR
 '   - Reports a NoSnapshot failure and exits when nothing was captured.
-'   - Restores title bar and Ribbon only when their captured states were
-'     readable.
-'   - Restores application-level object-model properties.
+'   - Restores title bar, Ribbon and every application-level property only
+'     when their captured states were readable.
 '   - Resolves each captured Window by retained object identity.
 '   - Restores state only to matching, still-usable windows.
 '   - Leaves newly opened windows unchanged, because nothing was captured for
@@ -585,40 +627,46 @@ Public Function UI_SnapshotRestoreCore( _
 '------------------------------------------------------------------------------
 ' RESTORE: APPLICATION-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Restore the status bar
-        If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-            Target:=Application, _
-            PropertyName:="DisplayStatusBar", _
-            NewValue:=m_SnapshotStatusBarVisible, _
-            FailMsg:=Msg) Then
+    'Restore the status bar only when its captured value is meaningful
+        If m_SnapshotStatusBarKnown Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Target:=Application, _
+                PropertyName:="DisplayStatusBar", _
+                NewValue:=m_SnapshotStatusBarVisible, _
+                FailMsg:=Msg) Then
 
-            UI_RuntimeHandleFailure _
-                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
-                CaptureFailureList, "StatusBar", Msg
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "StatusBar", Msg
+            End If
         End If
 
-    'Restore the scroll bars
-        If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-            Target:=Application, _
-            PropertyName:="DisplayScrollBars", _
-            NewValue:=m_SnapshotScrollBarsVisible, _
-            FailMsg:=Msg) Then
+    'Restore the scroll bars only when their captured value is meaningful
+        If m_SnapshotScrollBarsKnown Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Target:=Application, _
+                PropertyName:="DisplayScrollBars", _
+                NewValue:=m_SnapshotScrollBarsVisible, _
+                FailMsg:=Msg) Then
 
-            UI_RuntimeHandleFailure _
-                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
-                CaptureFailureList, "ScrollBars", Msg
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "ScrollBars", Msg
+            End If
         End If
 
-    'Restore the formula bar
-        If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-            Target:=Application, _
-            PropertyName:="DisplayFormulaBar", _
-            NewValue:=m_SnapshotFormulaBarVisible, _
-            FailMsg:=Msg) Then
+    'Restore the formula bar only when its captured value is meaningful
+        If m_SnapshotFormulaBarKnown Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Target:=Application, _
+                PropertyName:="DisplayFormulaBar", _
+                NewValue:=m_SnapshotFormulaBarVisible, _
+                FailMsg:=Msg) Then
 
-            UI_RuntimeHandleFailure _
-                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
-                CaptureFailureList, "FormulaBar", Msg
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "FormulaBar", Msg
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -740,7 +788,7 @@ Public Sub UI_SnapshotClear()
 '   None.
 '
 ' BEHAVIOR
-'   - Resets the availability and Known flags.
+'   - Resets the availability flag and every element Known flag.
 '   - Resets every captured value.
 '   - Erases the parallel arrays, releasing the retained Window objects.
 '
@@ -771,6 +819,9 @@ Public Sub UI_SnapshotClear()
 
     'Reset the best-effort Known flags
         m_SnapshotRibbonKnown = False
+        m_SnapshotStatusBarKnown = False
+        m_SnapshotScrollBarsKnown = False
+        m_SnapshotFormulaBarKnown = False
         m_SnapshotTitleBarKnown = False
 
 '------------------------------------------------------------------------------
