@@ -83,6 +83,11 @@ defaults. No migration is required.
   identity model, structured diagnostics, installation and release checklist.
 - Updated `CONTRIBUTING.md` and the pull-request template for the four-module
   package.
+- Moved the diagnostic window-label builder into `M_EXCEL_UI_RUNTIME` as
+  `UI_RuntimeBuildWindowLabel`, shared by the apply and snapshot paths, and
+  removed the private copy from `M_EXCEL_UI_SNAPSHOT`. The fallback label used
+  when Excel exposes neither a caption nor a parent workbook name is now
+  `Excel window`.
 - Updated all source, demo and regression module metadata to version `1.1.0`.
 
 ### Fixed
@@ -118,6 +123,15 @@ defaults. No migration is required.
 - Fixed `TST_SetWindowPos` in the regression harness declaring no `Alias`, so
   VBA searched `user32.dll` for an export of that literal name and raised error
   453. The defect was latent because `TST_TryRefreshWindowFrame` had no caller.
+- Fixed one unusable Excel window aborting the rest of a multi-window pass.
+  `UI_ApplyWindowLevelState` had no error handler, and the caller's handler
+  ends in `Resume Safe_Exit`, so an error raised while processing one window
+  abandoned every window still to be visited. The trigger was in the failure
+  path rather than the writes: composing a diagnostic read
+  `TargetWindow.Caption`, which can itself raise on the window that is already
+  failing. The procedure now handles errors locally, records one entry naming
+  the window, and returns so the enumeration continues; the label is built once
+  on entry, so no window property is read while composing a failure message.
 
 ### Compatibility
 
@@ -132,6 +146,8 @@ Release type:            minor
 - `TargetScope` is declared after `FailureCount` and `FailureList` in
   `UI_SetExcelUI_WithResult`, so existing positional callers are unaffected.
 - No enum member or value changed. `UIVisibility` is unchanged.
+- The `Stage | Detail` diagnostic format is unchanged. One new stage value,
+  `Window [label]`, can now appear in a failure list.
 - `UI_ShowExcelUI` still means "show all managed elements", not "restore the
   captured baseline".
 - Snapshot storage remains in memory only and does not survive a VBA project
