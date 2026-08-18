@@ -1213,6 +1213,25 @@ Public Function UI_RuntimeBuildErrorText() _
 '
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrNumber           As Long            'Err.Number captured on entry
+    Dim ErrDescription      As String          'Err.Description captured on entry
+    Dim ErrSource           As String          'Err.Source captured on entry
+    Dim ErrLine             As Long            'Erl captured on entry
+
+'------------------------------------------------------------------------------
+' CAPTURE ERR STATE
+'------------------------------------------------------------------------------
+    'Read the Err object BEFORE any On Error statement. Any form of On Error
+    'resets Err, so protecting this routine first would blank the very values
+    'it exists to report and every diagnostic would read "0: ".
+        ErrNumber = Err.Number
+        ErrDescription = Err.Description
+        ErrSource = Err.Source
+        ErrLine = Erl
+
+'------------------------------------------------------------------------------
 ' BUILD DIAGNOSTIC TEXT
 '------------------------------------------------------------------------------
     'Never let diagnostic formatting raise inside an error handler
@@ -1220,12 +1239,12 @@ Public Function UI_RuntimeBuildErrorText() _
 
     'Compose number, description, and the optional source and line fragments
         UI_RuntimeBuildErrorText = _
-            CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, _
-                " | Source: " & Err.Source, _
+            CStr(ErrNumber) & ": " & ErrDescription & _
+            IIf(Len(ErrSource) > 0, _
+                " | Source: " & ErrSource, _
                 vbNullString) & _
-            IIf(Erl <> 0, _
-                " | Line: " & CStr(Erl), _
+            IIf(ErrLine <> 0, _
+                " | Line: " & CStr(ErrLine), _
                 vbNullString)
 
 End Function
