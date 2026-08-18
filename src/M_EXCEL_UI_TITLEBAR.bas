@@ -174,6 +174,12 @@ Private Const WS_MAXIMIZEBOX            As Long = &H10000
 'needs a single mask rather than five OR-ed constants on every call.
 Private Const TITLEBAR_OWNED_STYLE_MASK As Long = &HCF0000
 
+'Owned bits assumed when a show is requested and no baseline was ever captured
+'for the current handle. Restoring the full owned frame is the only safe
+'assumption in that case: the alternative is to re-apply the current hidden
+'bits, which silently leaves the title bar hidden and reports success.
+Private Const TITLEBAR_DEFAULT_STYLE_BITS As Long = &HCF0000
+
 'SetWindowPos flags. Only the frame is recalculated: position, size, Z-order
 'and owner Z-order are all left untouched.
 Private Const SWP_NOSIZE                As Long = &H1
@@ -579,10 +585,12 @@ Private Function UI_TrySetTitleBarVisible( _
     Dim xlHnd               As LongPtr         'Excel main-window handle
     Dim CurrentStyle        As LongPtr         'Live GWL_STYLE value
     Dim NewStyle            As LongPtr         'Merged GWL_STYLE value to write
+    Dim RestoreBits         As LongPtr         'Owned bits a show will re-apply
 #Else
     Dim xlHnd               As Long            'Excel main-window handle
     Dim CurrentStyle        As Long            'Live GWL_STYLE value
     Dim NewStyle            As Long            'Merged GWL_STYLE value to write
+    Dim RestoreBits         As Long            'Owned bits a show will re-apply
 #End If
 
 '------------------------------------------------------------------------------
@@ -630,15 +638,29 @@ Private Function UI_TrySetTitleBarVisible( _
             m_HasOriginalMainWindowOwnedStyleBits = True
         End If
 
+    'Take the baseline a show would re-apply
+        RestoreBits = m_OriginalMainWindowOwnedStyleBits
+
 '------------------------------------------------------------------------------
 ' COMPUTE NEW STYLE
 '------------------------------------------------------------------------------
     'Showing restores the captured owned bits; hiding supplies none. Either way
     'the helper preserves every unrelated bit from CurrentStyle.
         If IsVisible Then
+
+            'A show must never re-apply an all-zero baseline. That happens when
+            'the first title-bar call after a VBA project reset is a show while
+            'the frame is already hidden: the capture above then records zero
+            'owned bits, the merge becomes a no-op, and the short circuit below
+            'reports success while the title bar stays hidden. Falling back to
+            'the full owned frame keeps UI_ShowExcelUI a real recovery path.
+                If RestoreBits = 0 Then
+                    RestoreBits = TITLEBAR_DEFAULT_STYLE_BITS
+                End If
+
             NewStyle = UI_InternalMergeTitleBarStyleBits( _
                 CurrentStyle:=CurrentStyle, _
-                OwnedStyleBits:=m_OriginalMainWindowOwnedStyleBits)
+                OwnedStyleBits:=RestoreBits)
         Else
             NewStyle = UI_InternalMergeTitleBarStyleBits( _
                 CurrentStyle:=CurrentStyle, _
@@ -1146,3 +1168,5 @@ Private Function UI_TitleBarBuildRuntimeErrorText() _
                 vbNullString)
 
 End Function
+
+
