@@ -3558,18 +3558,23 @@ Private Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
 '   - TST_AssertTitleBarVisible
 '   - TST_WaitUI
 '   - TST_Log
+'   - UI_InternalResetTitleBarBaseline
 '   - UI_ShowExcelUI
 '
 ' CALLED FROM
 '   - TST_RunTitleBarOnlyPack
 '
 ' NOTES
-'   The module-state reset is simulated rather than performed. VBA offers no
-'   supported way to clear another module's private state from code, so this
-'   case reproduces the observable precondition instead: a hidden frame that
-'   M_EXCEL_UI_TITLEBAR has never written. When the subsystem has already
-'   captured a non-zero baseline earlier in the session the assertion still
-'   holds, because a correct show restores the frame either way.
+'   Both halves of the precondition are established explicitly. The frame is
+'   hidden through the harness WinAPI helpers, which M_EXCEL_UI_TITLEBAR never
+'   observes, and the captured baseline is discarded through
+'   UI_InternalResetTitleBarBaseline.
+'
+'   The second step is not optional. An earlier version of this case relied on
+'   the subsystem happening to hold no baseline, and passed with the production
+'   fix reverted, because TST_Case_TitleBarRoundTrip runs first and captures one
+'   from a visible frame. The case is now deterministic regardless of ordering
+'   or of what ran earlier in the session.
 '
 ' UPDATED
 '   2026-08-18
@@ -3653,6 +3658,13 @@ Private Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
     'A frame that was never hidden would let the real assertion pass for the
     'wrong reason, so the precondition is asserted rather than assumed
         TST_AssertTitleBarVisible False, "TitleBarShowRecovery.Precondition"
+
+    'Discard any baseline captured earlier in this session. Without this the
+    'case cannot reach the branch it exists to guard: TST_Case_TitleBarRoundTrip
+    'runs first and captures a good baseline from a visible frame, so the show
+    'below would succeed by the ordinary path whether or not the defect is
+    'present.
+        UI_InternalResetTitleBarBaseline
 
 '------------------------------------------------------------------------------
 ' REQUEST RECOVERY THROUGH THE PUBLIC API
