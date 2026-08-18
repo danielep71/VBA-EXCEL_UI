@@ -220,6 +220,31 @@ UIWindowTargetScope
 
 Do not call `UI_Runtime...`, `UI_Snapshot...`, or title-bar worker routines from normal application code. Those procedures are internal implementation seams.
 
+### Snapshot lifetime and window references
+
+A captured snapshot holds a live reference to every Excel `Window` it recorded. That retention is deliberate: it is what allows restoration to match windows by object identity rather than by position in `Application.Windows`, so reordered windows restore correctly and a replacement window never receives another window's state.
+
+It also creates an ownership obligation. Those references are released only when:
+
+- `UI_ClearExcelUIStateSnapshot` is called;
+- a new capture replaces the previous snapshot;
+- the VBA project resets, or Excel closes.
+
+Restoring does **not** release them. `UI_ResetExcelUIToSnapshot` and `UI_ResetExcelUIToSnapshot_WithResult` deliberately retain the snapshot so it can be replayed, so a restore is not a release.
+
+Solutions that capture a baseline should clear it once it is no longer needed. `Workbook_BeforeClose` is the natural place:
+
+```vb
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    UI_ResetExcelUIToSnapshot
+    UI_ClearExcelUIStateSnapshot
+End Sub
+```
+
+Holding `Window` references past the lifetime of their workbook can prevent Excel from releasing those objects cleanly. A long-running solution that captures once at open and never clears will retain them for the whole session.
+
+Restoration itself is safe either way: a captured window that has since been closed is detected, reported as unusable, and skipped. Clearing is about resource lifetime, not correctness.
+
 ## Module settings
 
 The production modules use:

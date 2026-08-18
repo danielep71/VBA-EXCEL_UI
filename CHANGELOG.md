@@ -36,6 +36,11 @@ defaults. No migration is required.
   import order, dependency graph, fresh installation, upgrade from the
   single-module architecture, upgrade from intermediate `1.1.0` builds,
   validation and troubleshooting.
+- Added a snapshot-lifetime section to `INSTALLATION.md`, documenting that a
+  captured snapshot retains one live `Window` reference per captured window,
+  that those references are released only by `UI_ClearExcelUIStateSnapshot`, a
+  replacing capture or a project reset, and that restoring deliberately retains
+  the snapshot rather than releasing it.
 - Added `tools/reformat.py`, a deterministic house-style reformatter for
   exported `.bas` modules.
 - Added regression coverage for identity-safe window restoration, structured
