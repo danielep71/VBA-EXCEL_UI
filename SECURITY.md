@@ -195,10 +195,13 @@ Public bug reports should still avoid confidential workbooks and personal data.
 ### In scope
 
 - `src/M_EXCEL_UI.bas`;
+- `src/M_EXCEL_UI_RUNTIME.bas`;
+- `src/M_EXCEL_UI_SNAPSHOT.bas`;
+- `src/M_EXCEL_UI_TITLEBAR.bas`;
 - `demo/M_EXCEL_UI_DEMO.bas`;
 - `demo/M_DEMO_BUILDER.bas`;
 - `test/M_EXCEL_UI_REGRESSION_TESTS.bas`;
-- the official `demo/EXCEL_UI_DEMO.xlsm` artifact;
+- the official demo workbook published as a release asset;
 - repository release archives and attached release artifacts;
 - fixed Excel 4 macro use for Ribbon management;
 - WinAPI declarations and window-style handling;

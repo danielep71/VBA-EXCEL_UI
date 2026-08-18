@@ -25,7 +25,6 @@ VBA-EXCEL_UI/
 │  ├─ M_EXCEL_UI_SNAPSHOT.bas
 │  └─ M_EXCEL_UI_TITLEBAR.bas
 ├─ demo/
-│  ├─ EXCEL_UI_DEMO.xlsm
 │  ├─ M_DEMO_BUILDER.bas
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ test/
@@ -147,7 +146,7 @@ Workflow:
 10. Commit and push.
 11. Open a pull request against the agreed base.
 
-Changing an exported `.bas` file does not update `demo/EXCEL_UI_DEMO.xlsm`. Synchronize and validate the embedded VBA project separately when the binary demo is in scope.
+The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
 
 ## Required validation
 
