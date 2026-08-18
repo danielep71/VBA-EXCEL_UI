@@ -141,7 +141,8 @@ Option Private Module
                 As Long
         #End If
 
-        Private Declare PtrSafe Function TST_SetWindowPos Lib "user32" ( _
+        Private Declare PtrSafe Function TST_SetWindowPos Lib "user32" Alias _
+            "SetWindowPos" ( _
             ByVal hWnd As LongPtr, _
             ByVal hWndInsertAfter As LongPtr, _
             ByVal X As Long, _
@@ -166,7 +167,7 @@ Option Private Module
             ByVal dwNewLong As Long) _
             As Long
 
-        Private Declare Function TST_SetWindowPos Lib "user32" ( _
+        Private Declare Function TST_SetWindowPos Lib "user32" Alias "SetWindowPos" ( _
             ByVal hWnd As Long, _
             ByVal hWndInsertAfter As Long, _
             ByVal X As Long, _
@@ -767,6 +768,7 @@ Private Sub TST_RunRegressionPack( _
         If IncludeTitleBarTests Then
             TST_Case_TitleBarRoundTrip
             TST_Case_TitleBarOwnedBitPreservation
+            TST_Case_TitleBarShowRecoversWithoutBaseline
         End If
 
 '------------------------------------------------------------------------------
@@ -855,9 +857,10 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_RestoreState
 '   - TST_Case_TitleBarRoundTrip
 '   - TST_Case_TitleBarOwnedBitPreservation
+'   - TST_Case_TitleBarShowRecoversWithoutBaseline
 '
 ' UPDATED
-'   2026-07-29
+'   2026-08-18
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -921,9 +924,12 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify the exact production merge policy with deterministic style values
         TST_Case_TitleBarOwnedBitPreservation
 
+    'Verify that a show restores the frame with no captured baseline
+        TST_Case_TitleBarShowRecoversWithoutBaseline
+
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
-            "Title-bar round-trip and owned-bit preservation cases passed"
+            "Title-bar round-trip, owned-bit preservation, and show-recovery cases passed"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
@@ -3249,6 +3255,282 @@ Err_Handler:
             Description:=FailDescription
 
 End Sub
+
+
+Private Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
+'
+'==============================================================================
+' TST_Case_TitleBarShowRecoversWithoutBaseline
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a show request restores the title bar even when the title-bar
+'   subsystem holds no captured owned-bit baseline and the frame is already
+'   hidden on entry.
+'
+' WHY THIS EXISTS
+'   This is the regression guard for the defect where UI_ShowExcelUI silently
+'   failed to restore the title bar after a VBA project reset.
+'
+'   The window style survives a project reset because it belongs to the running
+'   Excel process, while M_EXCEL_UI_TITLEBAR module state does not. If the first
+'   title-bar call after such a reset was a show while the frame was already
+'   hidden, the subsystem captured an all-zero owned-bit baseline, merged it,
+'   found nothing to change, short-circuited, and returned TRUE. The title bar
+'   stayed hidden and no failure was reported through either diagnostic path.
+'
+'   TST_Case_TitleBarRoundTrip cannot detect this. It always begins from a
+'   visible frame, so the baseline it causes to be captured is never zero. This
+'   case deliberately reproduces the reset condition instead: it hides the frame
+'   through the harness WinAPI helpers, which leaves M_EXCEL_UI_TITLEBAR module
+'   state untouched, and only then asks the public API to show it.
+'
+' INPUTS
+'   None.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Reads and retains the entry style so the frame can be restored exactly.
+'   - Clears every owned bit directly through the harness WinAPI helpers, which
+'     bypasses M_EXCEL_UI entirely and therefore captures no baseline.
+'   - Confirms the frame really is hidden before the assertion of interest, so
+'     a pass cannot be produced by a frame that was never hidden.
+'   - Calls UI_ShowExcelUI and requires the caption bit to return.
+'   - Restores the entry style on every exit path, including failure.
+'
+' ERROR POLICY
+'   - Raises a TEST_ERR_BASE assertion error on failure, for the pack handler.
+'   - Restores the entry style before re-raising, so one failure cannot leave
+'     the host with a hidden title bar.
+'
+' DEPENDENCIES
+'   - TST_TryGetWindowStyle
+'   - TST_TrySetWindowStyle
+'   - TST_TryRefreshWindowFrame
+'   - TST_AssertTitleBarVisible
+'   - TST_WaitUI
+'   - TST_Log
+'   - UI_ShowExcelUI
+'
+' CALLED FROM
+'   - TST_RunTitleBarOnlyPack
+'
+' NOTES
+'   The module-state reset is simulated rather than performed. VBA offers no
+'   supported way to clear another module's private state from code, so this
+'   case reproduces the observable precondition instead: a hidden frame that
+'   M_EXCEL_UI_TITLEBAR has never written. When the subsystem has already
+'   captured a non-zero baseline earlier in the session the assertion still
+'   holds, because a correct show restores the frame either way.
+'
+' UPDATED
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim xlHnd               As LongPtr         'Excel main-window handle
+    Dim EntryStyle          As LongPtr         'Style observed on entry
+    Dim HiddenStyle         As LongPtr         'Style with owned bits cleared
+#Else
+    Dim xlHnd               As Long            'Excel main-window handle
+    Dim EntryStyle          As Long            'Style observed on entry
+    Dim HiddenStyle         As Long            'Style with owned bits cleared
+#End If
+
+    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
+    Dim FailMsg             As String          'Diagnostic from a WinAPI helper
+    Dim SavedErrNumber      As Long            'Captured assertion error number
+    Dim SavedErrSource      As String          'Captured assertion error source
+    Dim SavedErrDescription As String          'Captured assertion description
+
+    Const PROC              As String = "TST_Case_TitleBarShowRecoversWithoutBaseline"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route assertion and runtime errors to the restoring handler
+        On Error GoTo Err_Handler
+
+    'Announce the case
+        TST_Log PROC, "START", _
+            "Validating title-bar show recovery without a captured baseline"
+
+    'Resolve the Excel main-window handle
+        xlHnd = Application.hWnd
+
+        If xlHnd = 0 Then
+            Err.Raise TEST_ERR_BASE + 55, PROC, _
+                "invalid Excel window handle"
+        End If
+
+'------------------------------------------------------------------------------
+' CAPTURE ENTRY STYLE
+'------------------------------------------------------------------------------
+    'Retain the entry style so the frame can be restored exactly afterwards
+        If Not TST_TryGetWindowStyle(xlHnd, EntryStyle, FailMsg) Then
+            Err.Raise TEST_ERR_BASE + 56, PROC, _
+                "could not read the entry window style | " & FailMsg
+        End If
+
+        StyleCaptured = True
+
+'------------------------------------------------------------------------------
+' ESTABLISH HIDDEN FRAME WITHOUT TOUCHING MODULE STATE
+'------------------------------------------------------------------------------
+    'Clear the owned bits directly. Writing through the harness rather than
+    'through UI_SetExcelUI is the whole point: M_EXCEL_UI_TITLEBAR never sees
+    'this change and therefore captures no baseline from it.
+        HiddenStyle = EntryStyle And Not TST_TITLEBAR_OWNED_MASK
+
+        If Not TST_TrySetWindowStyle(xlHnd, HiddenStyle, FailMsg) Then
+            Err.Raise TEST_ERR_BASE + 57, PROC, _
+                "could not clear the owned title-bar style bits | " & FailMsg
+        End If
+
+    'Recalculate the non-client frame so the change is observable
+        If Not TST_TryRefreshWindowFrame(xlHnd, FailMsg) Then
+            Err.Raise TEST_ERR_BASE + 58, PROC, _
+                "could not refresh the non-client frame | " & FailMsg
+        End If
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' CONFIRM THE PRECONDITION
+'------------------------------------------------------------------------------
+    'A frame that was never hidden would let the real assertion pass for the
+    'wrong reason, so the precondition is asserted rather than assumed
+        TST_AssertTitleBarVisible False, "TitleBarShowRecovery.Precondition"
+
+'------------------------------------------------------------------------------
+' REQUEST RECOVERY THROUGH THE PUBLIC API
+'------------------------------------------------------------------------------
+    'This is the documented emergency recovery path
+        UI_ShowExcelUI
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'The caption must return even though no baseline was ever captured
+        TST_AssertTitleBarVisible True, "TitleBarShowRecovery.Show"
+
+'------------------------------------------------------------------------------
+' RESTORE ENTRY STYLE
+'------------------------------------------------------------------------------
+    'Leave the host exactly as the case found it
+        TST_RestoreTitleBarStyle xlHnd, EntryStyle, StyleCaptured
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Report the pass and exit before the error-handler block
+        TST_Log PROC, "PASS", _
+            "Show restored the title bar with no captured baseline"
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Retain the failure so it can be re-raised after the host is restored
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+
+    'Never leave the host with a hidden title bar because a case failed
+        TST_RestoreTitleBarStyle xlHnd, EntryStyle, StyleCaptured
+
+    'Hand the original failure to the pack handler
+        Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
+
+End Sub
+
+
+#If VBA7 Then
+Private Sub TST_RestoreTitleBarStyle( _
+    ByVal hWnd As LongPtr, _
+    ByVal EntryStyle As LongPtr, _
+    ByVal StyleCaptured As Boolean)
+#Else
+Private Sub TST_RestoreTitleBarStyle( _
+    ByVal hWnd As Long, _
+    ByVal EntryStyle As Long, _
+    ByVal StyleCaptured As Boolean)
+#End If
+'
+'==============================================================================
+' TST_RestoreTitleBarStyle
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restore a previously captured window style and refresh the non-client frame.
+'
+' WHY THIS EXISTS
+'   The recovery case must return the host to its entry state on both the
+'   success path and the failure path. Isolating the restore keeps those two
+'   paths using identical logic, so a failing assertion can never leave the
+'   user staring at a hidden title bar.
+'
+' INPUTS
+'   hWnd
+'     Excel main-window handle.
+'
+'   EntryStyle
+'     Style value captured before the case modified the frame.
+'
+'   StyleCaptured
+'     FALSE when the entry style was never read, in which case nothing is
+'     written.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Writes the captured style and refreshes the frame.
+'   - Does nothing when no entry style is available.
+'
+' ERROR POLICY
+'   - Suppresses errors locally. This runs inside an active error handler and
+'     must never raise.
+'
+' DEPENDENCIES
+'   - TST_TrySetWindowStyle
+'   - TST_TryRefreshWindowFrame
+'
+' CALLED FROM
+'   - TST_Case_TitleBarShowRecoversWithoutBaseline
+'
+' UPDATED
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim IgnoredFailMsg      As String          'Discarded helper diagnostic
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'This may run inside an active error handler and must never raise
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' RESTORE STYLE
+'------------------------------------------------------------------------------
+    'Restore only when an entry style was actually captured
+        If StyleCaptured And hWnd <> 0 Then
+            TST_TrySetWindowStyle hWnd, EntryStyle, IgnoredFailMsg
+            TST_TryRefreshWindowFrame hWnd, IgnoredFailMsg
+        End If
+
+End Sub
 '
 '------------------------------------------------------------------------------
 '
@@ -5226,6 +5508,25 @@ Private Function TST_BuildRuntimeErrorText() As String
 '==============================================================================
 '
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrNumber           As Long            'Err.Number captured on entry
+    Dim ErrDescription      As String          'Err.Description captured on entry
+    Dim ErrSource           As String          'Err.Source captured on entry
+    Dim ErrLine             As Long            'Erl captured on entry
+
+'------------------------------------------------------------------------------
+' CAPTURE ERR STATE
+'------------------------------------------------------------------------------
+    'Read the Err object BEFORE any On Error statement. Any form of On Error
+    'resets Err, so protecting this routine first would blank the very values
+    'it exists to report and every diagnostic would read "0: ".
+        ErrNumber = Err.Number
+        ErrDescription = Err.Description
+        ErrSource = Err.Source
+        ErrLine = Erl
+
+'------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Protect callers from any unexpected issue while formatting the diagnostic
@@ -5234,11 +5535,11 @@ Private Function TST_BuildRuntimeErrorText() As String
 '------------------------------------------------------------------------------
 ' BUILD RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
-    'Build a consistent diagnostic string from the current Err state
+    'Build a consistent diagnostic string from the captured Err state
         TST_BuildRuntimeErrorText = _
-            CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+            CStr(ErrNumber) & ": " & ErrDescription & _
+            IIf(Len(ErrSource) > 0, " | Source: " & ErrSource, vbNullString) & _
+            IIf(ErrLine <> 0, " | Line: " & CStr(ErrLine), vbNullString)
 
 End Function
 
