@@ -196,7 +196,7 @@ Public Function UI_SnapshotCaptureCore( _
 '
 ' DEPENDENCIES
 '   - UI_SnapshotClear
-'   - UI_SnapshotBuildWindowIdentityText
+'   - UI_RuntimeBuildWindowLabel
 '   - UI_RuntimeClearResultBuffer
 '   - UI_RuntimeHandleFailure
 '   - UI_RuntimeTryGetRibbonVisible
@@ -340,7 +340,7 @@ Public Function UI_SnapshotCaptureCore( _
 
                     'Build the diagnostic label once, for use by both passes
                         m_SnapshotWindowLabels(i) = _
-                            UI_SnapshotBuildWindowIdentityText(W)
+                            UI_RuntimeBuildWindowLabel(W)
 
                     'Capture Headings
                         m_SnapshotHeadingsKnown(i) = _
@@ -1010,85 +1010,5 @@ Err_Handler:
         Set WindowOut = Nothing
 
         Resume Safe_Exit
-
-End Function
-
-
-Private Function UI_SnapshotBuildWindowIdentityText( _
-    ByVal TargetWindow As Object) _
-    As String
-'
-'==============================================================================
-' UI_SnapshotBuildWindowIdentityText
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Builds a stable best-effort diagnostic label for a captured Excel Window.
-'
-' WHY THIS EXISTS
-'   Failure messages need to name the window they refer to. The label is built
-'   once at capture time so that the restore pass can report on a window that
-'   has since been closed, when reading its caption would raise.
-'
-' INPUTS
-'   TargetWindow
-'     Window whose identifying text should be described.
-'
-' RETURNS
-'   String
-'     A diagnostic label. This text is never used for identity matching.
-'
-' BEHAVIOR
-'   - Prefers "Workbook :: Caption".
-'   - Falls back to whichever of the two is available.
-'   - Falls back to a generic label when Excel exposes neither.
-'
-' ERROR POLICY
-'   - Does not raise.
-'   - Suppresses errors locally so an unreadable window still yields a label.
-'
-' DEPENDENCIES
-'   None.
-'
-' CALLED FROM
-'   - UI_SnapshotCaptureCore
-'
-' UPDATED
-'   2026-08-18
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim WorkbookName        As String          'Parent workbook name, if readable
-    Dim WindowCaption       As String          'Window caption, if readable
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'A label must always be produced, so no read may raise
-        On Error Resume Next
-
-'------------------------------------------------------------------------------
-' READ IDENTIFYING FIELDS
-'------------------------------------------------------------------------------
-    'Read both descriptive fields on a best-effort basis
-        WorkbookName = TargetWindow.Parent.Name
-        WindowCaption = TargetWindow.Caption
-
-'------------------------------------------------------------------------------
-' BUILD LABEL
-'------------------------------------------------------------------------------
-    'Prefer the fullest description Excel was able to supply
-        If Len(WorkbookName) > 0 And Len(WindowCaption) > 0 Then
-            UI_SnapshotBuildWindowIdentityText = _
-                WorkbookName & " :: " & WindowCaption
-        ElseIf Len(WindowCaption) > 0 Then
-            UI_SnapshotBuildWindowIdentityText = WindowCaption
-        ElseIf Len(WorkbookName) > 0 Then
-            UI_SnapshotBuildWindowIdentityText = WorkbookName
-        Else
-            UI_SnapshotBuildWindowIdentityText = "captured Excel window"
-        End If
 
 End Function

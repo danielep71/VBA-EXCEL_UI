@@ -28,6 +28,7 @@ Option Private Module
 '     - UI_RuntimeHandleFailure
 '     - UI_RuntimeClearResultBuffer
 '     - UI_RuntimeBuildErrorText
+'     - UI_RuntimeBuildWindowLabel
 '     - UI_RuntimeLogFailure
 '
 '   Quiet-update scope:
@@ -1246,6 +1247,90 @@ Public Function UI_RuntimeBuildErrorText() _
             IIf(ErrLine <> 0, _
                 " | Line: " & CStr(ErrLine), _
                 vbNullString)
+
+End Function
+
+
+Public Function UI_RuntimeBuildWindowLabel( _
+    ByVal TargetWindow As Object) _
+    As String
+'
+'==============================================================================
+' UI_RuntimeBuildWindowLabel
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds a stable best-effort diagnostic label for one Excel Window.
+'
+' WHY THIS EXISTS
+'   Failure entries must name the window they refer to, and both the apply path
+'   and the snapshot path need that label. Building it here means the two agree
+'   on the format, and means neither has to read Window.Caption while composing
+'   a failure message: that read can itself raise on a window that is closing
+'   or otherwise unusable, turning one property failure into an unexpected
+'   error for the whole pass.
+'
+' INPUTS
+'   TargetWindow
+'     Window to describe. May be Nothing or unusable.
+'
+' RETURNS
+'   String
+'     A diagnostic label. Never used for identity matching.
+'
+' BEHAVIOR
+'   - Prefers "Workbook :: Caption".
+'   - Falls back to whichever of the two is readable.
+'   - Falls back to a generic label when Excel exposes neither.
+'
+' ERROR POLICY
+'   - Does not raise. A label is always produced.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - M_EXCEL_UI
+'   - M_EXCEL_UI_SNAPSHOT
+'
+' UPDATED
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WorkbookName        As String          'Parent workbook name, if readable
+    Dim WindowCaption       As String          'Window caption, if readable
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A label must always be produced, so no read may raise
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' READ IDENTIFYING FIELDS
+'------------------------------------------------------------------------------
+    'Read both descriptive fields on a best-effort basis
+        If Not TargetWindow Is Nothing Then
+            WorkbookName = TargetWindow.Parent.Name
+            WindowCaption = TargetWindow.Caption
+        End If
+
+'------------------------------------------------------------------------------
+' BUILD LABEL
+'------------------------------------------------------------------------------
+    'Prefer the fullest description Excel was able to supply
+        If Len(WorkbookName) > 0 And Len(WindowCaption) > 0 Then
+            UI_RuntimeBuildWindowLabel = WorkbookName & " :: " & WindowCaption
+        ElseIf Len(WindowCaption) > 0 Then
+            UI_RuntimeBuildWindowLabel = WindowCaption
+        ElseIf Len(WorkbookName) > 0 Then
+            UI_RuntimeBuildWindowLabel = WorkbookName
+        Else
+            UI_RuntimeBuildWindowLabel = "Excel window"
+        End If
 
 End Function
 

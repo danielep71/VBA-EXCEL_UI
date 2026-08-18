@@ -1567,6 +1567,10 @@ Private Sub UI_ApplyWindowLevelState( _
 '   property writes out of the scope resolution keeps the three Select Case
 '   branches to their actual difference, which is which windows to visit.
 '
+'   It also gives each window its own error boundary. One window that becomes
+'   unusable mid-pass is recorded and skipped; the windows after it are still
+'   attempted.
+'
 ' INPUTS
 '   ProcName
 '     Public caller name used for diagnostics.
@@ -1598,14 +1602,24 @@ Private Sub UI_ApplyWindowLevelState( _
 '
 ' ERROR POLICY
 '   - Records property-level failures and continues with later properties.
-'   - Unexpected errors return to the caller's fail-soft handler.
+'   - Handles unexpected errors locally, records one entry against this window,
+'     and returns normally so the caller's enumeration continues.
+'   - Does not raise to the caller.
 '
 ' DEPENDENCIES
 '   - UI_RuntimeTrySetBooleanPropertyIfNeeded
 '   - UI_RuntimeHandleFailure
+'   - UI_RuntimeBuildWindowLabel
+'   - UI_RuntimeBuildErrorText
 '
 ' CALLED FROM
 '   - UI_ApplyExcelUIState
+'
+' NOTES
+'   Handling errors here rather than letting them reach the caller is what
+'   keeps the documented best-effort contract true across a multi-window pass.
+'   The caller's handler ends in Resume Safe_Exit, so an error escaping this
+'   procedure would abandon every window still to be visited.
 '
 ' UPDATED
 '   2026-08-18
@@ -1616,6 +1630,17 @@ Private Sub UI_ApplyWindowLevelState( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim Msg                 As String          'Per-property failure reason
+    Dim WindowLabel         As String          'Diagnostic label for this window
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Contain unexpected errors here so the caller's enumeration survives them
+        On Error GoTo Err_Handler
+
+    'Build the label once. Reading Window.Caption while composing each failure
+    'message would put a raising read inside the failure path itself.
+        WindowLabel = UI_RuntimeBuildWindowLabel(TargetWindow)
 
 '------------------------------------------------------------------------------
 ' APPLY HEADINGS
@@ -1628,7 +1653,7 @@ Private Sub UI_ApplyWindowLevelState( _
                 UI_RuntimeHandleFailure _
                     ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                     CaptureFailureList, _
-                    "Headings [" & TargetWindow.Caption & "]", Msg
+                    "Headings [" & WindowLabel & "]", Msg
             End If
         End If
 
@@ -1643,7 +1668,7 @@ Private Sub UI_ApplyWindowLevelState( _
                 UI_RuntimeHandleFailure _
                     ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                     CaptureFailureList, _
-                    "WorkbookTabs [" & TargetWindow.Caption & "]", Msg
+                    "WorkbookTabs [" & WindowLabel & "]", Msg
             End If
         End If
 
@@ -1658,9 +1683,29 @@ Private Sub UI_ApplyWindowLevelState( _
                 UI_RuntimeHandleFailure _
                     ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                     CaptureFailureList, _
-                    "Gridlines [" & TargetWindow.Caption & "]", Msg
+                    "Gridlines [" & WindowLabel & "]", Msg
             End If
         End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Record one entry against this window and return normally, so the caller
+    'continues with the windows that follow
+        UI_RuntimeHandleFailure _
+            ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+            CaptureFailureList, _
+            "Window [" & WindowLabel & "]", UI_RuntimeBuildErrorText
+
+        Resume Safe_Exit
 
 End Sub
 
