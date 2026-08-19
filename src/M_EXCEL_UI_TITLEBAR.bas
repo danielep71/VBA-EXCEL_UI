@@ -24,6 +24,7 @@ Option Private Module
 '   - UI_TryGetTitleBarVisible
 '   - UI_TrySetTitleBarVisibleIfNeeded
 '   - UI_InternalMergeTitleBarStyleBits
+'   - UI_InternalResetTitleBarBaseline
 '
 ' OWNERSHIP MODEL
 '   This module claims exactly five GWL_STYLE bits and nothing else:
@@ -295,6 +296,71 @@ Err_Handler:
         Resume Safe_Exit
 
 End Function
+
+
+Public Sub UI_InternalResetTitleBarBaseline()
+'
+'==============================================================================
+' UI_InternalResetTitleBarBaseline
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Discards the captured owned-bit baseline, returning this module to the
+'   state it holds before its first title-bar call for a given window handle.
+'
+' WHY THIS EXISTS
+'   The show-recovery defect only appears when a show is requested while no
+'   baseline has been captured and the frame is already hidden. That is the
+'   state left by a VBA project reset, because the window style belongs to the
+'   Excel process and survives, while this module's state does not.
+'
+'   A regression case cannot reach that state on its own. VBA offers no
+'   supported way to clear another module's private variables, and any earlier
+'   title-bar operation in the same session, including the round-trip case that
+'   runs before it, captures a baseline first. Without this entry point the
+'   guarding case silently exercises the ordinary path and passes whether or
+'   not the defect is present.
+'
+'   Exposing a deliberate seam is therefore the honest option. It follows the
+'   precedent already set by UI_InternalMergeTitleBarStyleBits, which is Public
+'   for the same reason.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Clears the captured owned bits, the associated handle, and the captured
+'     flag.
+'   - Touches no window style. The live frame is left exactly as it is.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     prevents exposure to external VBA projects.
+'   - Not part of the supported public API. Production code must never call it:
+'     doing so discards the frame the next show would restore.
+'
+' UPDATED
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' CLEAR CAPTURED BASELINE
+'------------------------------------------------------------------------------
+    'Forget the owned bits, the handle they belong to, and the captured flag
+        m_OriginalMainWindowOwnedStyleBits = 0
+        m_OriginalMainWindowHwnd = 0
+        m_HasOriginalMainWindowOwnedStyleBits = False
+
+End Sub
 
 
 Public Function UI_TryGetTitleBarVisible( _
