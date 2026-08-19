@@ -98,6 +98,14 @@ Application-level changes affect the current Excel process. `TargetScope` applie
 
 ---
 
+<p align="center">
+  <img width="100%"
+       alt="VBA Excel UI demo worksheet"
+       src="https://github.com/user-attachments/assets/574869d3-f17b-4daa-a17e-aa4c79e15bf7">
+</p>
+
+---
+
 <a id="quick-start"></a>
 
 # ⚡ Quick start
