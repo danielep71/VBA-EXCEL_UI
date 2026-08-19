@@ -30,6 +30,10 @@ no existing call site requires modification.
   `UI_InternalInjectFrameRefreshFailure`. The last makes the frame-refresh
   recovery path executable, because there is no supported way to make Windows
   fail `SetWindowPos` on demand.
+- Added `UI_SnapshotTryGetActiveWindow` and
+  `UI_SnapshotTryResolveTitleBarFrame` to `M_EXCEL_UI_SNAPSHOT`, which capture
+  the identity of the top-level frame a title-bar value was read from and prove
+  that frame is still present before anything is written back to it.
 
 ### Changed
 
@@ -60,6 +64,13 @@ no existing call site requires modification.
   a second workbook window silently displaced, and that was never refreshed
   after another component legitimately changed the owned frame bits.
   (`ICR-UI-P2-04`, #15)
+- Fixed title-bar snapshot restoration not being identity-safe under the Single
+  Document Interface. `Application.Hwnd` reports the active workbook window's
+  handle, and the snapshot re-resolved it on restore, so activating a different
+  workbook between capture and restore applied one window's captured title-bar
+  state to another. Every API call succeeded, so the misdirection was silent and
+  the originally captured frame was left unrestored.
+  (`ICR-UI-P1-01`, #14)
 
 ### Documentation
 
