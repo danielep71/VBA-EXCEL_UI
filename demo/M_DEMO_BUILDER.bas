@@ -1,6 +1,9 @@
 Attribute VB_Name = "M_DEMO_BUILDER"
+Option Explicit
+Option Private Module
+
 '==============================================================================
-' MODULE: M_DEMO_BUILDER
+' M_DEMO_BUILDER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Provides reusable helper routines to build, reset, and format DEMO sheets
@@ -37,7 +40,7 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '     during sheet-building operations.
 '
 ' UPDATED
-'   2026-04-19
+'   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
@@ -46,11 +49,6 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '   1.1.0
 '==============================================================================
 
-'------------------------------------------------------------------------------
-' MODULE SETTINGS
-'------------------------------------------------------------------------------
-    Option Explicit         'Force explicit declaration of all variables
-    Option Private Module   'Hide support routines from the Macro dialog
 
 '------------------------------------------------------------------------------
 ' PUBLIC CONSTANTS
@@ -102,20 +100,20 @@ Attribute VB_Name = "M_DEMO_BUILDER"
     Private Type tButtonAppearance
         FillVisible         As MsoTriState      'Original fill visibility
         FillColor           As Long             'Original fill color
-        
+
         LineVisible         As MsoTriState      'Original line visibility
         LineColor           As Long             'Original line color
         LineWeight          As Single           'Original line weight
-        
+
         TextColor           As Long             'Original text color
         TextBold            As MsoTriState      'Original text bold flag
         TextSize            As Single           'Original text size
-        
+
         ShadowVisible       As MsoTriState      'Original shadow visibility
         ShadowBlur          As Single           'Original shadow blur
         ShadowOffsetX       As Single           'Original shadow X offset
         ShadowOffsetY       As Single           'Original shadow Y offset
-        
+
         TopPos              As Double           'Original top position
         LeftPos             As Double           'Original left position
     End Type
@@ -129,7 +127,7 @@ Attribute VB_Name = "M_DEMO_BUILDER"
         DEMOInputValidationNumeric = 2
         DEMOInputValidationBoolean = 3
     End Enum
-    
+
 
 Public Sub DEMO_Sheet_BuildTemplate( _
     ByVal WS_Name As String, Optional ByVal Title As String = "Title", _
@@ -147,7 +145,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
     Optional ByVal ShowVerticalScrollBar As Boolean = True, Optional ByVal ZoomPercent As Long = 0)
 '
 '==============================================================================
-'                           BUILD DEMO TEMPLATE
+' BUILD DEMO TEMPLATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates or rebuilds a DEMO worksheet with a standard title/subtitle layout
@@ -241,34 +239,34 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WB                          As Workbook       'Target workbook
-    Dim WS                          As Worksheet      'Target worksheet
+    Dim WB                  As Workbook        'Target workbook
+    Dim WS                  As Worksheet       'Target worksheet
 
-    Dim MaxRow                      As Long           'Last worksheet row
-    Dim MaxCol                      As Long           'Last worksheet column
+    Dim MaxRow              As Long            'Last worksheet row
+    Dim MaxCol              As Long            'Last worksheet column
 
-    Dim ContentParts                As Variant        'Split ContentColumns parts
-    Dim ContentText                 As String         'Trimmed ContentColumns text
-    Dim ContentFirstColIndex        As Long           'Resolved first content-column index
-    Dim ContentLastColIndex         As Long           'Resolved last content-column index
+    Dim ContentParts        As Variant         'Split ContentColumns parts
+    Dim ContentText         As String          'Trimmed ContentColumns text
+    Dim ContentFirstColIndex As Long            'Resolved first content-column index
+    Dim ContentLastColIndex As Long            'Resolved last content-column index
 
-    Dim EffectiveSeparatorColIndex  As Long           'Derived separator-column index
-    Dim EffectiveHideFromColIndex   As Long           'Derived first hidden-column index
-    Dim EffectiveSeparatorColumns   As String         'Derived separator-column address
-    Dim EffectiveHideColumnsFrom    As String         'Derived first hidden-column text
+    Dim EffectiveSeparatorColIndex As Long            'Derived separator-column index
+    Dim EffectiveHideFromColIndex As Long            'Derived first hidden-column index
+    Dim EffectiveSeparatorColumns As String          'Derived separator-column address
+    Dim EffectiveHideColumnsFrom As String          'Derived first hidden-column text
 
-    Dim LastVisibleRow              As Long           'Last visible worksheet row
-    Dim LastVisibleCol              As Long           'Last visible worksheet column
-    Dim ScrollAreaAddress           As String         'Resolved worksheet ScrollArea text
+    Dim LastVisibleRow      As Long            'Last visible worksheet row
+    Dim LastVisibleCol      As Long            'Last visible worksheet column
+    Dim ScrollAreaAddress   As String          'Resolved worksheet ScrollArea text
 
-    Dim TitleBandRange              As Range          'Resolved title-band range
-    Dim SubTitleBandRange           As Range          'Resolved subtitle-band range
+    Dim TitleBandRange      As Range           'Resolved title-band range
+    Dim SubTitleBandRange   As Range           'Resolved subtitle-band range
 
-    Dim TmpColIndex                 As Long           'Temporary column index for normalization
+    Dim TmpColIndex         As Long            'Temporary column index for normalization
 
-    Dim SavedErrNum                 As Long           'Captured error number
-    Dim SavedErrSrc                 As String         'Captured error source
-    Dim SavedErrDesc                As String         'Captured error description
+    Dim SavedErrNum         As Long            'Captured error number
+    Dim SavedErrSrc         As String          'Captured error source
+    Dim SavedErrDesc        As String          'Captured error description
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -327,7 +325,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
-        On Error GoTo CleanFail
+        On Error GoTo Clean_Fail
 
     'Use the requested workbook when supplied; otherwise default to ThisWorkbook
         If IsMissing(TargetWorkbook) Or IsEmpty(TargetWorkbook) Then
@@ -585,7 +583,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                 Application.DisplayFormulaBar = ShowFormulaBar
         End If
 
-CleanExit:
+Clean_Exit:
 '------------------------------------------------------------------------------
 ' RE-RAISE ERROR AFTER CLEANUP
 '------------------------------------------------------------------------------
@@ -596,7 +594,7 @@ CleanExit:
 
     Exit Sub
 
-CleanFail:
+Clean_Fail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
@@ -606,7 +604,7 @@ CleanFail:
         SavedErrDesc = Err.Description
 
     'Continue through the centralized cleanup path
-        Resume CleanExit
+        Resume Clean_Exit
 
 End Sub
 
@@ -616,7 +614,7 @@ Private Function DEMO_ColumnLetter( _
     As String
 '
 '==============================================================================
-'                             COLUMN LETTER
+' COLUMN LETTER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the Excel column letter for a 1-based column index
@@ -643,9 +641,9 @@ Private Function DEMO_ColumnLetter( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim N                   As Long          'Working column index
-    Dim R                   As Long          'Current base-26 remainder
-    Dim S                   As String        'Accumulated column text
+    Dim N                   As Long            'Working column index
+    Dim R                   As Long            'Current base-26 remainder
+    Dim S                   As String          'Accumulated column text
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -681,7 +679,7 @@ Public Sub DEMO_FastMode_Begin( _
     ByRef StateOut As tDEMOFastModeState)
 '
 '==============================================================================
-'                              BEGIN FAST MODE
+' BEGIN FAST MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Captures the current Excel Application state and switches Excel into a
@@ -741,7 +739,7 @@ Public Sub DEMO_FastMode_End( _
     ByRef StateIn As tDEMOFastModeState)
 '
 '==============================================================================
-'                               END FAST MODE
+' END FAST MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restores a previously saved Excel Application state.
@@ -788,7 +786,7 @@ Public Sub DEMO_Set_RangeBorder( _
     Optional ByVal InsideColor As Long = vbWhite)
 '
 '==============================================================================
-'                             SET RANGE BORDER
+' SET RANGE BORDER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a consistent border format to a target range.
@@ -916,7 +914,7 @@ Public Function DEMO_Sheet_GetOrCreate( _
     As Worksheet
 '
 '==============================================================================
-'                           GET OR CREATE SHEET
+' GET OR CREATE SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns an existing worksheet by name, or creates it if missing.
@@ -951,7 +949,7 @@ Public Function DEMO_Sheet_GetOrCreate( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS As Worksheet     'Worksheet iterator / result
+    Dim WS                  As Worksheet       'Worksheet iterator / result
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -1016,7 +1014,7 @@ Public Sub DEMO_Sheet_Reset( _
     Optional ByVal ReProtectAtEnd As Boolean = False)
 '
 '==============================================================================
-'                                RESET SHEET
+' RESET SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clears a worksheet to a clean, reusable state for DEMO-sheet rebuilding
@@ -1112,18 +1110,18 @@ Public Sub DEMO_Sheet_Reset( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet   'Resolved worksheet to reset
-    Dim i                   As Long        'Reverse loop index
-    Dim WasProtected        As Boolean     'TRUE when the sheet was protected on entry
-    Dim SavedErrNumber      As Long        'Captured error number
-    Dim SavedErrSource      As String      'Captured error source
-    Dim SavedErrDescription As String      'Captured error description
+    Dim WS                  As Worksheet       'Resolved worksheet to reset
+    Dim i                   As Long            'Reverse loop index
+    Dim WasProtected        As Boolean         'TRUE when the sheet was protected on entry
+    Dim SavedErrNumber      As Long            'Captured error number
+    Dim SavedErrSource      As String          'Captured error source
+    Dim SavedErrDescription As String          'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
-        On Error GoTo CleanFail
+        On Error GoTo Clean_Fail
 
 '------------------------------------------------------------------------------
 ' RESOLVE TARGET WORKSHEET
@@ -1228,7 +1226,7 @@ Public Sub DEMO_Sheet_Reset( _
         If ClearValidation Then
             On Error Resume Next
             WS.Cells.Validation.Delete
-            On Error GoTo CleanFail
+            On Error GoTo Clean_Fail
         End If
 
 '------------------------------------------------------------------------------
@@ -1247,7 +1245,7 @@ Public Sub DEMO_Sheet_Reset( _
             On Error Resume Next
             WS.Cells.ClearComments
             WS.Cells.ClearNotes
-            On Error GoTo CleanFail
+            On Error GoTo Clean_Fail
         End If
 
 '------------------------------------------------------------------------------
@@ -1302,10 +1300,10 @@ Public Sub DEMO_Sheet_Reset( _
             'Hide page-break indicators on the sheet
                 WS.DisplayPageBreaks = False
 
-            On Error GoTo CleanFail
+            On Error GoTo Clean_Fail
         End If
 
-CleanExit:
+Clean_Exit:
 '------------------------------------------------------------------------------
 ' OPTIONAL RE-PROTECT
 '------------------------------------------------------------------------------
@@ -1324,7 +1322,7 @@ CleanExit:
 
     Exit Sub
 
-CleanFail:
+Clean_Fail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
@@ -1334,14 +1332,14 @@ CleanFail:
         SavedErrDescription = Err.Description
 
     'Continue through the centralized cleanup path
-        Resume CleanExit
+        Resume Clean_Exit
 
 End Sub
 Public Sub DEMO_Format_Labels( _
     ByVal TargetRange As Range)
 '
 '==============================================================================
-'                               FORMAT LABELS
+' FORMAT LABELS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a standard label format to a target range.
@@ -1398,7 +1396,7 @@ Public Sub DEMO_Format_InputCell( _
     ByVal TargetRange As Range)
 '
 '==============================================================================
-'                           FORMAT INPUT CELL
+' FORMAT INPUT CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats one or more DEMO control-input cells consistently.
@@ -1454,7 +1452,7 @@ Public Sub DEMO_Format_OutputCell( _
     ByVal TargetRange As Range)
 '
 '==============================================================================
-'                           FORMAT OUTPUT CELL
+' FORMAT OUTPUT CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats one or more output/result cells consistently.
@@ -1518,7 +1516,7 @@ Public Sub DEMO_Write_BandHeader( _
     Optional ByVal IsCentered As Boolean = True)
 '
 '==============================================================================
-'                            WRITE BAND HEADER
+' WRITE BAND HEADER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes and formats one left-aligned header band without merged cells.
@@ -1620,7 +1618,7 @@ Public Sub DEMO_Apply_ValidationList( _
     ByVal ListText As String)
 '
 '==============================================================================
-'                         APPLY VALIDATION LIST
+' APPLY VALIDATION LIST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies an in-cell dropdown validation list to a target cell or range.
@@ -1707,7 +1705,7 @@ Public Sub DEMO_Apply_NumericValidation( _
     Optional ByVal AllowDecimals As Boolean = True)
 '
 '==============================================================================
-'                         APPLY NUMERIC VALIDATION
+' APPLY NUMERIC VALIDATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a Data Validation rule requiring numeric values between MinValue
@@ -1765,9 +1763,9 @@ Public Sub DEMO_Apply_NumericValidation( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Lo              As Double   'Normalized lower bound
-    Dim Hi              As Double   'Normalized upper bound
-    Dim ValidationType  As Long     'Validation type to apply
+    Dim Lo                  As Double          'Normalized lower bound
+    Dim Hi                  As Double          'Normalized upper bound
+    Dim ValidationType      As Long            'Validation type to apply
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -1830,7 +1828,7 @@ Public Sub DEMO_Create_BoolList( _
     Optional ByVal WS_Name As String = DEFAULT_BOOL_WS)
 '
 '==============================================================================
-'                           CREATE BOOL LIST
+' CREATE BOOL LIST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates a workbook-level named range "BoolList" containing the literal text
@@ -1880,8 +1878,8 @@ Public Sub DEMO_Create_BoolList( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WB      As Workbook      'Target workbook
-    Dim WS      As Worksheet     'Target worksheet
+    Dim WB                  As Workbook        'Target workbook
+    Dim WS                  As Worksheet       'Target worksheet
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1930,7 +1928,7 @@ Public Sub DEMO_Apply_BoolValidation( _
     Optional ByVal ListName As String = DEFAULT_BOOLLIST_NAME)
 '
 '==============================================================================
-'                          APPLY BOOL VALIDATION
+' APPLY BOOL VALIDATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a locale-independent TRUE/FALSE validation list to a target range.
@@ -1993,7 +1991,7 @@ Public Sub DEMO_Set_WorkbookName( _
     ByVal TargetCell As Range)
 '
 '==============================================================================
-'                            SET WORKBOOK NAME
+' SET WORKBOOK NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates or refreshes a workbook-level defined name pointing to one cell.
@@ -2078,7 +2076,7 @@ Public Sub DEMO_Btn_Add( _
     Optional ByVal FillColor As Long = COLOR_BUTTON)
 '
 '==============================================================================
-'                             ADD DEMO BUTTON
+' ADD DEMO BUTTON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates one DEMO button as a worksheet Shape
@@ -2135,7 +2133,7 @@ Public Sub DEMO_Btn_Add( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Shp                 As Shape   'Created button shape
+    Dim Shp                 As Shape           'Created button shape
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -2215,7 +2213,7 @@ Public Sub DEMO_Hide_HelperColumns( _
     ByVal ColumnAddress As String)
 '
 '==============================================================================
-'                           HIDE HELPER COLUMNS
+' HIDE HELPER COLUMNS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Hides one or more helper columns used to store internal lists or support
@@ -2276,7 +2274,7 @@ Public Function DEMO_Create_Table( _
     As ListObject
 '
 '==============================================================================
-'                               CREATE TABLE
+' CREATE TABLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates or recreates an Excel ListObject on a target range.
@@ -2315,7 +2313,7 @@ Public Function DEMO_Create_Table( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Lo As ListObject   'Created or replaced table
+    Dim Lo                  As ListObject      'Created or replaced table
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -2368,7 +2366,7 @@ Public Sub DEMO_Clear_TableBody( _
     ByVal TableObject As ListObject)
 '
 '==============================================================================
-'                              CLEAR TABLE BODY
+' CLEAR TABLE BODY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clears the data body of a table while preserving its header row and
@@ -2416,7 +2414,7 @@ Public Sub DEMO_Append_TableRow( _
     ByVal RowValues As Variant)
 '
 '==============================================================================
-'                             APPEND TABLE ROW
+' APPEND TABLE ROW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Appends one row of values to an Excel table.
@@ -2455,11 +2453,11 @@ Public Sub DEMO_Append_TableRow( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LR          As ListRow   'Newly appended row
-    Dim i           As Long      'Column/value index
-    Dim LoBound     As Long      'Lower bound of the values array
-    Dim HiBound     As Long      'Upper bound of the values array
-    Dim MaxWrite    As Long      'Maximum number of values to write
+    Dim LR                  As ListRow         'Newly appended row
+    Dim i                   As Long            'Column/value index
+    Dim LoBound             As Long            'Lower bound of the values array
+    Dim HiBound             As Long            'Upper bound of the values array
+    Dim MaxWrite            As Long            'Maximum number of values to write
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -2497,7 +2495,6 @@ Public Sub DEMO_Append_TableRow( _
 End Sub
 
 
-
 Public Sub DEMO_Prepare_LabeledInputSection( _
     ByVal WS As Worksheet, _
     ByVal SectionHeaderRange As Range, _
@@ -2506,7 +2503,7 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
     ByVal ValueRange As Range)
 '
 '==============================================================================
-'                     PREPARE LABELED INPUT SECTION
+' PREPARE LABELED INPUT SECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the standard setup for a vertical label/value input section
@@ -2554,7 +2551,7 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
 ' UPDATED
 '   2026-04-19
 '==============================================================================
-    
+
 '------------------------------------------------------------------------------
 ' APPLY STANDARD SECTION FORMATTING
 '------------------------------------------------------------------------------
@@ -2584,7 +2581,7 @@ Public Sub DEMO_Write_NamedInputRow( _
     Optional ByVal NumberFormatText As String = "")
 '
 '==============================================================================
-'                         WRITE NAMED INPUT ROW
+' WRITE NAMED INPUT ROW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes one standard label/value row for a DEMO sheet control panel
@@ -2660,7 +2657,7 @@ Public Sub DEMO_Write_NamedInputRow( _
 ' UPDATED
 '   2026-04-19
 '==============================================================================
-    
+
 '------------------------------------------------------------------------------
 ' WRITE LABEL AND DEFAULT VALUE
 '------------------------------------------------------------------------------
@@ -2720,7 +2717,7 @@ Public Sub DEMO_Btn_AddGrid( _
     Optional ByVal OffsetTop As Double = 8)
 '
 '==============================================================================
-'                           ADD BUTTON GRID
+' ADD BUTTON GRID
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates a regular grid of DEMO buttons from a compact button specification
@@ -2797,15 +2794,15 @@ Public Sub DEMO_Btn_AddGrid( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long      'Loop index
-    Dim GridRow             As Long      'Zero-based button row
-    Dim GridCol             As Long      'Zero-based button column
-    Dim ButtonLeft          As Double    'Computed button left position
-    Dim ButtonTop           As Double    'Computed button top position
-    Dim ActionMacro         As String    'Resolved button action macro
-    Dim FillColor           As Long      'Resolved button fill color
-    Dim SpecItem            As Variant   'Current button specification item
-    Dim SpecUBound          As Long      'Upper bound of the current spec item
+    Dim i                   As Long            'Loop index
+    Dim GridRow             As Long            'Zero-based button row
+    Dim GridCol             As Long            'Zero-based button column
+    Dim ButtonLeft          As Double          'Computed button left position
+    Dim ButtonTop           As Double          'Computed button top position
+    Dim ActionMacro         As String          'Resolved button action macro
+    Dim FillColor           As Long            'Resolved button fill color
+    Dim SpecItem            As Variant         'Current button specification item
+    Dim SpecUBound          As Long            'Upper bound of the current spec item
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -2942,7 +2939,7 @@ Public Function DEMO_Create_TableSection( _
     Optional ByVal TableStyleName As String = "TableStyleMedium6") As ListObject
 '
 '==============================================================================
-'                         CREATE TABLE SECTION
+' CREATE TABLE SECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Builds a standard titled section containing a formatted ListObject table
@@ -3009,11 +3006,11 @@ Public Function DEMO_Create_TableSection( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim HeaderCount         As Long          'Number of table columns
-    Dim i                   As Long          'Loop index
-    Dim HeaderRange         As Range         'Formatted header row
-    Dim TableRange          As Range         'Range used to create the ListObject
-    Dim Lo                  As ListObject    'Created table object
+    Dim HeaderCount         As Long            'Number of table columns
+    Dim i                   As Long            'Loop index
+    Dim HeaderRange         As Range           'Formatted header row
+    Dim TableRange          As Range           'Range used to create the ListObject
+    Dim Lo                  As ListObject      'Created table object
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3143,14 +3140,12 @@ End Function
 '
 
 
-
-
 Public Sub DEMO_Btn_ApplyState( _
     ByVal Shp As Shape, _
     ByVal StateName As String)
 '
 '==============================================================================
-'                               APPLY BUTTON STATE
+' APPLY BUTTON STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies one named visual state to a shape-based button
@@ -3186,7 +3181,7 @@ Public Sub DEMO_Btn_ApplyState( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Col As Long   'Resolved fill color for the requested state
+    Dim Col                 As Long            'Resolved fill color for the requested state
 
 '------------------------------------------------------------------------------
 ' RESOLVE STATE COLOR
@@ -3194,13 +3189,13 @@ Public Sub DEMO_Btn_ApplyState( _
     Select Case UCase$(Trim$(StateName))
         Case "NORMAL"
             Col = BTN_PRIMARY_N
-        
+
         Case "HOVER"
             Col = BTN_PRIMARY_H
-        
+
         Case "PRESSED"
             Col = BTN_PRIMARY_P
-        
+
         Case Else
             Col = BTN_PRIMARY_N
     End Select
@@ -3225,7 +3220,7 @@ Private Function DEMO_Btn_CaptureAppearance( _
     As tButtonAppearance
 '
 '==============================================================================
-'                         CAPTURE BUTTON APPEARANCE
+' CAPTURE BUTTON APPEARANCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Captures the current visual appearance of a shape button
@@ -3255,7 +3250,7 @@ Private Function DEMO_Btn_CaptureAppearance( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim S As tButtonAppearance   'Captured appearance snapshot
+    Dim S                   As tButtonAppearance 'Captured appearance snapshot
 
 '------------------------------------------------------------------------------
 ' CAPTURE SHAPE APPEARANCE
@@ -3264,10 +3259,10 @@ Private Function DEMO_Btn_CaptureAppearance( _
         'Capture fill appearance
             S.FillVisible = .Fill.Visible
             S.FillColor = .Fill.ForeColor.RGB
-       
+
         'Capture line appearance
            S.LineVisible = .Line.Visible
-           
+
            If S.LineVisible = msoTrue Then
                S.LineColor = .Line.ForeColor.RGB
                S.LineWeight = .Line.Weight
@@ -3275,20 +3270,20 @@ Private Function DEMO_Btn_CaptureAppearance( _
                S.LineColor = 0
                S.LineWeight = 0!
            End If
-    
+
         'Capture text appearance when text is present
             If .TextFrame2.HasText Then
                 S.TextColor = .TextFrame2.TextRange.Font.Fill.ForeColor.RGB
                 S.TextBold = .TextFrame2.TextRange.Font.Bold
                 S.TextSize = .TextFrame2.TextRange.Font.Size
             End If
-        
+
         'Capture shadow appearance
             S.ShadowVisible = .Shadow.Visible
             S.ShadowBlur = .Shadow.Blur
             S.ShadowOffsetX = .Shadow.OffsetX
             S.ShadowOffsetY = .Shadow.OffsetY
-        
+
         'Capture position
             S.TopPos = .Top
             S.LeftPos = .Left
@@ -3307,7 +3302,7 @@ Private Sub DEMO_Btn_RestoreAppearance( _
     ByRef SavedState As tButtonAppearance)
 '
 '==============================================================================
-'                         RESTORE BUTTON APPEARANCE
+' RESTORE BUTTON APPEARANCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restores a previously captured visual appearance to a shape button
@@ -3343,25 +3338,25 @@ Private Sub DEMO_Btn_RestoreAppearance( _
         'Restore fill appearance
             .Fill.Visible = SavedState.FillVisible
             .Fill.ForeColor.RGB = SavedState.FillColor
-        
+
         'Restore line appearance
             .Line.Visible = SavedState.LineVisible
             .Line.ForeColor.RGB = SavedState.LineColor
             .Line.Weight = SavedState.LineWeight
-        
+
         'Restore text appearance when text is present
             If .TextFrame2.HasText Then
                 .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = SavedState.TextColor
                 .TextFrame2.TextRange.Font.Bold = SavedState.TextBold
                 .TextFrame2.TextRange.Font.Size = SavedState.TextSize
             End If
-        
+
         'Restore shadow appearance
             .Shadow.Visible = SavedState.ShadowVisible
             .Shadow.Blur = SavedState.ShadowBlur
             .Shadow.OffsetX = SavedState.ShadowOffsetX
             .Shadow.OffsetY = SavedState.ShadowOffsetY
-        
+
         'Restore position
             .Top = SavedState.TopPos
             .Left = SavedState.LeftPos
@@ -3370,11 +3365,10 @@ Private Sub DEMO_Btn_RestoreAppearance( _
 End Sub
 
 
-
 Public Sub DEMO_Btn_Click()
 '
 '==============================================================================
-'                                BUTTON CLICK
+' BUTTON CLICK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a short pressed-state visual feedback to the calling shape button
@@ -3418,12 +3412,12 @@ Public Sub DEMO_Btn_Click()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet           'Caller worksheet
-    Dim Shp                 As Shape               'Clicked shape
-    Dim SavedState          As tButtonAppearance   'Captured original appearance
-    Dim CallerName          As Variant             'Application.Caller value
-    Dim StartS              As Double              'Timer() snapshot at delay start
-    Dim ElapsedS            As Double              'Elapsed seconds during visual feedback
+    Dim WS                  As Worksheet       'Caller worksheet
+    Dim Shp                 As Shape           'Clicked shape
+    Dim SavedState          As tButtonAppearance 'Captured original appearance
+    Dim CallerName          As Variant         'Application.Caller value
+    Dim StartS              As Double          'Timer() snapshot at delay start
+    Dim ElapsedS            As Double          'Elapsed seconds during visual feedback
 
 '------------------------------------------------------------------------------
 ' RESOLVE CALLER
@@ -3497,7 +3491,7 @@ Public Sub DEMO_Btn_PlayFeedback()
 
 '
 '==============================================================================
-'                       DEMO_Btn_PlayFeedback
+' DEMO_Btn_PlayFeedback
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Invoke the shared button-click feedback helper on a best-effort basis
@@ -3534,7 +3528,7 @@ Public Sub DEMO_SB_SetProgress( _
     ByVal StepText As String)
 '
 '==============================================================================
-'                            SUITE SET PROGRESS
+' SUITE SET PROGRESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes regression-suite progress to the Excel status bar
@@ -3563,8 +3557,8 @@ Public Sub DEMO_SB_SetProgress( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Pct                 As Double       'Completion ratio
-    Dim PercentText         As String       'Formatted completion percentage
+    Dim Pct                 As Double          'Completion ratio
+    Dim PercentText         As String          'Formatted completion percentage
 
 '------------------------------------------------------------------------------
 ' NORMALIZE INPUTS
@@ -3607,7 +3601,7 @@ Public Sub DEMO_CB_AddForms( _
 
 '
 '==============================================================================
-'                           DEMO_CB_AddForms
+' DEMO_CB_AddForms
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Add one Forms check box for each cell in the supplied anchor range
@@ -3668,10 +3662,10 @@ Public Sub DEMO_CB_AddForms( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CellCount           As Long          'Number of target cells
-    Dim CellIndex           As Long          '1-based current target-cell index
-    Dim TargetCell          As Range         'Current target cell
-    Dim ResolvedName        As String        'Resolved check-box name for the current cell
+    Dim CellCount           As Long            'Number of target cells
+    Dim CellIndex           As Long            '1-based current target-cell index
+    Dim TargetCell          As Range           'Current target cell
+    Dim ResolvedName        As String          'Resolved check-box name for the current cell
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3744,7 +3738,7 @@ Private Sub DEMO_CB_ValidateNamesInput( _
 
 '
 '==============================================================================
-'                     DEMO_CB_ValidateNamesInput
+' DEMO_CB_ValidateNamesInput
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validate the optional CheckBoxNames input for DEMO_CB_AddForms
@@ -3774,9 +3768,9 @@ Private Sub DEMO_CB_ValidateNamesInput( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CellCount           As Long      'Number of target cells
-    Dim ArrLo               As Long      'Array lower bound
-    Dim ArrHi               As Long      'Array upper bound
+    Dim CellCount           As Long            'Number of target cells
+    Dim ArrLo               As Long            'Array lower bound
+    Dim ArrHi               As Long            'Array upper bound
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3851,7 +3845,7 @@ Private Function DEMO_CB_ResolveName( _
 
 '
 '==============================================================================
-'                       DEMO_CB_ResolveName
+' DEMO_CB_ResolveName
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolve the effective checkbox name for one target cell
@@ -3889,7 +3883,7 @@ Private Function DEMO_CB_ResolveName( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ArrLo               As Long      'Array lower bound
+    Dim ArrLo               As Long            'Array lower bound
 
 '------------------------------------------------------------------------------
 ' RESOLVE OMITTED CASE
@@ -3934,7 +3928,7 @@ Private Function DEMO_CB_DefaultName( _
 
 '
 '==============================================================================
-'                        DEMO_CB_DefaultName
+' DEMO_CB_DefaultName
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a deterministic default checkbox name from one target cell
@@ -3972,7 +3966,7 @@ Private Sub DEMO_AddOneFormsCheckBox( _
 
 '
 '==============================================================================
-'                        DEMO_AddOneFormsCheckBox
+' DEMO_AddOneFormsCheckBox
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Create one Forms check box centered inside one anchor cell
@@ -4005,11 +3999,11 @@ Private Sub DEMO_AddOneFormsCheckBox( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Cb                  As CheckBox    'Created Forms check box
-    Dim BoxWidth            As Double      'Check-box width
-    Dim BoxHeight           As Double      'Check-box height
-    Dim BoxLeft             As Double      'Resolved left position
-    Dim BoxTop              As Double      'Resolved top position
+    Dim Cb                  As CheckBox        'Created Forms check box
+    Dim BoxWidth            As Double          'Check-box width
+    Dim BoxHeight           As Double          'Check-box height
+    Dim BoxLeft             As Double          'Resolved left position
+    Dim BoxTop              As Double          'Resolved top position
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -4076,4 +4070,6 @@ Private Sub DEMO_AddOneFormsCheckBox( _
         Cb.PrintObject = True
 
 End Sub
+
+
 
