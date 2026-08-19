@@ -7,7 +7,63 @@ VBA API. Dates use the `YYYY-MM-DD` format.
 
 ## [Unreleased]
 
-No unreleased changes are currently documented.
+### Planned for 1.1.1
+
+A corrective release addressing the findings of the independent `v1.1.0` review
+recorded in `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`. The public API
+is unchanged: no procedure, enum or parameter is added, removed or renamed, and
+no existing call site requires modification.
+
+### Added
+
+- Added `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`, the independent
+  code and repository review of the `v1.1.0` tag at commit
+  `96360379a4bca7703cf649a69a2162961dfa6c9e`.
+- Added explicit-target title-bar entry points to `M_EXCEL_UI_TITLEBAR`:
+  `UI_TryGetActiveTitleBarHwnd`, `UI_TryGetTitleBarVisibleForHwnd`,
+  `UI_TrySetTitleBarVisibleForHwndIfNeeded` and
+  `UI_InternalIsTitleBarFrameAlive`. Callers that must read a frame now and
+  write it back later can resolve the target window once and keep it, rather
+  than re-resolving `Application.Hwnd` at each end of the operation.
+- Added the regression seams `UI_InternalResetTitleBarBaselineForHwnd`,
+  `UI_InternalIsFrameRefreshPending` and
+  `UI_InternalInjectFrameRefreshFailure`. The last makes the frame-refresh
+  recovery path executable, because there is no supported way to make Windows
+  fail `SetWindowPos` on demand.
+
+### Changed
+
+- Replaced the single process-wide title-bar baseline with a frame-state
+  registry keyed by top-level window handle. Operating on one workbook window
+  no longer discards the baseline captured for another, and entries whose
+  window has closed are reclaimed before the registry grows.
+- The title-bar baseline is now refreshed rather than captured once. While the
+  component does not own a hidden state for a window, the live owned style bits
+  are re-adopted on every call, so a legitimate frame change made by Excel or
+  another add-in survives the next hide and show instead of being reverted to
+  bits captured earlier in the session.
+- `UI_TryGetTitleBarVisible` and `UI_TrySetTitleBarVisibleIfNeeded` are now
+  documented and implemented as active-window wrappers over the explicit-target
+  entry points. Their signatures and behavior for existing callers are
+  unchanged.
+
+### Fixed
+
+- Fixed a title-bar style write and its non-client frame refresh not being
+  treated as one unit of work. `SetWindowLong` could succeed while
+  `SetWindowPos` failed, after which the desired style already matched the
+  current style and the next call short-circuited, reporting success over a
+  frame Windows had never re-measured. The outstanding refresh is now recorded
+  against the window and retried before the no-op test.
+  (`ICR-UI-P2-03`, #16)
+- Fixed the title-bar owned-bit baseline being a single process-wide value that
+  a second workbook window silently displaced, and that was never refreshed
+  after another component legitimately changed the owned frame bits.
+  (`ICR-UI-P2-04`, #15)
+
+### Documentation
+
+_Nothing yet._
 
 ## [1.1.0] - 2026-08-19
 
