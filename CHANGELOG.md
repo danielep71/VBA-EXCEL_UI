@@ -16,24 +16,21 @@ no existing call site requires modification.
 
 ### Added
 
-- Added `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`, the independent
-  code and repository review of the `v1.1.0` tag at commit
-  `96360379a4bca7703cf649a69a2162961dfa6c9e`.
 - Added explicit-target title-bar entry points to `M_EXCEL_UI_TITLEBAR`:
   `UI_TryGetActiveTitleBarHwnd`, `UI_TryGetTitleBarVisibleForHwnd`,
   `UI_TrySetTitleBarVisibleForHwndIfNeeded` and
   `UI_InternalIsTitleBarFrameAlive`. Callers that must read a frame now and
   write it back later can resolve the target window once and keep it, rather
   than re-resolving `Application.Hwnd` at each end of the operation.
+- Added `UI_SnapshotTryGetActiveWindow` and
+  `UI_SnapshotTryResolveTitleBarFrame` to `M_EXCEL_UI_SNAPSHOT`, which capture
+  the identity of the top-level frame a title-bar value was read from and prove
+  that frame is still present before anything is written back to it.
 - Added the regression seams `UI_InternalResetTitleBarBaselineForHwnd`,
   `UI_InternalIsFrameRefreshPending` and
   `UI_InternalInjectFrameRefreshFailure`. The last makes the frame-refresh
   recovery path executable, because there is no supported way to make Windows
   fail `SetWindowPos` on demand.
-- Added `UI_SnapshotTryGetActiveWindow` and
-  `UI_SnapshotTryResolveTitleBarFrame` to `M_EXCEL_UI_SNAPSHOT`, which capture
-  the identity of the top-level frame a title-bar value was read from and prove
-  that frame is still present before anything is written back to it.
 - Added `Test_EXCEL_UI_RunTitleBarSdiIdentity`, a regression runner covering
   title-bar restoration across two workbook windows. It verifies that a
   snapshot restores the frame it was captured from while a different window is
@@ -56,6 +53,11 @@ no existing call site requires modification.
   are re-adopted on every call, so a legitimate frame change made by Excel or
   another add-in survives the next hide and show instead of being reverted to
   bits captured earlier in the session.
+- The snapshot now retains the top-level window handle, the owning Excel
+  `Window` object and a diagnostic label for the captured title bar, and
+  restores through them. A captured frame that is no longer open is reported as
+  a title-bar failure naming the window, instead of the captured value being
+  applied to whichever workbook window is active at restore time.
 - `UI_TryGetTitleBarVisible` and `UI_TrySetTitleBarVisibleIfNeeded` are now
   documented and implemented as active-window wrappers over the explicit-target
   entry points. Their signatures and behavior for existing callers are
@@ -63,17 +65,6 @@ no existing call site requires modification.
 
 ### Fixed
 
-- Fixed a title-bar style write and its non-client frame refresh not being
-  treated as one unit of work. `SetWindowLong` could succeed while
-  `SetWindowPos` failed, after which the desired style already matched the
-  current style and the next call short-circuited, reporting success over a
-  frame Windows had never re-measured. The outstanding refresh is now recorded
-  against the window and retried before the no-op test.
-  (`ICR-UI-P2-03`, #16)
-- Fixed the title-bar owned-bit baseline being a single process-wide value that
-  a second workbook window silently displaced, and that was never refreshed
-  after another component legitimately changed the owned frame bits.
-  (`ICR-UI-P2-04`, #15)
 - Fixed title-bar snapshot restoration not being identity-safe under the Single
   Document Interface. `Application.Hwnd` reports the active workbook window's
   handle, and the snapshot re-resolved it on restore, so activating a different
@@ -81,10 +72,54 @@ no existing call site requires modification.
   state to another. Every API call succeeded, so the misdirection was silent and
   the originally captured frame was left unrestored.
   (`ICR-UI-P1-01`, #14)
+- Fixed the title-bar owned-bit baseline being a single process-wide value that
+  a second workbook window silently displaced, and that was never refreshed
+  after another component legitimately changed the owned frame bits.
+  (`ICR-UI-P2-04`, #15)
+- Fixed a title-bar style write and its non-client frame refresh not being
+  treated as one unit of work. `SetWindowLong` could succeed while
+  `SetWindowPos` failed, after which the desired style already matched the
+  current style and the next call short-circuited, reporting success over a
+  frame Windows had never re-measured. The outstanding refresh is now recorded
+  against the window and retried before the no-op test.
+  (`ICR-UI-P2-03`, #16)
 
 ### Documentation
 
-_Nothing yet._
+- Added `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`, the independent
+  code and repository review of the `v1.1.0` tag at commit
+  `96360379a4bca7703cf649a69a2162961dfa6c9e`. Every issue in the `1.1.1`
+  milestone cites it as a stable in-repo reference.
+
+### Compatibility
+
+```text
+Existing calls affected: none
+Backward compatible:     Yes
+Release type:            patch
+```
+
+- No public procedure was added, removed or renamed.
+- No existing parameter changed name, position, type or default.
+- No enum member or value changed.
+- The `Stage | Detail` diagnostic format is unchanged. A `TitleBar` entry can
+  now report that the captured frame is no longer available, where the previous
+  build silently applied the captured value to the active window instead.
+- Snapshot storage remains in memory only and does not survive a VBA project
+  reset or an Excel restart. It now also retains one `Window` reference for the
+  captured title-bar frame, released by `UI_ClearExcelUIStateSnapshot`, by a
+  replacing capture, or by a project reset.
+
+### Known limitations
+
+- Ribbon scope under the Single Document Interface remains uncharacterized and
+  is documented as application-level without supporting evidence. See `#21`.
+- The `README.md` title-bar scope statement still describes the pre-fix
+  behavior and is corrected with the rest of the documentation work. See `#19`.
+- `Test_EXCEL_UI_RunAll` does not execute every mandatory case; the SDI identity
+  runner must be invoked explicitly. See `#18`.
+- `tools/reformat.py` does not round-trip the committed production modules
+  byte-for-byte, so a formatter check cannot yet be made blocking. See `#20`.
 
 ## [1.1.0] - 2026-08-19
 
