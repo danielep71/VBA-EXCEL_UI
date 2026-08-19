@@ -111,6 +111,8 @@ Option Private Module
     Private Const TEST_ERR_BASE       As Long = vbObjectError + 4700  'Base custom error number for test assertions
     Private Const TEST_SNAPSHOT_ID_ERR_BASE As Long = vbObjectError + 4810  'Base custom error for snapshot-identity assertions
     Private Const TEST_TARGET_ERR_BASE As Long = vbObjectError + 4900  'Base custom error for target-scope tests
+    Private Const TEST_TITLEBAR_SDI_ERR_BASE As Long = vbObjectError + 5000  'Base custom error for title-bar SDI tests
+    Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -579,6 +581,146 @@ Err_Handler:
 End Sub
 
 
+Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunTitleBarSdiIdentity
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that title-bar snapshot restoration targets the window the state was
+'   captured from, and never the window that happens to be active at restore
+'   time.
+'
+' WHY THIS EXISTS
+'   Under the Single Document Interface each workbook window owns a separate
+'   top-level window, and Application.Hwnd reports whichever of them is active
+'   when it is read. A single-window regression run cannot distinguish "wrote
+'   to the captured frame" from "wrote to the active frame", because the two are
+'   the same window. Only a second window makes the difference observable.
+'
+'   The two cases below are the ones that would have caught ICR-UI-P1-01 before
+'   release.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
+'   - Runs the redirect case and the closed-frame case.
+'   - Clears any snapshot and restores the title bar before returning.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup.
+'   - Preserves the original test failure through cleanup.
+'
+' DEPENDENCIES
+'   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+'   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'
+' NOTES
+'   Destructive: creates and closes temporary workbooks. It is deliberately a
+'   separate runner rather than part of Test_EXCEL_UI_RunAll, because RunAll is
+'   currently non-destructive. Folding every mandatory case into one runner is
+'   tracked separately as the release-certification work.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window active before the run
+    Dim OldScreenUpdating   As Boolean         'Cached ScreenUpdating state
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "Test_EXCEL_UI_RunTitleBarSdiIdentity"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", "SDI title-bar identity test started"
+
+    'Refuse to destroy a snapshot the caller is relying on
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 1, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
+        End If
+
+    'Hold the window to return to, so the run leaves the host as it found it
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 2, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+    'These cases activate windows, so screen updates stay on for correctness
+        OldScreenUpdating = Application.ScreenUpdating
+
+'------------------------------------------------------------------------------
+' RUN REGRESSION CASES
+'------------------------------------------------------------------------------
+    'Restoration must reach the captured frame, not the active one
+        TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+
+    'A captured frame that has closed must be reported, never redirected
+        TST_Case_TitleBarCapturedFrameClosedIsReported
+
+    'Log successful completion before cleanup
+        TST_Log PROC, "PASS", _
+            "Restoration targeted the captured frame; a closed frame " & _
+            "was reported"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Leave no snapshot behind, and leave the frame visible
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
+
+            UI_SetExcelUI TitleBar:=UI_Show
+            Application.ScreenUpdating = OldScreenUpdating
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
 Private Sub TST_RunRegressionPack( _
     ByVal IncludeTitleBarTests As Boolean, _
     ByVal CallerProc As String)
@@ -861,6 +1003,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarRoundTrip
 '   - TST_Case_TitleBarOwnedBitPreservation
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
+'   - TST_Case_TitleBarFrameRefreshDebtRetried
 '
 ' UPDATED
 '   2026-08-18
@@ -930,9 +1073,12 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify that a show restores the frame with no captured baseline
         TST_Case_TitleBarShowRecoversWithoutBaseline
 
+    'Verify that a failed frame refresh is retried rather than short-circuited
+        TST_Case_TitleBarFrameRefreshDebtRetried
+
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
-            "Title-bar round-trip, owned-bit preservation, and show-recovery cases passed"
+            "Title-bar round-trip, owned-bit preservation, show-recovery, and refresh-debt cases passed"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
@@ -3711,6 +3857,605 @@ Err_Handler:
 End Sub
 
 
+Private Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
+
+'
+'==============================================================================
+' TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that restoring a snapshot writes the captured title-bar state to the
+'   window it was captured from, and leaves a different active window alone.
+'
+' WHY THIS EXISTS
+'   This is the direct regression for ICR-UI-P1-01. Before the fix the snapshot
+'   stored a Boolean with no record of its window and re-resolved
+'   Application.Hwnd on restore, so this sequence applied the anchor window's
+'   captured frame to the second window and reported success for it.
+'
+'   The assertion that matters is the negative one: the second window must be
+'   untouched. A test that only checked the anchor window would have passed
+'   against the defective build.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Creates a second workbook window.
+'   - Captures with the anchor window active and its title bar visible.
+'   - Hides the anchor title bar, then activates the second window.
+'   - Records the second window's frame state, then restores.
+'   - Asserts the anchor frame is restored and the second frame is unchanged.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup of the temporary workbook.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window whose frame is captured
+    Dim SecondWorkbook      As Workbook        'Temporary second workbook
+    Dim SecondWindow        As Window          'Window of the second workbook
+
+#If VBA7 Then
+    Dim AnchorHwnd          As LongPtr         'Top-level frame of the anchor
+    Dim SecondHwnd          As LongPtr         'Top-level frame of the second
+#Else
+    Dim AnchorHwnd          As Long            'Top-level frame of the anchor
+    Dim SecondHwnd          As Long            'Top-level frame of the second
+#End If
+
+    Dim SecondVisibleBefore As Boolean         'Second frame state before restore
+    Dim SecondVisibleAfter  As Boolean         'Second frame state after restore
+    Dim AnchorVisibleAfter  As Boolean         'Anchor frame state after restore
+
+    Dim OK                  As Boolean         'Structured result flag
+    Dim FailureCount        As Long            'Structured result failure count
+    Dim FailureList         As Variant         'Structured result failure list
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarSdiRestoreTargetsCapturedFrame"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that restore targets the captured frame under SDI"
+
+'------------------------------------------------------------------------------
+' PREPARE TWO TOP-LEVEL FRAMES
+'------------------------------------------------------------------------------
+    'Start from the current window and make sure its frame is visible
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 10, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        AnchorHwnd = Application.hWnd
+
+    'A second workbook gives a second top-level window under SDI
+        Set SecondWorkbook = Workbooks.Add
+        Set SecondWindow = SecondWorkbook.Windows(1)
+
+        SecondWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        SecondHwnd = Application.hWnd
+
+    'Without two distinct frames the case proves nothing, so say so rather than
+    'passing vacuously. A host that reports one handle for both windows is not
+    'running the interface this case exists to exercise.
+        If SecondHwnd = AnchorHwnd Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 11, _
+                PROC, _
+                "both workbook windows report the same top-level handle; " & _
+                "this host is not running the Single Document Interface " & _
+                "and the case cannot be evaluated"
+        End If
+
+'------------------------------------------------------------------------------
+' CAPTURE WITH THE ANCHOR ACTIVE
+'------------------------------------------------------------------------------
+    'Return to the anchor and capture its frame while it is visible
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess OK, FailureCount, FailureList, _
+            "SdiRestoreTargetsCapturedFrame.Capture"
+
+'------------------------------------------------------------------------------
+' DIVERGE THE TWO FRAMES
+'------------------------------------------------------------------------------
+    'Hide the anchor frame, so restoration has something to put back
+        UI_SetExcelUI TitleBar:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertBooleanEquals _
+            False, _
+            TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC), _
+            "SdiRestoreTargetsCapturedFrame.AnchorHiddenBeforeRestore"
+
+'------------------------------------------------------------------------------
+' ACTIVATE THE OTHER FRAME
+'------------------------------------------------------------------------------
+    'Make a different window active, which is the whole point of the case
+        SecondWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'Record the second frame exactly as it stands before restoration
+        SecondVisibleBefore = TST_TitleBarVisibleForHwndOrRaise(SecondHwnd, PROC)
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+    'Restore while the WRONG window is active
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertResultSuccess OK, FailureCount, FailureList, _
+            "SdiRestoreTargetsCapturedFrame.Restore"
+
+'------------------------------------------------------------------------------
+' ASSERT THE CAPTURED FRAME WAS RESTORED
+'------------------------------------------------------------------------------
+    'The anchor frame must be visible again, even though it was not active
+        AnchorVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
+
+        TST_AssertBooleanEquals _
+            True, _
+            AnchorVisibleAfter, _
+            "SdiRestoreTargetsCapturedFrame.AnchorRestored"
+
+'------------------------------------------------------------------------------
+' ASSERT THE ACTIVE FRAME WAS NOT TOUCHED
+'------------------------------------------------------------------------------
+    'This is the assertion the defective build failed: the active window must
+    'not receive another window's captured state
+        SecondVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(SecondHwnd, PROC)
+
+        TST_AssertBooleanEquals _
+            SecondVisibleBefore, _
+            SecondVisibleAfter, _
+            "SdiRestoreTargetsCapturedFrame.SecondWindowUntouched"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Captured frame restored; the active frame was left unchanged"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Release the snapshot and the temporary workbook before leaving
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+            TST_SafeCloseWorkbook SecondWorkbook
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
+
+'
+'==============================================================================
+' TST_Case_TitleBarCapturedFrameClosedIsReported
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that restoring a snapshot whose captured title-bar window has since
+'   closed reports a TitleBar failure and writes nothing.
+'
+' WHY THIS EXISTS
+'   Reporting the miss is the other half of ICR-UI-P1-01. A closed captured
+'   frame must not silently fall back to whatever window is active: that is the
+'   same misdirection, reached by a different route.
+'
+'   The surviving window's frame is asserted unchanged for exactly that reason.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Creates a second workbook and captures with its window active.
+'   - Closes that workbook, destroying the captured frame.
+'   - Restores and asserts a TitleBar failure is reported.
+'   - Asserts the surviving window's frame is unchanged.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup of the temporary workbook.
+'
+' NOTES
+'   Closing the captured window also invalidates its captured Window entry, so
+'   the structured result legitimately carries more than one failure. The
+'   assertion therefore looks for a TitleBar entry within the list rather than
+'   requiring it to be the only one.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window that survives the case
+    Dim DoomedWorkbook      As Workbook        'Temporary workbook to be closed
+    Dim DoomedWindow        As Window          'Window whose frame is captured
+
+#If VBA7 Then
+    Dim AnchorHwnd          As LongPtr         'Top-level frame of the anchor
+#Else
+    Dim AnchorHwnd          As Long            'Top-level frame of the anchor
+#End If
+
+    Dim AnchorVisibleBefore As Boolean         'Anchor frame before restore
+    Dim AnchorVisibleAfter  As Boolean         'Anchor frame after restore
+
+    Dim OK                  As Boolean         'Structured result flag
+    Dim FailureCount        As Long            'Structured result failure count
+    Dim FailureList         As Variant         'Structured result failure list
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarCapturedFrameClosedIsReported"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a closed captured frame is reported"
+
+'------------------------------------------------------------------------------
+' PREPARE THE SURVIVING FRAME
+'------------------------------------------------------------------------------
+    'Hold the window that must remain untouched
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 20, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        AnchorHwnd = Application.hWnd
+
+'------------------------------------------------------------------------------
+' CAPTURE THE FRAME THAT WILL BE DESTROYED
+'------------------------------------------------------------------------------
+    'Capture with the temporary window active, so the snapshot names its frame
+        Set DoomedWorkbook = Workbooks.Add
+        Set DoomedWindow = DoomedWorkbook.Windows(1)
+
+        DoomedWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess OK, FailureCount, FailureList, _
+            "TitleBarCapturedFrameClosed.Capture"
+
+'------------------------------------------------------------------------------
+' DESTROY THE CAPTURED FRAME
+'------------------------------------------------------------------------------
+    'Close the captured window; the snapshot now names a frame that is gone
+        TST_SafeCloseWorkbook DoomedWorkbook
+
+        Set DoomedWindow = Nothing
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'Record the surviving frame exactly as it stands before restoration
+        AnchorVisibleBefore = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+    'Restoration must refuse the title bar rather than redirect it
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT THE MISS IS REPORTED
+'------------------------------------------------------------------------------
+    'A TitleBar entry must appear in the ordered failure list
+        TST_AssertFailureListContainsPrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="TitleBar", _
+            AssertionName:="TitleBarCapturedFrameClosed.Reported"
+
+'------------------------------------------------------------------------------
+' ASSERT THE SURVIVING FRAME WAS NOT TOUCHED
+'------------------------------------------------------------------------------
+    'Nothing may be written when the captured frame cannot be proven present
+        AnchorVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
+
+        TST_AssertBooleanEquals _
+            AnchorVisibleBefore, _
+            AnchorVisibleAfter, _
+            "TitleBarCapturedFrameClosed.SurvivorUntouched"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Closed captured frame was reported and no state was applied"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Release the snapshot and any surviving temporary workbook
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+            TST_SafeCloseWorkbook DoomedWorkbook
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarFrameRefreshDebtRetried()
+
+'
+'==============================================================================
+' TST_Case_TitleBarFrameRefreshDebtRetried
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a style write whose frame refresh failed is recorded as owed and
+'   retried on the next call, instead of being short-circuited as a no-op.
+'
+' WHY THIS EXISTS
+'   This is the regression for ICR-UI-P2-03. After a failed refresh the style
+'   already matches the request, so the no-op test would otherwise fire and
+'   report success over a frame Windows never re-measured. That false success is
+'   invisible from the outside, which is why the module exposes a debt-query
+'   seam: without it this case could only assert that the second call succeeded,
+'   which it would also do if the debt had simply been forgotten.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Clears the frame-state registry so the case starts from a known state.
+'   - Arms a one-shot frame-refresh failure.
+'   - Requests a hide and asserts it reports failure.
+'   - Asserts a refresh is recorded as owed for the window.
+'   - Repeats the request and asserts it succeeds and clears the debt.
+'
+' ERROR POLICY
+'   - Raises after best-effort restoration of the frame.
+'
+' NOTES
+'   Uses the internal seams UI_InternalInjectFrameRefreshFailure and
+'   UI_InternalIsFrameRefreshPending. They are Public only for same-project
+'   regression access; Option Private Module keeps them out of the external
+'   automation namespace.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim TargetHwnd          As LongPtr         'Frame under test
+#Else
+    Dim TargetHwnd          As Long            'Frame under test
+#End If
+
+    Dim FirstAttemptOK      As Boolean         'Result of the injected-failure call
+    Dim SecondAttemptOK     As Boolean         'Result of the retry call
+    Dim Msg                 As String          'Diagnostic buffer
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarFrameRefreshDebtRetried"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a failed frame refresh is retried"
+
+'------------------------------------------------------------------------------
+' PREPARE A KNOWN FRAME STATE
+'------------------------------------------------------------------------------
+    'Start from a visible frame and an empty registry
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_InternalResetTitleBarBaseline
+
+        TargetHwnd = Application.hWnd
+
+        If TargetHwnd = 0 Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 30, _
+                PROC, _
+                "no Excel window handle is available"
+        End If
+
+'------------------------------------------------------------------------------
+' FAIL THE FRAME REFRESH
+'------------------------------------------------------------------------------
+    'Arm the one-shot seam, then request a hide
+        UI_InternalInjectFrameRefreshFailure True
+
+        FirstAttemptOK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=False, _
+            FailMsg:=Msg)
+
+    'The style write succeeded and the repaint did not, so this must report
+    'failure rather than success
+        TST_AssertBooleanEquals _
+            False, _
+            FirstAttemptOK, _
+            "TitleBarFrameRefreshDebt.FirstAttemptReportsFailure"
+
+'------------------------------------------------------------------------------
+' ASSERT THE DEBT WAS RECORDED
+'------------------------------------------------------------------------------
+    'Without this the next call cannot know a repaint is still owed
+        TST_AssertBooleanEquals _
+            True, _
+            UI_InternalIsFrameRefreshPending(TargetHwnd), _
+            "TitleBarFrameRefreshDebt.DebtRecorded"
+
+'------------------------------------------------------------------------------
+' RETRY
+'------------------------------------------------------------------------------
+    'The same request again. The style already matches, so a build without the
+    'debt would short-circuit here and report a false success.
+        SecondAttemptOK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=False, _
+            FailMsg:=Msg)
+
+        TST_AssertBooleanEquals _
+            True, _
+            SecondAttemptOK, _
+            "TitleBarFrameRefreshDebt.RetrySucceeds"
+
+'------------------------------------------------------------------------------
+' ASSERT THE DEBT WAS SETTLED
+'------------------------------------------------------------------------------
+    'A confirmed repaint is the only thing that may clear the debt
+        TST_AssertBooleanEquals _
+            False, _
+            UI_InternalIsFrameRefreshPending(TargetHwnd), _
+            "TitleBarFrameRefreshDebt.DebtCleared"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Failed refresh was recorded as owed and retried on the next call"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Disarm the seam and put the frame back, whatever happened above
+        On Error Resume Next
+            UI_InternalInjectFrameRefreshFailure False
+            UI_SetExcelUI TitleBar:=UI_Show
+        On Error GoTo 0
+
+    'Raise the captured failure after restoration when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
 #If VBA7 Then
 Private Sub TST_RestoreTitleBarStyle( _
     ByVal hWnd As LongPtr, _
@@ -5396,6 +6141,205 @@ End Sub
 '
 '------------------------------------------------------------------------------
 '
+
+#If VBA7 Then
+Private Function TST_TitleBarVisibleForHwndOrRaise( _
+    ByVal TargetHwnd As LongPtr, _
+    ByVal CallerProc As String) As Boolean
+#Else
+Private Function TST_TitleBarVisibleForHwndOrRaise( _
+    ByVal TargetHwnd As Long, _
+    ByVal CallerProc As String) As Boolean
+#End If
+
+'
+'==============================================================================
+' TST_TitleBarVisibleForHwndOrRaise
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Read title-bar visibility for one explicitly supplied top-level window, and
+'   raise when it cannot be read.
+'
+' WHY THIS EXISTS
+'   TST_TryGetTitleBarVisible reads through Application.Hwnd, which under the
+'   Single Document Interface names whichever window is active. A multi-window
+'   case must be able to inspect a specific frame while a different one is
+'   active, or it cannot tell the two apart, which is the entire point of the
+'   cases that call this.
+'
+'   It raises rather than returning a flag because an unreadable frame makes the
+'   surrounding assertion meaningless; reporting False would silently weaken the
+'   case into one that could pass against a defective build.
+'
+' INPUTS
+'   TargetHwnd
+'     Top-level window to read.
+'
+'   CallerProc
+'     Calling case name, used as the error source.
+'
+' RETURNS
+'   Boolean
+'     TRUE when WS_CAPTION is set on the supplied window.
+'
+' ERROR POLICY
+'   - Raises when the style cannot be read.
+'
+' DEPENDENCIES
+'   - TST_TryGetWindowStyle
+'
+' CALLED FROM
+'   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+'   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim StyleValue          As LongPtr         'Live GWL_STYLE value
+#Else
+    Dim StyleValue          As Long            'Live GWL_STYLE value
+#End If
+
+    Dim FailMsg             As String          'Diagnostic returned by the read
+
+'------------------------------------------------------------------------------
+' READ STYLE
+'------------------------------------------------------------------------------
+    'Read the live style for the supplied window, never the active one
+        If Not TST_TryGetWindowStyle(TargetHwnd, StyleValue, FailMsg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 40, _
+                CallerProc, _
+                "unable to read the window style for the supplied " & _
+                "frame: " & FailMsg
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN RESULT
+'------------------------------------------------------------------------------
+    'Visibility is carried by the caption bit alone
+        TST_TitleBarVisibleForHwndOrRaise = _
+            ((StyleValue And TEST_WS_CAPTION) <> 0)
+
+End Function
+
+
+Private Sub TST_AssertFailureListContainsPrefix( _
+    ByVal Succeeded As Boolean, _
+    ByVal FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal ExpectedPrefix As String, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+' TST_AssertFailureListContainsPrefix
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert a structured result reported failure and that at least one ordered
+'   entry begins with the expected stage prefix.
+'
+' WHY THIS EXISTS
+'   TST_AssertSingleFailurePrefix requires the entry to be the only one. Closing
+'   a captured window legitimately produces more than one failure, because the
+'   window identity and the title-bar frame are both lost by the same act.
+'   Requiring exactly one entry there would assert a contract the component does
+'   not make.
+'
+' INPUTS
+'   Succeeded
+'     Structured result flag; must be FALSE.
+'
+'   FailureCount
+'     Structured result failure count; must be at least one.
+'
+'   FailureList
+'     Ordered failure entries.
+'
+'   ExpectedPrefix
+'     Stage prefix at least one entry must start with.
+'
+'   AssertionName
+'     Diagnostic label for the raised error.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises a descriptive assertion failure.
+'
+' CALLED FROM
+'   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the failure entries
+    Dim EntryText           As String          'One failure entry as text
+    Dim Found               As Boolean         'TRUE once a match is seen
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE WAS REPORTED
+'------------------------------------------------------------------------------
+    'A success here would mean the component wrote state it could not verify
+        If Succeeded Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 50, _
+                AssertionName, _
+                "expected a structured failure but the operation reported success"
+        End If
+
+        If FailureCount < 1 Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 51, _
+                AssertionName, _
+                "expected at least one ordered failure entry but " & _
+                "FailureCount was " & CStr(FailureCount)
+        End If
+
+        If Not IsArray(FailureList) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 52, _
+                AssertionName, _
+                "expected an ordered failure list but no array was returned"
+        End If
+
+'------------------------------------------------------------------------------
+' SCAN FOR THE EXPECTED STAGE
+'------------------------------------------------------------------------------
+    'Any entry carrying the prefix satisfies the contract under test
+        For ScanIdx = LBound(FailureList) To UBound(FailureList)
+
+            EntryText = CStr(FailureList(ScanIdx))
+
+            If Left$(EntryText, Len(ExpectedPrefix)) = ExpectedPrefix Then
+                Found = True
+                Exit For
+            End If
+
+        Next ScanIdx
+
+        If Not Found Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 53, _
+                AssertionName, _
+                "no ordered failure entry began with the expected stage " & _
+                "prefix " & ExpectedPrefix
+        End If
+
+End Sub
+
 
 Private Sub TST_Log( _
     ByVal ProcName As String, _
