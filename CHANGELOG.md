@@ -26,11 +26,16 @@ no existing call site requires modification.
   `UI_SnapshotTryResolveTitleBarFrame` to `M_EXCEL_UI_SNAPSHOT`, which capture
   the identity of the top-level frame a title-bar value was read from and prove
   that frame is still present before anything is written back to it.
+- Added `UI_RuntimeTryAppendFailureEntry` and
+  `UI_RuntimeMarkFailureListTruncated` to `M_EXCEL_UI_RUNTIME`, which separate
+  the fallible allocation from the infallible status update, and record a
+  truncation marker in a slot that already exists when the list cannot grow.
 - Added the regression seams `UI_InternalResetTitleBarBaselineForHwnd`,
-  `UI_InternalIsFrameRefreshPending` and
-  `UI_InternalInjectFrameRefreshFailure`. The last makes the frame-refresh
-  recovery path executable, because there is no supported way to make Windows
-  fail `SetWindowPos` on demand.
+  `UI_InternalIsFrameRefreshPending`, `UI_InternalInjectFrameRefreshFailure`
+  and `UI_InternalInjectFailureListGrowthFailure`. They exist because neither a
+  `SetWindowPos` failure nor an exhausted allocation can be produced on demand,
+  and a recovery path that cannot be executed is indistinguishable from one
+  that was never written.
 - Added `Test_EXCEL_UI_RunTitleBarSdiIdentity`, a regression runner covering
   title-bar restoration across two workbook windows. It verifies that a
   snapshot restores the frame it was captured from while a different window is
@@ -41,6 +46,9 @@ no existing call site requires modification.
   pack, which injects a frame-refresh failure and verifies that the outstanding
   repaint is recorded and retried on the next call rather than short-circuited
   as a no-op.
+- Added `TST_Case_FailureAccumulatorDegradesSafely` to the core regression
+  pack, which injects a failure-list growth failure and verifies that the
+  status outputs survive, the truncation is reported, and nothing raises.
 
 ### Changed
 
@@ -58,6 +66,10 @@ no existing call site requires modification.
   restores through them. A captured frame that is no longer open is reported as
   a title-bar failure naming the window, instead of the captured value being
   applied to whichever workbook window is active at restore time.
+- `FailureCount` is now documented as authoritative and `FailureList` as best
+  effort. The list can hold fewer entries than the count when an allocation
+  fails, but never silently: a `Diagnostics` truncation marker is written into
+  an existing slot whenever growth failed.
 - `UI_TryGetTitleBarVisible` and `UI_TrySetTitleBarVisibleIfNeeded` are now
   documented and implemented as active-window wrappers over the explicit-target
   entry points. Their signatures and behavior for existing callers are
@@ -83,6 +95,16 @@ no existing call site requires modification.
   frame Windows had never re-measured. The outstanding refresh is now recorded
   against the window and retried before the no-op test.
   (`ICR-UI-P2-03`, #16)
+- Fixed failure accumulation being able to raise from inside an error handler.
+  `UI_RuntimeAddFailure` grew the failure list with no error boundary and
+  assumed the buffer already held a `String` array whose bound agreed with the
+  count. An allocation failure, or a buffer holding anything else, replaced the
+  original failure with the failure to record it, could abort a pass designed
+  to continue, and could bypass the `ScreenUpdating` restoration in
+  `UI_RuntimeEndQuietUpdate`. The status outputs are now set before anything
+  fallible is attempted, the entry text degrades rather than failing, and the
+  allocation is isolated behind a Boolean contract.
+  (`ICR-UI-P2-02`, #17)
 
 ### Documentation
 
@@ -102,9 +124,14 @@ Release type:            patch
 - No public procedure was added, removed or renamed.
 - No existing parameter changed name, position, type or default.
 - No enum member or value changed.
-- The `Stage | Detail` diagnostic format is unchanged. A `TitleBar` entry can
-  now report that the captured frame is no longer available, where the previous
-  build silently applied the captured value to the active window instead.
+- The `Stage | Detail` diagnostic format is unchanged. Two new entries can now
+  appear: a `TitleBar` entry reporting that the captured frame is no longer
+  available, where the previous build silently applied the captured value to the
+  active window; and a `Diagnostics` entry reporting that the failure list could
+  not be grown.
+- `FailureList` may now hold fewer entries than `FailureCount` under memory
+  pressure. Callers that assumed the two always agreed should read the count as
+  authoritative and treat the list as descriptive.
 - Snapshot storage remains in memory only and does not survive a VBA project
   reset or an Excel restart. It now also retains one `Window` reference for the
   captured title-bar frame, released by `UI_ClearExcelUIStateSnapshot`, by a

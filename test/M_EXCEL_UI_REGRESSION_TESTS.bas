@@ -863,6 +863,9 @@ Private Sub TST_RunRegressionPack( _
     'Run the ScreenUpdating preservation case
         TST_Case_ScreenUpdatingPreserved
 
+    'Verify diagnostics degrade rather than raise when the list cannot grow
+        TST_Case_FailureAccumulatorDegradesSafely
+
 '------------------------------------------------------------------------------
 ' RUN OPTIONAL SNAPSHOT CASES
 '------------------------------------------------------------------------------
@@ -3419,6 +3422,195 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
             "ScreenUpdating preservation behaved as expected"
 
 End Sub
+
+Private Sub TST_Case_FailureAccumulatorDegradesSafely()
+
+'
+'==============================================================================
+' TST_Case_FailureAccumulatorDegradesSafely
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a failure list which cannot be grown degrades visibly instead of
+'   raising, and that the authoritative status outputs survive intact.
+'
+' WHY THIS EXISTS
+'   This is the regression for ICR-UI-P2-02. The accumulator is reached FROM
+'   error handlers, so an allocation failure inside it used to replace the very
+'   failure it was invoked to record, and could abort a pass designed to
+'   continue.
+'
+'   The case drives UI_RuntimeHandleFailure directly with local buffers rather
+'   than through the public facade. That is deliberate: the facade clears its
+'   result buffers at the start of every call, so a facade-level test cannot
+'   arrange for one entry to be recorded successfully and the NEXT one to fail,
+'   which is the sequence that exercises the truncation marker.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Records one failure normally and asserts it was listed.
+'   - Arms a one-shot growth failure and records a second failure.
+'   - Asserts the call did not raise, the count still advanced, the list did
+'     not grow, and a truncation marker was written into the existing slot.
+'   - Repeats the growth failure against an empty buffer and asserts the count
+'     still advances with no list and no error.
+'
+' ERROR POLICY
+'   - Raises on assertion failure, after disarming the seam.
+'
+' NOTES
+'   Uses the internal seam UI_InternalInjectFailureListGrowthFailure. It is
+'   Public only for same-project regression access; Option Private Module keeps
+'   it out of the external automation namespace.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Succeeded           As Boolean         'Result contract success flag
+    Dim FailureCount        As Long            'Result contract failure count
+    Dim FailureList         As Variant         'Result contract failure list
+    Dim MarkerText          As String          'Final entry after truncation
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_FailureAccumulatorDegradesSafely"
+    Const MARKER_PREFIX As String = "Diagnostics |"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that failure accumulation degrades instead of raising"
+
+    'Start from the documented empty result contract
+        Succeeded = True
+        UI_RuntimeClearResultBuffer FailureCount, FailureList, True
+
+'------------------------------------------------------------------------------
+' RECORD ONE FAILURE NORMALLY
+'------------------------------------------------------------------------------
+    'A healthy append is the precondition for the truncation case below
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageOne", "first failure detail"
+
+        TST_AssertBooleanEquals _
+            False, Succeeded, "FailureAccumulator.SucceededCleared"
+
+        TST_AssertTrue _
+            (FailureCount = 1), "FailureAccumulator.FirstCount"
+
+        TST_AssertTrue _
+            IsArray(FailureList), "FailureAccumulator.FirstListIsArray"
+
+        TST_AssertTrue _
+            (UBound(FailureList) = 1), "FailureAccumulator.FirstListBound"
+
+'------------------------------------------------------------------------------
+' FAIL THE NEXT GROWTH
+'------------------------------------------------------------------------------
+    'Arm the one-shot seam, then record a second failure. Nothing here may
+    'raise: the accumulator runs inside error handlers.
+        UI_InternalInjectFailureListGrowthFailure True
+
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageTwo", "second failure detail"
+
+'------------------------------------------------------------------------------
+' ASSERT THE COUNT SURVIVED
+'------------------------------------------------------------------------------
+    'The count is authoritative and must advance even when nothing was listed
+        TST_AssertTrue _
+            (FailureCount = 2), "FailureAccumulator.CountAdvancedDespiteGrowthFailure"
+
+'------------------------------------------------------------------------------
+' ASSERT THE LIST DID NOT GROW
+'------------------------------------------------------------------------------
+    'A silently short list is the outcome this case exists to rule out
+        TST_AssertTrue _
+            (UBound(FailureList) = 1), "FailureAccumulator.ListDidNotGrow"
+
+'------------------------------------------------------------------------------
+' ASSERT THE TRUNCATION WAS REPORTED
+'------------------------------------------------------------------------------
+    'The marker must occupy a slot that already existed, so that reporting the
+    'allocation failure did not itself require an allocation
+        MarkerText = CStr(FailureList(UBound(FailureList)))
+
+        TST_AssertTrue _
+            (Left$(MarkerText, Len(MARKER_PREFIX)) = MARKER_PREFIX), _
+            "FailureAccumulator.TruncationMarkerWritten"
+
+'------------------------------------------------------------------------------
+' FAIL A GROWTH WITH NO EXISTING SLOT
+'------------------------------------------------------------------------------
+    'With an empty buffer there is nowhere to write a marker without
+    'allocating. The count must still advance and nothing may raise.
+        Succeeded = True
+        UI_RuntimeClearResultBuffer FailureCount, FailureList, True
+
+        UI_InternalInjectFailureListGrowthFailure True
+
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageThree", "third failure detail"
+
+        TST_AssertBooleanEquals _
+            False, Succeeded, "FailureAccumulator.EmptyBufferSucceededCleared"
+
+        TST_AssertTrue _
+            (FailureCount = 1), "FailureAccumulator.EmptyBufferCountAdvanced"
+
+        TST_AssertTrue _
+            Not IsArray(FailureList), "FailureAccumulator.EmptyBufferListUnallocated"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Accumulation degraded visibly and never raised"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Disarm the seam whatever happened above
+        On Error Resume Next
+            UI_InternalInjectFailureListGrowthFailure False
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
 
 Private Sub TST_Case_TitleBarRoundTrip()
 
