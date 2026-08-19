@@ -34,7 +34,6 @@ Option Private Module
 '   Regression seams:
 '   - UI_InternalMergeTitleBarStyleBits
 '   - UI_InternalResetTitleBarBaseline
-'   - UI_InternalResetTitleBarBaselineForHwnd
 '   - UI_InternalIsFrameRefreshPending
 '   - UI_InternalInjectFrameRefreshFailure
 '
@@ -133,6 +132,7 @@ Option Private Module
 '     drift apart.
 '
 ' UPDATED
+'   2026-08-19 - Removed the unused per-handle baseline-reset seam.
 '   2026-08-19 - Replaced the singleton frame baseline with a per-handle
 '                registry, added the explicit-target entry points, and made a
 '                failed frame refresh a recorded debt rather than a silent
@@ -987,104 +987,6 @@ End Sub
 
 
 #If VBA7 Then
-Public Sub UI_InternalResetTitleBarBaselineForHwnd( _
-    ByVal TargetHwnd As LongPtr)
-#Else
-Public Sub UI_InternalResetTitleBarBaselineForHwnd( _
-    ByVal TargetHwnd As Long)
-#End If
-'
-'==============================================================================
-' UI_InternalResetTitleBarBaselineForHwnd
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Discards the frame state held for one window, leaving every other entry in
-'   the registry intact.
-'
-' WHY THIS EXISTS
-'   The multi-window regression cases need to simulate "this module has never
-'   seen window B" while window A still holds a captured baseline. Clearing the
-'   whole registry would destroy the very state those cases exist to assert on.
-'
-' INPUTS
-'   TargetHwnd
-'     Window whose entry is discarded. An unknown handle is ignored.
-'
-' RETURNS
-'   None.
-'
-' BEHAVIOR
-'   - Removes the matching entry and closes the gap left behind.
-'   - Touches no window style.
-'
-' ERROR POLICY
-'   - Does not raise.
-'
-' DEPENDENCIES
-'   - UI_FrameStateIndexForHwnd
-'
-' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
-'
-' NOTES
-'   Public only for same-project regression access, on the same basis as
-'   UI_InternalResetTitleBarBaseline.
-'
-' UPDATED
-'   2026-08-19
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim Slot                As Long            'Registry index for TargetHwnd
-    Dim ShiftIdx            As Long            'Cursor closing the gap left
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
-
-'------------------------------------------------------------------------------
-' LOCATE ENTRY
-'------------------------------------------------------------------------------
-    'Look the handle up without creating an entry for it
-        Slot = UI_FrameStateIndexForHwnd(TargetHwnd, False)
-
-        If Slot < 1 Then
-            GoTo Safe_Exit
-        End If
-
-'------------------------------------------------------------------------------
-' REMOVE ENTRY
-'------------------------------------------------------------------------------
-    'Shift the tail down over the removed entry, then drop the last slot
-        For ShiftIdx = Slot To m_FrameStateCount - 1
-            m_FrameStates(ShiftIdx) = m_FrameStates(ShiftIdx + 1)
-        Next ShiftIdx
-
-        m_FrameStateCount = m_FrameStateCount - 1
-
-'------------------------------------------------------------------------------
-' RETURN SUCCESS
-'------------------------------------------------------------------------------
-Safe_Exit:
-    'Exit before the error-handler block
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-Err_Handler:
-    'A seam must never raise into the harness that called it
-        Resume Safe_Exit
-
-End Sub
-
-
-#If VBA7 Then
 Public Function UI_InternalIsFrameRefreshPending( _
     ByVal TargetHwnd As LongPtr) _
     As Boolean
@@ -1620,7 +1522,6 @@ Private Function UI_FrameStateIndexForHwnd( _
 '
 ' CALLED FROM
 '   - UI_TrySetTitleBarVisibleForHwndWorker
-'   - UI_InternalResetTitleBarBaselineForHwnd
 '   - UI_InternalIsFrameRefreshPending
 '
 ' UPDATED

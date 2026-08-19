@@ -30,12 +30,13 @@ no existing call site requires modification.
   `UI_RuntimeMarkFailureListTruncated` to `M_EXCEL_UI_RUNTIME`, which separate
   the fallible allocation from the infallible status update, and record a
   truncation marker in a slot that already exists when the list cannot grow.
-- Added the regression seams `UI_InternalResetTitleBarBaselineForHwnd`,
-  `UI_InternalIsFrameRefreshPending`, `UI_InternalInjectFrameRefreshFailure`
-  and `UI_InternalInjectFailureListGrowthFailure`. They exist because neither a
+- Added the regression seams `UI_InternalIsFrameRefreshPending`,
+  `UI_InternalInjectFrameRefreshFailure` and
+  `UI_InternalInjectFailureListGrowthFailure`. They exist because neither a
   `SetWindowPos` failure nor an exhausted allocation can be produced on demand,
   and a recovery path that cannot be executed is indistinguishable from one
-  that was never written.
+  that was never written. Each seam has a caller: a seam without one is the
+  same defect wearing different clothes.
 - Added `Test_EXCEL_UI_RunTitleBarSdiIdentity`, a regression runner covering
   title-bar restoration across two workbook windows. It verifies that a
   snapshot restores the frame it was captured from while a different window is
