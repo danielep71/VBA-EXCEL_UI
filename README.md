@@ -370,8 +370,13 @@ Expected behavior:
 - a closed, recreated, or otherwise unusable captured window is reported as a best-effort failure;
 - state is never intentionally applied to a different replacement window.
 
+Every captured element carries a `Known` flag recording whether its value was actually readable — the Ribbon, the title bar, the three application-level properties, and each window's Headings, Workbook Tabs and Gridlines. Capture continues after an element-level failure, and restoration never writes a value that was not successfully captured. A partial capture is therefore still a usable snapshot.
+
 > [!CAUTION]
 > Snapshot restoration is not persistent or transactional. It cannot survive a VBA project reset or guarantee rollback after Excel process termination.
+
+> [!IMPORTANT]
+> A snapshot retains a live `Window` reference per captured window, and restoring does not release them: the snapshot is deliberately kept so it can be replayed. Call `UI_ClearExcelUIStateSnapshot` when the baseline is no longer needed — `Workbook_BeforeClose` is the natural place. See [INSTALLATION.md](INSTALLATION.md#snapshot-lifetime-and-window-references).
 
 ---
 
@@ -386,6 +391,8 @@ The title-bar subsystem owns only these `GWL_STYLE` bits:
 - `WS_MAXIMIZEBOX`.
 
 Showing the title bar merges the captured owned bits into the current style. It does not restore an entire historical style value, so unrelated style changes are preserved.
+
+When a show is requested and no baseline was ever captured for the current handle, the full owned frame is restored instead. That case is reached after a VBA project reset, because the window style belongs to the running Excel process and survives while module state does not. Without the fallback a show would re-apply the current hidden bits, report success, and leave the title bar hidden — so this is what keeps `UI_ShowExcelUI` a real recovery path.
 
 The WinAPI path remains Windows-only and best effort. It supports VBA7 32-bit, VBA7 64-bit, and the legacy 32-bit declaration path through conditional compilation.
 
@@ -453,7 +460,9 @@ The suite covers:
 - title-bar owned-bit preservation and real WinAPI round-trips;
 - active-window targeting;
 - active-workbook-window targeting;
-- invalid-target-scope diagnostics and application-level continuation.
+- invalid-target-scope diagnostics and application-level continuation;
+- title-bar show recovery when no owned-bit baseline was captured;
+- per-element application-level capture and idempotent restoration.
 
 > [!IMPORTANT]
 > Tests manipulate the real Excel UI of the current process. Run them in a controlled Excel instance.
