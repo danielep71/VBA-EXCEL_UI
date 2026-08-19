@@ -50,6 +50,13 @@ no existing call site requires modification.
 - Added `TST_Case_FailureAccumulatorDegradesSafely` to the core regression
   pack, which injects a failure-list growth failure and verifies that the
   status outputs survive, the truncation is reported, and nothing raises.
+- Added `Test_EXCEL_UI_RunRibbonSdiProbe`, a characterization probe that records
+  Ribbon visibility through `CommandBars("Ribbon").Visible`, the same object's
+  `Height`, and the legacy `Get.ToolBar` query, across five scenarios spanning
+  two workbook windows and a window created after a hide. It is deliberately a
+  probe rather than a test: it asserts nothing, because writing assertions
+  before the host behavior is known would encode the assumption the exercise
+  exists to remove.
 - Added `Test_EXCEL_UI_RunReleaseCertification`, a single runner that executes
   every mandatory regression unit, counts units, failures, skips and cleanup
   separately, verifies the host state afterwards rather than assuming it, and
@@ -133,6 +140,11 @@ no existing call site requires modification.
   code and repository review of the `v1.1.0` tag at commit
   `96360379a4bca7703cf649a69a2162961dfa6c9e`. Every issue in the `1.1.1`
   milestone cites it as a stable in-repo reference.
+- Added `docs/RIBBON_SDI_BEHAVIOR.md`, which records why the documented Ribbon
+  scope is currently an assumption, how to reproduce the measurement, and which
+  model each possible result would commit the component to. Measurements are
+  pending; the document is the place they are recorded rather than a summary of
+  them.
 
 ### Validation
 
@@ -177,8 +189,10 @@ Release type:            patch
 
 ### Known limitations
 
-- Ribbon scope under the Single Document Interface remains uncharacterized and
-  is documented as application-level without supporting evidence. See `#21`.
+- Ribbon scope under the Single Document Interface is still documented as
+  application-level without supporting evidence. `Test_EXCEL_UI_RunRibbonSdiProbe`
+  and `docs/RIBBON_SDI_BEHAVIOR.md` now exist to settle it, but no host has been
+  measured yet, so the `README.md` statement remains an assumption. See `#21`.
 - The `README.md` title-bar scope statement still describes the pre-fix
   behavior and is corrected with the rest of the documentation work. See `#19`.
 - `tools/reformat.py` does not round-trip the committed production modules

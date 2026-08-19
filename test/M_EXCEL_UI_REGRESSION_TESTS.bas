@@ -113,6 +113,7 @@ Option Private Module
     Private Const TEST_TARGET_ERR_BASE As Long = vbObjectError + 4900  'Base custom error for target-scope tests
     Private Const TEST_TITLEBAR_SDI_ERR_BASE As Long = vbObjectError + 5000  'Base custom error for title-bar SDI tests
     Private Const TEST_CERT_ERR_BASE  As Long = vbObjectError + 5100  'Base custom error for certification
+    Private Const TEST_RIBBON_ERR_BASE As Long = vbObjectError + 5200  'Base custom error for the Ribbon probe
     Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
@@ -224,6 +225,12 @@ Private m_CertUnitDetail()              As String
 
 Private m_CertSkipCount                 As Long
 Private m_CertSkipDetail()              As String
+
+'Ribbon characterization observations, accumulated during a probe run. Rows are
+'plain text for reading and JSON for comparison between hosts.
+Private m_RibbonRowCount                As Long
+Private m_RibbonRowsText                As String
+Private m_RibbonRowsJson                As String
 
 
 Public Sub Test_EXCEL_UI_RunReleaseCertification()
@@ -1285,6 +1292,495 @@ Err_Handler:
         PathOut = vbNullString
 
         Resume Safe_Exit
+
+End Function
+
+
+Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunRibbonSdiProbe
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Characterize how Ribbon visibility behaves across multiple workbook windows,
+'   and record the result as evidence.
+'
+' WHY THIS EXISTS
+'   README.md states the Ribbon scope as "Excel application", which a reader will
+'   take to mean one state shared by every workbook window. Under the Single
+'   Document Interface each workbook window has its own Ribbon UI, and nothing
+'   in the component verifies that the documented scope is the scope Excel
+'   actually implements. The claim is currently an assumption.
+'
+'   This is deliberately a PROBE and not a test. It asserts nothing, because
+'   there is no agreed correct answer yet: the point is to discover what the
+'   host does so that a contract can be written, and only then to assert it.
+'   Writing assertions first would encode the guess this issue exists to remove.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
+'   - Records the Ribbon state through three independent mechanisms at each
+'     observation point, because they can legitimately disagree.
+'   - Exercises five scenarios: baseline, hide with A active, show with B
+'     active, a window created AFTER a hide, and snapshot restore across a
+'     window switch.
+'   - Emits a text table and a JSON document, and writes both to the temporary
+'     folder.
+'   - Restores the Ribbon and closes its temporary workbooks.
+'
+' ERROR POLICY
+'   - Raises only on a precondition failure or an unexpected host error.
+'   - Never fails on an observed value: every value is data.
+'
+' DEPENDENCIES
+'   - TST_RibbonProbeReset
+'   - TST_RibbonProbeRecord
+'   - TST_RibbonProbeBuildJson
+'   - TST_CertTryWriteEvidence
+'
+' NOTES
+'   Destructive: creates and closes temporary workbooks and toggles the Ribbon.
+'   Results belong in docs/RIBBON_SDI_BEHAVIOR.md, one block per host tested.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window active before the probe
+    Dim BookB               As Workbook        'Second workbook, window B
+    Dim BookC               As Workbook        'Workbook created after a hide
+
+    Dim JsonText            As String          'Machine-readable observations
+    Dim ReportText          As String          'Human-readable observations
+    Dim EvidencePath        As String          'Path an evidence file was written to
+
+    Dim HasFailure          As Boolean         'TRUE when the probe failed
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "Test_EXCEL_UI_RunRibbonSdiProbe"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_RibbonProbeReset
+
+        TST_Log PROC, "START", "Ribbon SDI characterization started"
+
+'------------------------------------------------------------------------------
+' VALIDATE PRECONDITIONS
+'------------------------------------------------------------------------------
+    'The probe captures and restores a snapshot, so it cannot share the slot
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_RIBBON_ERR_BASE + 1, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before probing"
+        End If
+
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_RIBBON_ERR_BASE + 2, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+'------------------------------------------------------------------------------
+' SCENARIO 1 - BASELINE
+'------------------------------------------------------------------------------
+    'Establish what a visible Ribbon reads as on this host, so later rows can be
+    'compared against something rather than interpreted in isolation
+        UI_SetExcelUI Ribbon:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "1-Baseline", "A"
+
+'------------------------------------------------------------------------------
+' SCENARIO 2 - HIDE WITH A ACTIVE, THEN OBSERVE B
+'------------------------------------------------------------------------------
+    'The central question: does hiding the Ribbon while A is active also hide it
+    'for a window that already existed?
+        Set BookB = Workbooks.Add
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "2-HiddenOnA", "A"
+
+        BookB.Windows(1).Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "2-HiddenOnA", "B"
+
+'------------------------------------------------------------------------------
+' SCENARIO 3 - SHOW WITH B ACTIVE, THEN OBSERVE A
+'------------------------------------------------------------------------------
+    'The symmetric question, which need not have the symmetric answer
+        UI_SetExcelUI Ribbon:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "3-ShownOnB", "B"
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "3-ShownOnB", "A"
+
+'------------------------------------------------------------------------------
+' SCENARIO 4 - WINDOW CREATED AFTER A HIDE
+'------------------------------------------------------------------------------
+    'A window that did not exist when the Ribbon was hidden is the case a
+    'component storing one Boolean cannot reason about at all
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        Set BookC = Workbooks.Add
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "4-NewWindowAfterHide", "C"
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "4-NewWindowAfterHide", "A"
+
+'------------------------------------------------------------------------------
+' SCENARIO 5 - SNAPSHOT RESTORE ACROSS A WINDOW SWITCH
+'------------------------------------------------------------------------------
+    'Whether the snapshot contract holds for the Ribbon depends entirely on the
+    'answers above, so it is measured rather than assumed
+        UI_SetExcelUI Ribbon:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_CaptureExcelUIState
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        BookB.Windows(1).Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_ResetExcelUIToSnapshot
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "5-RestoredFromB", "B"
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "5-RestoredFromB", "A"
+
+'------------------------------------------------------------------------------
+' EMIT EVIDENCE
+'------------------------------------------------------------------------------
+    'Build both forms before writing either
+        ReportText = "VBA Excel UI - Ribbon SDI characterization" & vbNewLine & _
+            "Excel " & Application.Version & _
+            " build " & CStr(Application.Build) & vbNewLine & _
+            Application.OperatingSystem & vbNewLine & _
+            Format$(Now, "yyyy-mm-dd hh:nn:ss") & vbNewLine & _
+            String$(72, "-") & vbNewLine & _
+            "scenario              window  CommandBars.Visible  Height  XLM" & _
+            vbNewLine & m_RibbonRowsText
+
+        JsonText = TST_RibbonProbeBuildJson()
+
+        TST_Log PROC, "EVIDENCE", vbNewLine & ReportText
+        TST_Log PROC, "JSON", JsonText
+
+        If TST_CertTryWriteEvidence(JsonText, "ribbon.json", EvidencePath) Then
+            TST_Log PROC, "WROTE", EvidencePath
+        End If
+
+        If TST_CertTryWriteEvidence(ReportText, "ribbon.txt", EvidencePath) Then
+            TST_Log PROC, "WROTE", EvidencePath
+        End If
+
+        TST_Log PROC, "DONE", _
+            "Recorded " & CStr(m_RibbonRowCount) & _
+            " observations; transcribe them into docs/RIBBON_SDI_BEHAVIOR.md"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Leave the host as it was found, whatever the observations were
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+            TST_SafeCloseWorkbook BookC
+            TST_SafeCloseWorkbook BookB
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
+
+            UI_SetExcelUI Ribbon:=UI_Show
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_RibbonProbeReset()
+
+'
+'==============================================================================
+' TST_RibbonProbeReset
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clear the observation buffers before a probe run.
+'
+' WHY THIS EXISTS
+'   Observations accumulate in module state, so a second run in the same session
+'   would otherwise report the first run's rows alongside its own and produce a
+'   document describing two different experiments as one.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunRibbonSdiProbe
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' CLEAR BUFFERS
+'------------------------------------------------------------------------------
+    'A reset that cannot complete must not abort the probe
+        On Error Resume Next
+
+        m_RibbonRowCount = 0
+        m_RibbonRowsText = vbNullString
+        m_RibbonRowsJson = vbNullString
+
+End Sub
+
+
+Private Sub TST_RibbonProbeRecord( _
+    ByVal ScenarioName As String, _
+    ByVal WindowLabel As String)
+
+'
+'==============================================================================
+' TST_RibbonProbeRecord
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Record one observation of Ribbon state through every mechanism available.
+'
+' WHY THIS EXISTS
+'   The component reads the Ribbon through CommandBars first and falls back to
+'   the legacy XLM query. Both are application-scoped calls: neither accepts a
+'   window. If the Ribbon really is per-window, the only way that can surface is
+'   as a DIFFERENCE between readings taken while different windows are active,
+'   or as a disagreement between the mechanisms themselves.
+'
+'   Height is recorded alongside Visible because it is the more sensitive
+'   signal. A Ribbon that is collapsed rather than hidden can report Visible as
+'   True while its height collapses to the tab strip, and a component that
+'   trusted Visible alone would call that state shown.
+'
+' INPUTS
+'   ScenarioName
+'     Scenario the observation belongs to.
+'
+'   WindowLabel
+'     Window that was active when the reading was taken.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Reads CommandBars("Ribbon").Visible, its Height, and the XLM query.
+'   - Records "err" for any mechanism that raises, rather than a value that
+'     would be indistinguishable from a real reading.
+'
+' ERROR POLICY
+'   - Does not raise. An unreadable mechanism is an observation, not a failure.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunRibbonSdiProbe
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim VisibleText         As String          'CommandBars Visible reading
+    Dim HeightText          As String          'CommandBars Height reading
+    Dim XlmText             As String          'Legacy XLM query reading
+    Dim ProbeValue          As Variant         'Working buffer for each read
+
+'------------------------------------------------------------------------------
+' READ EVERY MECHANISM
+'------------------------------------------------------------------------------
+    'An unreadable mechanism is recorded as such; substituting a default would
+    'silently invent data this document exists to gather
+        On Error Resume Next
+
+        VisibleText = "err"
+        HeightText = "err"
+        XlmText = "err"
+
+        ProbeValue = Application.CommandBars("Ribbon").Visible
+
+        If Err.Number = 0 Then
+            VisibleText = CStr(CBool(ProbeValue))
+        End If
+
+        Err.Clear
+
+        ProbeValue = Application.CommandBars("Ribbon").Height
+
+        If Err.Number = 0 Then
+            HeightText = CStr(CLng(ProbeValue))
+        End If
+
+        Err.Clear
+
+        ProbeValue = Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
+
+        If Err.Number = 0 Then
+            XlmText = CStr(CBool(ProbeValue))
+        End If
+
+        Err.Clear
+
+'------------------------------------------------------------------------------
+' APPEND OBSERVATION
+'------------------------------------------------------------------------------
+    'Text for reading, JSON for comparing between hosts
+        m_RibbonRowCount = m_RibbonRowCount + 1
+
+        m_RibbonRowsText = m_RibbonRowsText & _
+            Left$(ScenarioName & String$(22, " "), 22) & _
+            Left$(WindowLabel & String$(8, " "), 8) & _
+            Left$(VisibleText & String$(21, " "), 21) & _
+            Left$(HeightText & String$(8, " "), 8) & _
+            XlmText & vbNewLine
+
+        If m_RibbonRowCount > 1 Then
+            m_RibbonRowsJson = m_RibbonRowsJson & ","
+        End If
+
+        m_RibbonRowsJson = m_RibbonRowsJson & _
+            "{""scenario"":""" & TST_CertJsonEscape(ScenarioName) & """" & _
+            ",""window"":""" & TST_CertJsonEscape(WindowLabel) & """" & _
+            ",""commandBarsVisible"":""" & TST_CertJsonEscape(VisibleText) & """" & _
+            ",""commandBarsHeight"":""" & TST_CertJsonEscape(HeightText) & """" & _
+            ",""xlmGetToolBar"":""" & TST_CertJsonEscape(XlmText) & """}"
+
+End Sub
+
+
+Private Function TST_RibbonProbeBuildJson() _
+    As String
+
+'
+'==============================================================================
+' TST_RibbonProbeBuildJson
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Wrap the accumulated observations in a document that names the host.
+'
+' WHY THIS EXISTS
+'   Ribbon behavior can differ by Excel build, Office channel and policy. An
+'   observation that does not say which host produced it cannot be compared with
+'   another, and comparison is the entire purpose of gathering it.
+'
+' RETURNS
+'   String
+'     A single-line JSON document.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertJsonEscape
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunRibbonSdiProbe
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Bitness             As String          'Office bitness of this build
+
+'------------------------------------------------------------------------------
+' BUILD DOCUMENT
+'------------------------------------------------------------------------------
+    'A document must be produced even when a field cannot be read
+        On Error Resume Next
+
+#If VBA7 Then
+    #If Win64 Then
+        Bitness = "x64"
+    #Else
+        Bitness = "x86"
+    #End If
+#Else
+        Bitness = "x86"
+#End If
+
+        TST_RibbonProbeBuildJson = _
+            "{""document"":""ribbon-sdi-characterization""" & _
+            ",""schema"":1" & _
+            ",""timestampLocal"":""" & Format$(Now, "yyyy-mm-dd hh:nn:ss") & """" & _
+            ",""excelVersion"":""" & TST_CertJsonEscape(Application.Version) & """" & _
+            ",""excelBuild"":""" & TST_CertJsonEscape(CStr(Application.Build)) & """" & _
+            ",""operatingSystem"":""" & _
+            TST_CertJsonEscape(Application.OperatingSystem) & """" & _
+            ",""bitness"":""" & Bitness & """" & _
+            ",""observations"":[" & m_RibbonRowsJson & "]}"
 
 End Function
 
