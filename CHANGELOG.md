@@ -134,6 +134,23 @@ no existing call site requires modification.
   `96360379a4bca7703cf649a69a2162961dfa6c9e`. Every issue in the `1.1.1`
   milestone cites it as a stable in-repo reference.
 
+### Validation
+
+Certified in desktop Microsoft Excel for Windows via
+`Test_EXCEL_UI_RunReleaseCertification`:
+
+```text
+Excel 16.0 build 20131 | Windows (64-bit) NT 10.00 | x64 | VBA7
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+  PASS  RegressionPack
+  PASS  SnapshotIdentity
+  PASS  TitleBarSdiIdentity
+```
+
+The runner emits a JSON evidence document and a text report naming the exact
+host, both written to the temporary folder. Re-certify and replace the block
+above before tagging.
+
 ### Compatibility
 
 ```text

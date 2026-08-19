@@ -1440,6 +1440,8 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '
 ' BEHAVIOR
 '   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
+'   - Activates the surviving anchor window before capturing, so the captured
+'     title-bar frame belongs to a window that outlives the case.
 '   - Captures a surviving anchor window and a temporary second window.
 '   - Closes the captured temporary window and creates a replacement.
 '   - Restores through UI_ResetExcelUIToSnapshot_WithResult.
@@ -1458,7 +1460,15 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '   - TST_AssertSingleFailurePrefix
 '   - TST_AssertSnapshotWindowState
 '
+' NOTES
+'   The snapshot captures every window in Application.Windows regardless of
+'   which is active; only the title-bar frame is resolved from the active
+'   window. That is why activating the anchor before capture changes the
+'   expected failure count without weakening what this case covers.
+'
 ' UPDATED
+'   2026-08-19 - Anchor the captured title-bar frame to the surviving window,
+'                so the case asserts window identity alone.
 '   2026-07-29
 '==============================================================================
 '
@@ -1543,6 +1553,23 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
         CapturedWindow.DisplayHeadings = False
         CapturedWindow.DisplayWorkbookTabs = True
         CapturedWindow.DisplayGridlines = False
+
+'------------------------------------------------------------------------------
+' ACTIVATE THE SURVIVING WINDOW BEFORE CAPTURE
+'------------------------------------------------------------------------------
+    'ThisWorkbook.NewWindow activates the window it creates, so without this the
+    'capture would record the TEMPORARY window as the owner of the title-bar
+    'frame. Closing it below would then produce a second, correct TitleBar
+    'failure alongside the WindowIdentity failure this case exists to assert,
+    'and the case would be failing for a reason that is not about window
+    'identity at all.
+    '
+    'Anchoring the frame to the surviving window keeps this case about one
+    'thing. The closed-frame behavior it would otherwise trip over has its own
+    'dedicated case, TST_Case_TitleBarCapturedFrameClosedIsReported.
+        AnchorWindow.Activate
+
+        TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' CAPTURE THROUGH STRUCTURED-RESULT API
