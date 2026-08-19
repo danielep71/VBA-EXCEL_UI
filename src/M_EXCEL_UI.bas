@@ -1,1476 +1,1806 @@
 Attribute VB_Name = "M_EXCEL_UI"
+Option Explicit
+Option Private Module
+
 '==============================================================================
-'                           MODULE: M_EXCEL_UI
+' M_EXCEL_UI
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Centralize visibility control for the Excel UI elements managed by this
-'   module, combining:
-'     - Excel object-model UI elements
-'     - WinAPI-based title-bar control for the Excel main window represented
-'       by Application.Hwnd
+'   Centralizes visibility control for the Excel UI elements managed by this
+'   package, combining Excel object-model elements with delegated WinAPI
+'   title-bar control for the main window represented by Application.Hwnd.
 '
 ' WHY THIS EXISTS
-'   Some workbook-driven solutions need to present Excel in a constrained,
-'   kiosk-like, or application-style shell
+'   Workbook-driven solutions often need a constrained or application-style
+'   Excel shell. Written directly, that means UI writes scattered across every
+'   module that happens to need one, with no single owner, no consistent
+'   failure behavior, and no reliable way back to the original interface.
 '
-'   Excel exposes several UI elements directly through the object model
-'   (Ribbon, status bar, scroll bars, formula bar, headings, workbook tabs,
-'   gridlines), but it does not expose direct title-bar visibility control
-'
-'   This module unifies both approaches behind a defensive, explicit API so
-'   callers do not need to duplicate scattered UI-handling code
+'   This module provides one explicit, defensive, fail-soft API instead: a
+'   single owner for UI state changes, tri-state intent rather than ambiguous
+'   optional Booleans, diagnostics available as data, and a deterministic
+'   show-everything recovery path that is separate from snapshot restoration.
 '
 ' PUBLIC SURFACE
-'   - UIVisibility                   Tri-state visibility enum
-'   - UI_SetExcelUI                  Core selective UI-state routine
-'   - UI_SetExcelUI_WithResult       Selective routine with structured result
-'   - UI_HideExcelUI                 Convenience wrapper: hide all managed UI
-'   - UI_ShowExcelUI                 Convenience wrapper: show all managed UI
-'   - UI_CaptureExcelUIState         Explicitly snapshot the current managed UI
-'   - UI_ResetExcelUIToSnapshot      Best-effort restore to captured UI state
-'   - UI_HasExcelUIStateSnapshot     Return TRUE when a snapshot exists
-'   - UI_ClearExcelUIStateSnapshot   Remove any captured snapshot
+'   Enums:
+'     - UIVisibility
+'     - UIWindowTargetScope
 '
-' INTERNAL SUPPORT
-'   - UI_ApplyExcelUIState
-'   - UI_HandleApplyFailure
-'   - UI_ClearResultBuffer
-'   - UI_AddFailureToResult
-'   - UI_BeginQuietUIUpdate
-'   - UI_EndQuietUIUpdate
-'   - UI_TrySetRibbonVisibleIfNeeded
-'   - UI_TrySetTitleBarVisibleIfNeeded
-'   - UI_TrySetBooleanPropertyIfNeeded
-'   - UI_TryGetRibbonVisible
-'   - UI_TryGetTitleBarVisible
-'   - UI_TryGetBooleanProperty
-'   - UI_TrySetTitleBarVisible
-'   - UI_TrySetRibbonVisible
-'   - UI_TrySetBooleanProperty
-'   - UI_TryGetWindowStyle
-'   - UI_TrySetWindowStyle
-'   - UI_TryRefreshWindowFrame
-'   - UI_IsValidVisibility
-'   - UI_VisibilityToBoolean
-'   - UI_BuildRuntimeErrorText
-'   - UI_LogFailure
-'   - WinAPI declarations and constants
+'   Selective application:
+'     - UI_SetExcelUI
+'     - UI_SetExcelUI_WithResult
 '
-' BEHAVIOR
-'   - Application-level elements:
-'       * Ribbon
-'       * Status Bar
-'       * Scroll Bars
-'       * Formula Bar
+'   Convenience wrappers:
+'     - UI_HideExcelUI
+'     - UI_ShowExcelUI
 '
-'   - Window-level elements applied to each open Excel window:
-'       * Headings
-'       * Workbook Tabs
-'       * Gridlines
+'   Snapshot lifecycle:
+'     - UI_CaptureExcelUIState
+'     - UI_CaptureExcelUIState_WithResult
+'     - UI_ResetExcelUIToSnapshot
+'     - UI_ResetExcelUIToSnapshot_WithResult
+'     - UI_HasExcelUIStateSnapshot
+'     - UI_ClearExcelUIStateSnapshot
 '
-'   - Title bar:
-'       * applied to the Excel main window represented by Application.Hwnd
-'         through WinAPI style update and non-client frame refresh
+' MANAGED UI SURFACE
+'   Application-level, affecting the current Excel instance:
+'     Ribbon, Status Bar, Scroll Bars, Formula Bar
+'
+'   Window-level, affecting the requested target scope:
+'     Headings, Workbook Tabs, Gridlines
+'
+'   Main-window frame:
+'     Title Bar
+'
+' DESIGN PRINCIPLES
+'   1. Explicit caller intent. Tri-state values rather than ambiguous optional
+'      Booleans, because an omitted Boolean defaults to False and would read as
+'      an instruction to hide.
+'   2. One owner for UI state changes.
+'   3. Continue where safe. One failed element does not prevent unrelated
+'      requested changes from being attempted.
+'   4. Expose diagnostics when required. Simple callers may log; orchestration
+'      code can request structured results.
+'   5. Separate show-all from restore. A deterministic visible shell and a
+'      captured custom baseline are different operations.
+'   6. Preserve host state where possible. Avoid unnecessary writes and restore
+'      ScreenUpdating.
+'   7. Document platform-sensitive behavior. Ribbon and title-bar paths remain
+'      explicitly best effort.
 '
 ' ERROR POLICY
-'   - Public entry points are fail-soft
-'   - Unexpected errors are logged to the Immediate Window in the fire-and-
-'     forget path
-'   - Errors are not re-raised to callers
-'   - The core routine uses best-effort application so one failed UI element
-'     does not prevent later UI elements from being attempted
+'   - Public entry points are fail-soft and never raise to callers.
+'   - Fire-and-forget procedures log failures to the Immediate Window.
+'   - UI_SetExcelUI_WithResult and the snapshot WithResult APIs return
+'     structured failure information as data.
+'   - One failed element does not prevent later requested elements from being
+'     attempted.
+'
+' DEPENDENCIES
+'   - M_EXCEL_UI_RUNTIME   shared fail-soft host operations and diagnostics
+'   - M_EXCEL_UI_TITLEBAR  WinAPI title-bar control
+'   - M_EXCEL_UI_SNAPSHOT  snapshot state and lifecycle
 '
 ' PLATFORM / COMPATIBILITY
-'   - Windows only
-'   - Supports 32-bit and 64-bit Office / VBA through conditional compilation
-'     and bitness-safe WinAPI wrappers
+'   - Windows only, because title-bar control depends on WinAPI.
+'   - Supports 32-bit and 64-bit Office through conditional compilation in
+'     M_EXCEL_UI_TITLEBAR.
 '
 ' NOTES
-'   - Selective and show-all operations do not capture prior state automatically
-'   - Use UI_CaptureExcelUIState explicitly when later restoration is required
-'   - UI_ShowExcelUI means "show all managed UI", not "restore previous state"
-'   - UI_SetExcelUI is the simple fire-and-forget selective entry point
-'   - UI_SetExcelUI_WithResult provides the same best-effort application with
-'     structured diagnostics and no class-module dependency
-'   - Ribbon control relies on Application.ExecuteExcel4Macro
-'   - Title-bar control affects the Excel window represented by
-'     Application.Hwnd, not a user-specific saved UI state
-'   - The internal title-bar style snapshot is keyed to Application.Hwnd and is
-'     refreshed when the main-window handle changes
-'   - Restoring the exact captured style can replace intervening frame-style
-'     changes made by another component
-'   - The explicit snapshot / reset feature is separate from UI_ShowExcelUI and
-'     restores per-window state by common collection index on a best-effort basis
+'   - Snapshot state is stored in memory only and is lost after a project reset
+'     or when Excel closes.
+'   - Window-level snapshot state is keyed by the captured Window object
+'     identity, not by Application.Windows collection index, so reordered
+'     windows restore correctly, newly opened windows are left unchanged, and
+'     closed or recreated windows are skipped rather than having another
+'     window's state applied to them.
+'   - Title-bar ownership is limited to the caption, system-menu, sizing-frame,
+'     minimize-box and maximize-box style bits. Showing merges only those owned
+'     bits into the current style, preserving unrelated changes made by Excel or
+'     another component.
+'   - Selective apply APIs accept an optional trailing TargetScope that affects
+'     only Headings, Workbook Tabs and Gridlines.
+'   - Hidden Excel UI is not a security boundary.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.0.1
+'   1.1.0
 '==============================================================================
 
-'------------------------------------------------------------------------------
-' MODULE SETTINGS
-'------------------------------------------------------------------------------
-    Option Explicit
-    Option Private Module
+'==============================================================================
+' PUBLIC ENUMS
+'==============================================================================
 
-'------------------------------------------------------------------------------
-' DECLARE: PUBLIC ENUMS
-'------------------------------------------------------------------------------
+'Tri-state visibility. An omitted argument is equivalent to UI_LeaveUnchanged,
+'which is why the neutral member is negative rather than zero: a caller cannot
+'accidentally request a hide by omitting an argument.
 Public Enum UIVisibility
-    UI_LeaveUnchanged = -1     'Do not touch this UI element
-    UI_Hide = 0                'Hide this UI element
-    UI_Show = 1                'Show this UI element
+    UI_LeaveUnchanged = -1                'Do not touch this UI element
+    UI_Hide = 0                           'Hide this UI element
+    UI_Show = 1                           'Show this UI element
 End Enum
 
-'------------------------------------------------------------------------------
-' DECLARE: WIN32 / WIN64 API
-'------------------------------------------------------------------------------
-#If VBA7 Then
+'Window-level targeting. The default is zero so that pre-v1.1.0 callers, which
+'pass no scope at all, keep the original all-windows behavior.
+Public Enum UIWindowTargetScope
+    UI_TargetAllExcelWindows = 0          'Apply to every current Excel window
+    UI_TargetActiveWindow = 1             'Apply only to Application.ActiveWindow
+    UI_TargetActiveWorkbookWindows = 2    'Apply to ActiveWorkbook.Windows
+End Enum
 
-    #If Win64 Then
 
-        Private Declare PtrSafe Function GetWindowLongPtr Lib "user32" Alias _
-            "GetWindowLongPtrA" (ByVal hWnd As LongPtr, ByVal nIndex As Long) As _
-            LongPtr
-
-        Private Declare PtrSafe Function SetWindowLongPtr Lib "user32" Alias _
-            "SetWindowLongPtrA" (ByVal hWnd As LongPtr, ByVal nIndex As Long, ByVal _
-            dwNewLong As LongPtr) As LongPtr
-
-    #Else
-
-        Private Declare PtrSafe Function GetWindowLong Lib "user32" Alias _
-            "GetWindowLongA" (ByVal hWnd As LongPtr, ByVal nIndex As Long) As Long
-
-        Private Declare PtrSafe Function SetWindowLong Lib "user32" Alias _
-            "SetWindowLongA" (ByVal hWnd As LongPtr, ByVal nIndex As Long, ByVal _
-            dwNewLong As Long) As Long
-
-    #End If
-
-    Private Declare PtrSafe Function SetWindowPos Lib "user32" (ByVal hWnd As _
-        LongPtr, ByVal hWndInsertAfter As LongPtr, ByVal X As Long, ByVal Y As Long, _
-        ByVal cx As Long, ByVal cy As Long, ByVal uFlags As Long) As Long
-
-    Private Declare PtrSafe Function GetLastError Lib "kernel32" () As Long
-
-    Private Declare PtrSafe Sub SetLastError Lib "kernel32" (ByVal dwErrCode As _
-        Long)
-
-#Else
-
-    Private Declare Function GetWindowLong Lib "user32" Alias "GetWindowLongA" ( _
-        ByVal hWnd As Long, ByVal nIndex As Long) As Long
-
-    Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" ( _
-        ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
-
-    Private Declare Function SetWindowPos Lib "user32" ( ByVal hWnd As Long, _
-        ByVal hWndInsertAfter As Long, ByVal X As Long, ByVal Y As Long, ByVal cx As _
-        Long, ByVal cy As Long, ByVal uFlags As Long) As Long
-
-    Private Declare Function GetLastError Lib "kernel32" () As Long
-
-    Private Declare Sub SetLastError Lib "kernel32" ( ByVal dwErrCode As Long)
-
-#End If
-
-'------------------------------------------------------------------------------
-' DECLARE: PRIVATE CONSTANTS
-'------------------------------------------------------------------------------
-    Private Const GWL_STYLE          As Long = -16       'Window style index
-
-    Private Const WS_CAPTION         As Long = &HC00000  'Caption / title bar
-    Private Const WS_SYSMENU         As Long = &H80000   'System menu
-    Private Const WS_THICKFRAME      As Long = &H40000   'Resizable sizing frame
-    Private Const WS_MINIMIZEBOX     As Long = &H20000   'Minimize button
-    Private Const WS_MAXIMIZEBOX     As Long = &H10000   'Maximize button
-
-    Private Const SWP_NOSIZE         As Long = &H1       'Preserve current size
-    Private Const SWP_NOMOVE         As Long = &H2       'Preserve current position
-    Private Const SWP_NOZORDER       As Long = &H4       'Do not change Z order
-    Private Const SWP_FRAMECHANGED   As Long = &H20      'Repaint non-client frame
-    Private Const SWP_NOOWNERZORDER  As Long = &H200     'Do not change owner Z order
-
-'------------------------------------------------------------------------------
-' DECLARE: PRIVATE MODULE STATE
-'------------------------------------------------------------------------------
-#If VBA7 Then
-    Private m_OriginalMainWindowStyle As LongPtr      'Snapshotted original Excel main-window style
-    Private m_OriginalMainWindowHwnd  As LongPtr      'Window handle associated with the snapshotted style
-#Else
-    Private m_OriginalMainWindowStyle As Long         'Snapshotted original Excel main-window style
-    Private m_OriginalMainWindowHwnd  As Long         'Window handle associated with the snapshotted style
-#End If
-
-    Private m_HasOriginalMainWindowStyle As Boolean       'TRUE when original style has been captured
-
-    Private m_HasExcelUIStateSnapshot    As Boolean       'TRUE when an explicit snapshot exists
-
-    Private m_SnapshotRibbonKnown        As Boolean       'TRUE when Ribbon state was captured successfully
-    Private m_SnapshotRibbonVisible      As Boolean       'Captured Ribbon visibility
-    Private m_SnapshotStatusBarVisible   As Boolean       'Captured StatusBar visibility
-    Private m_SnapshotScrollBarsVisible  As Boolean       'Captured ScrollBars visibility
-    Private m_SnapshotFormulaBarVisible  As Boolean       'Captured FormulaBar visibility
-
-    Private m_SnapshotWindowCount        As Long          'Captured Application.Windows.Count
-    Private m_SnapshotHeadingsVisible()  As Boolean       'Captured per-window Headings visibility
-    Private m_SnapshotWorkbookTabsVisible() As Boolean    'Captured per-window WorkbookTabs visibility
-    Private m_SnapshotGridlinesVisible() As Boolean       'Captured per-window Gridlines visibility
-
-    Private m_SnapshotTitleBarKnown      As Boolean       'TRUE when TitleBar state was captured successfully
-    Private m_SnapshotTitleBarVisible    As Boolean       'Captured TitleBar visibility
-
-Public Sub UI_SetExcelUI(Optional ByVal Ribbon As UIVisibility = _
-    UI_LeaveUnchanged, Optional ByVal StatusBar As UIVisibility = UI_LeaveUnchanged, _
-    Optional ByVal ScrollBars As UIVisibility = UI_LeaveUnchanged, Optional ByVal _
-    FormulaBar As UIVisibility = UI_LeaveUnchanged, Optional ByVal Headings As _
-    UIVisibility = UI_LeaveUnchanged, Optional ByVal WorkbookTabs As UIVisibility = _
-    UI_LeaveUnchanged, Optional ByVal Gridlines As UIVisibility = UI_LeaveUnchanged, _
-    Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged)
-
+Public Sub UI_SetExcelUI( _
+    Optional ByVal Ribbon As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal StatusBar As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal ScrollBars As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal FormulaBar As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal Headings As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal WorkbookTabs As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal Gridlines As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal TargetScope As UIWindowTargetScope = _
+        UI_TargetAllExcelWindows)
 '
 '==============================================================================
-'                               UI_SetExcelUI
+' UI_SetExcelUI
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Apply the requested visibility state to the Excel UI elements managed by
-'   this module
+'   Applies the requested visibility state to the managed Excel UI elements.
 '
 ' WHY THIS EXISTS
-'   A Boolean-based "hide/show" routine is error-prone because omitted optional
-'   arguments can accidentally imply FALSE / hidden
-'
-'   This routine uses an explicit tri-state API:
-'     - UI_Show
-'     - UI_Hide
-'     - UI_LeaveUnchanged
-'
-'   This makes the caller's intent precise and prevents accidental UI changes
-'   for omitted arguments
+'   This is the primary selective entry point and the one most workbook code
+'   should call. It accepts best-effort completion and reports through the
+'   Immediate Window, which is sufficient when the caller has no decision to
+'   make about a partial result.
 '
 ' INPUTS
-'   Ribbon (optional)
-'     UI_Show             => show Ribbon
-'     UI_Hide             => hide Ribbon
-'     UI_LeaveUnchanged   => do not touch Ribbon
+'   Ribbon, StatusBar, ScrollBars, FormulaBar,
+'   Headings, WorkbookTabs, Gridlines, TitleBar
+'     UI_Show, UI_Hide or UI_LeaveUnchanged. Omitted arguments are equivalent
+'     to UI_LeaveUnchanged.
 '
-'   StatusBar (optional)
-'     UI_Show             => show status bar
-'     UI_Hide             => hide status bar
-'     UI_LeaveUnchanged   => do not touch status bar
-'
-'   ScrollBars (optional)
-'     UI_Show             => show scroll bars
-'     UI_Hide             => hide scroll bars
-'     UI_LeaveUnchanged   => do not touch scroll bars
-'
-'   FormulaBar (optional)
-'     UI_Show             => show formula bar
-'     UI_Hide             => hide formula bar
-'     UI_LeaveUnchanged   => do not touch formula bar
-'
-'   Headings (optional)
-'     UI_Show             => show row / column headings in each window
-'     UI_Hide             => hide row / column headings in each window
-'     UI_LeaveUnchanged   => do not touch headings
-'
-'   WorkbookTabs (optional)
-'     UI_Show             => show workbook tabs in each window
-'     UI_Hide             => hide workbook tabs in each window
-'     UI_LeaveUnchanged   => do not touch workbook tabs
-'
-'   Gridlines (optional)
-'     UI_Show             => show gridlines in each window
-'     UI_Hide             => hide gridlines in each window
-'     UI_LeaveUnchanged   => do not touch gridlines
-'
-'   TitleBar (optional)
-'     UI_Show             => show the title bar of the Excel main window
-'                            represented by Application.Hwnd
-'     UI_Hide             => hide the title bar of the Excel main window
-'                            represented by Application.Hwnd
-'     UI_LeaveUnchanged   => do not touch title bar
+'   TargetScope
+'     Controls only Headings, Workbook Tabs and Gridlines. The default remains
+'     UI_TargetAllExcelWindows for backward compatibility.
 '
 ' RETURNS
-'   None
+'   None.
 '
 ' BEHAVIOR
-'   - Applies Ribbon / status bar / scroll bars / formula bar at Application
-'     level
-'   - Applies headings / workbook tabs / gridlines to every open Excel window
-'     in the current Excel instance
-'   - Applies title-bar visibility to the Excel main window represented by
-'     Application.Hwnd via WinAPI
-'   - Uses best-effort processing so one failed UI element does not prevent
-'     subsequent UI elements from being attempted
+'   - Applies application-level settings to the current Excel instance.
+'   - Applies window-level settings to the requested target scope.
+'   - Applies title-bar visibility to Application.Hwnd.
+'   - Continues after an element-level failure.
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Unexpected failures are written to the Immediate Window
-'   - Element-level failures are logged and processing continues
+'   - Does not raise to callers.
+'   - Logs failures to the Immediate Window.
 '
 ' DEPENDENCIES
 '   - UI_ApplyExcelUIState
+'   - UI_RuntimeLogFailure
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - Workbook and add-in code
+'   - UI_HideExcelUI
+'   - UI_ShowExcelUI
 '
 ' NOTES
-'   - This is the preferred entry point for selective UI control
-'   - Changes affect the current Excel instance, not only the active workbook
+'   Use UI_SetExcelUI_WithResult instead when initialization, orchestration or
+'   test code must distinguish complete success from partial application.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim IgnoredFailureCount As Long      'Ignored structured-result failure count
-    Dim IgnoredFailureList  As Variant   'Ignored structured-result failure list
+    Dim IgnoredFailureCount As Long            'Discarded result buffer
+    Dim IgnoredFailureList  As Variant         'Discarded result buffer
 
-    Const PROC As String = "UI_SetExcelUI"   'Procedure name for diagnostics
+    Const PROC              As String = "UI_SetExcelUI"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
-' APPLY STATE THROUGH INTERNAL WORKER
+' APPLY
 '------------------------------------------------------------------------------
-        UI_ApplyExcelUIState ProcName:=PROC, Ribbon:=Ribbon, _
-            StatusBar:=StatusBar, ScrollBars:=ScrollBars, FormulaBar:=FormulaBar, _
-            Headings:=Headings, WorkbookTabs:=WorkbookTabs, Gridlines:=Gridlines, _
-            TitleBar:=TitleBar, LogFailures:=True, FailureCount:=IgnoredFailureCount, _
-            FailureList:=IgnoredFailureList, CaptureFailureList:=False
+    'Delegate to the shared worker with logging on and result capture off
+        UI_ApplyExcelUIState _
+            ProcName:=PROC, _
+            Ribbon:=Ribbon, _
+            StatusBar:=StatusBar, _
+            ScrollBars:=ScrollBars, _
+            FormulaBar:=FormulaBar, _
+            Headings:=Headings, _
+            WorkbookTabs:=WorkbookTabs, _
+            Gridlines:=Gridlines, _
+            TitleBar:=TitleBar, _
+            TargetScope:=TargetScope, _
+            LogFailures:=True, _
+            FailureCount:=IgnoredFailureCount, _
+            FailureList:=IgnoredFailureList, _
+            CaptureFailureList:=False
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
-        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
-
-        Resume SafeExit
+Err_Handler:
+    'Log the unexpected wrapper failure without raising to the caller
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+        Resume Safe_Exit
 
 End Sub
+
 
 Public Sub UI_HideExcelUI()
-
 '
 '==============================================================================
-'                               UI_HideExcelUI
+' UI_HideExcelUI
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Hide all Excel UI elements managed by this module
+'   Hides every Excel UI element managed by this package.
 '
 ' WHY THIS EXISTS
-'   Some workbook-driven solutions want a simple one-call way to suppress the
-'   managed Excel shell elements without specifying each element individually
+'   Applying a fully constrained shell is common enough to deserve a named
+'   operation rather than eight repeated arguments at every call site.
 '
 ' RETURNS
-'   None
+'   None.
 '
 ' BEHAVIOR
-'   - Delegates to UI_SetExcelUI
-'   - Requests hidden state for:
-'       * Ribbon
-'       * Status Bar
-'       * Scroll Bars
-'       * Formula Bar
-'       * Headings
-'       * Workbook Tabs
-'       * Gridlines
-'       * Title Bar
+'   - Delegates to UI_SetExcelUI with UI_Hide for every managed element.
+'   - Uses the default all-windows target scope.
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Unexpected failures are written to the Immediate Window
+'   - Does not raise to callers.
+'   - Logs an unexpected wrapper failure to the Immediate Window.
 '
 ' DEPENDENCIES
 '   - UI_SetExcelUI
+'   - UI_RuntimeLogFailure
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - Workbook and add-in code
 '
 ' NOTES
-'   - This is a convenience wrapper
-'   - For selective control, use UI_SetExcelUI directly
+'   Keep an accessible UI_ShowExcelUI recovery path available whenever this is
+'   used in a constrained-shell solution.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC As String = "UI_HideExcelUI"   'Procedure name for diagnostics
+    Const PROC              As String = "UI_HideExcelUI"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
-' APPLY: HIDE-ALL STATE
+' APPLY
 '------------------------------------------------------------------------------
-    'Hide all managed UI elements through the central tri-state entry point
-        UI_SetExcelUI Ribbon:=UI_Hide, StatusBar:=UI_Hide, ScrollBars:=UI_Hide, _
-            FormulaBar:=UI_Hide, Headings:=UI_Hide, WorkbookTabs:=UI_Hide, _
-            Gridlines:=UI_Hide, TitleBar:=UI_Hide
+    'Request the hidden state for every managed element
+        UI_SetExcelUI _
+            Ribbon:=UI_Hide, _
+            StatusBar:=UI_Hide, _
+            ScrollBars:=UI_Hide, _
+            FormulaBar:=UI_Hide, _
+            Headings:=UI_Hide, _
+            WorkbookTabs:=UI_Hide, _
+            Gridlines:=UI_Hide, _
+            TitleBar:=UI_Hide
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
-        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
-
-        Resume SafeExit
+Err_Handler:
+    'Log the unexpected wrapper failure without raising to the caller
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+        Resume Safe_Exit
 
 End Sub
+
 
 Public Sub UI_ShowExcelUI()
-
 '
 '==============================================================================
-'                               UI_ShowExcelUI
+' UI_ShowExcelUI
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Show all Excel UI elements managed by this module
+'   Shows every Excel UI element managed by this package.
 '
 ' WHY THIS EXISTS
-'   Workbook solutions that temporarily suppress the Excel shell often need a
-'   single, deterministic call that forces all managed UI elements to visible
-'   state
+'   This is the emergency recovery path. It requires no snapshot, which is what
+'   makes it usable when a workflow was interrupted, when the snapshot has been
+'   cleared, or when VBA project state was reset and the prior baseline is no
+'   longer available.
 '
 ' RETURNS
-'   None
+'   None.
 '
 ' BEHAVIOR
-'   - Delegates to UI_SetExcelUI
-'   - Requests visible state for:
-'       * Ribbon
-'       * Status Bar
-'       * Scroll Bars
-'       * Formula Bar
-'       * Headings
-'       * Workbook Tabs
-'       * Gridlines
-'       * Title Bar
+'   - Delegates to UI_SetExcelUI with UI_Show for every managed element.
+'   - Means "show all", not "restore captured state".
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Unexpected failures are written to the Immediate Window
+'   - Does not raise to callers.
+'   - Logs an unexpected wrapper failure to the Immediate Window.
 '
 ' DEPENDENCIES
 '   - UI_SetExcelUI
+'   - UI_RuntimeLogFailure
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - Workbook and add-in code
+'   - Manual recovery from the VBA editor or Quick Access Toolbar
 '
 ' NOTES
-'   - This means "show all managed UI"
-'   - It does NOT restore a previously captured user-specific object-model UI
-'     state
-'   - For selective control, use UI_SetExcelUI directly
+'   For development work, keep a simple macro that calls this procedure within
+'   reach of the VBA editor.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC As String = "UI_ShowExcelUI"   'Procedure name for diagnostics
+    Const PROC              As String = "UI_ShowExcelUI"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
-' APPLY: SHOW-ALL STATE
+' APPLY
 '------------------------------------------------------------------------------
-    'Show all managed UI elements through the central tri-state entry point
-        UI_SetExcelUI Ribbon:=UI_Show, StatusBar:=UI_Show, ScrollBars:=UI_Show, _
-            FormulaBar:=UI_Show, Headings:=UI_Show, WorkbookTabs:=UI_Show, _
-            Gridlines:=UI_Show, TitleBar:=UI_Show
+    'Request the visible state for every managed element
+        UI_SetExcelUI _
+            Ribbon:=UI_Show, _
+            StatusBar:=UI_Show, _
+            ScrollBars:=UI_Show, _
+            FormulaBar:=UI_Show, _
+            Headings:=UI_Show, _
+            WorkbookTabs:=UI_Show, _
+            Gridlines:=UI_Show, _
+            TitleBar:=UI_Show
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
-        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
-        Resume SafeExit
+Err_Handler:
+    'Log the unexpected wrapper failure without raising to the caller
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+        Resume Safe_Exit
 
 End Sub
 
-Public Function UI_SetExcelUI_WithResult(Optional ByVal Ribbon As UIVisibility = _
-    UI_LeaveUnchanged, Optional ByVal StatusBar As UIVisibility = UI_LeaveUnchanged, _
-    Optional ByVal ScrollBars As UIVisibility = UI_LeaveUnchanged, Optional ByVal _
-    FormulaBar As UIVisibility = UI_LeaveUnchanged, Optional ByVal Headings As _
-    UIVisibility = UI_LeaveUnchanged, Optional ByVal WorkbookTabs As UIVisibility = _
-    UI_LeaveUnchanged, Optional ByVal Gridlines As UIVisibility = UI_LeaveUnchanged, _
-    Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged, Optional ByRef _
-    FailureCount As Long = 0, Optional ByRef FailureList As Variant) As Boolean
 
+Public Function UI_SetExcelUI_WithResult( _
+    Optional ByVal Ribbon As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal StatusBar As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal ScrollBars As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal FormulaBar As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal Headings As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal WorkbookTabs As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal Gridlines As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged, _
+    Optional ByRef FailureCount As Long = 0, _
+    Optional ByRef FailureList As Variant, _
+    Optional ByVal TargetScope As UIWindowTargetScope = _
+        UI_TargetAllExcelWindows) _
+    As Boolean
 '
 '==============================================================================
-'                         UI_SetExcelUI_WithResult
+' UI_SetExcelUI_WithResult
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Apply the requested visibility state to the Excel UI elements managed by
-'   this module and return a Boolean success flag, with optional structured
-'   failure details captured through ByRef outputs
+'   Applies the requested managed UI state and returns structured diagnostics.
 '
 ' WHY THIS EXISTS
-'   UI_SetExcelUI is the preferred fire-and-forget, fail-soft entry point for
-'   callers that only need best-effort application plus Immediate Window
-'   diagnostics
-'
-'   Some callers, however, need structured feedback so they can:
-'     - inspect whether the full operation succeeded
-'     - count element-level failures
-'     - enumerate the recorded failures in order
-'     - surface diagnostics to higher-level orchestration or test logic
-'
-'   This routine provides the same best-effort behavior as UI_SetExcelUI, but
-'   avoids any class-module dependency by returning:
-'     - a Boolean success flag
-'     - FailureCount as an optional ByRef output
-'     - FailureList as an optional ByRef Variant containing a 1-based String
-'       array of recorded failures
+'   Initialization, orchestration and automated tests need to distinguish
+'   complete success from partial application, and to inspect which elements
+'   failed rather than reading the Immediate Window. This entry point returns
+'   that information as data.
 '
 ' INPUTS
-'   Ribbon (optional)
-'     UI_Show             => show Ribbon
-'     UI_Hide             => hide Ribbon
-'     UI_LeaveUnchanged   => do not touch Ribbon
+'   Ribbon, StatusBar, ScrollBars, FormulaBar,
+'   Headings, WorkbookTabs, Gridlines, TitleBar
+'     UI_Show, UI_Hide or UI_LeaveUnchanged.
 '
-'   StatusBar (optional)
-'     UI_Show             => show status bar
-'     UI_Hide             => hide status bar
-'     UI_LeaveUnchanged   => do not touch status bar
+'   FailureCount
+'     Optional ByRef. Receives the number of recorded failures.
 '
-'   ScrollBars (optional)
-'     UI_Show             => show scroll bars
-'     UI_Hide             => hide scroll bars
-'     UI_LeaveUnchanged   => do not touch scroll bars
+'   FailureList
+'     Optional ByRef. Receives a 1-based String array of ordered
+'     "Stage | Detail" entries. Populated only when the argument is supplied.
 '
-'   FormulaBar (optional)
-'     UI_Show             => show formula bar
-'     UI_Hide             => hide formula bar
-'     UI_LeaveUnchanged   => do not touch formula bar
-'
-'   Headings (optional)
-'     UI_Show             => show row / column headings in each window
-'     UI_Hide             => hide row / column headings in each window
-'     UI_LeaveUnchanged   => do not touch headings
-'
-'   WorkbookTabs (optional)
-'     UI_Show             => show workbook tabs in each window
-'     UI_Hide             => hide workbook tabs in each window
-'     UI_LeaveUnchanged   => do not touch workbook tabs
-'
-'   Gridlines (optional)
-'     UI_Show             => show gridlines in each window
-'     UI_Hide             => hide gridlines in each window
-'     UI_LeaveUnchanged   => do not touch gridlines
-'
-'   TitleBar (optional)
-'     UI_Show             => show the title bar of the Excel main window
-'                            represented by Application.Hwnd
-'     UI_Hide             => hide the title bar of the Excel main window
-'                            represented by Application.Hwnd
-'     UI_LeaveUnchanged   => do not touch title bar
-'
-'   FailureCount (optional, ByRef output)
-'     Receives the number of recorded failures
-'
-'   FailureList (optional, ByRef output)
-'     When supplied, receives a 1-based String array whose entries follow the
-'     format:
-'         Stage & " | " & Detail
+'   TargetScope
+'     Controls only Headings, Workbook Tabs and Gridlines. The default remains
+'     UI_TargetAllExcelWindows.
 '
 ' RETURNS
-'   TRUE  => no failures were recorded
-'   FALSE => one or more failures were recorded
+'   Boolean
+'     True  => no failure was recorded.
+'     False => one or more failures were recorded.
 '
 ' BEHAVIOR
-'   - Applies Ribbon / status bar / scroll bars / formula bar at Application
-'     level
-'   - Applies headings / workbook tabs / gridlines to every open Excel window
-'     in the current Excel instance
-'   - Applies title-bar visibility to the Excel main window represented by
-'     Application.Hwnd via WinAPI
-'   - Uses best-effort processing so one failed UI element does not prevent
-'     subsequent UI elements from being attempted
-'   - Records failures through FailureCount and, when requested, FailureList
+'   - Mirrors UI_SetExcelUI while suppressing Immediate Window logging.
+'   - Clears the output buffers deterministically on entry.
+'   - Accumulates into an internal buffer and publishes it once, so a caller's
+'     variable is never left holding a partially built array.
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers for ordinary element-level failures
-'   - Returns FALSE when one or more failures were recorded
-'   - Unexpected procedure-level failures are captured as an "Unexpected"
-'     failure entry and also produce a FALSE result
+'   - Does not raise for ordinary failures.
+'   - Captures unexpected failures in the result rather than propagating them.
 '
 ' DEPENDENCIES
 '   - UI_ApplyExcelUIState
-'   - UI_HandleApplyFailure
-'   - UI_ClearResultBuffer
+'   - UI_RuntimeClearResultBuffer
+'   - UI_RuntimeHandleFailure
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - Workbook and add-in initialization and orchestration code
+'   - M_EXCEL_UI_REGRESSION_TESTS
 '
 ' NOTES
-'   - This routine mirrors the best-effort semantics of UI_SetExcelUI
-'   - Failure order is preserved
-'   - FailureList remains optional so callers that only need the Boolean result
-'     or failure count do not need to manage an array
+'   TargetScope is deliberately declared after FailureCount and FailureList so
+'   that existing positional callers written against v1.0 are unaffected.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Succeeded           As Boolean    'Overall success flag returned to the caller
-    Dim CaptureFailureList  As Boolean    'TRUE when the caller supplied FailureList
-    Dim InternalFailureList As Variant    'Local working failure list copied back only when requested
+    Dim Succeeded           As Boolean         'Pass-level success flag
+    Dim CaptureFailureList  As Boolean         'True when a list was requested
+    Dim InternalFailureList As Variant         'Buffer published once on exit
 
-    Const PROC As String = "UI_SetExcelUI_WithResult"   'Procedure name for diagnostics
+    Const PROC              As String = "UI_SetExcelUI_WithResult"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Detect whether the caller supplied the optional failure-list output
+    'A failure list is built only when the caller supplied the argument
         CaptureFailureList = Not IsMissing(FailureList)
 
-    'Initialize the public result outputs in their clean-success state
-        UI_ClearResultBuffer FailureCount, InternalFailureList, _
-            CaptureFailureList
+    'Clear the result buffers deterministically
+        UI_RuntimeClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+    'Assume success until an element fails
         Succeeded = True
 
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
-' APPLY STATE THROUGH INTERNAL WORKER
+' APPLY
 '------------------------------------------------------------------------------
-        Succeeded = UI_ApplyExcelUIState(ProcName:=PROC, Ribbon:=Ribbon, _
-            StatusBar:=StatusBar, ScrollBars:=ScrollBars, FormulaBar:=FormulaBar, _
-            Headings:=Headings, WorkbookTabs:=WorkbookTabs, Gridlines:=Gridlines, _
-            TitleBar:=TitleBar, LogFailures:=False, FailureCount:=FailureCount, _
+    'Delegate to the shared worker with logging off and result capture on
+        Succeeded = UI_ApplyExcelUIState( _
+            ProcName:=PROC, _
+            Ribbon:=Ribbon, _
+            StatusBar:=StatusBar, _
+            ScrollBars:=ScrollBars, _
+            FormulaBar:=FormulaBar, _
+            Headings:=Headings, _
+            WorkbookTabs:=WorkbookTabs, _
+            Gridlines:=Gridlines, _
+            TitleBar:=TitleBar, _
+            TargetScope:=TargetScope, _
+            LogFailures:=False, _
+            FailureCount:=FailureCount, _
             FailureList:=InternalFailureList, _
             CaptureFailureList:=CaptureFailureList)
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
-    'Copy the internal working list back to the caller only when the optional
-    'failure-list output was actually supplied
+Safe_Exit:
+    'Publish the accumulated list only when one was requested
         If CaptureFailureList Then
             FailureList = InternalFailureList
         End If
 
+    'Publish the pass-level result and exit before the error handler
         UI_SetExcelUI_WithResult = Succeeded
-
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
-    'Capture the unexpected wrapper-level failure in the structured result buffers
-        UI_HandleApplyFailure ProcName:=PROC, LogFailures:=False, _
-            Succeeded:=Succeeded, FailureCount:=FailureCount, _
-            FailureList:=InternalFailureList, CaptureFailureList:=CaptureFailureList, _
-            Stage:="Unexpected", Detail:=UI_BuildRuntimeErrorText
+Err_Handler:
+    'Record the unexpected failure in the result instead of raising
+        UI_RuntimeHandleFailure _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList, _
+            Stage:="Unexpected", _
+            Detail:=UI_RuntimeBuildErrorText
 
-        Resume SafeExit
+        Resume Safe_Exit
 
 End Function
+
 
 Public Sub UI_CaptureExcelUIState()
-
 '
 '==============================================================================
-'                           UI_CaptureExcelUIState
+' UI_CaptureExcelUIState
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Explicitly snapshot the current managed Excel UI state so it can later be
-'   restored through UI_ResetExcelUIToSnapshot
+'   Captures the current managed Excel UI state for later restoration.
 '
 ' WHY THIS EXISTS
-'   UI_ShowExcelUI intentionally means "show all managed UI", not "restore the
-'   user's prior state"
-'
-'   Some callers need a distinct, deliberate lifecycle:
-'     - capture current state
-'     - apply a constrained shell
-'     - restore the captured state later
-'
-'   This routine provides that explicit capture step
+'   A workflow that constrains the shell should be able to hand the user back
+'   the interface they actually had, rather than a generic show-everything
+'   state. This is the fire-and-forget form of that capture.
 '
 ' RETURNS
-'   None
+'   None.
 '
 ' BEHAVIOR
-'   - Captures application-level state
-'   - Captures per-window state by index
-'   - Captures title-bar state on a best-effort basis
-'   - Marks the snapshot as available after object-model capture completes
-'   - Restores Ribbon / TitleBar later only when their reads succeeded
+'   - Delegates to the shared capture worker.
+'   - Replaces any prior snapshot.
+'   - Logs ordered best-effort failures to the Immediate Window.
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Logs any unexpected issue to the Immediate Window
+'   - Does not raise to callers.
+'   - Logs failures and continues where capture remains meaningful.
+'   - Leaves the snapshot unavailable after an unexpected capture failure.
 '
 ' DEPENDENCIES
-'   - UI_ClearExcelUIStateSnapshot
-'   - UI_TryGetRibbonVisible
-'   - UI_TryGetTitleBarVisible
-'   - UI_LogFailure
+'   - UI_SnapshotCaptureCore
+'   - UI_RuntimeLogFailure
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - Workbook and add-in code
+'
+' NOTES
+'   This form returns nothing, so a caller that must confirm the snapshot was
+'   taken should use UI_CaptureExcelUIState_WithResult instead.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long      'Current window index during snapshot
-    Dim Msg                 As String    'Diagnostic message from helper reads
+    Dim IgnoredFailureCount As Long            'Discarded result buffer
+    Dim IgnoredFailureList  As Variant         'Discarded result buffer
 
-    Const PROC As String = "UI_CaptureExcelUIState"   'Procedure name for diagnostics
+    Const PROC              As String = "UI_CaptureExcelUIState"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
-' CLEAR PRIOR SNAPSHOT
+' CAPTURE
 '------------------------------------------------------------------------------
-    'Clear any prior snapshot before capturing a fresh one
-        UI_ClearExcelUIStateSnapshot
+    'Delegate to the shared worker with logging on and result capture off
+        UI_SnapshotCaptureCore _
+            ProcName:=PROC, _
+            LogFailures:=True, _
+            FailureCount:=IgnoredFailureCount, _
+            FailureList:=IgnoredFailureList, _
+            CaptureFailureList:=False
 
 '------------------------------------------------------------------------------
-' CAPTURE APPLICATION-LEVEL STATE
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Capture application-level UI state directly from Excel
-        m_SnapshotStatusBarVisible = Application.DisplayStatusBar
-        m_SnapshotScrollBarsVisible = Application.DisplayScrollBars
-        m_SnapshotFormulaBarVisible = Application.DisplayFormulaBar
-
-'------------------------------------------------------------------------------
-' CAPTURE RIBBON / TITLE-BAR STATE
-'------------------------------------------------------------------------------
-    'Capture Ribbon state through the best-effort helper
-        m_SnapshotRibbonKnown = UI_TryGetRibbonVisible(m_SnapshotRibbonVisible, _
-            Msg)
-        If Not m_SnapshotRibbonKnown Then
-            UI_LogFailure PROC, "Ribbon", Msg
-        End If
-    'Capture TitleBar state through the best-effort helper
-        m_SnapshotTitleBarKnown = _
-            UI_TryGetTitleBarVisible(m_SnapshotTitleBarVisible, Msg)
-        If Not m_SnapshotTitleBarKnown Then
-            UI_LogFailure PROC, "TitleBar", Msg
-        End If
-
-'------------------------------------------------------------------------------
-' CAPTURE WINDOW-LEVEL STATE
-'------------------------------------------------------------------------------
-    'Capture the current window count
-        m_SnapshotWindowCount = Application.Windows.Count
-    'Allocate and fill per-window arrays only when at least one window exists
-        If m_SnapshotWindowCount > 0 Then
-                ReDim m_SnapshotHeadingsVisible(1 To m_SnapshotWindowCount)
-                ReDim m_SnapshotWorkbookTabsVisible(1 To m_SnapshotWindowCount)
-                ReDim m_SnapshotGridlinesVisible(1 To m_SnapshotWindowCount)
-            'Capture the state of each current Excel window by index
-                For i = 1 To m_SnapshotWindowCount
-                        m_SnapshotHeadingsVisible(i) = _
-                            Application.Windows(i).DisplayHeadings
-                        m_SnapshotWorkbookTabsVisible(i) = _
-                            Application.Windows(i).DisplayWorkbookTabs
-                        m_SnapshotGridlinesVisible(i) = _
-                            Application.Windows(i).DisplayGridlines
-                Next i
-        End If
-
-'------------------------------------------------------------------------------
-' MARK SNAPSHOT AVAILABLE
-'------------------------------------------------------------------------------
-        m_HasExcelUIStateSnapshot = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
-    'Log the unexpected capture failure without interrupting callers
-        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
-
-    'Leave quietly after logging
-        Resume SafeExit
+Err_Handler:
+    'Log the unexpected wrapper failure without raising to the caller
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+        Resume Safe_Exit
 
 End Sub
 
-Public Function UI_HasExcelUIStateSnapshot() As Boolean
 
+Public Function UI_CaptureExcelUIState_WithResult( _
+    Optional ByRef FailureCount As Long = 0, _
+    Optional ByRef FailureList As Variant) _
+    As Boolean
 '
 '==============================================================================
-'                        UI_HasExcelUIStateSnapshot
+' UI_CaptureExcelUIState_WithResult
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Return whether an explicit Excel UI snapshot is currently available
+'   Captures the current managed Excel UI state and returns structured
+'   diagnostics.
+'
+' WHY THIS EXISTS
+'   Code that is about to constrain the shell needs to know whether the
+'   baseline it will later restore was actually recorded, and which elements
+'   were unreadable. The fire-and-forget form cannot report either.
+'
+' INPUTS
+'   FailureCount
+'     Optional ByRef. Receives the number of recorded capture failures.
+'
+'   FailureList
+'     Optional ByRef. Receives a 1-based String array of ordered
+'     "Stage | Detail" entries.
 '
 ' RETURNS
-'   TRUE  => a snapshot is available
-'   FALSE => no snapshot is available
+'   Boolean
+'     True  => the capture pass recorded no failure.
+'     False => at least one element could not be captured.
+'
+' BEHAVIOR
+'   - Clears the output buffers deterministically on entry.
+'   - Replaces any prior snapshot.
+'   - Preserves best-effort partial-capture semantics.
+'   - Marks the snapshot available after the capture pass completes, even when
+'     optional elements were unreadable.
+'
+' ERROR POLICY
+'   - Does not raise for ordinary capture failures.
+'   - Returns ordered element and window-specific diagnostics.
+'   - Leaves the snapshot unavailable after an unexpected capture failure.
+'
+' DEPENDENCIES
+'   - UI_SnapshotCaptureCore
+'   - UI_RuntimeClearResultBuffer
+'   - UI_RuntimeHandleFailure
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - Workbook and add-in initialization and orchestration code
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   A False return does not mean no snapshot exists. A partial capture is still
+'   available for restoration; the failure list names what was missed.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
-' RETURN SNAPSHOT AVAILABILITY
+' DECLARE
 '------------------------------------------------------------------------------
-        UI_HasExcelUIStateSnapshot = m_HasExcelUIStateSnapshot
+    Dim Succeeded           As Boolean         'Pass-level success flag
+    Dim CaptureFailureList  As Boolean         'True when a list was requested
+    Dim InternalFailureList As Variant         'Buffer published once on exit
+
+    Const PROC              As String = "UI_CaptureExcelUIState_WithResult"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A failure list is built only when the caller supplied the argument
+        CaptureFailureList = Not IsMissing(FailureList)
+
+    'Clear the result buffers deterministically
+        UI_RuntimeClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+    'Assume success until an element fails
+        Succeeded = True
+
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' CAPTURE
+'------------------------------------------------------------------------------
+    'Delegate to the shared worker with logging off and result capture on
+        Succeeded = UI_SnapshotCaptureCore( _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList)
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Publish the accumulated list only when one was requested
+        If CaptureFailureList Then
+            FailureList = InternalFailureList
+        End If
+
+    'Publish the pass-level result and exit before the error handler
+        UI_CaptureExcelUIState_WithResult = Succeeded
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Record the unexpected failure in the result instead of raising
+        UI_RuntimeHandleFailure _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList, _
+            Stage:="Unexpected", _
+            Detail:=UI_RuntimeBuildErrorText
+
+        Resume Safe_Exit
 
 End Function
 
-Public Sub UI_ResetExcelUIToSnapshot()
 
+Public Function UI_HasExcelUIStateSnapshot() _
+    As Boolean
 '
 '==============================================================================
-'                        UI_ResetExcelUIToSnapshot
+' UI_HasExcelUIStateSnapshot
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Best-effort restore the Excel UI to the most recently captured explicit
-'   snapshot
+'   Returns whether an explicit in-memory Excel UI snapshot is available.
 '
 ' WHY THIS EXISTS
-'   Callers that previously used UI_CaptureExcelUIState may need a distinct way
-'   to restore the captured baseline rather than merely showing all managed UI
+'   Callers that offer a "restore" action need to know whether it would do
+'   anything, so the action can be disabled rather than failing when pressed.
 '
 ' RETURNS
-'   None
+'   Boolean
+'     True  => a snapshot exists and can be restored from.
+'     False => no snapshot has been captured, or it has been cleared.
 '
 ' BEHAVIOR
-'   - Restores title bar and Ribbon when their snapshot states were known
-'   - Restores application-level object-model properties
-'   - Restores per-window state by common index range
-'   - Uses a quiet-update scope with ScreenUpdating where possible
+'   - Reports availability only, not completeness.
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Logs any restore issue to the Immediate Window
-'   - Best-effort only, especially for per-window restore
+'   - Does not raise.
 '
 ' DEPENDENCIES
-'   - UI_BeginQuietUIUpdate
-'   - UI_EndQuietUIUpdate
-'   - UI_TrySetTitleBarVisibleIfNeeded
-'   - UI_TrySetRibbonVisibleIfNeeded
-'   - UI_TrySetBooleanPropertyIfNeeded
-'   - UI_LogFailure
+'   - UI_SnapshotHasState
+'
+' CALLED FROM
+'   - Workbook and add-in code
+'   - M_EXCEL_UI_DEMO
+'   - M_EXCEL_UI_REGRESSION_TESTS
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' RETURN AVAILABILITY
+'------------------------------------------------------------------------------
+    'Delegate to the snapshot engine, which owns the flag
+        UI_HasExcelUIStateSnapshot = UI_SnapshotHasState
+
+End Function
+
+
+Public Sub UI_ResetExcelUIToSnapshot()
+'
+'==============================================================================
+' UI_ResetExcelUIToSnapshot
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores the managed Excel UI to the most recently captured snapshot.
+'
+' WHY THIS EXISTS
+'   This returns the user to the interface they actually had, which is a
+'   different and usually better outcome than the deterministic show-everything
+'   state produced by UI_ShowExcelUI.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Delegates to the shared restoration worker.
+'   - Logs ordered best-effort failures to the Immediate Window.
+'   - Retains the snapshot afterwards.
+'
+' ERROR POLICY
+'   - Does not raise to callers.
+'   - Logs restore failures and continues where possible.
+'
+' DEPENDENCIES
+'   - UI_SnapshotRestoreCore
+'   - UI_RuntimeLogFailure
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - Workbook and add-in code
+'
+' NOTES
+'   Requires a snapshot. Prefer UI_ShowExcelUI for emergency recovery, because
+'   it works when no snapshot is available.
+'
+' UPDATED
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long      'Current window index during restore
-    Dim WindowLimit         As Long      'Minimum of saved and current window counts
-    Dim Msg                 As String    'Diagnostic message from helper routines
-    Dim OldScreenUpdating   As Boolean   'Cached ScreenUpdating state
-    Dim QuietModeChanged    As Boolean   'TRUE when ScreenUpdating was changed
+    Dim IgnoredFailureCount As Long            'Discarded result buffer
+    Dim IgnoredFailureList  As Variant         'Discarded result buffer
 
-    Const PROC As String = "UI_ResetExcelUIToSnapshot"   'Procedure name for diagnostics
+    Const PROC              As String = "UI_ResetExcelUIToSnapshot"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-    'Do nothing when no explicit snapshot is available
-        If Not m_HasExcelUIStateSnapshot Then
-            UI_LogFailure PROC, "NoSnapshot", _
-                "no captured Excel UI snapshot is available"
-            GoTo SafeExit
-        End If
-
-    'Enter the quiet-update scope to reduce worksheet redraw where possible
-        UI_BeginQuietUIUpdate OldScreenUpdating, QuietModeChanged
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
-' RESTORE TITLE-BAR STATE
+' RESET
 '------------------------------------------------------------------------------
-    'Restore TitleBar first when its snapshot state was captured successfully
-        If m_SnapshotTitleBarKnown Then
-            If Not UI_TrySetTitleBarVisibleIfNeeded(m_SnapshotTitleBarVisible, _
-                Msg) Then
-                UI_LogFailure PROC, "TitleBar", Msg
-            End If
-        End If
-
-'------------------------------------------------------------------------------
-' RESTORE RIBBON STATE
-'------------------------------------------------------------------------------
-    'Restore Ribbon when its snapshot state was captured successfully
-        If m_SnapshotRibbonKnown Then
-            If Not UI_TrySetRibbonVisibleIfNeeded(m_SnapshotRibbonVisible, Msg) _
-                Then
-                UI_LogFailure PROC, "Ribbon", Msg
-            End If
-        End If
+    'Delegate to the shared worker with logging on and result capture off
+        UI_SnapshotRestoreCore _
+            ProcName:=PROC, _
+            LogFailures:=True, _
+            FailureCount:=IgnoredFailureCount, _
+            FailureList:=IgnoredFailureList, _
+            CaptureFailureList:=False
 
 '------------------------------------------------------------------------------
-' RESTORE APPLICATION-LEVEL STATE
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-    'Restore StatusBar visibility best-effort
-        If Not UI_TrySetBooleanPropertyIfNeeded(Application, "DisplayStatusBar", _
-            m_SnapshotStatusBarVisible, Msg) Then
-            UI_LogFailure PROC, "StatusBar", Msg
-        End If
-
-    'Restore ScrollBars visibility best-effort
-        If Not UI_TrySetBooleanPropertyIfNeeded(Application, "DisplayScrollBars", _
-            m_SnapshotScrollBarsVisible, Msg) Then
-            UI_LogFailure PROC, "ScrollBars", Msg
-        End If
-
-    'Restore FormulaBar visibility best-effort
-        If Not UI_TrySetBooleanPropertyIfNeeded(Application, "DisplayFormulaBar", _
-            m_SnapshotFormulaBarVisible, Msg) Then
-            UI_LogFailure PROC, "FormulaBar", Msg
-        End If
-
-'------------------------------------------------------------------------------
-' RESTORE WINDOW-LEVEL STATE
-'------------------------------------------------------------------------------
-    'Restore only the common indexed window range that still exists
-        WindowLimit = Application.Windows.Count
-        If m_SnapshotWindowCount < WindowLimit Then WindowLimit = _
-            m_SnapshotWindowCount
-
-    'Restore each saved window state up to the common window count
-        For i = 1 To WindowLimit
-
-            'Restore Headings visibility for the current saved window index
-                If Not UI_TrySetBooleanPropertyIfNeeded(Application.Windows(i), _
-                    "DisplayHeadings", m_SnapshotHeadingsVisible(i), Msg) Then
-                    UI_LogFailure PROC, "Headings [" & _
-                        Application.Windows(i).Caption & "]", Msg
-                End If
-
-            'Restore WorkbookTabs visibility for the current saved window index
-                If Not UI_TrySetBooleanPropertyIfNeeded(Application.Windows(i), _
-                    "DisplayWorkbookTabs", m_SnapshotWorkbookTabsVisible(i), Msg) _
-                    Then
-                    UI_LogFailure PROC, "WorkbookTabs [" & _
-                        Application.Windows(i).Caption & "]", Msg
-                End If
-
-            'Restore Gridlines visibility for the current saved window index
-                If Not UI_TrySetBooleanPropertyIfNeeded(Application.Windows(i), _
-                    "DisplayGridlines", m_SnapshotGridlinesVisible(i), Msg) Then
-                    UI_LogFailure PROC, "Gridlines [" & _
-                        Application.Windows(i).Caption & "]", Msg
-                End If
-
-        Next i
-
-    'Log a note when the current window count differs from the captured count
-        If Application.Windows.Count <> m_SnapshotWindowCount Then
-            UI_LogFailure PROC, "WindowCount", _
-                "current window count differs from captured snapshot; restore applied to common index range only"
-        End If
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-    'Leave the quiet-update scope and restore ScreenUpdating when needed
-        UI_EndQuietUIUpdate OldScreenUpdating, QuietModeChanged
-
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
-    'Log the unexpected restore failure without interrupting callers
-        UI_LogFailure PROC, "Unexpected", UI_BuildRuntimeErrorText
-
-    'Leave quietly after logging
-        Resume SafeExit
+Err_Handler:
+    'Log the unexpected wrapper failure without raising to the caller
+        UI_RuntimeLogFailure PROC, "Unexpected", UI_RuntimeBuildErrorText
+        Resume Safe_Exit
 
 End Sub
 
-Public Sub UI_ClearExcelUIStateSnapshot()
 
+Public Function UI_ResetExcelUIToSnapshot_WithResult( _
+    Optional ByRef FailureCount As Long = 0, _
+    Optional ByRef FailureList As Variant) _
+    As Boolean
 '
 '==============================================================================
-'                      UI_ClearExcelUIStateSnapshot
+' UI_ResetExcelUIToSnapshot_WithResult
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Remove any captured explicit Excel UI snapshot from module state
+'   Restores the managed Excel UI to the current snapshot and returns structured
+'   diagnostics.
 '
 ' WHY THIS EXISTS
-'   Callers may want to discard an obsolete snapshot explicitly before taking a
-'   new one or before leaving a workflow
+'   Restoration is the operation most likely to be partially satisfiable, since
+'   captured windows may have been closed in the meantime. Callers that must
+'   report or persist what could not be restored need that as data.
+'
+' INPUTS
+'   FailureCount
+'     Optional ByRef. Receives the number of recorded restoration failures.
+'
+'   FailureList
+'     Optional ByRef. Receives a 1-based String array of ordered
+'     "Stage | Detail" entries.
 '
 ' RETURNS
-'   None
+'   Boolean
+'     True  => restoration recorded no failure.
+'     False => at least one element could not be restored, or no snapshot
+'              existed.
+'
+' BEHAVIOR
+'   - Clears the output buffers deterministically on entry.
+'   - Restores every available captured element on a best-effort basis.
+'   - Leaves newly opened windows unchanged.
+'   - Reports closed, recreated or unusable captured windows without applying
+'     their state to a replacement window.
+'   - Retains the snapshot after the restoration attempt.
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers
+'   - Does not raise for ordinary restoration failures.
+'   - Returns ordered element and window-specific diagnostics.
+'
+' DEPENDENCIES
+'   - UI_SnapshotRestoreCore
+'   - UI_RuntimeClearResultBuffer
+'   - UI_RuntimeHandleFailure
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - Workbook and add-in orchestration code
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   Calling this without a snapshot is not an unexpected error; it returns
+'   False with a single NoSnapshot entry.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
-' RESET SNAPSHOT FLAGS
+' DECLARE
 '------------------------------------------------------------------------------
-    'Mark the explicit UI snapshot as unavailable
-        m_HasExcelUIStateSnapshot = False
+    Dim Succeeded           As Boolean         'Pass-level success flag
+    Dim CaptureFailureList  As Boolean         'True when a list was requested
+    Dim InternalFailureList As Variant         'Buffer published once on exit
 
-    'Reset best-effort known flags
-        m_SnapshotRibbonKnown = False
-        m_SnapshotTitleBarKnown = False
-
-'------------------------------------------------------------------------------
-' RESET SNAPSHOT VALUES
-'------------------------------------------------------------------------------
-    'Reset application-level values
-        m_SnapshotRibbonVisible = False
-        m_SnapshotStatusBarVisible = False
-        m_SnapshotScrollBarsVisible = False
-        m_SnapshotFormulaBarVisible = False
-
-    'Reset title-bar value
-        m_SnapshotTitleBarVisible = False
-
-    'Reset captured window count
-        m_SnapshotWindowCount = 0
+    Const PROC              As String = "UI_ResetExcelUIToSnapshot_WithResult"
 
 '------------------------------------------------------------------------------
-' CLEAR SNAPSHOT ARRAYS
+' INITIALIZE
 '------------------------------------------------------------------------------
-    'Clear any captured per-window arrays
-        Erase m_SnapshotHeadingsVisible
-        Erase m_SnapshotWorkbookTabsVisible
-        Erase m_SnapshotGridlinesVisible
+    'A failure list is built only when the caller supplied the argument
+        CaptureFailureList = Not IsMissing(FailureList)
+
+    'Clear the result buffers deterministically
+        UI_RuntimeClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+    'Assume success until an element fails
+        Succeeded = True
+
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' RESET
+'------------------------------------------------------------------------------
+    'Delegate to the shared worker with logging off and result capture on
+        Succeeded = UI_SnapshotRestoreCore( _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList)
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Publish the accumulated list only when one was requested
+        If CaptureFailureList Then
+            FailureList = InternalFailureList
+        End If
+
+    'Publish the pass-level result and exit before the error handler
+        UI_ResetExcelUIToSnapshot_WithResult = Succeeded
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Record the unexpected failure in the result instead of raising
+        UI_RuntimeHandleFailure _
+            ProcName:=PROC, _
+            LogFailures:=False, _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=InternalFailureList, _
+            CaptureFailureList:=CaptureFailureList, _
+            Stage:="Unexpected", _
+            Detail:=UI_RuntimeBuildErrorText
+
+        Resume Safe_Exit
+
+End Function
+
+
+Public Sub UI_ClearExcelUIStateSnapshot()
+'
+'==============================================================================
+' UI_ClearExcelUIStateSnapshot
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes the current in-memory Excel UI snapshot.
+'
+' WHY THIS EXISTS
+'   The snapshot retains live Window references for as long as it exists.
+'   Clearing it when the captured baseline is no longer needed releases those
+'   references rather than holding them until the project resets.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Releases retained Window object references and clears all captured values.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - UI_SnapshotClear
+'
+' CALLED FROM
+'   - Workbook and add-in code
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   Worth calling from Workbook_BeforeClose in solutions that capture a
+'   baseline, so no Window reference outlives the workbook that produced it.
+'
+' UPDATED
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' CLEAR
+'------------------------------------------------------------------------------
+    'Clearing must never raise, whatever state the snapshot is in
+        On Error Resume Next
+
+    'Delegate to the snapshot engine, which owns the state
+        UI_SnapshotClear
 
 End Sub
 
-Private Function UI_ApplyExcelUIState(ByVal ProcName As String, ByVal Ribbon As _
-    UIVisibility, ByVal StatusBar As UIVisibility, ByVal ScrollBars As UIVisibility, _
-    ByVal FormulaBar As UIVisibility, ByVal Headings As UIVisibility, ByVal _
-    WorkbookTabs As UIVisibility, ByVal Gridlines As UIVisibility, ByVal TitleBar As _
-    UIVisibility, ByVal LogFailures As Boolean, ByRef FailureCount As Long, ByRef _
-    FailureList As Variant, ByVal CaptureFailureList As Boolean) As Boolean
 
+Private Function UI_ApplyExcelUIState( _
+    ByVal ProcName As String, _
+    ByVal Ribbon As UIVisibility, _
+    ByVal StatusBar As UIVisibility, _
+    ByVal ScrollBars As UIVisibility, _
+    ByVal FormulaBar As UIVisibility, _
+    ByVal Headings As UIVisibility, _
+    ByVal WorkbookTabs As UIVisibility, _
+    ByVal Gridlines As UIVisibility, _
+    ByVal TitleBar As UIVisibility, _
+    ByVal TargetScope As UIWindowTargetScope, _
+    ByVal LogFailures As Boolean, _
+    ByRef FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal CaptureFailureList As Boolean) _
+    As Boolean
 '
 '==============================================================================
-'                           UI_ApplyExcelUIState
+' UI_ApplyExcelUIState
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Apply the requested Excel UI state through the shared internal worker used
-'   by both public entry points
+'   Applies the requested UI state through the shared fire-and-forget and
+'   structured-result worker.
 '
 ' WHY THIS EXISTS
-'   The module exposes two public application paths:
-'     - UI_SetExcelUI
-'     - UI_SetExcelUI_WithResult
-'
-'   They are intentionally different only in how they surface failures:
-'     - logging to the Immediate Window
-'     - structured result buffers
-'
-'   Centralizing the actual UI-application logic here eliminates duplicated
-'   orchestration and reduces the risk of future behavioral drift
+'   Both selective entry points delegate here so that validation stays
+'   consistent, operation ordering stays stable, best-effort semantics do not
+'   drift between them, and the logging and structured-result paths share one
+'   implementation rather than two that must be kept in step.
 '
 ' INPUTS
 '   ProcName
-'     Public caller name used for failure diagnostics
+'     Public caller name used for diagnostics.
 '
-'   Ribbon / StatusBar / ScrollBars / FormulaBar / Headings / WorkbookTabs /
-'   Gridlines / TitleBar
-'     Requested tri-state UI modes
+'   Ribbon .. TitleBar
+'     Requested UIVisibility values, validated individually.
+'
+'   TargetScope
+'     Requested window targeting, validated before use.
 '
 '   LogFailures
-'     TRUE  => write failures to the Immediate Window
-'     FALSE => suppress Immediate Window logging and use only the result
-'              buffers
+'     True to emit Immediate Window diagnostics.
 '
-'   FailureCount
-'     Receives the number of recorded failures
-'
-'   FailureList
-'     Optional working Variant holding a 1-based String array of failures
-'
-'   CaptureFailureList
-'     TRUE  => populate FailureList
-'     FALSE => maintain only success flag and FailureCount
+'   FailureCount / FailureList / CaptureFailureList
+'     Standard structured-result buffers.
 '
 ' RETURNS
-'   TRUE  => no failures were recorded
-'   FALSE => one or more failures were recorded
+'   Boolean
+'     True  => no failure was recorded.
+'     False => at least one element failed or was invalid.
 '
 ' BEHAVIOR
-'   - Initializes the result buffers
-'   - Applies all requested UI changes using best-effort processing
-'   - Uses ScreenUpdating suppression where possible to reduce worksheet redraw
-'   - Skips object-model, Ribbon, and TitleBar writes when the current state
-'     can be read and already matches the requested target
-'   - Validates tri-state inputs before converting them to Boolean targets
-'   - Records and optionally logs failures in insertion order
+'   - Validates every UIVisibility argument and the TargetScope.
+'   - Records an invalid value as a failure and skips only that element, so one
+'     bad argument does not discard the rest of the request.
+'   - Skips UI_LeaveUnchanged values without reading or writing them.
+'   - Avoids no-op writes wherever the current state can be read.
+'   - Applies window-level state to all Excel windows, the active window, or
+'     all windows belonging to the active workbook.
+'   - TargetScope never changes the Ribbon, application-level properties, or
+'     the Excel main-window title bar.
+'   - Preserves ScreenUpdating through a quiet-update scope.
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Captures unexpected procedure-level failures as "Unexpected"
+'   - Does not raise.
+'   - Records and optionally logs failures in insertion order.
+'   - Leaves the quiet-update scope exactly as it was entered, on every path.
 '
 ' DEPENDENCIES
-'   - UI_ClearResultBuffer
-'   - UI_BeginQuietUIUpdate
-'   - UI_EndQuietUIUpdate
+'   - UI_ApplyWindowLevelState
 '   - UI_IsValidVisibility
+'   - UI_IsValidTargetScope
 '   - UI_VisibilityToBoolean
-'   - UI_TrySetRibbonVisibleIfNeeded
-'   - UI_TrySetTitleBarVisibleIfNeeded
-'   - UI_TrySetBooleanPropertyIfNeeded
-'   - UI_HandleApplyFailure
-'   - UI_BuildRuntimeErrorText
+'   - M_EXCEL_UI_RUNTIME
+'   - M_EXCEL_UI_TITLEBAR
+'
+' CALLED FROM
+'   - UI_SetExcelUI
+'   - UI_SetExcelUI_WithResult
+'
+' NOTES
+'   Every requested value is validated up front rather than at the point of
+'   use, so the failure list reports all invalid arguments in one pass instead
+'   of stopping at the first.
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Succeeded           As Boolean    'Overall success flag returned by the worker
-    Dim W                   As Window     'Workbook window in current Excel instance
-    Dim ShowFlag            As Boolean    'Converted Boolean visibility target
-    Dim Msg                 As String     'Element-level diagnostic message
+    Dim Succeeded           As Boolean         'Pass-level success flag
+    Dim W                   As Window          'Window being written
+    Dim ActiveTargetWindow  As Window          'Resolved active window
+    Dim ActiveTargetBook    As Workbook        'Resolved active workbook
+    Dim ShowFlag            As Boolean         'Requested value as a Boolean
+    Dim Msg                 As String          'Per-element failure reason
 
-    Dim ValidRibbon         As Boolean    'TRUE when Ribbon contains a valid tri-state value
-    Dim ValidStatusBar      As Boolean    'TRUE when StatusBar contains a valid tri-state value
-    Dim ValidScrollBars     As Boolean    'TRUE when ScrollBars contains a valid tri-state value
-    Dim ValidFormulaBar     As Boolean    'TRUE when FormulaBar contains a valid tri-state value
-    Dim ValidHeadings       As Boolean    'TRUE when Headings contains a valid tri-state value
-    Dim ValidWorkbookTabs   As Boolean    'TRUE when WorkbookTabs contains a valid tri-state value
-    Dim ValidGridlines      As Boolean    'TRUE when Gridlines contains a valid tri-state value
-    Dim ValidTitleBar       As Boolean    'TRUE when TitleBar contains a valid tri-state value
+    Dim ValidRibbon         As Boolean         'Ribbon argument is a valid enum
+    Dim ValidStatusBar      As Boolean         'StatusBar argument is valid
+    Dim ValidScrollBars     As Boolean         'ScrollBars argument is valid
+    Dim ValidFormulaBar     As Boolean         'FormulaBar argument is valid
+    Dim ValidHeadings       As Boolean         'Headings argument is valid
+    Dim ValidWorkbookTabs   As Boolean         'WorkbookTabs argument is valid
+    Dim ValidGridlines      As Boolean         'Gridlines argument is valid
+    Dim ValidTitleBar       As Boolean         'TitleBar argument is valid
+    Dim ValidTargetScope    As Boolean         'TargetScope argument is valid
 
-    Dim DoHeadings          As Boolean    'TRUE when headings were requested
-    Dim DoWorkbookTabs      As Boolean    'TRUE when workbook tabs were requested
-    Dim DoGridlines         As Boolean    'TRUE when gridlines were requested
+    Dim DoHeadings          As Boolean         'Headings must be written
+    Dim DoWorkbookTabs      As Boolean         'Workbook Tabs must be written
+    Dim DoGridlines         As Boolean         'Gridlines must be written
+    Dim DoWindowState       As Boolean         'Any window-level work is needed
 
-    Dim ShowHeadings        As Boolean    'Converted headings target
-    Dim ShowWorkbookTabs    As Boolean    'Converted workbook-tabs target
-    Dim ShowGridlines       As Boolean    'Converted gridlines target
+    Dim ShowHeadings        As Boolean         'Requested Headings value
+    Dim ShowWorkbookTabs    As Boolean         'Requested Workbook Tabs value
+    Dim ShowGridlines       As Boolean         'Requested Gridlines value
 
-    Dim OldScreenUpdating   As Boolean    'Cached ScreenUpdating state
-    Dim QuietModeChanged    As Boolean    'TRUE when ScreenUpdating was changed
+    Dim OldScreenUpdating   As Boolean         'ScreenUpdating value on entry
+    Dim QuietModeChanged    As Boolean         'True when this pass suppressed it
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Initialize the result buffers in their clean-success state
-        UI_ClearResultBuffer FailureCount, FailureList, CaptureFailureList
+    'Clear the result buffers deterministically
+        UI_RuntimeClearResultBuffer _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            CaptureFailureList:=CaptureFailureList
+
+    'Assume success until an element fails
         Succeeded = True
-        On Error GoTo Fail
-    'Enter the quiet-update scope to reduce worksheet redraw where possible
-        UI_BeginQuietUIUpdate OldScreenUpdating, QuietModeChanged
+
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Suppress redraw for the duration of the apply pass
+        UI_RuntimeBeginQuietUpdate _
+            OldScreenUpdating:=OldScreenUpdating, _
+            QuietModeChanged:=QuietModeChanged
 
 '------------------------------------------------------------------------------
-' VALIDATE TRI-STATE INPUTS
+' VALIDATE INPUTS
 '------------------------------------------------------------------------------
-    'Validate the Ribbon tri-state input
+    'Validate the Ribbon request
         ValidRibbon = UI_IsValidVisibility(Ribbon)
         If Not ValidRibbon Then
-            UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-                FailureList, CaptureFailureList, "Ribbon", _
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "Ribbon", _
                 "invalid UIVisibility value: " & CStr(Ribbon)
         End If
-    'Validate the StatusBar tri-state input
+
+    'Validate the Status Bar request
         ValidStatusBar = UI_IsValidVisibility(StatusBar)
         If Not ValidStatusBar Then
-            UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-                FailureList, CaptureFailureList, "StatusBar", _
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "StatusBar", _
                 "invalid UIVisibility value: " & CStr(StatusBar)
         End If
-    'Validate the ScrollBars tri-state input
+
+    'Validate the Scroll Bars request
         ValidScrollBars = UI_IsValidVisibility(ScrollBars)
         If Not ValidScrollBars Then
-            UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-                FailureList, CaptureFailureList, "ScrollBars", _
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "ScrollBars", _
                 "invalid UIVisibility value: " & CStr(ScrollBars)
         End If
-    'Validate the FormulaBar tri-state input
+
+    'Validate the Formula Bar request
         ValidFormulaBar = UI_IsValidVisibility(FormulaBar)
         If Not ValidFormulaBar Then
-            UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-                FailureList, CaptureFailureList, "FormulaBar", _
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "FormulaBar", _
                 "invalid UIVisibility value: " & CStr(FormulaBar)
         End If
-    'Validate the Headings tri-state input
+
+    'Validate the Headings request
         ValidHeadings = UI_IsValidVisibility(Headings)
         If Not ValidHeadings Then
-            UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-                FailureList, CaptureFailureList, "Headings", _
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "Headings", _
                 "invalid UIVisibility value: " & CStr(Headings)
         End If
-    'Validate the WorkbookTabs tri-state input
+
+    'Validate the Workbook Tabs request
         ValidWorkbookTabs = UI_IsValidVisibility(WorkbookTabs)
         If Not ValidWorkbookTabs Then
-            UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-                FailureList, CaptureFailureList, "WorkbookTabs", _
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "WorkbookTabs", _
                 "invalid UIVisibility value: " & CStr(WorkbookTabs)
         End If
-    'Validate the Gridlines tri-state input
+
+    'Validate the Gridlines request
         ValidGridlines = UI_IsValidVisibility(Gridlines)
         If Not ValidGridlines Then
-            UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-                FailureList, CaptureFailureList, "Gridlines", _
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "Gridlines", _
                 "invalid UIVisibility value: " & CStr(Gridlines)
         End If
-    'Validate the TitleBar tri-state input
+
+    'Validate the Title Bar request
         ValidTitleBar = UI_IsValidVisibility(TitleBar)
         If Not ValidTitleBar Then
-            UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-                FailureList, CaptureFailureList, "TitleBar", _
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "TitleBar", _
                 "invalid UIVisibility value: " & CStr(TitleBar)
         End If
 
-'------------------------------------------------------------------------------
-' APPLY APPLICATION-LEVEL UI STATE
-'------------------------------------------------------------------------------
-    'Apply Ribbon visibility when requested and valid
-        If ValidRibbon Then
-            If Ribbon <> UI_LeaveUnchanged Then
-                    ShowFlag = UI_VisibilityToBoolean(Ribbon)
-                    If Not UI_TrySetRibbonVisibleIfNeeded(ShowFlag, Msg) Then
-                        UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
-                            FailureCount, FailureList, CaptureFailureList, "Ribbon", _
-                            Msg
-                    End If
-            End If
-        End If
-
-    'Apply StatusBar visibility when requested and valid
-        If ValidStatusBar Then
-            If StatusBar <> UI_LeaveUnchanged Then
-                    ShowFlag = UI_VisibilityToBoolean(StatusBar)
-                    If Not UI_TrySetBooleanPropertyIfNeeded(Application, _
-                        "DisplayStatusBar", ShowFlag, Msg) Then
-                        UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
-                            FailureCount, FailureList, CaptureFailureList, _
-                            "StatusBar", Msg
-                    End If
-            End If
-        End If
-
-    'Apply ScrollBars visibility when requested and valid
-        If ValidScrollBars Then
-            If ScrollBars <> UI_LeaveUnchanged Then
-                    ShowFlag = UI_VisibilityToBoolean(ScrollBars)
-                    If Not UI_TrySetBooleanPropertyIfNeeded(Application, _
-                        "DisplayScrollBars", ShowFlag, Msg) Then
-                        UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
-                            FailureCount, FailureList, CaptureFailureList, _
-                            "ScrollBars", Msg
-                    End If
-            End If
-        End If
-    'Apply FormulaBar visibility when requested and valid
-        If ValidFormulaBar Then
-            If FormulaBar <> UI_LeaveUnchanged Then
-                    ShowFlag = UI_VisibilityToBoolean(FormulaBar)
-                    If Not UI_TrySetBooleanPropertyIfNeeded(Application, _
-                        "DisplayFormulaBar", ShowFlag, Msg) Then
-                        UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
-                            FailureCount, FailureList, CaptureFailureList, _
-                            "FormulaBar", Msg
-                    End If
-            End If
+    'Validate the window targeting request
+        ValidTargetScope = UI_IsValidTargetScope(TargetScope)
+        If Not ValidTargetScope Then
+            UI_RuntimeHandleFailure _
+                ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                CaptureFailureList, "TargetScope", _
+                "invalid UIWindowTargetScope value: " & CStr(TargetScope)
         End If
 
 '------------------------------------------------------------------------------
-' PRECOMPUTE WINDOW-LEVEL REQUESTS
+' APPLY APPLICATION-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Precompute whether each window-level property was requested
+    'Apply the Ribbon state
+        If ValidRibbon And Ribbon <> UI_LeaveUnchanged Then
+            ShowFlag = UI_VisibilityToBoolean(Ribbon)
+
+            If Not UI_RuntimeTrySetRibbonVisibleIfNeeded(ShowFlag, Msg) Then
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "Ribbon", Msg
+            End If
+        End If
+
+    'Apply the Status Bar state
+        If ValidStatusBar And StatusBar <> UI_LeaveUnchanged Then
+            ShowFlag = UI_VisibilityToBoolean(StatusBar)
+
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Application, "DisplayStatusBar", ShowFlag, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "StatusBar", Msg
+            End If
+        End If
+
+    'Apply the Scroll Bars state
+        If ValidScrollBars And ScrollBars <> UI_LeaveUnchanged Then
+            ShowFlag = UI_VisibilityToBoolean(ScrollBars)
+
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Application, "DisplayScrollBars", ShowFlag, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "ScrollBars", Msg
+            End If
+        End If
+
+    'Apply the Formula Bar state
+        If ValidFormulaBar And FormulaBar <> UI_LeaveUnchanged Then
+            ShowFlag = UI_VisibilityToBoolean(FormulaBar)
+
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                Application, "DisplayFormulaBar", ShowFlag, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "FormulaBar", Msg
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' PRECOMPUTE WINDOW-LEVEL STATE
+'------------------------------------------------------------------------------
+    'Decide once which window properties need writing, rather than re-testing
+    'the same conditions inside every window iteration
         DoHeadings = ValidHeadings And (Headings <> UI_LeaveUnchanged)
-        DoWorkbookTabs = ValidWorkbookTabs And (WorkbookTabs <> _
-            UI_LeaveUnchanged)
+        DoWorkbookTabs = _
+            ValidWorkbookTabs And (WorkbookTabs <> UI_LeaveUnchanged)
         DoGridlines = ValidGridlines And (Gridlines <> UI_LeaveUnchanged)
-    'Precompute the Boolean targets only for requested properties
+        DoWindowState = DoHeadings Or DoWorkbookTabs Or DoGridlines
+
+    'Convert only the values that will actually be written
         If DoHeadings Then
             ShowHeadings = UI_VisibilityToBoolean(Headings)
         End If
+
         If DoWorkbookTabs Then
             ShowWorkbookTabs = UI_VisibilityToBoolean(WorkbookTabs)
         End If
+
         If DoGridlines Then
             ShowGridlines = UI_VisibilityToBoolean(Gridlines)
         End If
 
 '------------------------------------------------------------------------------
-' APPLY WINDOW-LEVEL UI STATE
+' APPLY WINDOW-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Process window-scoped UI only when at least one window-level element has
-    'been requested for change
-        If DoHeadings Or DoWorkbookTabs Or DoGridlines Then
-            'Apply the requested window-level visibility state to each open
-            'Excel window in the current instance
-                For Each W In Application.Windows
-                    'Apply headings visibility when requested
-                        If DoHeadings Then
-                                If Not UI_TrySetBooleanPropertyIfNeeded(W, _
-                                    "DisplayHeadings", ShowHeadings, Msg) Then
-                                    UI_HandleApplyFailure ProcName, LogFailures, _
-                                        Succeeded, FailureCount, FailureList, _
-                                        CaptureFailureList, "Headings [" & W.Caption _
-                                        & "]", Msg
-                                End If
+    'Resolve the requested target scope and write each window in it
+        If DoWindowState And ValidTargetScope Then
+            Select Case TargetScope
+
+                Case UI_TargetAllExcelWindows
+
+                    'Every window in the current Excel instance
+                        For Each W In Application.Windows
+                            UI_ApplyWindowLevelState _
+                                ProcName:=ProcName, _
+                                TargetWindow:=W, _
+                                DoHeadings:=DoHeadings, _
+                                ShowHeadings:=ShowHeadings, _
+                                DoWorkbookTabs:=DoWorkbookTabs, _
+                                ShowWorkbookTabs:=ShowWorkbookTabs, _
+                                DoGridlines:=DoGridlines, _
+                                ShowGridlines:=ShowGridlines, _
+                                LogFailures:=LogFailures, _
+                                Succeeded:=Succeeded, _
+                                FailureCount:=FailureCount, _
+                                FailureList:=FailureList, _
+                                CaptureFailureList:=CaptureFailureList
+                        Next W
+
+                Case UI_TargetActiveWindow
+
+                    'The active window only, when one exists
+                        Set ActiveTargetWindow = Application.ActiveWindow
+
+                        If ActiveTargetWindow Is Nothing Then
+                            UI_RuntimeHandleFailure _
+                                ProcName, LogFailures, Succeeded, FailureCount, _
+                                FailureList, CaptureFailureList, "TargetScope", _
+                                "active Excel window is unavailable"
+                        Else
+                            UI_ApplyWindowLevelState _
+                                ProcName:=ProcName, _
+                                TargetWindow:=ActiveTargetWindow, _
+                                DoHeadings:=DoHeadings, _
+                                ShowHeadings:=ShowHeadings, _
+                                DoWorkbookTabs:=DoWorkbookTabs, _
+                                ShowWorkbookTabs:=ShowWorkbookTabs, _
+                                DoGridlines:=DoGridlines, _
+                                ShowGridlines:=ShowGridlines, _
+                                LogFailures:=LogFailures, _
+                                Succeeded:=Succeeded, _
+                                FailureCount:=FailureCount, _
+                                FailureList:=FailureList, _
+                                CaptureFailureList:=CaptureFailureList
                         End If
-                    'Apply workbook-tabs visibility when requested
-                        If DoWorkbookTabs Then
-                                If Not UI_TrySetBooleanPropertyIfNeeded(W, _
-                                    "DisplayWorkbookTabs", ShowWorkbookTabs, Msg) _
-                                    Then
-                                    UI_HandleApplyFailure ProcName, LogFailures, _
-                                        Succeeded, FailureCount, FailureList, _
-                                        CaptureFailureList, "WorkbookTabs [" & _
-                                        W.Caption & "]", Msg
-                                End If
+
+                Case UI_TargetActiveWorkbookWindows
+
+                    'Every window belonging to the active workbook
+                        Set ActiveTargetBook = Application.ActiveWorkbook
+
+                        If ActiveTargetBook Is Nothing Then
+                            UI_RuntimeHandleFailure _
+                                ProcName, LogFailures, Succeeded, FailureCount, _
+                                FailureList, CaptureFailureList, "TargetScope", _
+                                "active workbook is unavailable"
+                        Else
+                            For Each W In ActiveTargetBook.Windows
+                                UI_ApplyWindowLevelState _
+                                    ProcName:=ProcName, _
+                                    TargetWindow:=W, _
+                                    DoHeadings:=DoHeadings, _
+                                    ShowHeadings:=ShowHeadings, _
+                                    DoWorkbookTabs:=DoWorkbookTabs, _
+                                    ShowWorkbookTabs:=ShowWorkbookTabs, _
+                                    DoGridlines:=DoGridlines, _
+                                    ShowGridlines:=ShowGridlines, _
+                                    LogFailures:=LogFailures, _
+                                    Succeeded:=Succeeded, _
+                                    FailureCount:=FailureCount, _
+                                    FailureList:=FailureList, _
+                                    CaptureFailureList:=CaptureFailureList
+                            Next W
                         End If
-                    'Apply gridlines visibility when requested
-                        If DoGridlines Then
-                                If Not UI_TrySetBooleanPropertyIfNeeded(W, _
-                                    "DisplayGridlines", ShowGridlines, Msg) Then
-                                    UI_HandleApplyFailure ProcName, LogFailures, _
-                                        Succeeded, FailureCount, FailureList, _
-                                        CaptureFailureList, "Gridlines [" & _
-                                        W.Caption & "]", Msg
-                                End If
-                        End If
-                Next W
+
+            End Select
         End If
 
 '------------------------------------------------------------------------------
 ' APPLY TITLE-BAR STATE
 '------------------------------------------------------------------------------
-    'Apply title-bar visibility when requested and valid
-        If ValidTitleBar Then
-            If TitleBar <> UI_LeaveUnchanged Then
-                    ShowFlag = UI_VisibilityToBoolean(TitleBar)
-                    If Not UI_TrySetTitleBarVisibleIfNeeded(ShowFlag, Msg) Then
-                        UI_HandleApplyFailure ProcName, LogFailures, Succeeded, _
-                            FailureCount, FailureList, CaptureFailureList, _
-                            "TitleBar", Msg
-                    End If
+    'Apply the frame state; TargetScope never affects the main window
+        If ValidTitleBar And TitleBar <> UI_LeaveUnchanged Then
+            ShowFlag = UI_VisibilityToBoolean(TitleBar)
+
+            If Not UI_TrySetTitleBarVisibleIfNeeded(ShowFlag, Msg) Then
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "TitleBar", Msg
             End If
         End If
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' RETURN SUCCESS
 '------------------------------------------------------------------------------
-SafeExit:
-    'Leave the quiet-update scope and restore ScreenUpdating when needed
-        UI_EndQuietUIUpdate OldScreenUpdating, QuietModeChanged
+Safe_Exit:
+    'Leave the quiet scope exactly as it was entered
+        UI_RuntimeEndQuietUpdate _
+            OldScreenUpdating:=OldScreenUpdating, _
+            QuietModeChanged:=QuietModeChanged
+
+    'Publish the pass-level result and exit before the error handler
         UI_ApplyExcelUIState = Succeeded
         Exit Function
 
 '------------------------------------------------------------------------------
-' FAIL
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-Fail:
-    'Capture the unexpected worker-level failure in the result buffers and
-    'optionally log it
-        UI_HandleApplyFailure ProcName, LogFailures, Succeeded, FailureCount, _
-            FailureList, CaptureFailureList, "Unexpected", UI_BuildRuntimeErrorText
-        Resume SafeExit
+Err_Handler:
+    'Record the unexpected failure, then restore ScreenUpdating via Safe_Exit
+        UI_RuntimeHandleFailure _
+            ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+            CaptureFailureList, "Unexpected", UI_RuntimeBuildErrorText
+
+        Resume Safe_Exit
 
 End Function
 
-Private Function UI_IsValidVisibility(ByVal Visibility As UIVisibility) As Boolean
 
+Private Sub UI_ApplyWindowLevelState( _
+    ByVal ProcName As String, _
+    ByVal TargetWindow As Window, _
+    ByVal DoHeadings As Boolean, _
+    ByVal ShowHeadings As Boolean, _
+    ByVal DoWorkbookTabs As Boolean, _
+    ByVal ShowWorkbookTabs As Boolean, _
+    ByVal DoGridlines As Boolean, _
+    ByVal ShowGridlines As Boolean, _
+    ByVal LogFailures As Boolean, _
+    ByRef Succeeded As Boolean, _
+    ByRef FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal CaptureFailureList As Boolean)
 '
 '==============================================================================
-'                           UI_IsValidVisibility
+' UI_ApplyWindowLevelState
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Return whether a UIVisibility argument contains one of the supported
-'   tri-state enum values
+'   Applies the requested managed Window properties to one resolved Excel
+'   Window.
 '
 ' WHY THIS EXISTS
-'   Public procedures accept UIVisibility arguments, but VBA enum-typed
-'   parameters can still receive invalid numeric values at runtime
+'   All three target scopes need identical per-window behavior. Factoring the
+'   property writes out of the scope resolution keeps the three Select Case
+'   branches to their actual difference, which is which windows to visit.
 '
-'   This helper centralizes defensive validation so the worker can:
-'     - detect invalid values explicitly
-'     - record structured failures consistently
-'     - avoid silently coercing unexpected values into Boolean targets
+'   It also gives each window its own error boundary. One window that becomes
+'   unusable mid-pass is recorded and skipped; the windows after it are still
+'   attempted.
+'
+' INPUTS
+'   ProcName
+'     Public caller name used for diagnostics.
+'
+'   TargetWindow
+'     Window resolved by the caller's target scope.
+'
+'   DoHeadings / DoWorkbookTabs / DoGridlines
+'     True when the corresponding property was requested.
+'
+'   ShowHeadings / ShowWorkbookTabs / ShowGridlines
+'     Requested values, meaningful only when the matching Do flag is True.
+'
+'   LogFailures
+'     True to emit Immediate Window diagnostics.
+'
+'   Succeeded / FailureCount / FailureList / CaptureFailureList
+'     Standard structured-result buffers, updated in place.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Writes only the requested properties.
+'   - Records a property-level failure and continues with the later properties
+'     on the same window.
+'   - Names the window in each failure entry so a multi-window pass stays
+'     readable.
+'
+' ERROR POLICY
+'   - Records property-level failures and continues with later properties.
+'   - Handles unexpected errors locally, records one entry against this window,
+'     and returns normally so the caller's enumeration continues.
+'   - Does not raise to the caller.
+'
+' DEPENDENCIES
+'   - UI_RuntimeTrySetBooleanPropertyIfNeeded
+'   - UI_RuntimeHandleFailure
+'   - UI_RuntimeBuildWindowLabel
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - UI_ApplyExcelUIState
+'
+' NOTES
+'   Handling errors here rather than letting them reach the caller is what
+'   keeps the documented best-effort contract true across a multi-window pass.
+'   The caller's handler ends in Resume Safe_Exit, so an error escaping this
+'   procedure would abandon every window still to be visited.
+'
+' UPDATED
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Msg                 As String          'Per-property failure reason
+    Dim WindowLabel         As String          'Diagnostic label for this window
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Contain unexpected errors here so the caller's enumeration survives them
+        On Error GoTo Err_Handler
+
+    'Build the label once. Reading Window.Caption while composing each failure
+    'message would put a raising read inside the failure path itself.
+        WindowLabel = UI_RuntimeBuildWindowLabel(TargetWindow)
+
+'------------------------------------------------------------------------------
+' APPLY HEADINGS
+'------------------------------------------------------------------------------
+    'Write the row and column headings state
+        If DoHeadings Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                TargetWindow, "DisplayHeadings", ShowHeadings, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, _
+                    "Headings [" & WindowLabel & "]", Msg
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY WORKBOOK TABS
+'------------------------------------------------------------------------------
+    'Write the sheet-tab strip state
+        If DoWorkbookTabs Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                TargetWindow, "DisplayWorkbookTabs", ShowWorkbookTabs, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, _
+                    "WorkbookTabs [" & WindowLabel & "]", Msg
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY GRIDLINES
+'------------------------------------------------------------------------------
+    'Write the gridline state
+        If DoGridlines Then
+            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                TargetWindow, "DisplayGridlines", ShowGridlines, Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, _
+                    "Gridlines [" & WindowLabel & "]", Msg
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Record one entry against this window and return normally, so the caller
+    'continues with the windows that follow
+        UI_RuntimeHandleFailure _
+            ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+            CaptureFailureList, _
+            "Window [" & WindowLabel & "]", UI_RuntimeBuildErrorText
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Function UI_IsValidTargetScope( _
+    ByVal TargetScope As UIWindowTargetScope) _
+    As Boolean
+'
+'==============================================================================
+' UI_IsValidTargetScope
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates a UIWindowTargetScope value defensively.
+'
+' WHY THIS EXISTS
+'   VBA does not constrain an enum-typed parameter to its declared members, so
+'   any Long can arrive here at runtime. Validating explicitly turns that into
+'   a reported failure rather than a silently ignored Select Case.
+'
+' INPUTS
+'   TargetScope
+'     Value to validate.
+'
+' RETURNS
+'   Boolean
+'     True only for the three documented targeting scopes.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_ApplyExcelUIState
+'
+' UPDATED
+'   2026-08-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Accept only the three documented members
+        UI_IsValidTargetScope = _
+            (TargetScope = UI_TargetAllExcelWindows) Or _
+            (TargetScope = UI_TargetActiveWindow) Or _
+            (TargetScope = UI_TargetActiveWorkbookWindows)
+
+End Function
+
+
+Private Function UI_IsValidVisibility( _
+    ByVal Visibility As UIVisibility) _
+    As Boolean
+'
+'==============================================================================
+' UI_IsValidVisibility
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates a UIVisibility value defensively.
+'
+' WHY THIS EXISTS
+'   Invalid numeric values can reach a VBA enum-typed parameter at runtime. The
+'   shared worker validates every requested value before converting it to a
+'   Boolean target, so an out-of-range argument is reported rather than
+'   silently treated as a hide.
 '
 ' INPUTS
 '   Visibility
-'     Candidate UIVisibility value to validate
+'     Value to validate.
 '
 ' RETURNS
-'   TRUE  => value is one of:
-'              * UI_LeaveUnchanged
-'              * UI_Hide
-'              * UI_Show
-'   FALSE => value is outside the supported UIVisibility domain
+'   Boolean
+'     True only for UI_LeaveUnchanged, UI_Hide or UI_Show.
 '
 ' ERROR POLICY
-'   - Does NOT raise
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_ApplyExcelUIState
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
-' RETURN VALIDITY FLAG
+' VALIDATE
 '------------------------------------------------------------------------------
-    'Return TRUE only for the three supported tri-state enum values
+    'Accept only the three documented members
         UI_IsValidVisibility = _
             (Visibility = UI_LeaveUnchanged) Or _
             (Visibility = UI_Hide) Or _
@@ -1478,1804 +1808,48 @@ Private Function UI_IsValidVisibility(ByVal Visibility As UIVisibility) As Boole
 
 End Function
 
-Private Sub UI_HandleApplyFailure(ByVal ProcName As String, ByVal LogFailures As _
-    Boolean, ByRef Succeeded As Boolean, ByRef FailureCount As Long, ByRef _
-    FailureList As Variant, ByVal CaptureFailureList As Boolean, ByVal Stage As _
-    String, ByVal Detail As String)
 
+Private Function UI_VisibilityToBoolean( _
+    ByVal Visibility As UIVisibility) _
+    As Boolean
 '
 '==============================================================================
-'                           UI_HandleApplyFailure
+' UI_VisibilityToBoolean
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Handle one recorded failure consistently for the shared internal worker
-'
-' WHY THIS EXISTS
-'   The shared worker must support two public failure-surfacing modes:
-'     - logging to the Immediate Window
-'     - structured result capture through standard-module outputs
-'
-'   This helper centralizes both actions so the worker logic stays compact and
-'   consistent
-'
-' INPUTS
-'   ProcName
-'     Public caller name used for logging
-'
-'   LogFailures
-'     TRUE  => write the failure to the Immediate Window
-'     FALSE => suppress logging
-'
-'   Succeeded / FailureCount / FailureList / CaptureFailureList
-'     Result buffers used by the shared worker
-'
-'   Stage
-'     Logical stage, element, or operation associated with the failure
-'
-'   Detail
-'     Failure detail to append
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Does NOT raise
-'
-' DEPENDENCIES
-'   - UI_AddFailureToResult
-'   - UI_LogFailure
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' RECORD FAILURE
-'------------------------------------------------------------------------------
-        UI_AddFailureToResult Succeeded, FailureCount, FailureList, _
-            CaptureFailureList, Stage, Detail
-
-'------------------------------------------------------------------------------
-' OPTIONAL LOGGING
-'------------------------------------------------------------------------------
-        If LogFailures Then
-            UI_LogFailure ProcName, Stage, Detail
-        End If
-
-End Sub
-
-Private Sub UI_ClearResultBuffer(ByRef FailureCount As Long, ByRef FailureList _
-    As Variant, ByVal CaptureFailureList As Boolean)
-
-'
-'==============================================================================
-'                           UI_ClearResultBuffer
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Initialize the result buffers used by UI_SetExcelUI_WithResult and the
-'   shared internal worker
-'
-' WHY THIS EXISTS
-'   The standard-module result pattern needs a consistent way to reset:
-'     - FailureCount
-'     - FailureList
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Does NOT raise
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        FailureCount = 0
-
-    'Initialize the failure-list output only when the caller requested it
-        If CaptureFailureList Then
-            FailureList = Empty
-        End If
-
-End Sub
-
-Private Sub UI_AddFailureToResult(ByRef Succeeded As Boolean, ByRef FailureCount _
-    As Long, ByRef FailureList As Variant, ByVal CaptureFailureList As Boolean, _
-    ByVal Stage As String, ByVal Detail As String)
-
-'
-'==============================================================================
-'                          UI_AddFailureToResult
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Record a failure into the standard-module result buffers used by
-'   UI_SetExcelUI_WithResult
-'
-' WHY THIS EXISTS
-'   The module does not depend on a dedicated result class, so failures need to
-'   be accumulated through plain standard-module constructs:
-'     - a Boolean success flag
-'     - a Long failure count
-'     - an optional 1-based String array of failure entries
-'
-'   This helper centralizes that logic and preserves insertion order
-'
-' INPUTS
-'   Succeeded
-'     Set to FALSE once a failure is recorded
-'
-'   FailureCount
-'     Incremented for each recorded failure
-'
-'   FailureList
-'     Optional Variant carrying a 1-based String array of recorded failures
-'
-'   CaptureFailureList
-'     TRUE  => append the failure text into FailureList
-'     FALSE => update only Succeeded and FailureCount
-'
-'   Stage
-'     Logical stage, element, or operation associated with the failure
-'
-'   Detail
-'     Failure detail to append
-'
-' RETURNS
-'   None
-'
-' BEHAVIOR
-'   - Sets Succeeded to FALSE
-'   - Increments FailureCount
-'   - When requested, appends:
-'         Stage & " | " & Detail
-'     to a 1-based String array stored in FailureList
-'
-' ERROR POLICY
-'   - Does NOT raise
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim FailureText         As String    'Formatted failure entry
-    Dim Arr()               As String    'Working 1-based failure array
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Build the formatted failure text once
-        FailureText = Stage & " | " & Detail
-
-'------------------------------------------------------------------------------
-' UPDATE RESULT STATUS
-'------------------------------------------------------------------------------
-        Succeeded = False
-
-        FailureCount = FailureCount + 1
-
-'------------------------------------------------------------------------------
-' APPEND FAILURE TEXT
-'------------------------------------------------------------------------------
-        If CaptureFailureList Then
-
-            'Allocate the first entry when the failure list is still empty
-                If IsEmpty(FailureList) Then
-                    ReDim Arr(1 To 1)
-
-            'Otherwise, expand the existing 1-based array while preserving
-            'previous entries
-                Else
-                    Arr = FailureList
-                    ReDim Preserve Arr(1 To FailureCount)
-                End If
-
-                Arr(FailureCount) = FailureText
-
-                FailureList = Arr
-
-        End If
-
-End Sub
-
-Private Sub UI_BeginQuietUIUpdate(ByRef OldScreenUpdating As Boolean, ByRef _
-    QuietModeChanged As Boolean)
-
-'
-'==============================================================================
-'                          UI_BeginQuietUIUpdate
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Enter a small best-effort quiet-update scope by suppressing
-'   Application.ScreenUpdating when possible
-'
-' WHY THIS EXISTS
-'   Many object-model UI writes can cause visible worksheet redraw
-'   Temporarily disabling ScreenUpdating reduces flicker for those surfaces,
-'   even though it cannot fully suppress Ribbon or WinAPI non-client refresh
-'
-' INPUTS / OUTPUTS
-'   OldScreenUpdating
-'     Receives the prior Application.ScreenUpdating state
-'
-'   QuietModeChanged
-'     Receives TRUE only when this helper actually changed ScreenUpdating
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Does NOT raise
-'   - Best-effort only
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Protect callers from any unexpected issue while entering quiet mode
-        On Error Resume Next
-
-    'Capture the current ScreenUpdating state
-        OldScreenUpdating = Application.ScreenUpdating
-
-        QuietModeChanged = False
-
-'------------------------------------------------------------------------------
-' APPLY QUIET MODE
-'------------------------------------------------------------------------------
-    'Disable ScreenUpdating only when it is currently enabled
-        If OldScreenUpdating Then
-            Application.ScreenUpdating = False
-            QuietModeChanged = True
-        End If
-
-End Sub
-
-Private Sub UI_EndQuietUIUpdate(ByVal OldScreenUpdating As Boolean, ByVal _
-    QuietModeChanged As Boolean)
-
-'
-'==============================================================================
-'                           UI_EndQuietUIUpdate
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Leave the quiet-update scope created by UI_BeginQuietUIUpdate
-'
-' WHY THIS EXISTS
-'   ScreenUpdating should be restored only when this module actually changed it
-'
-' INPUTS
-'   OldScreenUpdating
-'     Previously captured Application.ScreenUpdating state
-'
-'   QuietModeChanged
-'     TRUE when UI_BeginQuietUIUpdate changed ScreenUpdating
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Does NOT raise
-'   - Best-effort only
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Protect callers from any unexpected issue while leaving quiet mode
-        On Error Resume Next
-
-'------------------------------------------------------------------------------
-' RESTORE PRIOR STATE
-'------------------------------------------------------------------------------
-    'Restore ScreenUpdating only when this module previously changed it
-        If QuietModeChanged Then
-            Application.ScreenUpdating = OldScreenUpdating
-        End If
-
-End Sub
-
-Private Function UI_TrySetRibbonVisibleIfNeeded(ByVal IsVisible As Boolean, _
-    ByRef FailMsg As String) As Boolean
-
-'
-'==============================================================================
-'                     UI_TrySetRibbonVisibleIfNeeded
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to update Ribbon visibility only when the current visible state
-'   differs from the requested target
-'
-' WHY THIS EXISTS
-'   Avoiding no-op Ribbon writes can slightly reduce visible UI churn and keeps
-'   the apply path cleaner
-'
-' INPUTS
-'   IsVisible
-'     Requested Ribbon visibility
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => Ribbon is already in the requested state or was updated
-'   FALSE => Ribbon update failed
-'
-' BEHAVIOR
-'   - Tries to read the current Ribbon visibility
-'   - Skips the write path when the current state already matches the target
-'   - Falls back to the actual write path when the current state differs or
-'     could not be read
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - UI_TryGetRibbonVisible
-'   - UI_TrySetRibbonVisible
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim CurrentVisible      As Boolean   'Current Ribbon visibility when readable
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TrySetRibbonVisibleIfNeeded = False
-        FailMsg = vbNullString
-
-'------------------------------------------------------------------------------
-' SHORT-CIRCUIT NO-OP
-'------------------------------------------------------------------------------
-    'When current Ribbon visibility can be read and already matches the target,
-    'skip the write path entirely
-        If UI_TryGetRibbonVisible(CurrentVisible, FailMsg) Then
-            If CurrentVisible = IsVisible Then
-                UI_TrySetRibbonVisibleIfNeeded = True
-                GoTo SafeExit
-            End If
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY RIBBON WRITE
-'------------------------------------------------------------------------------
-        FailMsg = vbNullString
-        UI_TrySetRibbonVisibleIfNeeded = UI_TrySetRibbonVisible(IsVisible, _
-            FailMsg)
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_TrySetTitleBarVisibleIfNeeded(ByVal IsVisible As Boolean, _
-    ByRef FailMsg As String) As Boolean
-
-'
-'==============================================================================
-'                    UI_TrySetTitleBarVisibleIfNeeded
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to update TitleBar visibility only when the current visible state
-'   differs from the requested target
-'
-' WHY THIS EXISTS
-'   Avoiding no-op title-bar writes reduces unnecessary non-client frame
-'   refresh attempts
-'
-' INPUTS
-'   IsVisible
-'     Requested TitleBar visibility
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => TitleBar is already in the requested state or was updated
-'   FALSE => TitleBar update failed
-'
-' BEHAVIOR
-'   - Tries to read the current TitleBar visibility
-'   - Skips the write path when the current state already matches the target
-'   - Falls back to the actual write path when the current state differs or
-'     could not be read
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - UI_TryGetTitleBarVisible
-'   - UI_TrySetTitleBarVisible
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim CurrentVisible      As Boolean   'Current TitleBar visibility when readable
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TrySetTitleBarVisibleIfNeeded = False
-        FailMsg = vbNullString
-
-'------------------------------------------------------------------------------
-' SHORT-CIRCUIT NO-OP
-'------------------------------------------------------------------------------
-    'When current TitleBar visibility can be read and already matches the
-    'target, skip the write path entirely
-        If UI_TryGetTitleBarVisible(CurrentVisible, FailMsg) Then
-            If CurrentVisible = IsVisible Then
-                UI_TrySetTitleBarVisibleIfNeeded = True
-                GoTo SafeExit
-            End If
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY TITLE-BAR WRITE
-'------------------------------------------------------------------------------
-        FailMsg = vbNullString
-        UI_TrySetTitleBarVisibleIfNeeded = UI_TrySetTitleBarVisible(IsVisible, _
-            FailMsg)
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_TrySetBooleanPropertyIfNeeded(ByVal Target As Object, ByVal _
-    PropertyName As String, ByVal NewValue As Boolean, ByRef FailMsg As String) As _
-    Boolean
-
-'
-'==============================================================================
-'                   UI_TrySetBooleanPropertyIfNeeded
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to assign a Boolean property only when the current state differs
-'   from the requested target
-'
-' WHY THIS EXISTS
-'   Avoiding no-op property writes reduces unnecessary redraw and keeps the UI
-'   application path quieter when the property already matches the target
-'
-' INPUTS
-'   Target
-'     Object exposing the target Boolean property
-'
-'   PropertyName
-'     Name of the Boolean property to assign
-'
-'   NewValue
-'     Requested Boolean value
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => property is already in the requested state or was updated
-'   FALSE => property update failed
-'
-' BEHAVIOR
-'   - Tries to read the current property value
-'   - Skips the write path when the current state already matches the target
-'   - Falls back to the actual write path when the current state differs or
-'     could not be read
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - UI_TryGetBooleanProperty
-'   - UI_TrySetBooleanProperty
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim CurrentValue        As Boolean   'Current property value when readable
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TrySetBooleanPropertyIfNeeded = False
-        FailMsg = vbNullString
-
-'------------------------------------------------------------------------------
-' SHORT-CIRCUIT NO-OP
-'------------------------------------------------------------------------------
-    'When current property state can be read and already matches the target,
-    'skip the write path entirely
-        If UI_TryGetBooleanProperty(Target, PropertyName, CurrentValue, FailMsg) _
-            Then
-            If CurrentValue = NewValue Then
-                UI_TrySetBooleanPropertyIfNeeded = True
-                GoTo SafeExit
-            End If
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY PROPERTY WRITE
-'------------------------------------------------------------------------------
-        FailMsg = vbNullString
-        UI_TrySetBooleanPropertyIfNeeded = UI_TrySetBooleanProperty(Target, _
-            PropertyName, NewValue, FailMsg)
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_TryGetRibbonVisible(ByRef IsVisible As Boolean, ByRef _
-    FailMsg As String) As Boolean
-
-'
-'==============================================================================
-'                         UI_TryGetRibbonVisible
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to read current Ribbon visibility
-'
-' WHY THIS EXISTS
-'   Excel does not expose Ribbon visibility as a dedicated Application Boolean
-'   property, so the module uses a best-effort CommandBars read with an Excel4
-'   macro fallback
-'
-' INPUTS
-'   IsVisible
-'     Receives current Ribbon visibility on success
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => Ribbon visibility was read successfully
-'   FALSE => read failed
-'
-' BEHAVIOR
-'   - First attempts CommandBars("Ribbon").Visible
-'   - Falls back to an Excel4 macro read when needed
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - Application.CommandBars
-'   - Application.ExecuteExcel4Macro
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim V                   As Variant   'Fallback Excel4 macro result
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TryGetRibbonVisible = False
-        IsVisible = False
-        FailMsg = vbNullString
-
-'------------------------------------------------------------------------------
-' TRY COMMANDBARS
-'------------------------------------------------------------------------------
-    'Attempt to read Ribbon visibility from the CommandBars collection
-        On Error Resume Next
-            IsVisible = Application.CommandBars("Ribbon").Visible
-        If Err.Number = 0 Then
-            On Error GoTo Fail
-            UI_TryGetRibbonVisible = True
-            GoTo SafeExit
-        End If
-        Err.Clear
-        On Error GoTo Fail
-
-'------------------------------------------------------------------------------
-' TRY EXCEL4 MACRO FALLBACK
-'------------------------------------------------------------------------------
-    'Attempt a fallback read using an Excel4 macro
-        On Error Resume Next
-            V = Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
-        If Err.Number = 0 Then
-            On Error GoTo Fail
-            IsVisible = CBool(V)
-            UI_TryGetRibbonVisible = True
-            GoTo SafeExit
-        End If
-        FailMsg = CStr(Err.Number) & ": " & Err.Description
-        Err.Clear
-        On Error GoTo Fail
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_TryGetTitleBarVisible(ByRef IsVisible As Boolean, ByRef _
-    FailMsg As String) As Boolean
-
-'
-'==============================================================================
-'                        UI_TryGetTitleBarVisible
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to read current title-bar visibility for the Excel window
-'   represented by Application.Hwnd
-'
-' WHY THIS EXISTS
-'   Title-bar state is controlled through WinAPI in this module, so the module
-'   also uses a corresponding WinAPI-based read helper
-'
-' INPUTS
-'   IsVisible
-'     Receives current title-bar visibility on success
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => title-bar visibility was read successfully
-'   FALSE => read failed
-'
-' BEHAVIOR
-'   - Reads the current main-window style through the appropriate WinAPI path
-'   - Treats the caption style bit as the title-bar visibility signal
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - GetWindowLong / GetWindowLongPtr
-'   - GetLastError
-'   - SetLastError
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-#If VBA7 Then
-    Dim xlHnd               As LongPtr   'Excel window handle from Application.Hwnd
-    Dim StyleValue          As LongPtr   'Current window style value
-#Else
-    Dim xlHnd               As Long      'Excel window handle from Application.Hwnd
-    Dim StyleValue          As Long      'Current window style value
-#End If
-    Dim LastErr             As Long      'Last Win32 error after API call
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TryGetTitleBarVisible = False
-        IsVisible = False
-        FailMsg = vbNullString
-
-    'Read the Excel window handle
-        xlHnd = Application.hWnd
-
-    'Reject an invalid window handle deterministically
-        If xlHnd = 0 Then
-            FailMsg = "invalid Excel window handle"
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' READ WINDOW STYLE
-'------------------------------------------------------------------------------
-    'Clear last-error state before the API call
-        SetLastError 0
-
-#If VBA7 Then
-    #If Win64 Then
-
-        'Read the current window style using the 64-bit API
-            StyleValue = GetWindowLongPtr(xlHnd, GWL_STYLE)
-
-    #Else
-
-        'Read the current window style using the 32-bit API under VBA7
-            StyleValue = GetWindowLong(xlHnd, GWL_STYLE)
-
-    #End If
-#Else
-
-    'Read the current window style using the legacy 32-bit API
-        StyleValue = GetWindowLong(xlHnd, GWL_STYLE)
-
-#End If
-
-    'Read the Win32 last-error value immediately after the API call
-        LastErr = GetLastError
-
-    'Treat zero plus nonzero last error as failure
-        If StyleValue = 0 And LastErr <> 0 Then
-            FailMsg = "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
-                CStr(LastErr)
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' MAP STYLE TO TITLE-BAR VISIBILITY
-'------------------------------------------------------------------------------
-    'Treat the caption style bit as the title-bar visibility signal
-        IsVisible = ((StyleValue And WS_CAPTION) <> 0)
-
-'------------------------------------------------------------------------------
-' RETURN SUCCESS
-'------------------------------------------------------------------------------
-        UI_TryGetTitleBarVisible = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_TryGetBooleanProperty(ByVal Target As Object, ByVal _
-    PropertyName As String, ByRef ValueOut As Boolean, ByRef FailMsg As String) As _
-    Boolean
-
-'
-'==============================================================================
-'                         UI_TryGetBooleanProperty
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to read a Boolean property from an object using CallByName
-'
-' WHY THIS EXISTS
-'   Skip-if-already-correct processing needs one reusable reader for Boolean
-'   properties exposed by Application and Window objects
-'
-' INPUTS
-'   Target
-'     Object exposing the target Boolean property
-'
-'   PropertyName
-'     Name of the Boolean property to read
-'
-'   ValueOut
-'     Receives the property value on success
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => property read succeeded
-'   FALSE => property read failed
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim V                   As Variant   'Late-bound property value
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TryGetBooleanProperty = False
-        ValueOut = False
-        FailMsg = vbNullString
-
-    'Reject invalid object input deterministically
-        If Target Is Nothing Then
-            FailMsg = "target object is Nothing"
-            GoTo SafeExit
-        End If
-
-    'Reject empty property name deterministically
-        If Len(PropertyName) = 0 Then
-            FailMsg = "property name is empty"
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' READ PROPERTY
-'------------------------------------------------------------------------------
-    'Read the requested property using late-bound property access
-        V = CallByName(Target, PropertyName, VbGet)
-
-    'Convert the result to a Boolean
-        ValueOut = CBool(V)
-
-'------------------------------------------------------------------------------
-' RETURN SUCCESS
-'------------------------------------------------------------------------------
-        UI_TryGetBooleanProperty = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_TrySetTitleBarVisible(ByVal IsVisible As Boolean, ByRef _
-    FailMsg As String) As Boolean
-
-'
-'==============================================================================
-'                           UI_TrySetTitleBarVisible
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to show or hide the title bar of the Excel main window represented
-'   by Application.Hwnd by updating the window style and refreshing the
-'   non-client frame
-'
-' WHY THIS EXISTS
-'   Excel does not expose direct title-bar visibility control in the object
-'   model, so the project must update the underlying window style via WinAPI
-'
-'   To improve the visual result when hiding, this routine also removes the
-'   sizing frame (WS_THICKFRAME)
-'
-'   The original window style is snapshotted and restored exactly when showing
-'   again
-'
-' INPUTS
-'   IsVisible
-'     TRUE  => restore the original snapshotted Excel main-window style
-'     FALSE => hide title bar and related frame controls
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => title-bar update succeeded
-'   FALSE => title-bar update failed
-'
-' BEHAVIOR
-'   - Reads the current main-window style
-'   - Snapshots the original style against the current Application.Hwnd
-'   - Restores the exact original style when showing again
-'   - Refreshes the non-client frame after a style change
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' NOTES
-'   - Windows only
-'   - While hidden, the Excel window is intentionally less frame-like and may
-'     not be user-resizable in the normal way
-'   - Restoring the exact captured style may overwrite intervening frame-style
-'     changes made by another component
-'   - This routine intentionally does NOT toggle Application.DisplayFullScreen
-'
-' DEPENDENCIES
-'   - UI_TryGetWindowStyle
-'   - UI_TrySetWindowStyle
-'   - UI_TryRefreshWindowFrame
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-#If VBA7 Then
-    Dim xlHnd               As LongPtr   'Excel main-window handle from Application.Hwnd
-    Dim CurrentStyle        As LongPtr   'Current main-window style
-    Dim NewStyle            As LongPtr   'Updated main-window style
-#Else
-    Dim xlHnd               As Long      'Excel main-window handle from Application.Hwnd
-    Dim CurrentStyle        As Long      'Current main-window style
-    Dim NewStyle            As Long      'Updated main-window style
-#End If
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TrySetTitleBarVisible = False
-        FailMsg = vbNullString
-
-    'Read the Excel main-window handle
-        xlHnd = Application.hWnd
-
-    'Reject an invalid window handle deterministically
-        If xlHnd = 0 Then
-            FailMsg = "invalid Excel window handle"
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' READ: CURRENT WINDOW STYLE
-'------------------------------------------------------------------------------
-    'Read the current main-window style using the bitness-safe wrapper
-        If Not UI_TryGetWindowStyle(xlHnd, CurrentStyle, FailMsg) Then
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' SNAPSHOT: ORIGINAL STYLE FOR CURRENT HWND
-'------------------------------------------------------------------------------
-    'Snapshot the original main-window style whenever no snapshot exists yet or
-    'the current Application.Hwnd differs from the one previously captured
-        If (Not m_HasOriginalMainWindowStyle) Or (m_OriginalMainWindowHwnd <> _
-            xlHnd) Then
-            m_OriginalMainWindowStyle = CurrentStyle
-            m_OriginalMainWindowHwnd = xlHnd
-            m_HasOriginalMainWindowStyle = True
-        End If
-
-'------------------------------------------------------------------------------
-' COMPUTE: UPDATED WINDOW STYLE
-'------------------------------------------------------------------------------
-    'Restore the exact original snapshotted style when the caller requests a
-    'visible title bar
-        If IsVisible Then
-
-            'Use the exact captured original style whenever it belongs to the
-            'current window handle
-                If m_HasOriginalMainWindowStyle And m_OriginalMainWindowHwnd = _
-                    xlHnd Then
-                    NewStyle = m_OriginalMainWindowStyle
-
-            'Fall back to a conservative visible-frame composition only if the
-            'original style is not available for the current handle
-                Else
-                    NewStyle = CurrentStyle
-                    NewStyle = NewStyle Or WS_SYSMENU
-                    NewStyle = NewStyle Or WS_MINIMIZEBOX
-                    NewStyle = NewStyle Or WS_MAXIMIZEBOX
-                    NewStyle = NewStyle Or WS_CAPTION
-                    NewStyle = NewStyle Or WS_THICKFRAME
-                End If
-
-    'Remove the frame-related bits when the caller requests a hidden title bar
-        Else
-            NewStyle = CurrentStyle
-            NewStyle = NewStyle And Not WS_SYSMENU
-            NewStyle = NewStyle And Not WS_MINIMIZEBOX
-            NewStyle = NewStyle And Not WS_MAXIMIZEBOX
-            NewStyle = NewStyle And Not WS_CAPTION
-            NewStyle = NewStyle And Not WS_THICKFRAME
-        End If
-
-'------------------------------------------------------------------------------
-' SHORT-CIRCUIT: NO-OP
-'------------------------------------------------------------------------------
-    'Skip the write path entirely when no style change is required
-        If NewStyle = CurrentStyle Then
-            UI_TrySetTitleBarVisible = True
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY: UPDATED WINDOW STYLE
-'------------------------------------------------------------------------------
-    'Write the updated main-window style using the bitness-safe wrapper
-        If Not UI_TrySetWindowStyle(xlHnd, NewStyle, FailMsg) Then
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' REFRESH: NON-CLIENT FRAME
-'------------------------------------------------------------------------------
-    'Force Windows to recalculate and repaint the frame after the style change
-        If Not UI_TryRefreshWindowFrame(xlHnd, FailMsg) Then
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' RETURN: SUCCESS
-'------------------------------------------------------------------------------
-        UI_TrySetTitleBarVisible = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_TrySetRibbonVisible(ByVal IsVisible As Boolean, ByRef _
-    FailMsg As String) As Boolean
-
-'
-'==============================================================================
-'                           UI_TrySetRibbonVisible
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to show or hide the Ribbon using Excel4 macro execution
-'
-' WHY THIS EXISTS
-'   The Ribbon is not exposed through a simple Application Boolean property, so
-'   a legacy but commonly used Excel4 macro call is required for direct control
-'
-' INPUTS
-'   IsVisible
-'     TRUE  => show Ribbon
-'     FALSE => hide Ribbon
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => Ribbon update succeeded
-'   FALSE => Ribbon update failed
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - Application.ExecuteExcel4Macro
-'
-' NOTES
-'   - Availability may vary by Excel host / configuration
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim MacroText           As String    'Excel4 macro text controlling Ribbon visibility
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TrySetRibbonVisible = False
-        FailMsg = vbNullString
-
-'------------------------------------------------------------------------------
-' BUILD: EXCEL4 MACRO TEXT
-'------------------------------------------------------------------------------
-    'Build the exact macro text required to show or hide the Ribbon
-        If IsVisible Then
-            MacroText = "Show.TOOLBAR(""Ribbon"",True)"
-        Else
-            MacroText = "Show.TOOLBAR(""Ribbon"",False)"
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY: RIBBON VISIBILITY
-'------------------------------------------------------------------------------
-    'Execute the Ribbon visibility macro through Excel's legacy macro engine
-        Application.ExecuteExcel4Macro MacroText
-
-'------------------------------------------------------------------------------
-' RETURN: SUCCESS
-'------------------------------------------------------------------------------
-        UI_TrySetRibbonVisible = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_TrySetBooleanProperty(ByVal Target As Object, ByVal _
-    PropertyName As String, ByVal NewValue As Boolean, ByRef FailMsg As String) As _
-    Boolean
-
-'
-'==============================================================================
-'                           UI_TrySetBooleanProperty
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to assign a Boolean property on an object using a common,
-'   best-effort helper
-'
-' WHY THIS EXISTS
-'   UI_SetExcelUI sets several Boolean properties across different object types
-'   such as Application and Window
-'
-'   A shared helper avoids duplicating identical property-write error-handling
-'   logic for each target property
-'
-' INPUTS
-'   Target
-'     Object exposing the target Boolean property
-'
-'   PropertyName
-'     Name of the Boolean property to assign
-'
-'   NewValue
-'     Boolean value to write to the target property
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => property write succeeded
-'   FALSE => property write failed
-'
-' BEHAVIOR
-'   - Uses CallByName with vbLet to assign the property
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' NOTES
-'   - Intended for Application / Window Boolean property writes in this module
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        UI_TrySetBooleanProperty = False
-        FailMsg = vbNullString
-
-    'Reject a missing target object deterministically
-        If Target Is Nothing Then
-            FailMsg = "target object is Nothing"
-            GoTo SafeExit
-        End If
-
-    'Reject an empty property name deterministically
-        If Len(PropertyName) = 0 Then
-            FailMsg = "property name is empty"
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY: PROPERTY WRITE
-'------------------------------------------------------------------------------
-    'Assign the requested Boolean value using late-bound property assignment
-        CallByName Target, PropertyName, VbLet, NewValue
-
-'------------------------------------------------------------------------------
-' RETURN: SUCCESS
-'------------------------------------------------------------------------------
-        UI_TrySetBooleanProperty = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-#If VBA7 Then
-Private Function UI_TryGetWindowStyle(ByVal hWnd As LongPtr, ByRef StyleOut As _
-    LongPtr, ByRef FailMsg As String) As Boolean
-#Else
-Private Function UI_TryGetWindowStyle(ByVal hWnd As Long, ByRef StyleOut As Long, _
-    ByRef FailMsg As String) As Boolean
-#End If
-
-'
-'==============================================================================
-'                            UI_TryGetWindowStyle
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to read the current GWL_STYLE value using the correct API for the
-'   current VBA / Office bitness
-'
-' WHY THIS EXISTS
-'   GetWindowLong / GetWindowLongPtr can validly return zero, so a robust
-'   wrapper should use GetLastError to distinguish a real zero from failure
-'
-' INPUTS
-'   hWnd
-'     Target window handle
-'
-'   StyleOut
-'     Receives the current GWL_STYLE value on success
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => style read succeeded
-'   FALSE => style read failed
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - GetWindowLong / GetWindowLongPtr
-'   - GetLastError
-'   - SetLastError
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim LastErr             As Long      'Win32 last-error value read after the API call
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        StyleOut = 0
-        FailMsg = vbNullString
-        UI_TryGetWindowStyle = False
-
-    'Reject an invalid window handle deterministically
-        If hWnd = 0 Then
-            FailMsg = "invalid window handle"
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' READ: WINDOW STYLE
-'------------------------------------------------------------------------------
-    'Clear the Win32 last-error state before calling the API so a valid zero
-    'return can later be distinguished from failure
-        SetLastError 0
-
-#If VBA7 Then
-    #If Win64 Then
-
-        'Read the style with the 64-bit API in 64-bit Office / VBA
-            StyleOut = GetWindowLongPtr(hWnd, GWL_STYLE)
-
-    #Else
-
-        'Read the style with the 32-bit API in VBA7 32-bit Office
-            StyleOut = GetWindowLong(hWnd, GWL_STYLE)
-
-    #End If
-#Else
-
-    'Read the style with the legacy 32-bit API
-        StyleOut = GetWindowLong(hWnd, GWL_STYLE)
-
-#End If
-
-    'Read the Win32 last-error value immediately after the API call
-        LastErr = GetLastError
-
-    'Treat zero plus nonzero last error as an API failure
-        If StyleOut = 0 And LastErr <> 0 Then
-            FailMsg = "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
-                CStr(LastErr)
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' RETURN: SUCCESS
-'------------------------------------------------------------------------------
-    'Mark the operation as successful after a valid style read
-        UI_TryGetWindowStyle = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-#If VBA7 Then
-Private Function UI_TrySetWindowStyle(ByVal hWnd As LongPtr, ByVal NewStyle As _
-    LongPtr, ByRef FailMsg As String) As Boolean
-#Else
-Private Function UI_TrySetWindowStyle(ByVal hWnd As Long, ByVal NewStyle As Long, _
-    ByRef FailMsg As String) As Boolean
-#End If
-
-'
-'==============================================================================
-'                            UI_TrySetWindowStyle
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to write the GWL_STYLE value using the correct API for the current
-'   VBA / Office bitness
-'
-' WHY THIS EXISTS
-'   SetWindowLong / SetWindowLongPtr can validly return zero, so a robust
-'   wrapper should use GetLastError to distinguish a real previous zero from
-'   failure
-'
-' INPUTS
-'   hWnd
-'     Target window handle
-'
-'   NewStyle
-'     New GWL_STYLE value to write
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => style write succeeded
-'   FALSE => style write failed
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - SetWindowLong / SetWindowLongPtr
-'   - GetLastError
-'   - SetLastError
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-#If VBA7 Then
-    Dim PrevStyle           As LongPtr   'Previous style returned by the API
-#Else
-    Dim PrevStyle           As Long      'Previous style returned by the API
-#End If
-    Dim LastErr             As Long      'Win32 last-error value read after the API call
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        FailMsg = vbNullString
-        UI_TrySetWindowStyle = False
-
-    'Reject an invalid window handle deterministically
-        If hWnd = 0 Then
-            FailMsg = "invalid window handle"
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' WRITE: WINDOW STYLE
-'------------------------------------------------------------------------------
-    'Clear the Win32 last-error state before calling the API so a valid zero
-    'return can later be distinguished from failure
-        SetLastError 0
-
-#If VBA7 Then
-    #If Win64 Then
-
-        'Write the style with the 64-bit API in 64-bit Office / VBA
-            PrevStyle = SetWindowLongPtr(hWnd, GWL_STYLE, NewStyle)
-
-    #Else
-
-        'Write the style with the 32-bit API in VBA7 32-bit Office
-            PrevStyle = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
-
-    #End If
-#Else
-
-    'Write the style with the legacy 32-bit API
-        PrevStyle = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
-
-#End If
-
-    'Read the Win32 last-error value immediately after the API call
-        LastErr = GetLastError
-
-    'Treat zero plus nonzero last error as an API failure
-        If PrevStyle = 0 And LastErr <> 0 Then
-            FailMsg = "SetWindowLong/SetWindowLongPtr failed; GetLastError=" & _
-                CStr(LastErr)
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' RETURN: SUCCESS
-'------------------------------------------------------------------------------
-        UI_TrySetWindowStyle = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-#If VBA7 Then
-Private Function UI_TryRefreshWindowFrame(ByVal hWnd As LongPtr, ByRef FailMsg _
-    As String) As Boolean
-#Else
-Private Function UI_TryRefreshWindowFrame(ByVal hWnd As Long, ByRef FailMsg As _
-    String) As Boolean
-#End If
-
-'
-'==============================================================================
-'                           UI_TryRefreshWindowFrame
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to force Windows to repaint the non-client frame of the specified
-'   window after a style change
-'
-' WHY THIS EXISTS
-'   Updating GWL_STYLE alone is not always visually reflected immediately
-'   SetWindowPos with SWP_FRAMECHANGED is the standard way to notify Windows
-'   that the frame should be recalculated and repainted
-'
-' INPUTS
-'   hWnd
-'     Target window handle
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => frame refresh succeeded
-'   FALSE => frame refresh failed
-'
-' BEHAVIOR
-'   - Uses the canonical no-move / no-size / no-z-order refresh pattern
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' DEPENDENCIES
-'   - SetWindowPos
-'   - GetLastError
-'   - SetLastError
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim ApiOK               As Long      'WinAPI success flag / return code
-    Dim LastErr             As Long      'Win32 last-error value read after the API call
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Fail
-
-        FailMsg = vbNullString
-        UI_TryRefreshWindowFrame = False
-
-    'Reject an invalid window handle deterministically
-        If hWnd = 0 Then
-            FailMsg = "invalid window handle"
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' REFRESH: NON-CLIENT FRAME
-'------------------------------------------------------------------------------
-    'Clear the Win32 last-error state before calling the API
-        SetLastError 0
-
-    'Force Windows to recalculate and repaint the non-client frame without
-    'moving, resizing, or reordering the target window
-        ApiOK = SetWindowPos(hWnd, 0, 0, 0, 0, 0, SWP_NOMOVE Or SWP_NOSIZE Or _
-            SWP_NOZORDER Or SWP_NOOWNERZORDER Or SWP_FRAMECHANGED)
-
-    'Read the Win32 last-error value immediately after the API call
-        LastErr = GetLastError
-
-    'Reject API failure deterministically and include the Win32 error code
-        If ApiOK = 0 Then
-            FailMsg = "SetWindowPos failed; GetLastError=" & CStr(LastErr)
-            GoTo SafeExit
-        End If
-
-'------------------------------------------------------------------------------
-' RETURN: SUCCESS
-'------------------------------------------------------------------------------
-        UI_TryRefreshWindowFrame = True
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' FAIL
-'------------------------------------------------------------------------------
-Fail:
-        FailMsg = UI_BuildRuntimeErrorText
-
-End Function
-
-Private Function UI_VisibilityToBoolean(ByVal Visibility As UIVisibility) As _
-    Boolean
-
-'
-'==============================================================================
-'                           UI_VisibilityToBoolean
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Convert a tri-state visibility enum value into the explicit Boolean visible
-'   state required by Excel properties and internal helpers
-'
-' WHY THIS EXISTS
-'   Public callers use UIVisibility values, while Excel object-model
-'   properties and internal helpers require a Boolean visible / hidden state
+'   Converts UI_Show or UI_Hide to a Boolean visible state.
 '
 ' INPUTS
 '   Visibility
-'     Expected values:
-'       - UI_Hide
-'       - UI_Show
+'     Value to convert. Callers validate the enum first.
 '
 ' RETURNS
-'   TRUE  => visible
-'   FALSE => hidden
-'
-' BEHAVIOR
-'   - UI_Show maps to TRUE
-'   - UI_Hide maps to FALSE
-'   - Callers validate and exclude UI_LeaveUnchanged before invoking this helper
+'   Boolean
+'     True for UI_Show; False otherwise.
 '
 ' ERROR POLICY
-'   - Does NOT raise
+'   - Does not raise. Callers validate the enum and exclude UI_LeaveUnchanged
+'     before calling.
 '
-' NOTES
-'   - Callers should only invoke this helper after excluding
-'     UI_LeaveUnchanged
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_ApplyExcelUIState
 '
 ' UPDATED
-'   2026-07-25
+'   2026-08-18
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
-' RETURN: BOOLEAN VISIBILITY
+' CONVERT
 '------------------------------------------------------------------------------
+    'Only UI_Show means visible
         UI_VisibilityToBoolean = (Visibility = UI_Show)
 
 End Function
 
-Private Function UI_BuildRuntimeErrorText() As String
 
-'
-'==============================================================================
-'                           UI_BuildRuntimeErrorText
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Build a consistent runtime diagnostic string from the active Err object
-'
-' WHY THIS EXISTS
-'   Several procedures in this module use identical failure-text construction
-'   A shared helper avoids duplicated formatting logic and keeps diagnostics
-'   consistent
-'
-' RETURNS
-'   A formatted diagnostic string including:
-'     - Err.Number
-'     - Err.Description
-'     - Err.Source, when available
-'     - Erl, when available
-'
-' ERROR POLICY
-'   - Does NOT raise
-'   - Returns best-effort text
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Protect callers from any unexpected issue while formatting the diagnostic
-        On Error Resume Next
-
-'------------------------------------------------------------------------------
-' BUILD: RUNTIME ERROR TEXT
-'------------------------------------------------------------------------------
-        UI_BuildRuntimeErrorText = CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
-
-End Function
-
-Private Sub UI_LogFailure(ByVal ProcName As String, ByVal Stage As String, ByVal _
-    Detail As String)
-
-'
-'==============================================================================
-'                                UI_LogFailure
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Write a consistent diagnostic line to the Immediate Window
-'
-' WHY THIS EXISTS
-'   The module uses fail-soft behavior and needs a single place to format
-'   diagnostic output consistently
-'
-' INPUTS
-'   ProcName
-'     Procedure name associated with the failure
-'
-'   Stage
-'     Logical stage or element associated with the failure
-'
-'   Detail
-'     Failure detail to append
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Suppresses any unexpected logging failure locally
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Protect callers from any unexpected logging failure
-        On Error Resume Next
-
-'------------------------------------------------------------------------------
-' WRITE: DIAGNOSTIC LINE
-'------------------------------------------------------------------------------
-        Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
-
-End Sub
 
 
