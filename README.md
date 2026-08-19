@@ -38,6 +38,16 @@
 &nbsp;·&nbsp;
 [Download demo release assets](https://github.com/danielep71/VBA-EXCEL_UI/releases)
 
+---
+
+<p align="center">
+  <img width="100%"
+       alt="VBA Excel UI — structured Excel interface controller"
+       src="https://github.com/user-attachments/assets/702a3603-3744-4012-8a4c-fcf44d39bba8">
+</p>
+
+---
+
 </div>
 
 ---
