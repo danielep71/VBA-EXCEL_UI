@@ -189,10 +189,15 @@ Release type:            patch
 
 ### Known limitations
 
-- Ribbon scope under the Single Document Interface is still documented as
-  application-level without supporting evidence. `Test_EXCEL_UI_RunRibbonSdiProbe`
-  and `docs/RIBBON_SDI_BEHAVIOR.md` now exist to settle it, but no host has been
-  measured yet, so the `README.md` statement remains an assumption. See `#21`.
+- Ribbon visibility is **per workbook window**, not application-wide, on the
+  host measured. `README.md` still describes it as application-level; the
+  correction lands with the rest of the documentation work. See `#19` and
+  `docs/RIBBON_SDI_BEHAVIOR.md`.
+- Restoring a snapshot cannot return the Ribbon to a window that is not active,
+  because every mechanism Excel exposes for it acts on the active window and
+  none accepts a window argument. Reaching the captured window requires
+  activating it, which is an observable side effect and is deferred rather than
+  introduced in a patch release. See `#23`.
 - The `README.md` title-bar scope statement still describes the pre-fix
   behavior and is corrected with the rest of the documentation work. See `#19`.
 - `tools/reformat.py` does not round-trip the committed production modules

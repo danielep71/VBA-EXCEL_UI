@@ -1,6 +1,6 @@
 # Ribbon behaviour under the Single Document Interface
 
-> **Status:** measurements pending.
+> **Status:** measured on one host. Model determined: **active-window only.**
 > **Issue:** [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21) —
 > `ICR-UI-P2-01`, Ribbon scope under SDI is unspecified and unverified.
 > **Produced by:** `Test_EXCEL_UI_RunRibbonSdiProbe`
@@ -84,55 +84,139 @@ active**, or as a disagreement between the mechanisms.
 
 ## 4. Measurements
 
-> Paste probe output here, one block per host. Do not summarise — record the
-> table verbatim, then interpret it in section 5.
+> One block per host, recorded verbatim from the probe. Interpretation belongs
+> in section 5, not here.
 
-### Host 1 — *(pending)*
+### Host 1 — Excel 16.0 build 20131, Windows (64-bit) NT 10.00, x64, VBA7
+
+Recorded 2026-08-19 18:51:14.
 
 ```text
-Excel <version> build <build> | <operating system> | <bitness>
-
 scenario              window  CommandBars.Visible  Height  XLM
+1-Baseline            A       True                 178     True
+2-HiddenOnA           A       False                178     False
+2-HiddenOnA           B       True                 178     True
+3-ShownOnB            B       True                 178     True
+3-ShownOnB            A       False                178     False
+4-NewWindowAfterHide  C       False                178     False
+4-NewWindowAfterHide  A       False                178     False
+5-RestoredFromB       B       True                 178     True
+5-RestoredFromB       A       False                178     False
 ```
 
 ---
 
 ## 5. Interpretation
 
-*(to be completed once at least one host has been measured)*
+### The Ribbon is per-window
 
-The measurements will place the Ribbon into exactly one of these models. Each
-carries a different obligation for the component:
+Scenario 2 settles it. Hiding the Ribbon while window A was active left A
+reporting hidden and **B reporting visible**. Scenario 3 is the symmetric
+confirmation: showing it while B was active left B visible and **A still
+hidden** from the previous scenario.
 
-| Model | Meaning | What the component must then do |
-|---|---|---|
-| **Application-wide** | One state, every window agrees | Nothing. `README.md` is already correct and the snapshot contract holds. |
-| **Active-window only** | Each window has its own state; the API addresses the active one | Same class of defect as `ICR-UI-P1-01`. The snapshot must capture the Ribbon's window identity, and `README.md` must stop claiming application scope. |
-| **Cached and propagated** | New windows inherit the state at creation | `README.md` must say so explicitly, and scenario 4 governs what a caller can expect after opening a workbook. |
-| **Host-dependent** | Differs by build, channel or policy | The component must document the scope as best effort and name the builds tested, exactly as it already does for title-bar control. |
+Each write therefore affects the active window and nothing else. The documented
+scope, *Excel application*, is wrong for this host.
 
----
+### A window created after a hide inherits the hidden state
+
+Scenario 4: with the Ribbon hidden and A active, a newly created window C
+reported hidden. Note the limit of what this shows — at that moment the "last
+written state" and "the active window's state" were both hidden, so this
+measurement cannot separate *inherits from the active window* from *inherits
+from the last write*. Distinguishing them needs a scenario that sets them
+differently, and no current decision depends on the answer.
+
+### Scenario 5 is a live defect, not a curiosity
+
+The sequence was: show with A active, capture, hide A, activate B, restore.
+
+The captured value was read from **A**. The restore applied it to **B**, which
+was merely the window that happened to be active. A was left hidden. Nothing was
+reported.
+
+```text
+captured from  A  (Ribbon visible)
+restored to    B  (already visible - no-op)
+A              still hidden, never restored
+result         success
+```
+
+That is the same defect as `ICR-UI-P1-01`, in the same snapshot, on a different
+element. It was invisible before this probe because no test ever activated a
+second window across a Ribbon capture and restore.
+
+### The `Height` column is inert on this host
+
+`CommandBars("Ribbon").Height` reported **178 in all nine observations**,
+including every hidden one. It does not track visibility on this build and is
+worthless as a signal here. The *collapsed versus hidden* ambiguity the column
+was added to detect did not arise.
+
+### The two read mechanisms agree exactly
+
+`CommandBars("Ribbon").Visible` and `Get.ToolBar(7,"Ribbon")` returned the same
+value in **all nine observations**. The component's XLM fallback is faithful to
+its primary read, at least on this host, so a divergence between them is not a
+risk that needs designing around.
+
+### Model
+
+| Model | Verdict |
+|---|---|
+| Application-wide | **Ruled out** by scenarios 2 and 3. |
+| **Active-window only** | **Selected.** Every write affects the active window alone. |
+| Cached and propagated | **Partly true** — new windows inherit at creation (scenario 4) — but this is a property of window creation, not of the write scope. |
+| Host-dependent | Not ruled out. One host is one data point. |
 
 ## 6. Decision and consequences
 
-*(to be completed)*
+The measured model has the same shape as the title-bar defect fixed in `1.1.1`,
+but **it cannot take the same fix**, and that difference drives the split below.
 
-- [ ] Model selected, with the measurements that justify it.
-- [ ] `README.md` Ribbon scope statement corrected to match (tracked on #19).
-- [ ] If the model is anything other than application-wide, a follow-up issue
-      opened for the propagation or identity work, scoped to `v1.2.0` — it
-      changes observable behaviour and does not belong in a patch release.
-- [ ] Assertions added to the regression suite **only after** the model is
-      decided. Writing them first would encode the guess this document exists to
-      remove.
+The title bar could be corrected inside a patch release because
+`SetWindowLong` accepts an explicit `HWND`: the component could simply write to
+the captured window without touching anything else. The Ribbon has no such API.
+Every mechanism available is application-scoped and acts on the active window:
 
----
+```text
+Application.CommandBars("Ribbon").Visible                     no window argument
+Application.ExecuteExcel4Macro("Show.TOOLBAR(""Ribbon"",…)")  no window argument
+```
+
+Restoring the Ribbon to a specific window therefore requires **activating that
+window**, writing, and restoring focus. That is a visible side effect which can
+fire `Workbook_WindowActivate` handlers in caller code, and it does not belong
+in a corrective patch release.
+
+### Decided for `1.1.1`
+
+- [x] Model determined and recorded above.
+- [ ] `README.md` states the measured active-window scope and names the build
+      tested, instead of claiming application scope (tracked on #19).
+- [ ] The snapshot **reports** the Ribbon as unrestorable when the captured
+      window is not active, rather than applying the captured value to whichever
+      window is. This mirrors the decision taken for the title bar: refusing to
+      write is correct when the target cannot be reached, and a silent wrong
+      write is the worst available outcome. No window is activated, so there is
+      no new side effect.
+
+### Deferred to `1.2.0`
+
+- [ ] Restore the Ribbon to its captured window by activating it, writing, and
+      restoring focus — with an opt-out, because the activation is observable.
+- [ ] Decide and document whether `UI_SetExcelUI(Ribbon:=…)` should apply to
+      every window or only the active one, which is a public-contract question
+      the `UIWindowTargetScope` enum already raises for other elements.
+- [ ] Establish whether a new window inherits from the active window or from the
+      last write, if either behaviour is to be promised.
 
 ## 7. Limitations
 
-- The probe measures what the host reports, not what is drawn on screen. A
-  Ribbon that is visually collapsed but reported as visible is detectable only
-  through the `Height` column.
+- The probe measures what the host reports, not what is drawn on screen. On the
+  host measured, `Height` proved inert and could not have detected a collapsed
+  Ribbon; if a future host reports differently, that column becomes meaningful
+  again.
 - One host is one data point. Ribbon behaviour can vary by Office channel,
   update ring and administrative policy; a single green block does not establish
   behaviour for the supported range.
