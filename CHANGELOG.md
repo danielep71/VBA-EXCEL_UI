@@ -9,7 +9,7 @@ VBA API. Dates use the `YYYY-MM-DD` format.
 
 No unreleased changes are currently documented.
 
-## [1.1.0] - 2026-08-18
+## [1.1.0] - 2026-08-19
 
 Backward-compatible feature release. Every public `UI_...` procedure and enum
 member from `1.0.1` is preserved, with unchanged names, parameter order and
