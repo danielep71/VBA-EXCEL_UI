@@ -34,6 +34,16 @@ no existing call site requires modification.
   `UI_SnapshotTryResolveTitleBarFrame` to `M_EXCEL_UI_SNAPSHOT`, which capture
   the identity of the top-level frame a title-bar value was read from and prove
   that frame is still present before anything is written back to it.
+- Added `Test_EXCEL_UI_RunTitleBarSdiIdentity`, a regression runner covering
+  title-bar restoration across two workbook windows. It verifies that a
+  snapshot restores the frame it was captured from while a different window is
+  active, and that a captured frame which has since closed is reported rather
+  than redirected. The runner is destructive and is invoked explicitly; it is
+  not part of `Test_EXCEL_UI_RunAll`.
+- Added `TST_Case_TitleBarFrameRefreshDebtRetried` to the title-bar regression
+  pack, which injects a frame-refresh failure and verifies that the outstanding
+  repaint is recorded and retried on the next call rather than short-circuited
+  as a no-op.
 
 ### Changed
 
