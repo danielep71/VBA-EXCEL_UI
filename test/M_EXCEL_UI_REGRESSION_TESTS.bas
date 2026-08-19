@@ -112,6 +112,7 @@ Option Private Module
     Private Const TEST_SNAPSHOT_ID_ERR_BASE As Long = vbObjectError + 4810  'Base custom error for snapshot-identity assertions
     Private Const TEST_TARGET_ERR_BASE As Long = vbObjectError + 4900  'Base custom error for target-scope tests
     Private Const TEST_TITLEBAR_SDI_ERR_BASE As Long = vbObjectError + 5000  'Base custom error for title-bar SDI tests
+    Private Const TEST_CERT_ERR_BASE  As Long = vbObjectError + 5100  'Base custom error for certification
     Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
@@ -207,6 +208,1087 @@ Option Private Module
 '------------------------------------------------------------------------------
 '
 
+'==============================================================================
+' RELEASE-CERTIFICATION STATE
+'==============================================================================
+
+'Accrued only while a certification run is active. The regression packs are
+'shared with the legacy runners, so recording must be inert outside a run rather
+'than leaking counts from one invocation into the next.
+Private m_CertActive                    As Boolean
+
+Private m_CertUnitCount                 As Long
+Private m_CertUnitNames()               As String
+Private m_CertUnitPassed()              As Boolean
+Private m_CertUnitDetail()              As String
+
+Private m_CertSkipCount                 As Long
+Private m_CertSkipDetail()              As String
+
+
+Public Sub Test_EXCEL_UI_RunReleaseCertification()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunReleaseCertification
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Execute every mandatory regression unit in one pass and emit an unambiguous
+'   complete/incomplete and pass/fail verdict with machine-readable evidence.
+'
+' WHY THIS EXISTS
+'   The existing runners cannot certify a release. Test_EXCEL_UI_RunAll executes
+'   no multi-window case, silently skips the snapshot cases when a snapshot
+'   already exists, and reports its outcome only as Immediate Window prose. A
+'   reader of that output cannot distinguish
+'
+'       a complete pass
+'       a pass with snapshot cases skipped
+'       a pass on one environment only
+'
+'   which means a green result carries far less information than it appears to.
+'
+'   This runner makes the difference explicit. Every unit is counted, a skipped
+'   mandatory unit is a failure rather than a quiet log line, the host state is
+'   verified after the run rather than assumed, and the environment the result
+'   was obtained on is recorded alongside it.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Refuses to start when an explicit EXCEL_UI snapshot already exists, rather
+'     than degrading into a partial run.
+'   - Records the anchor window by object identity and the workbook count, so
+'     leaked state is detected rather than tolerated.
+'   - Runs the full regression pack, the snapshot-identity runner and the SDI
+'     title-bar identity runner, each under its own error boundary so one
+'     failing unit does not conceal the rest.
+'   - Verifies cleanup: no snapshot left behind, ScreenUpdating restored, the
+'     workbook count back to its starting value, the anchor window still usable.
+'   - Emits a JSON evidence document and a text summary, and writes both to the
+'     temporary folder on a best-effort basis.
+'   - Raises when the verdict is anything other than a complete pass.
+'
+' ERROR POLICY
+'   - Individual unit failures are captured, not propagated.
+'   - Raises once at the end when the verdict is not PASS/COMPLETE.
+'
+' DEPENDENCIES
+'   - TST_CertResetCounters
+'   - TST_CertRunUnit
+'   - TST_CertBuildJsonEvidence
+'   - TST_CertBuildTextReport
+'   - TST_CertTryWriteEvidence
+'
+' NOTES
+'   Destructive: creates and closes temporary workbooks and toggles every
+'   managed UI element. Save unsaved work before running it.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window active before the run
+    Dim BaselineBooks       As Long            'Workbooks open before the run
+    Dim OldScreenUpdating   As Boolean         'ScreenUpdating before the run
+
+    Dim UnitsFailed         As Long            'Units that reported failure
+    Dim CleanupOK           As Boolean         'TRUE when no state leaked
+    Dim CleanupDetail       As String          'Reason cleanup was rejected
+
+    Dim Complete            As Boolean         'TRUE when nothing was skipped
+    Dim Passed              As Boolean         'TRUE when the verdict is a pass
+    Dim Verdict             As String          'Human-readable verdict line
+
+    Dim JsonText            As String          'Machine-readable evidence
+    Dim ReportText          As String          'Human-readable evidence
+    Dim JsonPath            As String          'Path the JSON was written to
+    Dim ReportPath          As String          'Path the report was written to
+    Dim ScanIdx             As Long            'Cursor over recorded units
+
+    Const PROC As String = "Test_EXCEL_UI_RunReleaseCertification"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertResetCounters
+
+        m_CertActive = True
+
+        TST_Log PROC, "START", "Release certification started"
+
+'------------------------------------------------------------------------------
+' VALIDATE PRECONDITIONS
+'------------------------------------------------------------------------------
+    'A pre-existing snapshot cannot be preserved across these units. Refusing to
+    'start is the honest response; running anyway would produce a partial result
+    'that reads exactly like a complete one.
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 1, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before certifying a release"
+        End If
+
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 2, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+    'Identity and counts recorded here are what cleanup is judged against
+        BaselineBooks = Workbooks.Count
+        OldScreenUpdating = Application.ScreenUpdating
+
+'------------------------------------------------------------------------------
+' RUN MANDATORY UNITS
+'------------------------------------------------------------------------------
+    'Each unit is run under its own boundary so that one failure does not hide
+    'the state of everything after it
+        TST_CertRunUnit "RegressionPack"
+        TST_CertRunUnit "SnapshotIdentity"
+        TST_CertRunUnit "TitleBarSdiIdentity"
+
+'------------------------------------------------------------------------------
+' COUNT RESULTS
+'------------------------------------------------------------------------------
+    'Tally the recorded units
+        For ScanIdx = 1 To m_CertUnitCount
+
+            If Not m_CertUnitPassed(ScanIdx) Then
+                UnitsFailed = UnitsFailed + 1
+            End If
+
+        Next ScanIdx
+
+'------------------------------------------------------------------------------
+' VERIFY CLEANUP
+'------------------------------------------------------------------------------
+    'Cleanup failure is a run failure. A suite that leaves a snapshot, a stray
+    'workbook or suppressed screen updates behind has not finished, however many
+    'assertions passed on the way.
+        CleanupOK = True
+        CleanupDetail = vbNullString
+
+        If UI_HasExcelUIStateSnapshot Then
+            CleanupOK = False
+            CleanupDetail = "an EXCEL_UI snapshot was left behind"
+        End If
+
+        If Workbooks.Count <> BaselineBooks Then
+            CleanupOK = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "workbook count changed from " & CStr(BaselineBooks) & _
+                " to " & CStr(Workbooks.Count))
+        End If
+
+        If Not Application.ScreenUpdating Then
+            CleanupOK = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "ScreenUpdating was left suppressed")
+        End If
+
+        If Not TST_CertIsWindowUsable(AnchorWindow) Then
+            CleanupOK = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "the anchor window is no longer usable")
+        End If
+
+'------------------------------------------------------------------------------
+' DETERMINE VERDICT
+'------------------------------------------------------------------------------
+    'Completeness and correctness are separate questions and are reported as
+    'such. A run that skipped a mandatory unit is not a pass, whatever the
+    'assertions that did execute reported.
+        Complete = (m_CertSkipCount = 0)
+        Passed = (UnitsFailed = 0) And CleanupOK And Complete
+
+        Verdict = "RESULT: " & IIf(Passed, "PASS", "FAIL") & _
+            " | " & IIf(Complete, "COMPLETE", "INCOMPLETE") & _
+            " | units=" & CStr(m_CertUnitCount) & _
+            " failed=" & CStr(UnitsFailed) & _
+            " skipped=" & CStr(m_CertSkipCount) & _
+            " cleanup=" & IIf(CleanupOK, "OK", "FAILED")
+
+'------------------------------------------------------------------------------
+' EMIT EVIDENCE
+'------------------------------------------------------------------------------
+    'Build both forms before writing either, so a file-system failure cannot
+    'cost the Immediate Window record as well
+        JsonText = TST_CertBuildJsonEvidence( _
+            UnitsFailed:=UnitsFailed, _
+            CleanupOK:=CleanupOK, _
+            CleanupDetail:=CleanupDetail, _
+            Complete:=Complete, _
+            Passed:=Passed)
+
+        ReportText = TST_CertBuildTextReport( _
+            Verdict:=Verdict, _
+            CleanupDetail:=CleanupDetail)
+
+        TST_Log PROC, "EVIDENCE", vbNewLine & ReportText
+        TST_Log PROC, "JSON", JsonText
+
+    'File output is a convenience, never a gate on the verdict
+        If TST_CertTryWriteEvidence(JsonText, "json", JsonPath) Then
+            TST_Log PROC, "WROTE", JsonPath
+        End If
+
+        If TST_CertTryWriteEvidence(ReportText, "txt", ReportPath) Then
+            TST_Log PROC, "WROTE", ReportPath
+        End If
+
+        TST_Log PROC, IIf(Passed, "PASS", "FAIL"), Verdict
+
+'------------------------------------------------------------------------------
+' RAISE ON A NON-PASSING VERDICT
+'------------------------------------------------------------------------------
+    'Raise only after the evidence exists, so a failed run is still documented
+        If Not Passed Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 3, _
+                PROC, _
+                Verdict & IIf(Len(CleanupDetail) > 0, " | " & CleanupDetail, vbNullString)
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Certification accounting must not leak into a later legacy run
+        m_CertActive = False
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Report the precondition or verdict failure to the caller
+        m_CertActive = False
+
+        TST_Log PROC, "FAIL", Err.Description
+
+        Err.Raise Err.Number, Err.Source, Err.Description
+
+End Sub
+
+
+Private Sub TST_CertResetCounters()
+
+'
+'==============================================================================
+' TST_CertResetCounters
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clear every certification counter and buffer before a run.
+'
+' WHY THIS EXISTS
+'   The regression packs are shared with the legacy runners, so skip recording
+'   is module state rather than a parameter. Without an explicit reset a second
+'   certification run in the same session would inherit the first run's counts
+'   and report a verdict about work it did not do.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' CLEAR COUNTERS
+'------------------------------------------------------------------------------
+    'Suppress any error; a reset that cannot complete must not abort the run
+        On Error Resume Next
+
+        m_CertUnitCount = 0
+        m_CertSkipCount = 0
+
+        Erase m_CertUnitNames
+        Erase m_CertUnitPassed
+        Erase m_CertUnitDetail
+        Erase m_CertSkipDetail
+
+End Sub
+
+
+Private Sub TST_CertRecordSkip( _
+    ByVal CallerProc As String, _
+    ByVal Reason As String)
+
+'
+'==============================================================================
+' TST_CertRecordSkip
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Log a skipped case and, during a certification run, count it.
+'
+' WHY THIS EXISTS
+'   A skip used to be an Immediate Window line and nothing else, which made a
+'   partial run indistinguishable from a complete one in every artifact that
+'   survived the session. Counting the skip is what lets the certification
+'   verdict report INCOMPLETE rather than quietly reporting PASS.
+'
+'   Recording is inert outside a certification run, so the legacy runners keep
+'   their existing behavior exactly.
+'
+' INPUTS
+'   CallerProc
+'     Procedure that skipped the case, used as the log prefix.
+'
+'   Reason
+'     Why the case was skipped.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' LOG SKIP
+'------------------------------------------------------------------------------
+    'Preserve the existing diagnostic line for the legacy runners
+        TST_Log CallerProc, "SKIP", Reason
+
+'------------------------------------------------------------------------------
+' COUNT SKIP
+'------------------------------------------------------------------------------
+    'Accrue only while certifying, so counts cannot leak between invocations
+        On Error Resume Next
+
+        If m_CertActive Then
+
+            m_CertSkipCount = m_CertSkipCount + 1
+
+            ReDim Preserve m_CertSkipDetail(1 To m_CertSkipCount)
+            m_CertSkipDetail(m_CertSkipCount) = CallerProc & ": " & Reason
+
+        End If
+
+End Sub
+
+
+Private Sub TST_CertRunUnit( _
+    ByVal UnitName As String)
+
+'
+'==============================================================================
+' TST_CertRunUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Execute one mandatory certification unit and record its outcome without
+'   propagating a failure.
+'
+' WHY THIS EXISTS
+'   The legacy runners raise on the first assertion failure, which is right for
+'   interactive debugging and wrong for certification: it reports one defect and
+'   conceals the state of everything after it. Trapping per unit means a single
+'   run tells you everything that is broken, not merely the first thing.
+'
+'   Dispatch is an explicit Select Case rather than Application.Run because the
+'   units are private to this module and a name-based call would fail silently
+'   or bind to the wrong project. A compile-time reference cannot rot.
+'
+' INPUTS
+'   UnitName
+'     Identifier of the unit to execute.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. A failing unit is recorded and the run continues.
+'
+' DEPENDENCIES
+'   - TST_RunRegressionPack
+'   - Test_EXCEL_UI_RunSnapshotIdentity
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'   - TST_CertRecordUnit
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log "TST_CertRunUnit", "UNIT", "Running " & UnitName
+
+'------------------------------------------------------------------------------
+' DISPATCH UNIT
+'------------------------------------------------------------------------------
+    'An unknown identifier is a defect in the registry above, not a pass
+        Select Case UnitName
+
+            Case "RegressionPack"
+                TST_RunRegressionPack _
+                    IncludeTitleBarTests:=True, _
+                    CallerProc:="Certification.RegressionPack"
+
+            Case "SnapshotIdentity"
+                Test_EXCEL_UI_RunSnapshotIdentity
+
+            Case "TitleBarSdiIdentity"
+                Test_EXCEL_UI_RunTitleBarSdiIdentity
+
+            Case Else
+                Err.Raise _
+                    TEST_CERT_ERR_BASE + 10, _
+                    "TST_CertRunUnit", _
+                    "unknown certification unit: " & UnitName
+
+        End Select
+
+'------------------------------------------------------------------------------
+' RECORD PASS
+'------------------------------------------------------------------------------
+    'The unit completed without raising
+        TST_CertRecordUnit UnitName, True, vbNullString
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Record the failure and continue; the verdict is assembled by the caller
+        TST_CertRecordUnit UnitName, False, _
+            CStr(Err.Number) & ": " & Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_CertRecordUnit( _
+    ByVal UnitName As String, _
+    ByVal Passed As Boolean, _
+    ByVal Detail As String)
+
+'
+'==============================================================================
+' TST_CertRecordUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Append one unit outcome to the certification record.
+'
+' WHY THIS EXISTS
+'   The verdict, the JSON evidence and the text report are all derived from the
+'   same arrays, so there is exactly one place where an outcome enters the run
+'   and no opportunity for the three to disagree.
+'
+' INPUTS
+'   UnitName
+'     Identifier of the unit.
+'
+'   Passed
+'     TRUE when the unit completed without raising.
+'
+'   Detail
+'     Failure text; empty on success.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertRunUnit
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' APPEND OUTCOME
+'------------------------------------------------------------------------------
+    'Recording must never be the thing that breaks a run
+        On Error Resume Next
+
+        m_CertUnitCount = m_CertUnitCount + 1
+
+        ReDim Preserve m_CertUnitNames(1 To m_CertUnitCount)
+        ReDim Preserve m_CertUnitPassed(1 To m_CertUnitCount)
+        ReDim Preserve m_CertUnitDetail(1 To m_CertUnitCount)
+
+        m_CertUnitNames(m_CertUnitCount) = UnitName
+        m_CertUnitPassed(m_CertUnitCount) = Passed
+        m_CertUnitDetail(m_CertUnitCount) = Detail
+
+        TST_Log "TST_CertRecordUnit", IIf(Passed, "UNIT PASS", "UNIT FAIL"), _
+            UnitName & IIf(Len(Detail) > 0, " | " & Detail, vbNullString)
+
+End Sub
+
+
+Private Function TST_CertIsWindowUsable( _
+    ByVal TargetWindow As Object) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertIsWindowUsable
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Report whether a retained Window reference still responds.
+'
+' WHY THIS EXISTS
+'   Cleanup is judged against the window the run started from, held by object
+'   identity rather than by collection index. An index would be satisfied by any
+'   window that happens to occupy the same position afterwards, which is exactly
+'   the substitution the snapshot identity work exists to prevent.
+'
+' INPUTS
+'   TargetWindow
+'     Window to probe. May be Nothing.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the reference still responds to a non-mutating read.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ProbeValue          As Boolean         'Non-mutating probe output
+
+'------------------------------------------------------------------------------
+' PROBE REFERENCE
+'------------------------------------------------------------------------------
+    'A dead wrapper raises on the read, which is the signal required
+        On Error Resume Next
+
+        TST_CertIsWindowUsable = False
+
+        If TargetWindow Is Nothing Then
+            Exit Function
+        End If
+
+        ProbeValue = TargetWindow.DisplayHeadings
+
+        TST_CertIsWindowUsable = (Err.Number = 0)
+
+        Err.Clear
+
+End Function
+
+
+Private Function TST_CertAppendDetail( _
+    ByVal ExistingDetail As String, _
+    ByVal NewDetail As String) _
+    As String
+
+'
+'==============================================================================
+' TST_CertAppendDetail
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Join cleanup findings into one ordered diagnostic string.
+'
+' WHY THIS EXISTS
+'   Cleanup can fail in more than one way at once, and reporting only the first
+'   would send the reader back for a second run to discover the second problem.
+'
+' INPUTS
+'   ExistingDetail
+'     Findings recorded so far; may be empty.
+'
+'   NewDetail
+'     Finding to append.
+'
+' RETURNS
+'   String
+'     The joined findings.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' JOIN FINDINGS
+'------------------------------------------------------------------------------
+    'Separate with the established diagnostic delimiter
+        If Len(ExistingDetail) = 0 Then
+            TST_CertAppendDetail = NewDetail
+        Else
+            TST_CertAppendDetail = ExistingDetail & " | " & NewDetail
+        End If
+
+End Function
+
+
+Private Function TST_CertBuildJsonEvidence( _
+    ByVal UnitsFailed As Long, _
+    ByVal CleanupOK As Boolean, _
+    ByVal CleanupDetail As String, _
+    ByVal Complete As Boolean, _
+    ByVal Passed As Boolean) _
+    As String
+
+'
+'==============================================================================
+' TST_CertBuildJsonEvidence
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Compose the machine-readable certification result.
+'
+' WHY THIS EXISTS
+'   Prose in the Immediate Window cannot be attached to a release, compared
+'   between environments or checked by a workflow. A result that names the exact
+'   host it was obtained on is the difference between evidence and an assertion
+'   that the tests passed somewhere once.
+'
+'   The document is assembled by hand rather than through a library because the
+'   module carries no dependency, and the field set is small and fixed.
+'
+' INPUTS
+'   UnitsFailed / CleanupOK / CleanupDetail / Complete / Passed
+'     Verdict components computed by the caller.
+'
+' RETURNS
+'   String
+'     A single-line JSON document.
+'
+' ERROR POLICY
+'   - Does not raise. A field that cannot be read is reported as unknown.
+'
+' DEPENDENCIES
+'   - TST_CertJsonEscape
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' NOTES
+'   Bitness and VBA generation come from conditional compilation, so they
+'   describe the build that is executing rather than what the host reports.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Json                As String          'Document under construction
+    Dim ScanIdx             As Long            'Cursor over recorded units
+    Dim Bitness             As String          'Office bitness of this build
+    Dim VbaGeneration       As String          'VBA generation of this build
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Evidence must be produced even when a field cannot be read
+        On Error Resume Next
+
+#If VBA7 Then
+        VbaGeneration = "VBA7"
+    #If Win64 Then
+        Bitness = "x64"
+    #Else
+        Bitness = "x86"
+    #End If
+#Else
+        VbaGeneration = "pre-VBA7"
+        Bitness = "x86"
+#End If
+
+'------------------------------------------------------------------------------
+' BUILD ENVIRONMENT
+'------------------------------------------------------------------------------
+    'Name the exact host this verdict describes
+        Json = "{""component"":""VBA Excel UI""" & _
+            ",""schema"":1" & _
+            ",""timestampLocal"":""" & Format$(Now, "yyyy-mm-dd hh:nn:ss") & """" & _
+            ",""excelVersion"":""" & TST_CertJsonEscape(Application.Version) & """" & _
+            ",""excelBuild"":""" & TST_CertJsonEscape(CStr(Application.Build)) & """" & _
+            ",""operatingSystem"":""" & TST_CertJsonEscape(Application.OperatingSystem) & """" & _
+            ",""bitness"":""" & Bitness & """" & _
+            ",""vbaGeneration"":""" & VbaGeneration & """"
+
+'------------------------------------------------------------------------------
+' BUILD COUNTERS
+'------------------------------------------------------------------------------
+    'Counts first, so a reader sees the shape of the run before its detail
+        Json = Json & _
+            ",""units"":" & CStr(m_CertUnitCount) & _
+            ",""unitsFailed"":" & CStr(UnitsFailed) & _
+            ",""skipped"":" & CStr(m_CertSkipCount) & _
+            ",""cleanup"":""" & IIf(CleanupOK, "OK", "FAILED") & """" & _
+            ",""cleanupDetail"":""" & TST_CertJsonEscape(CleanupDetail) & """" & _
+            ",""complete"":" & IIf(Complete, "true", "false") & _
+            ",""passed"":" & IIf(Passed, "true", "false")
+
+'------------------------------------------------------------------------------
+' BUILD UNIT DETAIL
+'------------------------------------------------------------------------------
+    'One object per unit, in execution order
+        Json = Json & ",""unitResults"":["
+
+        For ScanIdx = 1 To m_CertUnitCount
+
+            If ScanIdx > 1 Then
+                Json = Json & ","
+            End If
+
+            Json = Json & "{""name"":""" & _
+                TST_CertJsonEscape(m_CertUnitNames(ScanIdx)) & """" & _
+                ",""passed"":" & IIf(m_CertUnitPassed(ScanIdx), "true", "false") & _
+                ",""detail"":""" & _
+                TST_CertJsonEscape(m_CertUnitDetail(ScanIdx)) & """}"
+
+        Next ScanIdx
+
+        Json = Json & "]"
+
+'------------------------------------------------------------------------------
+' BUILD SKIP DETAIL
+'------------------------------------------------------------------------------
+    'Skips are listed explicitly; an empty array is a meaningful result
+        Json = Json & ",""skipDetail"":["
+
+        For ScanIdx = 1 To m_CertSkipCount
+
+            If ScanIdx > 1 Then
+                Json = Json & ","
+            End If
+
+            Json = Json & """" & _
+                TST_CertJsonEscape(m_CertSkipDetail(ScanIdx)) & """"
+
+        Next ScanIdx
+
+        Json = Json & "]}"
+
+'------------------------------------------------------------------------------
+' RETURN DOCUMENT
+'------------------------------------------------------------------------------
+    'Publish the assembled document
+        TST_CertBuildJsonEvidence = Json
+
+End Function
+
+
+Private Function TST_CertJsonEscape( _
+    ByVal Value As String) _
+    As String
+
+'
+'==============================================================================
+' TST_CertJsonEscape
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Escape the characters that would otherwise make the evidence document
+'   unparseable.
+'
+' WHY THIS EXISTS
+'   Failure detail is host text and can contain quotes, backslashes and line
+'   breaks. Emitting it raw would produce a document that no consumer can read,
+'   which defeats the purpose of machine-readable evidence precisely when the
+'   run failed and the evidence matters most.
+'
+' INPUTS
+'   Value
+'     Text to escape. May be empty.
+'
+' RETURNS
+'   String
+'     The escaped text, without surrounding quotes.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertBuildJsonEvidence
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Result              As String          'Escaped text under construction
+
+'------------------------------------------------------------------------------
+' ESCAPE VALUE
+'------------------------------------------------------------------------------
+    'Escape the backslash first, or the escapes added below are re-escaped
+        On Error Resume Next
+
+        Result = Value
+        Result = Replace(Result, "\", "\\")
+        Result = Replace(Result, """", "\""")
+        Result = Replace(Result, vbCrLf, "\n")
+        Result = Replace(Result, vbCr, "\n")
+        Result = Replace(Result, vbLf, "\n")
+        Result = Replace(Result, vbTab, "\t")
+
+        TST_CertJsonEscape = Result
+
+End Function
+
+
+Private Function TST_CertBuildTextReport( _
+    ByVal Verdict As String, _
+    ByVal CleanupDetail As String) _
+    As String
+
+'
+'==============================================================================
+' TST_CertBuildTextReport
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Compose the human-readable certification summary.
+'
+' WHY THIS EXISTS
+'   The JSON document is for tooling. A person deciding whether to tag a release
+'   needs the same facts in a form they can read at a glance and paste into the
+'   changelog validation block.
+'
+' INPUTS
+'   Verdict
+'     Pre-composed verdict line.
+'
+'   CleanupDetail
+'     Cleanup findings; empty when cleanup passed.
+'
+' RETURNS
+'   String
+'     A multi-line report.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Report              As String          'Report under construction
+    Dim ScanIdx             As Long            'Cursor over recorded entries
+
+'------------------------------------------------------------------------------
+' BUILD REPORT
+'------------------------------------------------------------------------------
+    'A report must be produced even when a field cannot be read
+        On Error Resume Next
+
+        Report = "VBA Excel UI - release certification" & vbNewLine & _
+            "Excel " & Application.Version & _
+            " build " & CStr(Application.Build) & vbNewLine & _
+            Application.OperatingSystem & vbNewLine & _
+            Format$(Now, "yyyy-mm-dd hh:nn:ss") & vbNewLine & _
+            String$(60, "-") & vbNewLine & Verdict & vbNewLine
+
+'------------------------------------------------------------------------------
+' APPEND UNIT RESULTS
+'------------------------------------------------------------------------------
+    'One line per unit, in execution order
+        For ScanIdx = 1 To m_CertUnitCount
+
+            Report = Report & _
+                IIf(m_CertUnitPassed(ScanIdx), "  PASS  ", "  FAIL  ") & _
+                m_CertUnitNames(ScanIdx) & _
+                IIf(Len(m_CertUnitDetail(ScanIdx)) > 0, _
+                    " | " & m_CertUnitDetail(ScanIdx), vbNullString) & _
+                vbNewLine
+
+        Next ScanIdx
+
+'------------------------------------------------------------------------------
+' APPEND SKIPS AND CLEANUP
+'------------------------------------------------------------------------------
+    'Skips are named, because an unnamed skip is what this runner exists to
+    'stop happening
+        For ScanIdx = 1 To m_CertSkipCount
+            Report = Report & "  SKIP  " & m_CertSkipDetail(ScanIdx) & vbNewLine
+        Next ScanIdx
+
+        If Len(CleanupDetail) > 0 Then
+            Report = Report & "  CLEANUP  " & CleanupDetail & vbNewLine
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN REPORT
+'------------------------------------------------------------------------------
+    'Publish the assembled report
+        TST_CertBuildTextReport = Report
+
+End Function
+
+
+Private Function TST_CertTryWriteEvidence( _
+    ByVal Content As String, _
+    ByVal Extension As String, _
+    ByRef PathOut As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertTryWriteEvidence
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Write one evidence document to the temporary folder.
+'
+' WHY THIS EXISTS
+'   Evidence that exists only in the Immediate Window is lost the moment the
+'   session ends and cannot be attached to a release. A file can.
+'
+'   Writing is nonetheless best effort and never a gate on the verdict: a
+'   locked-down or full temporary folder is an environment problem, and letting
+'   it fail a run whose assertions all passed would report the wrong defect.
+'
+' INPUTS
+'   Content
+'     Document text to write.
+'
+'   Extension
+'     File extension without the dot.
+'
+'   PathOut
+'     ByRef. Receives the path written, or empty on failure.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the file was written.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FolderPath          As String          'Temporary folder for evidence
+    Dim FileNumber          As Integer         'Free file handle
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A file-system failure must never abort certification
+        On Error GoTo Err_Handler
+
+        TST_CertTryWriteEvidence = False
+        PathOut = vbNullString
+
+'------------------------------------------------------------------------------
+' RESOLVE PATH
+'------------------------------------------------------------------------------
+    'Fall back silently when the host exposes no temporary folder
+        FolderPath = Environ$("TEMP")
+
+        If Len(FolderPath) = 0 Then
+            GoTo Safe_Exit
+        End If
+
+        PathOut = FolderPath & "\EXCEL_UI_certification_" & _
+            Format$(Now, "yyyymmdd_hhnnss") & "." & Extension
+
+'------------------------------------------------------------------------------
+' WRITE FILE
+'------------------------------------------------------------------------------
+    'Write the document as a single block
+        FileNumber = FreeFile
+
+        Open PathOut For Output As #FileNumber
+        Print #FileNumber, Content
+        Close #FileNumber
+
+        TST_CertTryWriteEvidence = True
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Report the miss without disturbing the verdict
+        TST_CertTryWriteEvidence = False
+        PathOut = vbNullString
+
+        Resume Safe_Exit
+
+End Function
+
+
 Public Sub Test_EXCEL_UI_RunAll()
 
 '
@@ -235,8 +1317,14 @@ Public Sub Test_EXCEL_UI_RunAll()
 ' DEPENDENCIES
 '   - TST_RunRegressionPack
 '
+' NOTES
+'   This is NOT the release gate. It runs no multi-window case, it can skip
+'   snapshot cases silently when a snapshot already exists, and it produces no
+'   machine-readable evidence. Use Test_EXCEL_UI_RunReleaseCertification to
+'   certify a release.
+'
 ' UPDATED
-'   2026-07-25
+'   2026-08-19
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -874,8 +1962,9 @@ Private Sub TST_RunRegressionPack( _
     'snapshot object safely
         If HadExplicitSnapshot Then
 
-            'Log that snapshot-destructive cases were skipped
-                TST_Log CallerProc, "SKIP", _
+            'Record that snapshot-destructive cases were skipped. Under the
+            'certification runner a skip is a failure, not a quiet log line.
+                TST_CertRecordSkip CallerProc, _
                     "Snapshot lifecycle cases skipped because an explicit EXCEL_UI snapshot already existed before the run"
 
         Else
@@ -908,7 +1997,7 @@ Private Sub TST_RunRegressionPack( _
         If IncludeTitleBarTests Then
             TST_Case_ConvenienceWrappers True
         Else
-            TST_Log CallerProc, "SKIP", _
+            TST_CertRecordSkip CallerProc, _
                 "Convenience-wrapper case skipped in core mode because the wrappers also toggle TitleBar"
         End If
 

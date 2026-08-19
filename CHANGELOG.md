@@ -49,6 +49,13 @@ no existing call site requires modification.
 - Added `TST_Case_FailureAccumulatorDegradesSafely` to the core regression
   pack, which injects a failure-list growth failure and verifies that the
   status outputs survive, the truncation is reported, and nothing raises.
+- Added `Test_EXCEL_UI_RunReleaseCertification`, a single runner that executes
+  every mandatory regression unit, counts units, failures, skips and cleanup
+  separately, verifies the host state afterwards rather than assuming it, and
+  emits a JSON evidence document and a text report naming the exact Excel
+  build, bitness and operating system the verdict was obtained on. It refuses
+  to start when an explicit snapshot already exists, rather than degrading into
+  a partial run that reads like a complete one.
 
 ### Changed
 
@@ -70,6 +77,10 @@ no existing call site requires modification.
   effort. The list can hold fewer entries than the count when an allocation
   fails, but never silently: a `Diagnostics` truncation marker is written into
   an existing slot whenever growth failed.
+- A skipped regression case is now counted rather than only logged. Under the
+  certification runner a skipped mandatory case makes the run `INCOMPLETE` and
+  therefore not a pass; the legacy runners keep their previous behavior
+  exactly, because the accounting is inert outside a certification run.
 - `UI_TryGetTitleBarVisible` and `UI_TrySetTitleBarVisibleIfNeeded` are now
   documented and implemented as active-window wrappers over the explicit-target
   entry points. Their signatures and behavior for existing callers are
@@ -105,6 +116,15 @@ no existing call site requires modification.
   fallible is attempted, the entry text degrades rather than failing, and the
   allocation is isolated behind a Boolean contract.
   (`ICR-UI-P2-02`, #17)
+
+- Fixed the regression harness being unable to distinguish a complete pass from
+  a partial one. `Test_EXCEL_UI_RunAll` executed no multi-window case, could
+  skip the snapshot cases silently when a snapshot already existed, suppressed
+  cleanup failures, and reported its outcome only as Immediate Window prose with
+  no counters. A green result therefore carried far less information than it
+  appeared to. `Test_EXCEL_UI_RunAll` is unchanged and remains the interactive
+  runner; release certification now has its own gate.
+  (`ICR-UI-P2-07`, #18)
 
 ### Documentation
 
@@ -143,8 +163,6 @@ Release type:            patch
   is documented as application-level without supporting evidence. See `#21`.
 - The `README.md` title-bar scope statement still describes the pre-fix
   behavior and is corrected with the rest of the documentation work. See `#19`.
-- `Test_EXCEL_UI_RunAll` does not execute every mandatory case; the SDI identity
-  runner must be invoked explicitly. See `#18`.
 - `tools/reformat.py` does not round-trip the committed production modules
   byte-for-byte, so a formatter check cannot yet be made blocking. See `#20`.
 
