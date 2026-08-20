@@ -513,9 +513,11 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '------------------------------------------------------------------------------
 ' VALIDATE PRECONDITIONS
 '------------------------------------------------------------------------------
-    'A pre-existing snapshot cannot be preserved across these units. Refusing to
-    'start is the honest response; running anyway would produce a partial result
-    'that reads exactly like a complete one.
+    'A pre-existing snapshot cannot be preserved across these units, so it is
+    'rejected rather than compared. That asymmetry with the other cleanup checks
+    'is deliberate: ScreenUpdating and the workbook count can be observed on
+    'entry and restored, whereas a snapshot the caller depends on would be
+    'destroyed by the first unit that captures one.
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 1, _
@@ -562,34 +564,13 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 ' VERIFY CLEANUP
 '------------------------------------------------------------------------------
     'Cleanup failure is a run failure. A suite that leaves a snapshot, a stray
-    'workbook or suppressed screen updates behind has not finished, however many
+    'workbook or an altered host setting behind has not finished, however many
     'assertions passed on the way.
-        CleanupOK = True
-        CleanupDetail = vbNullString
-
-        If UI_HasExcelUIStateSnapshot Then
-            CleanupOK = False
-            CleanupDetail = "an EXCEL_UI snapshot was left behind"
-        End If
-
-        If Workbooks.Count <> BaselineBooks Then
-            CleanupOK = False
-            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
-                "workbook count changed from " & CStr(BaselineBooks) & _
-                " to " & CStr(Workbooks.Count))
-        End If
-
-        If Not Application.ScreenUpdating Then
-            CleanupOK = False
-            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
-                "ScreenUpdating was left suppressed")
-        End If
-
-        If Not TST_CertIsWindowUsable(AnchorWindow) Then
-            CleanupOK = False
-            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
-                "the anchor window is no longer usable")
-        End If
+        CleanupOK = TST_CertEvaluateCleanup( _
+            BaselineBooks:=BaselineBooks, _
+            BaselineScreenUpdating:=OldScreenUpdating, _
+            AnchorWindow:=AnchorWindow, _
+            CleanupDetail:=CleanupDetail)
 
 '------------------------------------------------------------------------------
 ' DETERMINE VERDICT
@@ -960,6 +941,118 @@ Private Sub TST_CertRecordUnit( _
             UnitName & IIf(Len(Detail) > 0, " | " & Detail, vbNullString)
 
 End Sub
+
+
+Private Function TST_CertEvaluateCleanup( _
+    ByVal BaselineBooks As Long, _
+    ByVal BaselineScreenUpdating As Boolean, _
+    ByVal AnchorWindow As Object, _
+    ByRef CleanupDetail As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertEvaluateCleanup
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decide whether a certification run returned the host to the state it found.
+'
+' WHY THIS EXISTS
+'   Every check compares the exit state with the state observed on ENTRY, never
+'   with an assumed ideal. Requiring ScreenUpdating to be True reported a false
+'   failure for any run started from within a quiet-update scope, where
+'   restoring the suppressed value it found is correct behavior rather than
+'   leakage.
+'
+'   A counter that fires when nothing is wrong is a counter a reader learns to
+'   discount, which defeats the verdict from the opposite direction to a missed
+'   failure.
+'
+'   Extracting the decision from the runner makes it testable with crafted
+'   inputs, without a full destructive run, and gives the additional state
+'   comparisons planned for this suite one place to live.
+'
+' INPUTS
+'   BaselineBooks
+'     Workbooks.Count observed on entry.
+'
+'   BaselineScreenUpdating
+'     Application.ScreenUpdating observed on entry.
+'
+'   AnchorWindow
+'     The window active on entry, held by object reference.
+'
+'   CleanupDetail
+'     ByRef. Receives every finding, joined in order. Empty when clean.
+'
+' RETURNS
+'   Boolean
+'     True  => the host matches its entry state.
+'     False => at least one difference was found, and all are in CleanupDetail.
+'
+' BEHAVIOR
+'   - Accumulates findings rather than stopping at the first, so one run reports
+'     every way cleanup failed.
+'   - Reports the snapshot check absolutely, because a snapshot is rejected as a
+'     precondition rather than preserved.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertAppendDetail
+'   - TST_CertIsWindowUsable
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_Case_CertificationCleanupUsesBaseline
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A cleanup verdict must never itself raise
+        On Error Resume Next
+
+        TST_CertEvaluateCleanup = True
+        CleanupDetail = vbNullString
+
+'------------------------------------------------------------------------------
+' COMPARE AGAINST ENTRY STATE
+'------------------------------------------------------------------------------
+    'A snapshot is rejected on entry rather than preserved, so any snapshot here
+    'was left by the run itself
+        If UI_HasExcelUIStateSnapshot Then
+            TST_CertEvaluateCleanup = False
+            CleanupDetail = "an EXCEL_UI snapshot was left behind"
+        End If
+
+        If Workbooks.Count <> BaselineBooks Then
+            TST_CertEvaluateCleanup = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "workbook count changed from " & CStr(BaselineBooks) & _
+                " to " & CStr(Workbooks.Count))
+        End If
+
+        If Application.ScreenUpdating <> BaselineScreenUpdating Then
+            TST_CertEvaluateCleanup = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "ScreenUpdating changed from " & _
+                CStr(BaselineScreenUpdating) & " to " & _
+                CStr(Application.ScreenUpdating))
+        End If
+
+        If Not TST_CertIsWindowUsable(AnchorWindow) Then
+            TST_CertEvaluateCleanup = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "the anchor window is no longer usable")
+        End If
+
+End Function
 
 
 Private Function TST_CertIsWindowUsable( _
@@ -2669,6 +2762,9 @@ Private Sub TST_RunRegressionPack( _
 
     'Verify diagnostics degrade rather than raise when the list cannot grow
         TST_Case_FailureAccumulatorDegradesSafely
+
+    'Verify cleanup is judged against the entry state, not an assumed ideal
+        TST_Case_CertificationCleanupUsesBaseline
 
 '------------------------------------------------------------------------------
 ' RUN OPTIONAL SNAPSHOT CASES
@@ -5227,6 +5323,151 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
             "ScreenUpdating preservation behaved as expected"
 
 End Sub
+
+Private Sub TST_Case_CertificationCleanupUsesBaseline()
+
+'
+'==============================================================================
+' TST_Case_CertificationCleanupUsesBaseline
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that the certification cleanup verdict compares the host with the
+'   state observed on entry, rather than requiring an assumed ideal.
+'
+' WHY THIS EXISTS
+'   Cleanup required Application.ScreenUpdating to be True. A run started from
+'   within a quiet-update scope therefore failed certification even though the
+'   regression pack had correctly restored the suppressed value it found.
+'
+'   The damage was to the verdict's credibility rather than to the host: a
+'   counter that fires when nothing is wrong is a counter a reader stops
+'   believing, which defeats the verdict from the opposite direction to a missed
+'   failure.
+'
+'   The case drives TST_CertEvaluateCleanup directly. Reaching the same decision
+'   through Test_EXCEL_UI_RunReleaseCertification would require a full
+'   destructive run to assert one comparison, and could not run from inside the
+'   pack at all.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Suppresses screen updating and asserts a matching baseline is clean.
+'   - Asserts a mismatched baseline is reported, naming both values.
+'   - Restores the entry value on every path.
+'
+' ERROR POLICY
+'   - Raises on assertion failure, after restoration.
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim EntryScreenUpdating As Boolean         'Value to restore on exit
+    Dim AnchorWindow        As Window          'Window used as the anchor
+    Dim BaselineBooks       As Long            'Workbooks open during the case
+    Dim CleanupOK           As Boolean         'Result under test
+    Dim CleanupDetail       As String          'Findings returned by the helper
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_CertificationCleanupUsesBaseline"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that cleanup is judged against the entry state"
+
+        Set AnchorWindow = ActiveWindow
+        BaselineBooks = Workbooks.Count
+        EntryScreenUpdating = Application.ScreenUpdating
+
+'------------------------------------------------------------------------------
+' SUPPRESSED STATE MATCHING ITS BASELINE IS CLEAN
+'------------------------------------------------------------------------------
+    'This is the case the previous implementation failed: screen updating is
+    'suppressed, and that is exactly what the baseline says it should be.
+        Application.ScreenUpdating = False
+
+        CleanupOK = TST_CertEvaluateCleanup( _
+            BaselineBooks:=BaselineBooks, _
+            BaselineScreenUpdating:=False, _
+            AnchorWindow:=AnchorWindow, _
+            CleanupDetail:=CleanupDetail)
+
+        TST_AssertBooleanEquals _
+            True, CleanupOK, "CertificationCleanup.SuppressedMatchingBaselineIsClean"
+
+        TST_AssertTrue _
+            (Len(CleanupDetail) = 0), _
+            "CertificationCleanup.NoDetailWhenClean"
+
+'------------------------------------------------------------------------------
+' A GENUINE DIFFERENCE IS STILL REPORTED
+'------------------------------------------------------------------------------
+    'Same host state, opposite baseline: the run would have changed it, so this
+    'must fail. Loosening the check must not have disabled it.
+        CleanupOK = TST_CertEvaluateCleanup( _
+            BaselineBooks:=BaselineBooks, _
+            BaselineScreenUpdating:=True, _
+            AnchorWindow:=AnchorWindow, _
+            CleanupDetail:=CleanupDetail)
+
+        TST_AssertBooleanEquals _
+            False, CleanupOK, "CertificationCleanup.GenuineDifferenceReported"
+
+    'The detail must name both values, or a real leak cannot be diagnosed from
+    'the evidence file alone
+        TST_AssertTrue _
+            (InStr(1, CleanupDetail, "ScreenUpdating changed from") > 0), _
+            "CertificationCleanup.DetailNamesBothValues"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Cleanup compared the entry state and still reported a real change"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Restore the value found on entry, whatever happened above
+        On Error Resume Next
+            Application.ScreenUpdating = EntryScreenUpdating
+        On Error GoTo 0
+
+    'Raise the captured failure after restoration when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        HasFailure = True
+
+        Resume Safe_Exit
+
+End Sub
+
 
 Private Sub TST_Case_FailureAccumulatorDegradesSafely()
 

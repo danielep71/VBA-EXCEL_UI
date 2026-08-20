@@ -54,6 +54,13 @@ have reported failure. The component's public API is unchanged.
   active flag on exit, leaving the outer verdict describing work it never did.
   The refusal is raised before the error handler is armed, so it reaches the
   caller without disturbing the run in progress.
+- Added `TST_CertEvaluateCleanup`, which extracts the certification cleanup
+  decision from the runner so it can be tested with crafted inputs instead of a
+  full destructive run, and gives the further state comparisons planned for this
+  suite one place to live.
+- Added `TST_Case_CertificationCleanupUsesBaseline` to the core regression pack,
+  which asserts that a suppressed state matching its baseline is clean and that
+  a genuine difference is still reported with both values named.
 - Added `Test_EXCEL_UI_RunCertificationSelfTest`, which asserts that a failure
   inside certification reaches the caller with its error number and description
   intact. It is a standalone runner rather than a pack case, because the only
@@ -73,6 +80,14 @@ have reported failure. The component's public API is unchanged.
 
 ### 🐛 Fixed
 
+- Fixed certification cleanup reporting false leakage. It required
+  `Application.ScreenUpdating` to be `True` rather than comparing it with the
+  value captured on entry, so a run started from within a quiet-update scope
+  failed certification even though the regression pack had correctly restored
+  the suppressed value it found. `OldScreenUpdating` was captured and never
+  read. Every cleanup check now compares the exit state with the entry state,
+  and a genuine change names both values so it can be diagnosed from the
+  evidence file alone. (`ICR-UI-111-P2-02`, #33)
 - Fixed `Demo_GetRuntimeErrorText` reading the `Err` object after
   `On Error Resume Next`. Every form of `On Error` resets `Err`, so every
   unexpected-error diagnostic the demo produced reported `0:` with an empty
