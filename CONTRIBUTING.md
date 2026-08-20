@@ -142,10 +142,26 @@ Workflow:
 5. Run the complete applicable sequence.
 6. Perform manual recovery.
 7. Re-export each changed module over the matching repository path.
-8. Review the GitHub Desktop diff.
-9. Update documentation and version metadata.
-10. Commit and push.
-11. Open a pull request against the agreed base.
+8. Run the static gate locally: `python3 tools/check_repo.py`.
+9. Review the GitHub Desktop diff.
+10. Update documentation and version metadata.
+11. Commit and push.
+12. Open a pull request against the agreed base.
+
+Step 8 is the same gate CI runs, so running it locally costs seconds and saves a
+round trip. If it reports house-style drift, the fix is mechanical:
+
+```text
+python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas
+```
+
+Re-import any module it rewrites before committing, so the repository and the
+VBE do not diverge.
+
+A public member added or removed also requires an intentional edit to
+`tools/public_api_manifest.txt`. That is deliberate friction: a change to the
+public surface is exactly what breaks callers, and it is otherwise invisible in
+a large diff.
 
 The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
 
@@ -155,13 +171,26 @@ For production code changes:
 
 ```text
 Debug → Compile VBAProject
-Test_EXCEL_UI_RunCore
-Test_EXCEL_UI_RunTitleBarOnly
-Test_EXCEL_UI_RunSnapshotIdentity
-Test_EXCEL_UI_RunAll
+Test_EXCEL_UI_RunReleaseCertification
 UI_HideExcelUI / UI_ShowExcelUI
 capture / hide / reset
 ```
+
+Certification is the gate. Quote its verdict line in the pull request:
+
+```text
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+```
+
+A run reporting `INCOMPLETE`, any `skipped` count above zero, or
+`cleanup=FAILED` is not a pass, whatever the assertions that did execute
+reported. The narrower runners remain useful while iterating, but do not
+substitute for certification: `Test_EXCEL_UI_RunAll` executes no multi-window
+case and produces no machine-readable evidence.
+
+CI runs the static gate on every pull request. It cannot execute VBA — a hosted
+runner has no Excel — so certification remains a manual step on a real host, and
+the two are complementary rather than alternatives.
 
 Record only environments actually tested.
 

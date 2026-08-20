@@ -101,13 +101,29 @@ ScreenUpdating restoration:
 ## Testing performed
 
 ```text
-Debug → Compile VBAProject            →
+Debug → Compile VBAProject             →
+python3 tools/check_repo.py            →
+Test_EXCEL_UI_RunReleaseCertification  →
+Manual UI_HideExcelUI / UI_ShowExcelUI →
+Manual capture / hide / reset          →
+```
+
+Paste the certification verdict line:
+
+```text
+RESULT:
+```
+
+`INCOMPLETE`, a non-zero `skipped` count, or `cleanup=FAILED` is not a pass.
+
+Narrower runners used while iterating, if any:
+
+```text
+Test_EXCEL_UI_RunAll                  →
 Test_EXCEL_UI_RunCore                 →
 Test_EXCEL_UI_RunTitleBarOnly         →
 Test_EXCEL_UI_RunSnapshotIdentity     →
-Test_EXCEL_UI_RunAll                  →
-Manual UI_HideExcelUI / UI_ShowExcelUI →
-Manual capture / hide / reset         →
+Test_EXCEL_UI_RunTitleBarSdiIdentity  →
 ```
 
 ## Validation environment

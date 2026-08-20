@@ -195,19 +195,51 @@ UI_SetExcelUI _
 
 ## Validation sequence
 
-With the optional regression module imported:
+With the optional regression module imported, one command validates the
+installation:
 
 ```text
 Debug → Compile VBAProject
+Test_EXCEL_UI_RunReleaseCertification
+```
+
+It runs every mandatory unit and prints an unambiguous verdict:
+
+```text
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+```
+
+All four numbers matter. `failed=0` alone is not a pass: `skipped=0` confirms
+nothing was silently omitted, and `cleanup=OK` confirms the run left no snapshot,
+stray workbook or suppressed screen update behind. A JSON document and a text
+report naming your exact Excel build are written to `%TEMP%`.
+
+The runner is destructive — it creates and closes temporary workbooks and toggles
+every managed element — so save unsaved work first. It also refuses to start if a
+snapshot already exists, rather than degrading into a partial run.
+
+### Narrower runners
+
+For focused work, or when the certification runner cannot be used:
+
+```text
+Test_EXCEL_UI_RunAll                  interactive, non-destructive
 Test_EXCEL_UI_RunCore
 Test_EXCEL_UI_RunTitleBarOnly
 Test_EXCEL_UI_RunSnapshotIdentity
-Test_EXCEL_UI_RunAll
+Test_EXCEL_UI_RunTitleBarSdiIdentity  destructive: opens and closes windows
+Test_EXCEL_UI_RunRibbonSdiProbe       characterization only; asserts nothing
+```
+
+`Test_EXCEL_UI_RunAll` is **not** a substitute for certification: it executes no
+multi-window case and produces no machine-readable evidence.
+
+Follow either with a manual recovery check:
+
+```vb
 UI_HideExcelUI
 UI_ShowExcelUI
 ```
-
-The regression harness includes active-window, active-workbook-window, and invalid-target-scope cases.
 
 The tests manipulate the real Excel UI. Run them in a controlled Excel instance.
 
@@ -257,6 +289,8 @@ Private Sub Workbook_BeforeClose(Cancel As Boolean)
     UI_ClearExcelUIStateSnapshot
 End Sub
 ```
+
+The title bar adds one further reference. Its captured state is recorded together with the top-level window handle it was read from and the owning `Window` object, because neither identifies the frame on its own: Windows may reuse a handle value once its window is destroyed, while a `Window` object cannot be recycled that way but exposes no handle to write through. That reference is released on exactly the same terms as the others.
 
 Holding `Window` references past the lifetime of their workbook can prevent Excel from releasing those objects cleanly. A long-running solution that captures once at open and never clears will retain them for the whole session.
 
@@ -313,6 +347,9 @@ Confirm:
 - the project compiles for the installed Office bitness.
 
 Title-bar behavior is best effort and can vary by Excel/Windows environment.
+
+Ribbon behavior across multiple workbook windows has been measured and is
+recorded in [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md).
 
 If another add-in legitimately changes the owned frame bits between a hide and a
 show, the component adopts the change rather than reverting it: while it does not

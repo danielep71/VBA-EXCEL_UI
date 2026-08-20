@@ -196,6 +196,22 @@ no existing call site requires modification.
   baseline was written for.
 - Corrected the branch-naming examples in `CONTRIBUTING.md`, which offered
   `release/v1.1.0` — a branch line that no longer exists.
+- Replaced the recommended validation sequence in `INSTALLATION.md`,
+  `CONTRIBUTING.md`, the pull-request template and the bug-report template with
+  `Test_EXCEL_UI_RunReleaseCertification`. All four still listed the four
+  pre-`1.1.1` runners, so every document that told a reader how to validate a
+  change directed them away from the gate. The narrower runners are retained as
+  iteration aids, with `Test_EXCEL_UI_RunAll` marked explicitly as not a
+  substitute.
+- Documented in `CONTRIBUTING.md` that `tools/check_repo.py` is the same gate CI
+  runs and can be run locally, that `tools/reformat.py --write` fixes style
+  drift mechanically, and that a change to the public surface requires an
+  intentional edit to `tools/public_api_manifest.txt`.
+- Documented in `INSTALLATION.md` that the snapshot retains a top-level window
+  handle and a `Window` object for the captured title-bar frame, and why neither
+  identifies the frame on its own.
+- Cross-referenced `docs/RIBBON_SDI_BEHAVIOR.md` from `INSTALLATION.md`, so a
+  reader troubleshooting Ribbon behavior reaches the measurements.
 
 ### Validation
 
