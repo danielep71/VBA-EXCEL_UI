@@ -189,17 +189,15 @@ Release type:            patch
 
 ### Known limitations
 
-- Ribbon visibility is **per workbook window**, not application-wide, on the
-  host measured. `README.md` still describes it as application-level; the
-  correction lands with the rest of the documentation work. See `#19` and
-  `docs/RIBBON_SDI_BEHAVIOR.md`.
-- Restoring a snapshot cannot return the Ribbon to a window that is not active,
-  because every mechanism Excel exposes for it acts on the active window and
-  none accepts a window argument. Reaching the captured window requires
-  activating it, which is an observable side effect and is deferred rather than
-  introduced in a patch release. See `#23`.
-- The `README.md` title-bar scope statement still describes the pre-fix
-  behavior and is corrected with the rest of the documentation work. See `#19`.
+- Ribbon visibility is **per workbook window**, not application-wide. Restoring
+  a snapshot therefore applies the captured Ribbon value to whichever window is
+  active, which need not be the window it was captured from. Every Ribbon
+  mechanism Excel exposes acts on the active window and none accepts a window
+  argument, so reaching the captured window requires activating it — an
+  observable side effect that does not belong in a patch release. Deferred to
+  `1.2.0`; see `#23` and `docs/RIBBON_SDI_BEHAVIOR.md`.
+- Ribbon behavior has been measured on one host only. It can vary by Office
+  channel, update ring and administrative policy.
 - `tools/reformat.py` does not round-trip the committed production modules
   byte-for-byte, so a formatter check cannot yet be made blocking. See `#20`.
 
