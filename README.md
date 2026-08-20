@@ -53,7 +53,7 @@
 ---
 
 > [!IMPORTANT]
-> Version 1.1.0 uses a **four-module production package**. Importing only
+> This component ships as a **four-module production package**. Importing only
 > `M_EXCEL_UI.bas` is not a valid installation. See [INSTALLATION.md](INSTALLATION.md).
 
 > [!NOTE]
@@ -318,7 +318,7 @@ End Enum
 | `UI_HasExcelUIStateSnapshot` | Public `Function` | Report snapshot availability | Returns `Boolean` |
 | `UI_ClearExcelUIStateSnapshot` | Public `Sub` | Discard snapshot state | No return value |
 
-The v1.1.0 targeting extension is backward compatible:
+Window targeting, added in `1.1.0`, is backward compatible:
 
 - existing public names are preserved;
 - existing parameter order is preserved;
@@ -578,11 +578,19 @@ demo/M_DEMO_BUILDER.bas
 
 The macro-enabled demo workbook is intentionally **not committed to Git**.
 
-For tagged releases, a tested workbook should be published as a GitHub Release asset, for example:
+For tagged releases, a tested workbook should be published as a GitHub Release asset, named for the tag it was built from:
 
 ```text
-EXCEL_UI_DEMO_v1.1.0.xlsm
+EXCEL_UI_DEMO_v<major>.<minor>.<patch>.xlsm
 ```
+
+> [!NOTE]
+> The most recent published demo workbook is `EXCEL_UI_DEMO_v1.1.0.xlsm`. It
+> predates the `1.1.1` corrective work and does not exercise window targeting,
+> structured `*_WithResult` diagnostics, the snapshot lifecycle or multi-window
+> behavior, and its preset controls do not function. A rebuilt demo is scheduled
+> for `1.2.0`. Until then, the examples in this document are the accurate
+> reference.
 
 Release-asset preparation should include:
 

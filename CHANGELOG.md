@@ -212,6 +212,14 @@ no existing call site requires modification.
   identifies the frame on its own.
 - Cross-referenced `docs/RIBBON_SDI_BEHAVIOR.md` from `INSTALLATION.md`, so a
   reader troubleshooting Ribbon behavior reaches the measurements.
+- Removed the remaining version pins from `README.md`. The four-module
+  requirement and the window-targeting compatibility note were both worded as
+  properties of `1.1.0` rather than of the component, so each would have needed
+  editing at every release.
+- Recorded in `README.md` that the most recently published demo workbook is the
+  `v1.1.0` asset, that it does not exercise the current feature set and that its
+  preset controls do not work. The release-asset name is now given as a pattern
+  rather than a fixed filename.
 
 ### Validation
 
