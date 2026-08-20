@@ -61,8 +61,23 @@ have reported failure. The component's public API is unchanged.
   reset, and the re-entrancy guard deliberately prevents reaching that path from
   inside a run.
 
+### 📖 Documentation
+
+- `CONTRIBUTING.md` now states both rules that protect a diagnostic from
+  destroying the failure it describes: nothing reachable from an error handler
+  may raise, and `Err` must never be read after a call or after any `On Error`.
+  Both had been violated twice, each time by someone who had just fixed the
+  other instance. The safe exception — passing `Err.Number` as a call argument,
+  where evaluation precedes the call — is stated explicitly, because a sweep
+  that does not know it will "fix" correct code.
+
 ### 🐛 Fixed
 
+- Fixed `Demo_GetRuntimeErrorText` reading the `Err` object after
+  `On Error Resume Next`. Every form of `On Error` resets `Err`, so every
+  unexpected-error diagnostic the demo produced reported `0:` with an empty
+  description — the failure text was lost at exactly the moment it was needed.
+  The fields are now captured before errors are suppressed. (#39)
 - Fixed release certification destroying the error it re-raises. The handler
   called `TST_Log`, which contains `On Error Resume Next` and therefore clears
   `Err`, then read `Err` to re-raise. `Err.Number` was zero by that point, and

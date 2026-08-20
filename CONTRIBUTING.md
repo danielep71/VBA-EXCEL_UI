@@ -322,10 +322,33 @@ Production entry points are fail-soft unless the public contract explicitly says
 | Preserve insertion order in diagnostics | Order is the only clue to which failure caused the others |
 
 > [!CAUTION]
-> Anything reachable **from** an error handler must not be able to raise. A
-> diagnostic that replaces the failure it was invoked to record is worse than no
-> diagnostic at all. Set the outputs that cannot fail before attempting anything
-> that can.
+> Two rules protect a diagnostic from destroying the failure it describes. Both
+> have been violated in this repository, twice each, in code written by someone
+> who had just fixed the other instance.
+>
+> **1. Anything reachable from an error handler must not be able to raise.**
+> A diagnostic that replaces the failure it was invoked to record is worse than
+> no diagnostic at all. Set the outputs that cannot fail before attempting
+> anything that can.
+>
+> **2. Never read `Err` after calling anything, or after any `On Error`.**
+> Every form of `On Error` resets `Err`, and any procedure you call may contain
+> one. Capture what you need into locals first:
+>
+> ```vb
+> ErrNumber = Err.Number
+> ErrDescription = Err.Description
+> ErrSource = Err.Source
+> ErrLine = Erl
+> ```
+>
+> Then log, format and re-raise from the locals. Reading `Err` afterwards yields
+> zero and an empty string — and `Err.Raise 0` does not raise at all, so a
+> failure reported this way is not reported.
+>
+> Passing `Err.Number` as a **call argument** is safe, because arguments are
+> evaluated before the call. That distinction is subtle enough to be worth
+> stating rather than leaving to be rediscovered.
 
 ## ✒️ Source style
 
