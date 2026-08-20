@@ -245,6 +245,15 @@ no existing call site requires modification.
   baseline was written for.
 - Corrected the branch-naming examples in `CONTRIBUTING.md`, which offered
   `release/v1.1.0` — a branch line that no longer exists.
+- Restyled `.github/PULL_REQUEST_TEMPLATE.md`: glyphed type and surface
+  sections, the affected-surface list regrouped by actual scope so that the
+  Ribbon and title bar are no longer presented as application-level, the
+  certification verdict promoted to a required field, and the five
+  subsystem-specific sections collapsed behind `<details>` so a documentation
+  change is not asked nine questions about WinAPI. Every checklist item is
+  retained; the documentation items are consolidated onto one line. The
+  environment section now says that attaching the certification evidence file
+  replaces the hand-typed fields.
 - Restyled `INSTALLATION.md` to match the other repository documents: a
   requirements table, glyphed headings, a routing table that sends a reader to
   the one upgrade path that applies to them, an indexed symptom table above the
