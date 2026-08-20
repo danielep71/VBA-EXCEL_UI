@@ -1,21 +1,53 @@
-# Contributing to VBA-EXCEL_UI
+<div align="center">
 
-Thank you for improving VBA-EXCEL_UI.
+# 🤝 Contributing
 
-The project prioritizes:
+**Thank you for improving VBA Excel UI**
 
-- backward compatibility of the documented `UI_...` public surface;
-- safe recovery after constrained-shell operations;
-- identity-safe Window restoration;
-- explicit state ownership;
-- deterministic diagnostics;
-- 32-bit and 64-bit Windows Excel compatibility;
-- permanent regression coverage;
-- readable exported VBA source.
+[![Conduct](https://img.shields.io/badge/read_first-code_of_conduct-6f42c1?style=flat-square)](CODE_OF_CONDUCT.md)
+[![Security](https://img.shields.io/badge/read_first-security_policy-d73a49?style=flat-square)](SECURITY.md)
+[![Checks](https://img.shields.io/badge/CI-static_gate-0969da?style=flat-square)](.github/workflows/static-checks.yml)
+[![Gate](https://img.shields.io/badge/release-certification_runner-217346?style=flat-square)](#-required-validation)
 
-Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [SECURITY.md](SECURITY.md) before contributing. Open an issue before non-trivial work.
+</div>
 
-## Project layout
+---
+
+## 🧭 Before you start
+
+Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [SECURITY.md](SECURITY.md).
+**Open an issue before non-trivial work** — scope agreed in advance is far
+cheaper than scope discovered in review.
+
+This project holds these above convenience, and a change that trades one away
+needs to say so explicitly:
+
+| Priority | Why it is non-negotiable |
+|---|---|
+| 🔒 **Public API compatibility** | Callers are workbooks in production. A rename is a breaking change no matter how much better the name is. |
+| 🆘 **Recoverable UI state** | A constrained shell that cannot be undone traps a user in an unusable Excel. |
+| 🎯 **Identity-safe restoration** | State applied to the wrong window silently is worse than state not applied at all. |
+| 📍 **Explicit state ownership** | Two modules holding the same mutable state means neither can be reasoned about. |
+| 🧾 **Deterministic diagnostics** | A failure that is not reported did not happen, as far as the caller is concerned. |
+| ⚙️ **32-bit and 64-bit parity** | A defect that only appears on the other bitness is invisible to the person who wrote it. |
+| 🧪 **Permanent regression coverage** | A fix without a test is a fix with a scheduled regression. |
+| 📖 **Readable exported source** | The `.bas` file is the review artifact; the VBE is not. |
+
+---
+
+## ⚡ Quick reference
+
+```text
+python3 tools/check_repo.py                        the gate CI runs
+python3 tools/reformat.py --write src/*.bas …      fix house-style drift
+Test_EXCEL_UI_RunReleaseCertification              certify behaviour in Excel
+```
+
+Static checks run on every pull request. They cannot execute VBA — a hosted
+runner has no Excel — so certification stays a manual step on a real host. The
+two are complementary, not alternatives.
+
+## 📁 Project layout
 
 ```text
 VBA-EXCEL_UI/
@@ -29,12 +61,26 @@ VBA-EXCEL_UI/
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ test/
 │  └─ M_EXCEL_UI_REGRESSION_TESTS.bas
+├─ tools/
+│  ├─ reformat.py                house-style formatter
+│  ├─ check_repo.py              the static gate CI runs
+│  └─ public_api_manifest.txt    versioned public surface
+├─ docs/
+│  └─ …                          measurements and reviews
+├─ .github/workflows/
+│  └─ static-checks.yml
 ├─ INSTALLATION.md
 ├─ README.md
-└─ ...
+└─ …
 ```
 
-## Production module boundaries
+> [!IMPORTANT]
+> `tools/public_api_manifest.txt` records every `Public` member in `src/`. Adding
+> or removing one requires an intentional edit there, and CI fails otherwise.
+> That friction is the point: a change to the public surface is exactly what
+> breaks callers, and it is invisible in a diff of several thousand lines.
+
+## 🧱 Production module boundaries
 
 ### `M_EXCEL_UI`
 
@@ -82,7 +128,7 @@ Owns:
 
 It must not depend on another project module.
 
-## Dependency rule
+## 🔗 Dependency rule
 
 The production dependency graph must remain acyclic:
 
@@ -97,12 +143,21 @@ M_EXCEL_UI
 
 Do not introduce:
 
-- a callback from runtime or title-bar modules into the facade;
-- a second copy of mutable snapshot or title-bar state;
-- generic utility modules with unrelated responsibilities;
-- public implementation details solely to simplify testing.
+| ❌ Never | Because |
+|---|---|
+| A callback from runtime or title-bar into the facade | It creates a cycle, and the two lower modules are deliberately usable without the facade |
+| A second copy of mutable snapshot or title-bar state | Two owners of one truth means neither can be reasoned about, and they will drift |
+| Generic utility modules with unrelated responsibilities | "Helpers" is not a responsibility; the module boundary stops meaning anything |
+| Public implementation details solely to simplify testing | Anything `Public` is surface that must be kept working |
 
-## Branch workflow
+> [!NOTE]
+> Test seams are the deliberate exception, and they earn it: a recovery path that
+> cannot be executed is indistinguishable from one that was never written. Each
+> seam is `Public` only for same-project access, kept out of the cross-project
+> namespace by `Option Private Module`, documented as unsupported, and has a
+> caller. A seam without a caller is dead surface — remove it.
+
+## 🌿 Branch workflow
 
 Do not make routine development changes directly on `main`.
 
@@ -112,13 +167,29 @@ Use a branch appropriate to the agreed scope, for example:
 fix/snapshot-window-identity
 test/titlebar-owned-bits
 docs/install-modules
+ci/static-release-gate
 feature/window-target-scope
-release/v1.1.0
+release/v<major>.<minor>.<patch>
 ```
+
+| Prefix | For |
+|---|---|
+| `fix/` | A defect with an issue |
+| `feature/` | Backward-compatible new capability |
+| `test/` | Regression coverage only |
+| `docs/` | Prose only, no code effect |
+| `ci/` | Workflow, gate or tooling |
+| `chore/` | Repository configuration and hygiene |
+| `release/` | Integration branch for a version |
 
 Confirm the current branch in GitHub Desktop before every commit.
 
-## Import, edit, compile, test, export
+> [!WARNING]
+> Editing files through the GitHub web interface while holding unpushed local
+> commits diverges the branch. If it happens, `git pull --rebase` replays your
+> work on top; setting `pull.rebase true` once avoids the prompt entirely.
+
+## 🔁 Import, edit, compile, test, export
 
 Recommended import order:
 
@@ -141,30 +212,59 @@ Workflow:
 5. Run the complete applicable sequence.
 6. Perform manual recovery.
 7. Re-export each changed module over the matching repository path.
-8. Review the GitHub Desktop diff.
-9. Update documentation and version metadata.
-10. Commit and push.
-11. Open a pull request against the agreed base.
+8. Run the static gate locally: `python3 tools/check_repo.py`.
+9. Review the GitHub Desktop diff.
+10. Update documentation and version metadata.
+11. Commit and push.
+12. Open a pull request against the agreed base.
+
+Step 8 is the same gate CI runs, so running it locally costs seconds and saves a
+round trip. If it reports house-style drift, the fix is mechanical:
+
+```text
+python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas
+```
+
+Re-import any module it rewrites before committing, so the repository and the
+VBE do not diverge.
+
+A public member added or removed also requires an intentional edit to
+`tools/public_api_manifest.txt`. That is deliberate friction: a change to the
+public surface is exactly what breaks callers, and it is otherwise invisible in
+a large diff.
 
 The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
 
-## Required validation
+## ✅ Required validation
 
 For production code changes:
 
 ```text
 Debug → Compile VBAProject
-Test_EXCEL_UI_RunCore
-Test_EXCEL_UI_RunTitleBarOnly
-Test_EXCEL_UI_RunSnapshotIdentity
-Test_EXCEL_UI_RunAll
+Test_EXCEL_UI_RunReleaseCertification
 UI_HideExcelUI / UI_ShowExcelUI
 capture / hide / reset
 ```
 
+Certification is the gate. Quote its verdict line in the pull request:
+
+```text
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+```
+
+A run reporting `INCOMPLETE`, any `skipped` count above zero, or
+`cleanup=FAILED` is not a pass, whatever the assertions that did execute
+reported. The narrower runners remain useful while iterating, but do not
+substitute for certification: `Test_EXCEL_UI_RunAll` executes no multi-window
+case and produces no machine-readable evidence.
+
+CI runs the static gate on every pull request. It cannot execute VBA — a hosted
+runner has no Excel — so certification remains a manual step on a real host, and
+the two are complementary rather than alternatives.
+
 Record only environments actually tested.
 
-## Public API compatibility
+## 🔒 Public API compatibility
 
 Preserve unless an explicitly approved breaking release requires otherwise:
 
@@ -180,7 +280,7 @@ Preserve unless an explicitly approved breaking release requires otherwise:
 
 New backward-compatible parameters must normally be optional and trailing.
 
-## Snapshot changes
+## 📸 Snapshot changes
 
 Document and test:
 
@@ -194,7 +294,7 @@ Document and test:
 
 Never restore per-window state by collection index.
 
-## Title-bar changes
+## 🪟 Title-bar changes
 
 Document and test:
 
@@ -208,18 +308,26 @@ Document and test:
 
 Do not restore an entire stale `GWL_STYLE` value.
 
-## Error policy
+## 🛡️ Error policy
 
 Production entry points are fail-soft unless the public contract explicitly says otherwise.
 
-- Continue after unrelated element-level failures.
-- Do not silently discard failures.
-- Restore `ScreenUpdating`.
-- Do not introduce unsolicited `MsgBox` calls.
-- Keep `On Error Resume Next` scopes narrow.
-- Preserve insertion order in structured diagnostics.
+| Rule | Rationale |
+|---|---|
+| Continue after unrelated element-level failures | One unreachable window must not cost the caller the other seven elements |
+| Never silently discard a failure | A caller acting on a false success is worse off than one told nothing happened |
+| Always restore `ScreenUpdating` | Leaving it suppressed makes Excel look frozen long after the call returned |
+| No unsolicited `MsgBox` | A library that blocks on a modal dialog cannot be automated |
+| Keep `On Error Resume Next` scopes narrow | A wide scope swallows the error you did not anticipate, which is the one that matters |
+| Preserve insertion order in diagnostics | Order is the only clue to which failure caused the others |
 
-## Source style
+> [!CAUTION]
+> Anything reachable **from** an error handler must not be able to raise. A
+> diagnostic that replaces the failure it was invoked to record is worse than no
+> diagnostic at all. Set the outputs that cannot fail before attempting anything
+> that can.
+
+## ✒️ Source style
 
 Every module must use `Option Explicit`.
 
@@ -241,29 +349,47 @@ UPDATED
 
 Prefer explicit procedure boundaries and cohesive modules over clever abstraction.
 
-## Repository hygiene
+## 🧹 Repository hygiene
 
-- Exported `.bas`, `.cls`, and `.frm` files use CRLF.
-- Markdown and repository configuration use LF.
-- Workbooks, images, `.frx`, archives, and PDFs are binary.
-- Do not commit Office lock files, backups, logs, credentials, client data, or unrelated formatting churn.
-- Review every binary workbook change separately.
+| Kind | Policy |
+|---|---|
+| Exported `.bas`, `.cls`, `.frm` | CRLF, pure ASCII |
+| Markdown and repository configuration | LF |
+| Workbooks, images, `.frx`, archives, PDFs | Binary, never line-merged |
+| Office lock files, backups, logs, credentials, client data | Never committed |
+| Formatting churn unrelated to the change | Never mixed into a functional commit |
 
-## Pull requests
+Line endings and binary handling are enforced by `.gitattributes`; exclusions by
+`.gitignore`; and both by `tools/check_repo.py`, which fails the build if a
+workbook binary or lock file is ever tracked. All three are meant to agree — if
+you find them disagreeing, that is a defect worth reporting.
 
-Keep a pull request focused on one coherent concern.
+Binary workbooks are **release assets, not repository content**. Review any
+binary change separately from source.
 
-Include:
+## 🚀 Pull requests
 
-- related issue;
-- public behavior and Semantic Versioning assessment;
-- affected UI scope;
-- state ownership;
-- diagnostics and failure policy;
-- validation environment;
-- focused and full test evidence;
-- recovery evidence;
-- documentation changes;
-- binary demo impact.
+Keep a pull request focused on **one coherent concern**. A branch that fixes a
+defect and tidies formatting produces a diff in which neither can be reviewed.
 
-A refactor is complete only when the public API still compiles and behaves identically under the regression harness.
+```text
+[ ] Related issue linked
+[ ] Public behaviour and Semantic Versioning assessment stated
+[ ] Affected UI scope named
+[ ] State ownership unchanged, or the change justified
+[ ] Diagnostics and failure policy considered
+[ ] Validation environment recorded
+[ ] Certification verdict pasted
+[ ] Recovery evidence (UI_HideExcelUI / UI_ShowExcelUI)
+[ ] Documentation updated in the same pull request
+[ ] CHANGELOG.md entry added
+[ ] Binary demo impact assessed
+```
+
+> [!TIP]
+> Documentation belongs in the **same** pull request as the change it describes.
+> A follow-up documentation commit is a commit that does not get written.
+
+A refactor is complete only when the public API still compiles and behaves
+identically under the regression harness. "It should be equivalent" is a
+hypothesis; the certification verdict is the test of it.

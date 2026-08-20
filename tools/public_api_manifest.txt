@@ -1,0 +1,50 @@
+# Public API manifest for VBA-EXCEL_UI
+#
+# Every Public Sub, Function, Enum, Const and Type declared in src/.
+# tools/check_repo.py diffs the live surface against this file, so a public
+# member cannot be added or removed without an intentional edit here.
+#
+# A member listed with no caller outside its own module is deliberate, not
+# dead: UI_TryGetTitleBarVisible is the read half of a documented get/set pair
+# whose write half is called by M_EXCEL_UI, and removing one side would make
+# the internal surface harder to read rather than cleaner.
+#
+# Format: <module>\t<kind>\t<name>
+M_EXCEL_UI	Enum	UIVisibility
+M_EXCEL_UI	Enum	UIWindowTargetScope
+M_EXCEL_UI	Function	UI_CaptureExcelUIState_WithResult
+M_EXCEL_UI	Function	UI_HasExcelUIStateSnapshot
+M_EXCEL_UI	Function	UI_ResetExcelUIToSnapshot_WithResult
+M_EXCEL_UI	Function	UI_SetExcelUI_WithResult
+M_EXCEL_UI	Sub	UI_CaptureExcelUIState
+M_EXCEL_UI	Sub	UI_ClearExcelUIStateSnapshot
+M_EXCEL_UI	Sub	UI_HideExcelUI
+M_EXCEL_UI	Sub	UI_ResetExcelUIToSnapshot
+M_EXCEL_UI	Sub	UI_SetExcelUI
+M_EXCEL_UI	Sub	UI_ShowExcelUI
+M_EXCEL_UI_RUNTIME	Function	UI_RuntimeBuildErrorText
+M_EXCEL_UI_RUNTIME	Function	UI_RuntimeBuildWindowLabel
+M_EXCEL_UI_RUNTIME	Function	UI_RuntimeTryGetBooleanProperty
+M_EXCEL_UI_RUNTIME	Function	UI_RuntimeTryGetRibbonVisible
+M_EXCEL_UI_RUNTIME	Function	UI_RuntimeTrySetBooleanPropertyIfNeeded
+M_EXCEL_UI_RUNTIME	Function	UI_RuntimeTrySetRibbonVisibleIfNeeded
+M_EXCEL_UI_RUNTIME	Sub	UI_InternalInjectFailureListGrowthFailure
+M_EXCEL_UI_RUNTIME	Sub	UI_RuntimeBeginQuietUpdate
+M_EXCEL_UI_RUNTIME	Sub	UI_RuntimeClearResultBuffer
+M_EXCEL_UI_RUNTIME	Sub	UI_RuntimeEndQuietUpdate
+M_EXCEL_UI_RUNTIME	Sub	UI_RuntimeHandleFailure
+M_EXCEL_UI_RUNTIME	Sub	UI_RuntimeLogFailure
+M_EXCEL_UI_SNAPSHOT	Function	UI_SnapshotCaptureCore
+M_EXCEL_UI_SNAPSHOT	Function	UI_SnapshotHasState
+M_EXCEL_UI_SNAPSHOT	Function	UI_SnapshotRestoreCore
+M_EXCEL_UI_SNAPSHOT	Sub	UI_SnapshotClear
+M_EXCEL_UI_TITLEBAR	Function	UI_InternalIsFrameRefreshPending
+M_EXCEL_UI_TITLEBAR	Function	UI_InternalIsTitleBarFrameAlive
+M_EXCEL_UI_TITLEBAR	Function	UI_InternalMergeTitleBarStyleBits
+M_EXCEL_UI_TITLEBAR	Function	UI_TryGetActiveTitleBarHwnd
+M_EXCEL_UI_TITLEBAR	Function	UI_TryGetTitleBarVisible
+M_EXCEL_UI_TITLEBAR	Function	UI_TryGetTitleBarVisibleForHwnd
+M_EXCEL_UI_TITLEBAR	Function	UI_TrySetTitleBarVisibleForHwndIfNeeded
+M_EXCEL_UI_TITLEBAR	Function	UI_TrySetTitleBarVisibleIfNeeded
+M_EXCEL_UI_TITLEBAR	Sub	UI_InternalInjectFrameRefreshFailure
+M_EXCEL_UI_TITLEBAR	Sub	UI_InternalResetTitleBarBaseline

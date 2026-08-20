@@ -1,21 +1,407 @@
-# Changelog
+<div align="center">
 
-All notable changes to **VBA Excel UI** are documented in this file.
+# 📄 Changelog
 
-The project follows [Semantic Versioning](https://semver.org/) for its public
-VBA API. Dates use the `YYYY-MM-DD` format.
+**All notable changes to VBA Excel UI**
+
+[![Semantic Versioning](https://img.shields.io/badge/versioning-semver-6f42c1?style=flat-square)](https://semver.org/)
+[![Format](https://img.shields.io/badge/format-keep_a_changelog-0969da?style=flat-square)](https://keepachangelog.com/)
+[![Dates](https://img.shields.io/badge/dates-YYYY--MM--DD-217346?style=flat-square)](#)
+
+</div>
+
+---
+
+Versioning applies to the **public VBA API** — every `UI_…` procedure, enum and
+parameter in `M_EXCEL_UI`. Internal module boundaries are not covered by it, so
+a release that changes nothing public may still require all four `src/` modules
+to be replaced together.
+
+<details>
+<summary><strong>Section legend</strong></summary>
+
+<br>
+
+| Section | Contains |
+|---|---|
+| ➕ **Added** | New members, runners, tools or files |
+| 🔧 **Changed** | Behaviour or contract changes to something that already existed |
+| 🐛 **Fixed** | Defects, each citing its review finding and issue |
+| 📖 **Documentation** | Corrections and additions to prose, with no code effect |
+| ✅ **Validation** | The evidence a release was actually certified on |
+| 🔗 **Compatibility** | What upgrading requires, and what becomes newly observable |
+| ⚠️ **Known limitations** | What is deliberately not fixed, and where it is tracked |
+
+Release types follow semver: 🩹 **patch** corrects defects, ✨ **minor** adds
+backward-compatible capability, 💥 **major** may break callers.
+
+</details>
 
 ## [Unreleased]
 
 No unreleased changes are currently documented.
 
+---
+
+## [1.1.1] - 2026-08-20
+
+> 🩹 **Patch** · corrective release · public API unchanged
+
+### 🧭 Release intent
+
+A corrective release addressing the findings of the independent `v1.1.0` review
+recorded in `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`. The public API
+is unchanged: no procedure, enum or parameter is added, removed or renamed, and
+no existing call site requires modification.
+
+#### At a glance
+
+| Finding | Issue | What it was |
+|---|:--:|---|
+| 🔴 `ICR-UI-P1-01` | [#14](https://github.com/danielep71/VBA-EXCEL_UI/issues/14) | Title-bar restoration wrote to whichever window was active |
+| 🟠 `ICR-UI-P2-04` | [#15](https://github.com/danielep71/VBA-EXCEL_UI/issues/15) | One frame baseline per process, silently displaced by a second window |
+| 🟠 `ICR-UI-P2-03` | [#16](https://github.com/danielep71/VBA-EXCEL_UI/issues/16) | A failed frame repaint reported as a successful no-op |
+| 🟠 `ICR-UI-P2-02` | [#17](https://github.com/danielep71/VBA-EXCEL_UI/issues/17) | Diagnostics could raise and destroy the failure being recorded |
+| 🟠 `ICR-UI-P2-07` | [#18](https://github.com/danielep71/VBA-EXCEL_UI/issues/18) | A green run could not be distinguished from a partial one |
+| 🟠 `ICR-UI-P2-06` | [#19](https://github.com/danielep71/VBA-EXCEL_UI/issues/19) | Tagged documentation still described a pre-release state |
+| 🟠 `ICR-UI-P2-05` | [#20](https://github.com/danielep71/VBA-EXCEL_UI/issues/20) | No automated check had ever run on any commit |
+| 🟠 `ICR-UI-P2-01` | [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21) | Ribbon scope documented without evidence |
+
+🔴 P1 · 🟠 P2 — priorities as assigned by the independent review.
+
+### ➕ Added
+
+- Added explicit-target title-bar entry points to `M_EXCEL_UI_TITLEBAR`:
+  `UI_TryGetActiveTitleBarHwnd`, `UI_TryGetTitleBarVisibleForHwnd`,
+  `UI_TrySetTitleBarVisibleForHwndIfNeeded` and
+  `UI_InternalIsTitleBarFrameAlive`. Callers that must read a frame now and
+  write it back later can resolve the target window once and keep it, rather
+  than re-resolving `Application.Hwnd` at each end of the operation.
+- Added `UI_SnapshotTryGetActiveWindow` and
+  `UI_SnapshotTryResolveTitleBarFrame` to `M_EXCEL_UI_SNAPSHOT`, which capture
+  the identity of the top-level frame a title-bar value was read from and prove
+  that frame is still present before anything is written back to it.
+- Added `UI_RuntimeTryAppendFailureEntry` and
+  `UI_RuntimeMarkFailureListTruncated` to `M_EXCEL_UI_RUNTIME`, which separate
+  the fallible allocation from the infallible status update, and record a
+  truncation marker in a slot that already exists when the list cannot grow.
+- Added the regression seams `UI_InternalIsFrameRefreshPending`,
+  `UI_InternalInjectFrameRefreshFailure` and
+  `UI_InternalInjectFailureListGrowthFailure`. They exist because neither a
+  `SetWindowPos` failure nor an exhausted allocation can be produced on demand,
+  and a recovery path that cannot be executed is indistinguishable from one
+  that was never written. Each seam has a caller: a seam without one is the
+  same defect wearing different clothes.
+- Added `Test_EXCEL_UI_RunTitleBarSdiIdentity`, a regression runner covering
+  title-bar restoration across two workbook windows. It verifies that a
+  snapshot restores the frame it was captured from while a different window is
+  active, and that a captured frame which has since closed is reported rather
+  than redirected. The runner is destructive and is invoked explicitly; it is
+  not part of `Test_EXCEL_UI_RunAll`.
+- Added `TST_Case_TitleBarFrameRefreshDebtRetried` to the title-bar regression
+  pack, which injects a frame-refresh failure and verifies that the outstanding
+  repaint is recorded and retried on the next call rather than short-circuited
+  as a no-op.
+- Added `.github/workflows/static-checks.yml`, the first automated check this
+  repository has ever carried. It runs on every pull request and push to `main`
+  and `release/**`, using only the Python standard library so that it cannot be
+  broken by an upstream release and runs identically on a maintainer's machine.
+- Added `tools/check_repo.py`, a static gate covering required files, module
+  names against filenames, `Option` policy, encoding and line endings, banner
+  widths, procedure and directive balance, label vocabulary, jump-target
+  resolution, `PtrSafe` on VBA7 declarations, duplicate procedure names, the
+  public API manifest, documentation release state, tracked binaries, markdown
+  links and house-style conformance.
+- Added `tools/public_api_manifest.txt`, recording all 38 public members
+  declared in `src/`. A public member can no longer be added or removed without
+  an intentional edit to the manifest, which is otherwise invisible in a diff of
+  several thousand lines.
+- Added `--check` and `--write` modes to `tools/reformat.py`, and module-name
+  detection from the file's own `Attribute VB_Name`. Taking the name from the
+  file removes a class of caller error: a mismatched name silently changes what
+  the hoisting and title passes do, and the result still looks plausible.
+- Added `TST_Case_FailureAccumulatorDegradesSafely` to the core regression
+  pack, which injects a failure-list growth failure and verifies that the
+  status outputs survive, the truncation is reported, and nothing raises.
+- Added `Test_EXCEL_UI_RunRibbonSdiProbe`, a characterization probe that records
+  Ribbon visibility through `CommandBars("Ribbon").Visible`, the same object's
+  `Height`, and the legacy `Get.ToolBar` query, across five scenarios spanning
+  two workbook windows and a window created after a hide. It is deliberately a
+  probe rather than a test: it asserts nothing, because writing assertions
+  before the host behavior is known would encode the assumption the exercise
+  exists to remove.
+- Added `Test_EXCEL_UI_RunReleaseCertification`, a single runner that executes
+  every mandatory regression unit, counts units, failures, skips and cleanup
+  separately, verifies the host state afterwards rather than assuming it, and
+  emits a JSON evidence document and a text report naming the exact Excel
+  build, bitness and operating system the verdict was obtained on. It refuses
+  to start when an explicit snapshot already exists, rather than degrading into
+  a partial run that reads like a complete one.
+
+### 🔧 Changed
+
+- Replaced the single process-wide title-bar baseline with a frame-state
+  registry keyed by top-level window handle. Operating on one workbook window
+  no longer discards the baseline captured for another, and entries whose
+  window has closed are reclaimed before the registry grows.
+- The title-bar baseline is now refreshed rather than captured once. While the
+  component does not own a hidden state for a window, the live owned style bits
+  are re-adopted on every call, so a legitimate frame change made by Excel or
+  another add-in survives the next hide and show instead of being reverted to
+  bits captured earlier in the session.
+- The snapshot now retains the top-level window handle, the owning Excel
+  `Window` object and a diagnostic label for the captured title bar, and
+  restores through them. A captured frame that is no longer open is reported as
+  a title-bar failure naming the window, instead of the captured value being
+  applied to whichever workbook window is active at restore time.
+- `FailureCount` is now documented as authoritative and `FailureList` as best
+  effort. The list can hold fewer entries than the count when an allocation
+  fails, but never silently: a `Diagnostics` truncation marker is written into
+  an existing slot whenever growth failed.
+- A skipped regression case is now counted rather than only logged. Under the
+  certification runner a skipped mandatory case makes the run `INCOMPLETE` and
+  therefore not a pass; the legacy runners keep their previous behavior
+  exactly, because the accounting is inert outside a certification run.
+- `UI_TryGetTitleBarVisible` and `UI_TrySetTitleBarVisibleIfNeeded` are now
+  documented and implemented as active-window wrappers over the explicit-target
+  entry points. Their signatures and behavior for existing callers are
+  unchanged.
+- Normalised all seven `.bas` modules to the formatter's normal form. Six had
+  drifted from it, by 160 bytes in total: `Const PROC` declarations aligned on
+  the `Dim` grid, which the formatter reserves for `Dim`, and between two and
+  three trailing blank lines at end of file. No executable token changed.
+
+### 🐛 Fixed
+
+- Fixed title-bar snapshot restoration not being identity-safe under the Single
+  Document Interface. `Application.Hwnd` reports the active workbook window's
+  handle, and the snapshot re-resolved it on restore, so activating a different
+  workbook between capture and restore applied one window's captured title-bar
+  state to another. Every API call succeeded, so the misdirection was silent and
+  the originally captured frame was left unrestored.
+  (`ICR-UI-P1-01`, #14)
+- Fixed the title-bar owned-bit baseline being a single process-wide value that
+  a second workbook window silently displaced, and that was never refreshed
+  after another component legitimately changed the owned frame bits.
+  (`ICR-UI-P2-04`, #15)
+- Fixed a title-bar style write and its non-client frame refresh not being
+  treated as one unit of work. `SetWindowLong` could succeed while
+  `SetWindowPos` failed, after which the desired style already matched the
+  current style and the next call short-circuited, reporting success over a
+  frame Windows had never re-measured. The outstanding refresh is now recorded
+  against the window and retried before the no-op test.
+  (`ICR-UI-P2-03`, #16)
+- Fixed failure accumulation being able to raise from inside an error handler.
+  `UI_RuntimeAddFailure` grew the failure list with no error boundary and
+  assumed the buffer already held a `String` array whose bound agreed with the
+  count. An allocation failure, or a buffer holding anything else, replaced the
+  original failure with the failure to record it, could abort a pass designed
+  to continue, and could bypass the `ScreenUpdating` restoration in
+  `UI_RuntimeEndQuietUpdate`. The status outputs are now set before anything
+  fallible is attempted, the entry text degrades rather than failing, and the
+  allocation is isolated behind a Boolean contract.
+  (`ICR-UI-P2-02`, #17)
+
+- Fixed the regression harness being unable to distinguish a complete pass from
+  a partial one. `Test_EXCEL_UI_RunAll` executed no multi-window case, could
+  skip the snapshot cases silently when a snapshot already existed, suppressed
+  cleanup failures, and reported its outcome only as Immediate Window prose with
+  no counters. A green result therefore carried far less information than it
+  appeared to. `Test_EXCEL_UI_RunAll` is unchanged and remains the interactive
+  runner; release certification now has its own gate.
+  (`ICR-UI-P2-07`, #18)
+
+### 📖 Documentation
+
+- Added `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`, the independent
+  code and repository review of the `v1.1.0` tag at commit
+  `96360379a4bca7703cf649a69a2162961dfa6c9e`. Every issue in the `1.1.1`
+  milestone cites it as a stable in-repo reference.
+- Added `docs/RIBBON_SDI_BEHAVIOR.md`, recording the measured behavior of the
+  Ribbon across multiple workbook windows, the reasoning that selects one model
+  from four candidates, and the split between what is corrected in `1.1.1` and
+  what is deferred. Measured on Excel 16.0 build 20131, Windows x64, VBA7.
+- Corrected `README.md`, which described a pre-release state after `v1.1.0` had
+  been merged and tagged: a Release Candidate badge, an entirely unchecked
+  release checklist, a remaining-maintenance list of work already completed, and
+  references to a branch line that no longer exists. All are removed.
+- Corrected the Ribbon's documented scope in `README.md` from *Excel
+  application* to *active window*, matching the measurement, and recorded that
+  Ribbon restoration is the one managed element that is not window-identity-safe.
+- Corrected the title bar's documented scope to name the captured window rather
+  than `Application.Hwnd`, and documented the per-window frame registry, the
+  self-healing baseline and the retried frame refresh.
+- Documented that `FailureCount` is authoritative while `FailureList` is best
+  effort, and that a truncated list is always marked rather than silently short.
+- Separated source compatibility from package migration in `README.md`: the
+  public API is unchanged from `1.0.1`, but all four `src/` modules must be
+  replaced together, because the boundaries between them changed at `1.1.0`.
+- Documented `Test_EXCEL_UI_RunReleaseCertification` as the release gate, and
+  `Test_EXCEL_UI_RunAll` explicitly as not being one.
+- Corrected `INSTALLATION.md`, which stated that the title bar retained its
+  established scope. It did not: the title bar follows the window a value was
+  captured from, and `TargetScope` never applied to it. The section now
+  separates the three genuinely application-level elements from the Ribbon and
+  the title bar, and states how far the component can keep the per-window
+  promise for each.
+- Corrected the `INSTALLATION.md` title-bar troubleshooting section, which
+  predated per-window frame state and offered no help to a reader who has hit a
+  reported `TitleBar` failure or changed the frame of the wrong window. Both
+  cases are now covered, along with the add-in interaction the self-healing
+  baseline was written for.
+- Corrected the branch-naming examples in `CONTRIBUTING.md`, which offered
+  `release/v1.1.0` — a branch line that no longer exists.
+- Restyled `.github/PULL_REQUEST_TEMPLATE.md`: glyphed type and surface
+  sections, the affected-surface list regrouped by actual scope so that the
+  Ribbon and title bar are no longer presented as application-level, the
+  certification verdict promoted to a required field, and the five
+  subsystem-specific sections collapsed behind `<details>` so a documentation
+  change is not asked nine questions about WinAPI. Every checklist item is
+  retained; the documentation items are consolidated onto one line. The
+  environment section now says that attaching the certification evidence file
+  replaces the hand-typed fields.
+- Restyled `INSTALLATION.md` to match the other repository documents: a
+  requirements table, glyphed headings, a routing table that sends a reader to
+  the one upgrade path that applies to them, an indexed symptom table above the
+  troubleshooting entries, and an emergency-recovery section placed before the
+  problem list rather than buried inside it. A same-line upgrade section is
+  added, naming the two outcomes that become newly observable without any call
+  site changing. The guide is no longer pinned to a version, and the demo asset
+  filename is a pattern rather than a fixed name.
+- Restyled `CONTRIBUTING.md` to match `README.md` and `CHANGELOG.md`: glyphed
+  headings, a priorities table stating why each non-negotiable is
+  non-negotiable, a quick-reference block for the three commands a contributor
+  needs, branch-prefix and error-policy tables, and a copyable pull-request
+  checklist. The project layout now shows `tools/`, `docs/` and the workflow,
+  and the public API manifest is explained where a contributor will meet it.
+- Replaced the recommended validation sequence in `INSTALLATION.md`,
+  `CONTRIBUTING.md`, the pull-request template and the bug-report template with
+  `Test_EXCEL_UI_RunReleaseCertification`. All four still listed the four
+  pre-`1.1.1` runners, so every document that told a reader how to validate a
+  change directed them away from the gate. The narrower runners are retained as
+  iteration aids, with `Test_EXCEL_UI_RunAll` marked explicitly as not a
+  substitute.
+- Documented in `CONTRIBUTING.md` that `tools/check_repo.py` is the same gate CI
+  runs and can be run locally, that `tools/reformat.py --write` fixes style
+  drift mechanically, and that a change to the public surface requires an
+  intentional edit to `tools/public_api_manifest.txt`.
+- Documented in `INSTALLATION.md` that the snapshot retains a top-level window
+  handle and a `Window` object for the captured title-bar frame, and why neither
+  identifies the frame on its own.
+- Cross-referenced `docs/RIBBON_SDI_BEHAVIOR.md` from `INSTALLATION.md`, so a
+  reader troubleshooting Ribbon behavior reaches the measurements.
+- Removed the remaining version pins from `README.md`. The four-module
+  requirement and the window-targeting compatibility note were both worded as
+  properties of `1.1.0` rather than of the component, so each would have needed
+  editing at every release.
+- Recorded in `README.md` that the most recently published demo workbook is the
+  `v1.1.0` asset, that it does not exercise the current feature set and that its
+  preset controls do not work. The release-asset name is now given as a pattern
+  rather than a fixed filename.
+- Corrected the `diff.vba.xfuncname` recipe documented in `.gitattributes`. Git
+  renders capture group 1 when a pattern has one, so the previous regex — which
+  grouped only the visibility keyword — produced hunk headers reading `Public`
+  instead of the procedure signature. The whole declaration is now the outer
+  group.
+- Broadened the binary-workbook exclusion in `.gitignore` from `demo/*.xlsm` to
+  every macro-enabled and binary Office format, anywhere in the tree. The
+  narrower rule left a workbook saved at the repository root, in `test/`, or
+  with any other extension silently trackable, while the file's stated policy
+  and `tools/check_repo.py` both said such files must not be tracked. The two
+  now agree, instead of the gate catching what the ignore rules let through.
+- Extended `.gitignore` coverage: merge and patch artifacts (`*.orig`, `*.rej`),
+  release-certification evidence copied into the working tree, further Windows,
+  macOS and Linux desktop metadata, and local state written by editors and
+  coding assistants.
+- Extended `.gitattributes` coverage: the remaining Office formats
+  (`.dotm`, `.potm`, `.ppsx`, `.ppsm`, `.accde`, `.accdr`, `.mde`, `.ade`,
+  `.xlw`, `.xll`, `.thmx`), Office lock files (`~$*`, `.laccdb`, `.ldb`),
+  further archive, library, media, font and image formats. Lock files are
+  already excluded by `.gitignore`; stating them here as well means one that
+  reaches the index by accident still cannot be normalized or line-merged.
+
+### ✅ Validation
+
+Certified in desktop Microsoft Excel for Windows via
+`Test_EXCEL_UI_RunReleaseCertification`.
+
+| Host | Value |
+|---|---|
+| 🖥️ Excel | `16.0` build `20131` |
+| 🪟 Operating system | Windows (64-bit) NT 10.00 |
+| ⚙️ Bitness | x64 |
+| 🧾 VBA generation | VBA7 |
+| 🕒 Certified | 2026-08-20 20:13:12 |
+
+```text
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+  PASS  RegressionPack
+  PASS  SnapshotIdentity
+  PASS  TitleBarSdiIdentity
+```
+
+All four counters are part of the verdict. `failed=0` alone is not a pass:
+`skipped=0` confirms nothing was silently omitted, and `cleanup=OK` confirms no
+snapshot, stray workbook or suppressed screen update was left behind.
+
+The runner also emits a JSON document and a text report naming the exact host,
+written to the temporary folder, so a result can be attached to a release rather
+than retyped from the Immediate Window.
+
+Static checks additionally run on every pull request via
+`.github/workflows/static-checks.yml`. They cannot execute VBA — a hosted runner
+has no Excel — so the two gates are complementary rather than alternatives.
+
+### 🔗 Compatibility
+
+| Question | Answer |
+|---|---|
+| Existing calls affected | ✅ none |
+| Backward compatible | ✅ yes |
+| Release type | 🩹 patch |
+| Modules to replace | ⚠️ all four, together |
+
+- No public procedure was added, removed or renamed.
+- No existing parameter changed name, position, type or default.
+- No enum member or value changed.
+- The `Stage | Detail` diagnostic format is unchanged. Two new entries can now
+  appear: a `TitleBar` entry reporting that the captured frame is no longer
+  available, where the previous build silently applied the captured value to the
+  active window; and a `Diagnostics` entry reporting that the failure list could
+  not be grown.
+- `FailureList` may now hold fewer entries than `FailureCount` under memory
+  pressure. Callers that assumed the two always agreed should read the count as
+  authoritative and treat the list as descriptive.
+- Snapshot storage remains in memory only and does not survive a VBA project
+  reset or an Excel restart. It now also retains one `Window` reference for the
+  captured title-bar frame, released by `UI_ClearExcelUIStateSnapshot`, by a
+  replacing capture, or by a project reset.
+
+### ⚠️ Known limitations
+
+- Ribbon visibility is **per workbook window**, not application-wide. Restoring
+  a snapshot therefore applies the captured Ribbon value to whichever window is
+  active, which need not be the window it was captured from. Every Ribbon
+  mechanism Excel exposes acts on the active window and none accepts a window
+  argument, so reaching the captured window requires activating it — an
+  observable side effect that does not belong in a patch release. Deferred to
+  `1.2.0`; see `#23` and `docs/RIBBON_SDI_BEHAVIOR.md`.
+- Ribbon behavior has been measured on one host only. It can vary by Office
+  channel, update ring and administrative policy.
+- The static gate cannot execute VBA, because a hosted runner has no Excel. It
+  covers what is decidable from repository text and does not replace
+  `Test_EXCEL_UI_RunReleaseCertification`, which remains the behavioral gate and
+  is run by a maintainer on a real host.
+
 ## [1.1.0] - 2026-08-19
+
+> ✨ **Minor** · backward-compatible feature release
 
 Backward-compatible feature release. Every public `UI_...` procedure and enum
 member from `1.0.1` is preserved, with unchanged names, parameter order and
 defaults. No migration is required.
 
-### Added
+### ➕ Added
 
 - Added `UIWindowTargetScope`, a public enum selecting which Excel windows
   receive window-level UI changes:
@@ -50,7 +436,7 @@ defaults. No migration is required.
   application-level capture and restoration.
 - Added the `Test_EXCEL_UI_RunSnapshotIdentity` regression runner.
 
-### Changed
+### 🔧 Changed
 
 - Replaced index-based per-window snapshot restoration with identity-based
   matching. The snapshot now retains each captured `Window` object and restores
@@ -95,7 +481,7 @@ defaults. No migration is required.
   `Excel window`.
 - Updated all source, demo and regression module metadata to version `1.1.0`.
 
-### Fixed
+### 🐛 Fixed
 
 - Fixed `UI_ShowExcelUI` silently failing to restore the title bar when no
   owned-bit baseline had been captured and the frame was already hidden - the
@@ -138,7 +524,22 @@ defaults. No migration is required.
   the window, and returns so the enumeration continues; the label is built once
   on entry, so no window property is read while composing a failure message.
 
-### Compatibility
+### ✅ Validation
+
+Validated manually in desktop Microsoft Excel for Windows:
+
+```text
+Debug -> Compile VBAProject        PASS
+Test_EXCEL_UI_RunCore              PASS
+Test_EXCEL_UI_RunTitleBarOnly      PASS
+Test_EXCEL_UI_RunSnapshotIdentity  PASS
+Test_EXCEL_UI_RunAll               PASS
+```
+
+Manual checks completed: `UI_HideExcelUI` / `UI_ShowExcelUI` recovery, and
+capture / hide / reset validation.
+
+### 🔗 Compatibility
 
 ```text
 Existing calls affected: none
@@ -160,22 +561,7 @@ Release type:            minor
 - Installation now requires all four `src/` modules. Importing only
   `M_EXCEL_UI.bas` is not a valid installation; see `INSTALLATION.md`.
 
-### Validation
-
-Validated manually in desktop Microsoft Excel for Windows:
-
-```text
-Debug -> Compile VBAProject        PASS
-Test_EXCEL_UI_RunCore              PASS
-Test_EXCEL_UI_RunTitleBarOnly      PASS
-Test_EXCEL_UI_RunSnapshotIdentity  PASS
-Test_EXCEL_UI_RunAll               PASS
-```
-
-Manual checks completed: `UI_HideExcelUI` / `UI_ShowExcelUI` recovery, and
-capture / hide / reset validation.
-
-### Known limitations
+### ⚠️ Known limitations
 
 - Ribbon and title-bar control remain best effort and depend on Excel version,
   window state, Windows desktop composition and other loaded add-ins.
@@ -189,7 +575,9 @@ capture / hide / reset validation.
 
 ## [1.0.1] - 2026-07-25
 
-### Added
+> 🩹 **Patch** · documentation and repository governance
+
+### ➕ Added
 
 - Added `CONTRIBUTING.md` with repository-specific contribution, testing,
   compatibility, WinAPI, and release guidance.
@@ -203,7 +591,7 @@ capture / hide / reset validation.
 - Added a pull-request template tailored to Excel UI, snapshot, WinAPI,
   diagnostics, recovery, and compatibility changes.
 
-### Changed
+### 🔧 Changed
 
 - Redesigned `README.md` as the primary project, API, architecture, integration,
   testing, recovery, and release reference.
@@ -222,7 +610,7 @@ capture / hide / reset validation.
 - Synchronized `demo/EXCEL_UI_DEMO.xlsm` with the exported versioned VBA
   modules.
 
-### Validation
+### ✅ Validation
 
 The release candidate was validated manually in desktop Microsoft Excel:
 
@@ -233,7 +621,7 @@ The release candidate was validated manually in desktop Microsoft Excel:
 
 All three regression runners completed successfully.
 
-### Compatibility
+### 🔗 Compatibility
 
 - No public procedure signature changed.
 - No public enum member or value changed.
@@ -241,6 +629,7 @@ All three regression runners completed successfully.
 - No executable VBA behavior was intentionally changed.
 - GitHub Actions workflows are intentionally not included in this release.
 
-[Unreleased]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/danielep71/VBA-EXCEL_UI/releases/tag/v1.0.1

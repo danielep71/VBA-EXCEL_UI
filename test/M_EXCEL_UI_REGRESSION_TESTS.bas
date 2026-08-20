@@ -111,6 +111,10 @@ Option Private Module
     Private Const TEST_ERR_BASE       As Long = vbObjectError + 4700  'Base custom error number for test assertions
     Private Const TEST_SNAPSHOT_ID_ERR_BASE As Long = vbObjectError + 4810  'Base custom error for snapshot-identity assertions
     Private Const TEST_TARGET_ERR_BASE As Long = vbObjectError + 4900  'Base custom error for target-scope tests
+    Private Const TEST_TITLEBAR_SDI_ERR_BASE As Long = vbObjectError + 5000  'Base custom error for title-bar SDI tests
+    Private Const TEST_CERT_ERR_BASE  As Long = vbObjectError + 5100  'Base custom error for certification
+    Private Const TEST_RIBBON_ERR_BASE As Long = vbObjectError + 5200  'Base custom error for the Ribbon probe
+    Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -205,6 +209,1582 @@ Option Private Module
 '------------------------------------------------------------------------------
 '
 
+'==============================================================================
+' RELEASE-CERTIFICATION STATE
+'==============================================================================
+
+'Accrued only while a certification run is active. The regression packs are
+'shared with the legacy runners, so recording must be inert outside a run rather
+'than leaking counts from one invocation into the next.
+Private m_CertActive                    As Boolean
+
+Private m_CertUnitCount                 As Long
+Private m_CertUnitNames()               As String
+Private m_CertUnitPassed()              As Boolean
+Private m_CertUnitDetail()              As String
+
+Private m_CertSkipCount                 As Long
+Private m_CertSkipDetail()              As String
+
+'Ribbon characterization observations, accumulated during a probe run. Rows are
+'plain text for reading and JSON for comparison between hosts.
+Private m_RibbonRowCount                As Long
+Private m_RibbonRowsText                As String
+Private m_RibbonRowsJson                As String
+
+
+Public Sub Test_EXCEL_UI_RunReleaseCertification()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunReleaseCertification
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Execute every mandatory regression unit in one pass and emit an unambiguous
+'   complete/incomplete and pass/fail verdict with machine-readable evidence.
+'
+' WHY THIS EXISTS
+'   The existing runners cannot certify a release. Test_EXCEL_UI_RunAll executes
+'   no multi-window case, silently skips the snapshot cases when a snapshot
+'   already exists, and reports its outcome only as Immediate Window prose. A
+'   reader of that output cannot distinguish
+'
+'       a complete pass
+'       a pass with snapshot cases skipped
+'       a pass on one environment only
+'
+'   which means a green result carries far less information than it appears to.
+'
+'   This runner makes the difference explicit. Every unit is counted, a skipped
+'   mandatory unit is a failure rather than a quiet log line, the host state is
+'   verified after the run rather than assumed, and the environment the result
+'   was obtained on is recorded alongside it.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Refuses to start when an explicit EXCEL_UI snapshot already exists, rather
+'     than degrading into a partial run.
+'   - Records the anchor window by object identity and the workbook count, so
+'     leaked state is detected rather than tolerated.
+'   - Runs the full regression pack, the snapshot-identity runner and the SDI
+'     title-bar identity runner, each under its own error boundary so one
+'     failing unit does not conceal the rest.
+'   - Verifies cleanup: no snapshot left behind, ScreenUpdating restored, the
+'     workbook count back to its starting value, the anchor window still usable.
+'   - Emits a JSON evidence document and a text summary, and writes both to the
+'     temporary folder on a best-effort basis.
+'   - Raises when the verdict is anything other than a complete pass.
+'
+' ERROR POLICY
+'   - Individual unit failures are captured, not propagated.
+'   - Raises once at the end when the verdict is not PASS/COMPLETE.
+'
+' DEPENDENCIES
+'   - TST_CertResetCounters
+'   - TST_CertRunUnit
+'   - TST_CertBuildJsonEvidence
+'   - TST_CertBuildTextReport
+'   - TST_CertTryWriteEvidence
+'
+' NOTES
+'   Destructive: creates and closes temporary workbooks and toggles every
+'   managed UI element. Save unsaved work before running it.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window active before the run
+    Dim BaselineBooks       As Long            'Workbooks open before the run
+    Dim OldScreenUpdating   As Boolean         'ScreenUpdating before the run
+
+    Dim UnitsFailed         As Long            'Units that reported failure
+    Dim CleanupOK           As Boolean         'TRUE when no state leaked
+    Dim CleanupDetail       As String          'Reason cleanup was rejected
+
+    Dim Complete            As Boolean         'TRUE when nothing was skipped
+    Dim Passed              As Boolean         'TRUE when the verdict is a pass
+    Dim Verdict             As String          'Human-readable verdict line
+
+    Dim JsonText            As String          'Machine-readable evidence
+    Dim ReportText          As String          'Human-readable evidence
+    Dim JsonPath            As String          'Path the JSON was written to
+    Dim ReportPath          As String          'Path the report was written to
+    Dim ScanIdx             As Long            'Cursor over recorded units
+
+    Const PROC As String = "Test_EXCEL_UI_RunReleaseCertification"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertResetCounters
+
+        m_CertActive = True
+
+        TST_Log PROC, "START", "Release certification started"
+
+'------------------------------------------------------------------------------
+' VALIDATE PRECONDITIONS
+'------------------------------------------------------------------------------
+    'A pre-existing snapshot cannot be preserved across these units. Refusing to
+    'start is the honest response; running anyway would produce a partial result
+    'that reads exactly like a complete one.
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 1, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before certifying a release"
+        End If
+
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 2, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+    'Identity and counts recorded here are what cleanup is judged against
+        BaselineBooks = Workbooks.Count
+        OldScreenUpdating = Application.ScreenUpdating
+
+'------------------------------------------------------------------------------
+' RUN MANDATORY UNITS
+'------------------------------------------------------------------------------
+    'Each unit is run under its own boundary so that one failure does not hide
+    'the state of everything after it
+        TST_CertRunUnit "RegressionPack"
+        TST_CertRunUnit "SnapshotIdentity"
+        TST_CertRunUnit "TitleBarSdiIdentity"
+
+'------------------------------------------------------------------------------
+' COUNT RESULTS
+'------------------------------------------------------------------------------
+    'Tally the recorded units
+        For ScanIdx = 1 To m_CertUnitCount
+
+            If Not m_CertUnitPassed(ScanIdx) Then
+                UnitsFailed = UnitsFailed + 1
+            End If
+
+        Next ScanIdx
+
+'------------------------------------------------------------------------------
+' VERIFY CLEANUP
+'------------------------------------------------------------------------------
+    'Cleanup failure is a run failure. A suite that leaves a snapshot, a stray
+    'workbook or suppressed screen updates behind has not finished, however many
+    'assertions passed on the way.
+        CleanupOK = True
+        CleanupDetail = vbNullString
+
+        If UI_HasExcelUIStateSnapshot Then
+            CleanupOK = False
+            CleanupDetail = "an EXCEL_UI snapshot was left behind"
+        End If
+
+        If Workbooks.Count <> BaselineBooks Then
+            CleanupOK = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "workbook count changed from " & CStr(BaselineBooks) & _
+                " to " & CStr(Workbooks.Count))
+        End If
+
+        If Not Application.ScreenUpdating Then
+            CleanupOK = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "ScreenUpdating was left suppressed")
+        End If
+
+        If Not TST_CertIsWindowUsable(AnchorWindow) Then
+            CleanupOK = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "the anchor window is no longer usable")
+        End If
+
+'------------------------------------------------------------------------------
+' DETERMINE VERDICT
+'------------------------------------------------------------------------------
+    'Completeness and correctness are separate questions and are reported as
+    'such. A run that skipped a mandatory unit is not a pass, whatever the
+    'assertions that did execute reported.
+        Complete = (m_CertSkipCount = 0)
+        Passed = (UnitsFailed = 0) And CleanupOK And Complete
+
+        Verdict = "RESULT: " & IIf(Passed, "PASS", "FAIL") & _
+            " | " & IIf(Complete, "COMPLETE", "INCOMPLETE") & _
+            " | units=" & CStr(m_CertUnitCount) & _
+            " failed=" & CStr(UnitsFailed) & _
+            " skipped=" & CStr(m_CertSkipCount) & _
+            " cleanup=" & IIf(CleanupOK, "OK", "FAILED")
+
+'------------------------------------------------------------------------------
+' EMIT EVIDENCE
+'------------------------------------------------------------------------------
+    'Build both forms before writing either, so a file-system failure cannot
+    'cost the Immediate Window record as well
+        JsonText = TST_CertBuildJsonEvidence( _
+            UnitsFailed:=UnitsFailed, _
+            CleanupOK:=CleanupOK, _
+            CleanupDetail:=CleanupDetail, _
+            Complete:=Complete, _
+            Passed:=Passed)
+
+        ReportText = TST_CertBuildTextReport( _
+            Verdict:=Verdict, _
+            CleanupDetail:=CleanupDetail)
+
+        TST_Log PROC, "EVIDENCE", vbNewLine & ReportText
+        TST_Log PROC, "JSON", JsonText
+
+    'File output is a convenience, never a gate on the verdict
+        If TST_CertTryWriteEvidence(JsonText, "json", JsonPath) Then
+            TST_Log PROC, "WROTE", JsonPath
+        End If
+
+        If TST_CertTryWriteEvidence(ReportText, "txt", ReportPath) Then
+            TST_Log PROC, "WROTE", ReportPath
+        End If
+
+        TST_Log PROC, IIf(Passed, "PASS", "FAIL"), Verdict
+
+'------------------------------------------------------------------------------
+' RAISE ON A NON-PASSING VERDICT
+'------------------------------------------------------------------------------
+    'Raise only after the evidence exists, so a failed run is still documented
+        If Not Passed Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 3, _
+                PROC, _
+                Verdict & IIf(Len(CleanupDetail) > 0, " | " & CleanupDetail, vbNullString)
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Certification accounting must not leak into a later legacy run
+        m_CertActive = False
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Report the precondition or verdict failure to the caller
+        m_CertActive = False
+
+        TST_Log PROC, "FAIL", Err.Description
+
+        Err.Raise Err.Number, Err.Source, Err.Description
+
+End Sub
+
+
+Private Sub TST_CertResetCounters()
+
+'
+'==============================================================================
+' TST_CertResetCounters
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clear every certification counter and buffer before a run.
+'
+' WHY THIS EXISTS
+'   The regression packs are shared with the legacy runners, so skip recording
+'   is module state rather than a parameter. Without an explicit reset a second
+'   certification run in the same session would inherit the first run's counts
+'   and report a verdict about work it did not do.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' CLEAR COUNTERS
+'------------------------------------------------------------------------------
+    'Suppress any error; a reset that cannot complete must not abort the run
+        On Error Resume Next
+
+        m_CertUnitCount = 0
+        m_CertSkipCount = 0
+
+        Erase m_CertUnitNames
+        Erase m_CertUnitPassed
+        Erase m_CertUnitDetail
+        Erase m_CertSkipDetail
+
+End Sub
+
+
+Private Sub TST_CertRecordSkip( _
+    ByVal CallerProc As String, _
+    ByVal Reason As String)
+
+'
+'==============================================================================
+' TST_CertRecordSkip
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Log a skipped case and, during a certification run, count it.
+'
+' WHY THIS EXISTS
+'   A skip used to be an Immediate Window line and nothing else, which made a
+'   partial run indistinguishable from a complete one in every artifact that
+'   survived the session. Counting the skip is what lets the certification
+'   verdict report INCOMPLETE rather than quietly reporting PASS.
+'
+'   Recording is inert outside a certification run, so the legacy runners keep
+'   their existing behavior exactly.
+'
+' INPUTS
+'   CallerProc
+'     Procedure that skipped the case, used as the log prefix.
+'
+'   Reason
+'     Why the case was skipped.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' LOG SKIP
+'------------------------------------------------------------------------------
+    'Preserve the existing diagnostic line for the legacy runners
+        TST_Log CallerProc, "SKIP", Reason
+
+'------------------------------------------------------------------------------
+' COUNT SKIP
+'------------------------------------------------------------------------------
+    'Accrue only while certifying, so counts cannot leak between invocations
+        On Error Resume Next
+
+        If m_CertActive Then
+
+            m_CertSkipCount = m_CertSkipCount + 1
+
+            ReDim Preserve m_CertSkipDetail(1 To m_CertSkipCount)
+            m_CertSkipDetail(m_CertSkipCount) = CallerProc & ": " & Reason
+
+        End If
+
+End Sub
+
+
+Private Sub TST_CertRunUnit( _
+    ByVal UnitName As String)
+
+'
+'==============================================================================
+' TST_CertRunUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Execute one mandatory certification unit and record its outcome without
+'   propagating a failure.
+'
+' WHY THIS EXISTS
+'   The legacy runners raise on the first assertion failure, which is right for
+'   interactive debugging and wrong for certification: it reports one defect and
+'   conceals the state of everything after it. Trapping per unit means a single
+'   run tells you everything that is broken, not merely the first thing.
+'
+'   Dispatch is an explicit Select Case rather than Application.Run because the
+'   units are private to this module and a name-based call would fail silently
+'   or bind to the wrong project. A compile-time reference cannot rot.
+'
+' INPUTS
+'   UnitName
+'     Identifier of the unit to execute.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. A failing unit is recorded and the run continues.
+'
+' DEPENDENCIES
+'   - TST_RunRegressionPack
+'   - Test_EXCEL_UI_RunSnapshotIdentity
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'   - TST_CertRecordUnit
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log "TST_CertRunUnit", "UNIT", "Running " & UnitName
+
+'------------------------------------------------------------------------------
+' DISPATCH UNIT
+'------------------------------------------------------------------------------
+    'An unknown identifier is a defect in the registry above, not a pass
+        Select Case UnitName
+
+            Case "RegressionPack"
+                TST_RunRegressionPack _
+                    IncludeTitleBarTests:=True, _
+                    CallerProc:="Certification.RegressionPack"
+
+            Case "SnapshotIdentity"
+                Test_EXCEL_UI_RunSnapshotIdentity
+
+            Case "TitleBarSdiIdentity"
+                Test_EXCEL_UI_RunTitleBarSdiIdentity
+
+            Case Else
+                Err.Raise _
+                    TEST_CERT_ERR_BASE + 10, _
+                    "TST_CertRunUnit", _
+                    "unknown certification unit: " & UnitName
+
+        End Select
+
+'------------------------------------------------------------------------------
+' RECORD PASS
+'------------------------------------------------------------------------------
+    'The unit completed without raising
+        TST_CertRecordUnit UnitName, True, vbNullString
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Record the failure and continue; the verdict is assembled by the caller
+        TST_CertRecordUnit UnitName, False, _
+            CStr(Err.Number) & ": " & Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_CertRecordUnit( _
+    ByVal UnitName As String, _
+    ByVal Passed As Boolean, _
+    ByVal Detail As String)
+
+'
+'==============================================================================
+' TST_CertRecordUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Append one unit outcome to the certification record.
+'
+' WHY THIS EXISTS
+'   The verdict, the JSON evidence and the text report are all derived from the
+'   same arrays, so there is exactly one place where an outcome enters the run
+'   and no opportunity for the three to disagree.
+'
+' INPUTS
+'   UnitName
+'     Identifier of the unit.
+'
+'   Passed
+'     TRUE when the unit completed without raising.
+'
+'   Detail
+'     Failure text; empty on success.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertRunUnit
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' APPEND OUTCOME
+'------------------------------------------------------------------------------
+    'Recording must never be the thing that breaks a run
+        On Error Resume Next
+
+        m_CertUnitCount = m_CertUnitCount + 1
+
+        ReDim Preserve m_CertUnitNames(1 To m_CertUnitCount)
+        ReDim Preserve m_CertUnitPassed(1 To m_CertUnitCount)
+        ReDim Preserve m_CertUnitDetail(1 To m_CertUnitCount)
+
+        m_CertUnitNames(m_CertUnitCount) = UnitName
+        m_CertUnitPassed(m_CertUnitCount) = Passed
+        m_CertUnitDetail(m_CertUnitCount) = Detail
+
+        TST_Log "TST_CertRecordUnit", IIf(Passed, "UNIT PASS", "UNIT FAIL"), _
+            UnitName & IIf(Len(Detail) > 0, " | " & Detail, vbNullString)
+
+End Sub
+
+
+Private Function TST_CertIsWindowUsable( _
+    ByVal TargetWindow As Object) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertIsWindowUsable
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Report whether a retained Window reference still responds.
+'
+' WHY THIS EXISTS
+'   Cleanup is judged against the window the run started from, held by object
+'   identity rather than by collection index. An index would be satisfied by any
+'   window that happens to occupy the same position afterwards, which is exactly
+'   the substitution the snapshot identity work exists to prevent.
+'
+' INPUTS
+'   TargetWindow
+'     Window to probe. May be Nothing.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the reference still responds to a non-mutating read.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ProbeValue          As Boolean         'Non-mutating probe output
+
+'------------------------------------------------------------------------------
+' PROBE REFERENCE
+'------------------------------------------------------------------------------
+    'A dead wrapper raises on the read, which is the signal required
+        On Error Resume Next
+
+        TST_CertIsWindowUsable = False
+
+        If TargetWindow Is Nothing Then
+            Exit Function
+        End If
+
+        ProbeValue = TargetWindow.DisplayHeadings
+
+        TST_CertIsWindowUsable = (Err.Number = 0)
+
+        Err.Clear
+
+End Function
+
+
+Private Function TST_CertAppendDetail( _
+    ByVal ExistingDetail As String, _
+    ByVal NewDetail As String) _
+    As String
+
+'
+'==============================================================================
+' TST_CertAppendDetail
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Join cleanup findings into one ordered diagnostic string.
+'
+' WHY THIS EXISTS
+'   Cleanup can fail in more than one way at once, and reporting only the first
+'   would send the reader back for a second run to discover the second problem.
+'
+' INPUTS
+'   ExistingDetail
+'     Findings recorded so far; may be empty.
+'
+'   NewDetail
+'     Finding to append.
+'
+' RETURNS
+'   String
+'     The joined findings.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' JOIN FINDINGS
+'------------------------------------------------------------------------------
+    'Separate with the established diagnostic delimiter
+        If Len(ExistingDetail) = 0 Then
+            TST_CertAppendDetail = NewDetail
+        Else
+            TST_CertAppendDetail = ExistingDetail & " | " & NewDetail
+        End If
+
+End Function
+
+
+Private Function TST_CertBuildJsonEvidence( _
+    ByVal UnitsFailed As Long, _
+    ByVal CleanupOK As Boolean, _
+    ByVal CleanupDetail As String, _
+    ByVal Complete As Boolean, _
+    ByVal Passed As Boolean) _
+    As String
+
+'
+'==============================================================================
+' TST_CertBuildJsonEvidence
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Compose the machine-readable certification result.
+'
+' WHY THIS EXISTS
+'   Prose in the Immediate Window cannot be attached to a release, compared
+'   between environments or checked by a workflow. A result that names the exact
+'   host it was obtained on is the difference between evidence and an assertion
+'   that the tests passed somewhere once.
+'
+'   The document is assembled by hand rather than through a library because the
+'   module carries no dependency, and the field set is small and fixed.
+'
+' INPUTS
+'   UnitsFailed / CleanupOK / CleanupDetail / Complete / Passed
+'     Verdict components computed by the caller.
+'
+' RETURNS
+'   String
+'     A single-line JSON document.
+'
+' ERROR POLICY
+'   - Does not raise. A field that cannot be read is reported as unknown.
+'
+' DEPENDENCIES
+'   - TST_CertJsonEscape
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' NOTES
+'   Bitness and VBA generation come from conditional compilation, so they
+'   describe the build that is executing rather than what the host reports.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Json                As String          'Document under construction
+    Dim ScanIdx             As Long            'Cursor over recorded units
+    Dim Bitness             As String          'Office bitness of this build
+    Dim VbaGeneration       As String          'VBA generation of this build
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Evidence must be produced even when a field cannot be read
+        On Error Resume Next
+
+#If VBA7 Then
+        VbaGeneration = "VBA7"
+    #If Win64 Then
+        Bitness = "x64"
+    #Else
+        Bitness = "x86"
+    #End If
+#Else
+        VbaGeneration = "pre-VBA7"
+        Bitness = "x86"
+#End If
+
+'------------------------------------------------------------------------------
+' BUILD ENVIRONMENT
+'------------------------------------------------------------------------------
+    'Name the exact host this verdict describes
+        Json = "{""component"":""VBA Excel UI""" & _
+            ",""schema"":1" & _
+            ",""timestampLocal"":""" & Format$(Now, "yyyy-mm-dd hh:nn:ss") & """" & _
+            ",""excelVersion"":""" & TST_CertJsonEscape(Application.Version) & """" & _
+            ",""excelBuild"":""" & TST_CertJsonEscape(CStr(Application.Build)) & """" & _
+            ",""operatingSystem"":""" & TST_CertJsonEscape(Application.OperatingSystem) & """" & _
+            ",""bitness"":""" & Bitness & """" & _
+            ",""vbaGeneration"":""" & VbaGeneration & """"
+
+'------------------------------------------------------------------------------
+' BUILD COUNTERS
+'------------------------------------------------------------------------------
+    'Counts first, so a reader sees the shape of the run before its detail
+        Json = Json & _
+            ",""units"":" & CStr(m_CertUnitCount) & _
+            ",""unitsFailed"":" & CStr(UnitsFailed) & _
+            ",""skipped"":" & CStr(m_CertSkipCount) & _
+            ",""cleanup"":""" & IIf(CleanupOK, "OK", "FAILED") & """" & _
+            ",""cleanupDetail"":""" & TST_CertJsonEscape(CleanupDetail) & """" & _
+            ",""complete"":" & IIf(Complete, "true", "false") & _
+            ",""passed"":" & IIf(Passed, "true", "false")
+
+'------------------------------------------------------------------------------
+' BUILD UNIT DETAIL
+'------------------------------------------------------------------------------
+    'One object per unit, in execution order
+        Json = Json & ",""unitResults"":["
+
+        For ScanIdx = 1 To m_CertUnitCount
+
+            If ScanIdx > 1 Then
+                Json = Json & ","
+            End If
+
+            Json = Json & "{""name"":""" & _
+                TST_CertJsonEscape(m_CertUnitNames(ScanIdx)) & """" & _
+                ",""passed"":" & IIf(m_CertUnitPassed(ScanIdx), "true", "false") & _
+                ",""detail"":""" & _
+                TST_CertJsonEscape(m_CertUnitDetail(ScanIdx)) & """}"
+
+        Next ScanIdx
+
+        Json = Json & "]"
+
+'------------------------------------------------------------------------------
+' BUILD SKIP DETAIL
+'------------------------------------------------------------------------------
+    'Skips are listed explicitly; an empty array is a meaningful result
+        Json = Json & ",""skipDetail"":["
+
+        For ScanIdx = 1 To m_CertSkipCount
+
+            If ScanIdx > 1 Then
+                Json = Json & ","
+            End If
+
+            Json = Json & """" & _
+                TST_CertJsonEscape(m_CertSkipDetail(ScanIdx)) & """"
+
+        Next ScanIdx
+
+        Json = Json & "]}"
+
+'------------------------------------------------------------------------------
+' RETURN DOCUMENT
+'------------------------------------------------------------------------------
+    'Publish the assembled document
+        TST_CertBuildJsonEvidence = Json
+
+End Function
+
+
+Private Function TST_CertJsonEscape( _
+    ByVal Value As String) _
+    As String
+
+'
+'==============================================================================
+' TST_CertJsonEscape
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Escape the characters that would otherwise make the evidence document
+'   unparseable.
+'
+' WHY THIS EXISTS
+'   Failure detail is host text and can contain quotes, backslashes and line
+'   breaks. Emitting it raw would produce a document that no consumer can read,
+'   which defeats the purpose of machine-readable evidence precisely when the
+'   run failed and the evidence matters most.
+'
+' INPUTS
+'   Value
+'     Text to escape. May be empty.
+'
+' RETURNS
+'   String
+'     The escaped text, without surrounding quotes.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertBuildJsonEvidence
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Result              As String          'Escaped text under construction
+
+'------------------------------------------------------------------------------
+' ESCAPE VALUE
+'------------------------------------------------------------------------------
+    'Escape the backslash first, or the escapes added below are re-escaped
+        On Error Resume Next
+
+        Result = Value
+        Result = Replace(Result, "\", "\\")
+        Result = Replace(Result, """", "\""")
+        Result = Replace(Result, vbCrLf, "\n")
+        Result = Replace(Result, vbCr, "\n")
+        Result = Replace(Result, vbLf, "\n")
+        Result = Replace(Result, vbTab, "\t")
+
+        TST_CertJsonEscape = Result
+
+End Function
+
+
+Private Function TST_CertBuildTextReport( _
+    ByVal Verdict As String, _
+    ByVal CleanupDetail As String) _
+    As String
+
+'
+'==============================================================================
+' TST_CertBuildTextReport
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Compose the human-readable certification summary.
+'
+' WHY THIS EXISTS
+'   The JSON document is for tooling. A person deciding whether to tag a release
+'   needs the same facts in a form they can read at a glance and paste into the
+'   changelog validation block.
+'
+' INPUTS
+'   Verdict
+'     Pre-composed verdict line.
+'
+'   CleanupDetail
+'     Cleanup findings; empty when cleanup passed.
+'
+' RETURNS
+'   String
+'     A multi-line report.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Report              As String          'Report under construction
+    Dim ScanIdx             As Long            'Cursor over recorded entries
+
+'------------------------------------------------------------------------------
+' BUILD REPORT
+'------------------------------------------------------------------------------
+    'A report must be produced even when a field cannot be read
+        On Error Resume Next
+
+        Report = "VBA Excel UI - release certification" & vbNewLine & _
+            "Excel " & Application.Version & _
+            " build " & CStr(Application.Build) & vbNewLine & _
+            Application.OperatingSystem & vbNewLine & _
+            Format$(Now, "yyyy-mm-dd hh:nn:ss") & vbNewLine & _
+            String$(60, "-") & vbNewLine & Verdict & vbNewLine
+
+'------------------------------------------------------------------------------
+' APPEND UNIT RESULTS
+'------------------------------------------------------------------------------
+    'One line per unit, in execution order
+        For ScanIdx = 1 To m_CertUnitCount
+
+            Report = Report & _
+                IIf(m_CertUnitPassed(ScanIdx), "  PASS  ", "  FAIL  ") & _
+                m_CertUnitNames(ScanIdx) & _
+                IIf(Len(m_CertUnitDetail(ScanIdx)) > 0, _
+                    " | " & m_CertUnitDetail(ScanIdx), vbNullString) & _
+                vbNewLine
+
+        Next ScanIdx
+
+'------------------------------------------------------------------------------
+' APPEND SKIPS AND CLEANUP
+'------------------------------------------------------------------------------
+    'Skips are named, because an unnamed skip is what this runner exists to
+    'stop happening
+        For ScanIdx = 1 To m_CertSkipCount
+            Report = Report & "  SKIP  " & m_CertSkipDetail(ScanIdx) & vbNewLine
+        Next ScanIdx
+
+        If Len(CleanupDetail) > 0 Then
+            Report = Report & "  CLEANUP  " & CleanupDetail & vbNewLine
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN REPORT
+'------------------------------------------------------------------------------
+    'Publish the assembled report
+        TST_CertBuildTextReport = Report
+
+End Function
+
+
+Private Function TST_CertTryWriteEvidence( _
+    ByVal Content As String, _
+    ByVal Extension As String, _
+    ByRef PathOut As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertTryWriteEvidence
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Write one evidence document to the temporary folder.
+'
+' WHY THIS EXISTS
+'   Evidence that exists only in the Immediate Window is lost the moment the
+'   session ends and cannot be attached to a release. A file can.
+'
+'   Writing is nonetheless best effort and never a gate on the verdict: a
+'   locked-down or full temporary folder is an environment problem, and letting
+'   it fail a run whose assertions all passed would report the wrong defect.
+'
+' INPUTS
+'   Content
+'     Document text to write.
+'
+'   Extension
+'     File extension without the dot.
+'
+'   PathOut
+'     ByRef. Receives the path written, or empty on failure.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the file was written.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FolderPath          As String          'Temporary folder for evidence
+    Dim FileNumber          As Integer         'Free file handle
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A file-system failure must never abort certification
+        On Error GoTo Err_Handler
+
+        TST_CertTryWriteEvidence = False
+        PathOut = vbNullString
+
+'------------------------------------------------------------------------------
+' RESOLVE PATH
+'------------------------------------------------------------------------------
+    'Fall back silently when the host exposes no temporary folder
+        FolderPath = Environ$("TEMP")
+
+        If Len(FolderPath) = 0 Then
+            GoTo Safe_Exit
+        End If
+
+        PathOut = FolderPath & "\EXCEL_UI_certification_" & _
+            Format$(Now, "yyyymmdd_hhnnss") & "." & Extension
+
+'------------------------------------------------------------------------------
+' WRITE FILE
+'------------------------------------------------------------------------------
+    'Write the document as a single block
+        FileNumber = FreeFile
+
+        Open PathOut For Output As #FileNumber
+        Print #FileNumber, Content
+        Close #FileNumber
+
+        TST_CertTryWriteEvidence = True
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Report the miss without disturbing the verdict
+        TST_CertTryWriteEvidence = False
+        PathOut = vbNullString
+
+        Resume Safe_Exit
+
+End Function
+
+
+Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunRibbonSdiProbe
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Characterize how Ribbon visibility behaves across multiple workbook windows,
+'   and record the result as evidence.
+'
+' WHY THIS EXISTS
+'   README.md states the Ribbon scope as "Excel application", which a reader will
+'   take to mean one state shared by every workbook window. Under the Single
+'   Document Interface each workbook window has its own Ribbon UI, and nothing
+'   in the component verifies that the documented scope is the scope Excel
+'   actually implements. The claim is currently an assumption.
+'
+'   This is deliberately a PROBE and not a test. It asserts nothing, because
+'   there is no agreed correct answer yet: the point is to discover what the
+'   host does so that a contract can be written, and only then to assert it.
+'   Writing assertions first would encode the guess this issue exists to remove.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
+'   - Records the Ribbon state through three independent mechanisms at each
+'     observation point, because they can legitimately disagree.
+'   - Exercises five scenarios: baseline, hide with A active, show with B
+'     active, a window created AFTER a hide, and snapshot restore across a
+'     window switch.
+'   - Emits a text table and a JSON document, and writes both to the temporary
+'     folder.
+'   - Restores the Ribbon and closes its temporary workbooks.
+'
+' ERROR POLICY
+'   - Raises only on a precondition failure or an unexpected host error.
+'   - Never fails on an observed value: every value is data.
+'
+' DEPENDENCIES
+'   - TST_RibbonProbeReset
+'   - TST_RibbonProbeRecord
+'   - TST_RibbonProbeBuildJson
+'   - TST_CertTryWriteEvidence
+'
+' NOTES
+'   Destructive: creates and closes temporary workbooks and toggles the Ribbon.
+'   Results belong in docs/RIBBON_SDI_BEHAVIOR.md, one block per host tested.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window active before the probe
+    Dim BookB               As Workbook        'Second workbook, window B
+    Dim BookC               As Workbook        'Workbook created after a hide
+
+    Dim JsonText            As String          'Machine-readable observations
+    Dim ReportText          As String          'Human-readable observations
+    Dim EvidencePath        As String          'Path an evidence file was written to
+
+    Dim HasFailure          As Boolean         'TRUE when the probe failed
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "Test_EXCEL_UI_RunRibbonSdiProbe"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_RibbonProbeReset
+
+        TST_Log PROC, "START", "Ribbon SDI characterization started"
+
+'------------------------------------------------------------------------------
+' VALIDATE PRECONDITIONS
+'------------------------------------------------------------------------------
+    'The probe captures and restores a snapshot, so it cannot share the slot
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_RIBBON_ERR_BASE + 1, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before probing"
+        End If
+
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_RIBBON_ERR_BASE + 2, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+'------------------------------------------------------------------------------
+' SCENARIO 1 - BASELINE
+'------------------------------------------------------------------------------
+    'Establish what a visible Ribbon reads as on this host, so later rows can be
+    'compared against something rather than interpreted in isolation
+        UI_SetExcelUI Ribbon:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "1-Baseline", "A"
+
+'------------------------------------------------------------------------------
+' SCENARIO 2 - HIDE WITH A ACTIVE, THEN OBSERVE B
+'------------------------------------------------------------------------------
+    'The central question: does hiding the Ribbon while A is active also hide it
+    'for a window that already existed?
+        Set BookB = Workbooks.Add
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "2-HiddenOnA", "A"
+
+        BookB.Windows(1).Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "2-HiddenOnA", "B"
+
+'------------------------------------------------------------------------------
+' SCENARIO 3 - SHOW WITH B ACTIVE, THEN OBSERVE A
+'------------------------------------------------------------------------------
+    'The symmetric question, which need not have the symmetric answer
+        UI_SetExcelUI Ribbon:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "3-ShownOnB", "B"
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "3-ShownOnB", "A"
+
+'------------------------------------------------------------------------------
+' SCENARIO 4 - WINDOW CREATED AFTER A HIDE
+'------------------------------------------------------------------------------
+    'A window that did not exist when the Ribbon was hidden is the case a
+    'component storing one Boolean cannot reason about at all
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        Set BookC = Workbooks.Add
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "4-NewWindowAfterHide", "C"
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "4-NewWindowAfterHide", "A"
+
+'------------------------------------------------------------------------------
+' SCENARIO 5 - SNAPSHOT RESTORE ACROSS A WINDOW SWITCH
+'------------------------------------------------------------------------------
+    'Whether the snapshot contract holds for the Ribbon depends entirely on the
+    'answers above, so it is measured rather than assumed
+        UI_SetExcelUI Ribbon:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_CaptureExcelUIState
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        BookB.Windows(1).Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_ResetExcelUIToSnapshot
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "5-RestoredFromB", "B"
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RibbonProbeRecord "5-RestoredFromB", "A"
+
+'------------------------------------------------------------------------------
+' EMIT EVIDENCE
+'------------------------------------------------------------------------------
+    'Build both forms before writing either
+        ReportText = "VBA Excel UI - Ribbon SDI characterization" & vbNewLine & _
+            "Excel " & Application.Version & _
+            " build " & CStr(Application.Build) & vbNewLine & _
+            Application.OperatingSystem & vbNewLine & _
+            Format$(Now, "yyyy-mm-dd hh:nn:ss") & vbNewLine & _
+            String$(72, "-") & vbNewLine & _
+            "scenario              window  CommandBars.Visible  Height  XLM" & _
+            vbNewLine & m_RibbonRowsText
+
+        JsonText = TST_RibbonProbeBuildJson()
+
+        TST_Log PROC, "EVIDENCE", vbNewLine & ReportText
+        TST_Log PROC, "JSON", JsonText
+
+        If TST_CertTryWriteEvidence(JsonText, "ribbon.json", EvidencePath) Then
+            TST_Log PROC, "WROTE", EvidencePath
+        End If
+
+        If TST_CertTryWriteEvidence(ReportText, "ribbon.txt", EvidencePath) Then
+            TST_Log PROC, "WROTE", EvidencePath
+        End If
+
+        TST_Log PROC, "DONE", _
+            "Recorded " & CStr(m_RibbonRowCount) & _
+            " observations; transcribe them into docs/RIBBON_SDI_BEHAVIOR.md"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Leave the host as it was found, whatever the observations were
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+            TST_SafeCloseWorkbook BookC
+            TST_SafeCloseWorkbook BookB
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
+
+            UI_SetExcelUI Ribbon:=UI_Show
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_RibbonProbeReset()
+
+'
+'==============================================================================
+' TST_RibbonProbeReset
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clear the observation buffers before a probe run.
+'
+' WHY THIS EXISTS
+'   Observations accumulate in module state, so a second run in the same session
+'   would otherwise report the first run's rows alongside its own and produce a
+'   document describing two different experiments as one.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunRibbonSdiProbe
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' CLEAR BUFFERS
+'------------------------------------------------------------------------------
+    'A reset that cannot complete must not abort the probe
+        On Error Resume Next
+
+        m_RibbonRowCount = 0
+        m_RibbonRowsText = vbNullString
+        m_RibbonRowsJson = vbNullString
+
+End Sub
+
+
+Private Sub TST_RibbonProbeRecord( _
+    ByVal ScenarioName As String, _
+    ByVal WindowLabel As String)
+
+'
+'==============================================================================
+' TST_RibbonProbeRecord
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Record one observation of Ribbon state through every mechanism available.
+'
+' WHY THIS EXISTS
+'   The component reads the Ribbon through CommandBars first and falls back to
+'   the legacy XLM query. Both are application-scoped calls: neither accepts a
+'   window. If the Ribbon really is per-window, the only way that can surface is
+'   as a DIFFERENCE between readings taken while different windows are active,
+'   or as a disagreement between the mechanisms themselves.
+'
+'   Height is recorded alongside Visible because it is the more sensitive
+'   signal. A Ribbon that is collapsed rather than hidden can report Visible as
+'   True while its height collapses to the tab strip, and a component that
+'   trusted Visible alone would call that state shown.
+'
+' INPUTS
+'   ScenarioName
+'     Scenario the observation belongs to.
+'
+'   WindowLabel
+'     Window that was active when the reading was taken.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Reads CommandBars("Ribbon").Visible, its Height, and the XLM query.
+'   - Records "err" for any mechanism that raises, rather than a value that
+'     would be indistinguishable from a real reading.
+'
+' ERROR POLICY
+'   - Does not raise. An unreadable mechanism is an observation, not a failure.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunRibbonSdiProbe
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim VisibleText         As String          'CommandBars Visible reading
+    Dim HeightText          As String          'CommandBars Height reading
+    Dim XlmText             As String          'Legacy XLM query reading
+    Dim ProbeValue          As Variant         'Working buffer for each read
+
+'------------------------------------------------------------------------------
+' READ EVERY MECHANISM
+'------------------------------------------------------------------------------
+    'An unreadable mechanism is recorded as such; substituting a default would
+    'silently invent data this document exists to gather
+        On Error Resume Next
+
+        VisibleText = "err"
+        HeightText = "err"
+        XlmText = "err"
+
+        ProbeValue = Application.CommandBars("Ribbon").Visible
+
+        If Err.Number = 0 Then
+            VisibleText = CStr(CBool(ProbeValue))
+        End If
+
+        Err.Clear
+
+        ProbeValue = Application.CommandBars("Ribbon").Height
+
+        If Err.Number = 0 Then
+            HeightText = CStr(CLng(ProbeValue))
+        End If
+
+        Err.Clear
+
+        ProbeValue = Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
+
+        If Err.Number = 0 Then
+            XlmText = CStr(CBool(ProbeValue))
+        End If
+
+        Err.Clear
+
+'------------------------------------------------------------------------------
+' APPEND OBSERVATION
+'------------------------------------------------------------------------------
+    'Text for reading, JSON for comparing between hosts
+        m_RibbonRowCount = m_RibbonRowCount + 1
+
+        m_RibbonRowsText = m_RibbonRowsText & _
+            Left$(ScenarioName & String$(22, " "), 22) & _
+            Left$(WindowLabel & String$(8, " "), 8) & _
+            Left$(VisibleText & String$(21, " "), 21) & _
+            Left$(HeightText & String$(8, " "), 8) & _
+            XlmText & vbNewLine
+
+        If m_RibbonRowCount > 1 Then
+            m_RibbonRowsJson = m_RibbonRowsJson & ","
+        End If
+
+        m_RibbonRowsJson = m_RibbonRowsJson & _
+            "{""scenario"":""" & TST_CertJsonEscape(ScenarioName) & """" & _
+            ",""window"":""" & TST_CertJsonEscape(WindowLabel) & """" & _
+            ",""commandBarsVisible"":""" & TST_CertJsonEscape(VisibleText) & """" & _
+            ",""commandBarsHeight"":""" & TST_CertJsonEscape(HeightText) & """" & _
+            ",""xlmGetToolBar"":""" & TST_CertJsonEscape(XlmText) & """}"
+
+End Sub
+
+
+Private Function TST_RibbonProbeBuildJson() _
+    As String
+
+'
+'==============================================================================
+' TST_RibbonProbeBuildJson
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Wrap the accumulated observations in a document that names the host.
+'
+' WHY THIS EXISTS
+'   Ribbon behavior can differ by Excel build, Office channel and policy. An
+'   observation that does not say which host produced it cannot be compared with
+'   another, and comparison is the entire purpose of gathering it.
+'
+' RETURNS
+'   String
+'     A single-line JSON document.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertJsonEscape
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunRibbonSdiProbe
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Bitness             As String          'Office bitness of this build
+
+'------------------------------------------------------------------------------
+' BUILD DOCUMENT
+'------------------------------------------------------------------------------
+    'A document must be produced even when a field cannot be read
+        On Error Resume Next
+
+#If VBA7 Then
+    #If Win64 Then
+        Bitness = "x64"
+    #Else
+        Bitness = "x86"
+    #End If
+#Else
+        Bitness = "x86"
+#End If
+
+        TST_RibbonProbeBuildJson = _
+            "{""document"":""ribbon-sdi-characterization""" & _
+            ",""schema"":1" & _
+            ",""timestampLocal"":""" & Format$(Now, "yyyy-mm-dd hh:nn:ss") & """" & _
+            ",""excelVersion"":""" & TST_CertJsonEscape(Application.Version) & """" & _
+            ",""excelBuild"":""" & TST_CertJsonEscape(CStr(Application.Build)) & """" & _
+            ",""operatingSystem"":""" & _
+            TST_CertJsonEscape(Application.OperatingSystem) & """" & _
+            ",""bitness"":""" & Bitness & """" & _
+            ",""observations"":[" & m_RibbonRowsJson & "]}"
+
+End Function
+
+
 Public Sub Test_EXCEL_UI_RunAll()
 
 '
@@ -233,8 +1813,14 @@ Public Sub Test_EXCEL_UI_RunAll()
 ' DEPENDENCIES
 '   - TST_RunRegressionPack
 '
+' NOTES
+'   This is NOT the release gate. It runs no multi-window case, it can skip
+'   snapshot cases silently when a snapshot already exists, and it produces no
+'   machine-readable evidence. Use Test_EXCEL_UI_RunReleaseCertification to
+'   certify a release.
+'
 ' UPDATED
-'   2026-07-25
+'   2026-08-19
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -350,6 +1936,8 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '
 ' BEHAVIOR
 '   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
+'   - Activates the surviving anchor window before capturing, so the captured
+'     title-bar frame belongs to a window that outlives the case.
 '   - Captures a surviving anchor window and a temporary second window.
 '   - Closes the captured temporary window and creates a replacement.
 '   - Restores through UI_ResetExcelUIToSnapshot_WithResult.
@@ -368,7 +1956,15 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '   - TST_AssertSingleFailurePrefix
 '   - TST_AssertSnapshotWindowState
 '
+' NOTES
+'   The snapshot captures every window in Application.Windows regardless of
+'   which is active; only the title-bar frame is resolved from the active
+'   window. That is why activating the anchor before capture changes the
+'   expected failure count without weakening what this case covers.
+'
 ' UPDATED
+'   2026-08-19 - Anchor the captured title-bar frame to the surviving window,
+'                so the case asserts window identity alone.
 '   2026-07-29
 '==============================================================================
 '
@@ -453,6 +2049,23 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
         CapturedWindow.DisplayHeadings = False
         CapturedWindow.DisplayWorkbookTabs = True
         CapturedWindow.DisplayGridlines = False
+
+'------------------------------------------------------------------------------
+' ACTIVATE THE SURVIVING WINDOW BEFORE CAPTURE
+'------------------------------------------------------------------------------
+    'ThisWorkbook.NewWindow activates the window it creates, so without this the
+    'capture would record the TEMPORARY window as the owner of the title-bar
+    'frame. Closing it below would then produce a second, correct TitleBar
+    'failure alongside the WindowIdentity failure this case exists to assert,
+    'and the case would be failing for a reason that is not about window
+    'identity at all.
+    '
+    'Anchoring the frame to the surviving window keeps this case about one
+    'thing. The closed-frame behavior it would otherwise trip over has its own
+    'dedicated case, TST_Case_TitleBarCapturedFrameClosedIsReported.
+        AnchorWindow.Activate
+
+        TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
 ' CAPTURE THROUGH STRUCTURED-RESULT API
@@ -561,6 +2174,146 @@ Safe_Exit:
                 Number:=FailNumber, _
                 Source:=FailSource, _
                 Description:=FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunTitleBarSdiIdentity
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that title-bar snapshot restoration targets the window the state was
+'   captured from, and never the window that happens to be active at restore
+'   time.
+'
+' WHY THIS EXISTS
+'   Under the Single Document Interface each workbook window owns a separate
+'   top-level window, and Application.Hwnd reports whichever of them is active
+'   when it is read. A single-window regression run cannot distinguish "wrote
+'   to the captured frame" from "wrote to the active frame", because the two are
+'   the same window. Only a second window makes the difference observable.
+'
+'   The two cases below are the ones that would have caught ICR-UI-P1-01 before
+'   release.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
+'   - Runs the redirect case and the closed-frame case.
+'   - Clears any snapshot and restores the title bar before returning.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup.
+'   - Preserves the original test failure through cleanup.
+'
+' DEPENDENCIES
+'   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+'   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'
+' NOTES
+'   Destructive: creates and closes temporary workbooks. It is deliberately a
+'   separate runner rather than part of Test_EXCEL_UI_RunAll, because RunAll is
+'   currently non-destructive. Folding every mandatory case into one runner is
+'   tracked separately as the release-certification work.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window active before the run
+    Dim OldScreenUpdating   As Boolean         'Cached ScreenUpdating state
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "Test_EXCEL_UI_RunTitleBarSdiIdentity"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", "SDI title-bar identity test started"
+
+    'Refuse to destroy a snapshot the caller is relying on
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 1, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
+        End If
+
+    'Hold the window to return to, so the run leaves the host as it found it
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 2, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+    'These cases activate windows, so screen updates stay on for correctness
+        OldScreenUpdating = Application.ScreenUpdating
+
+'------------------------------------------------------------------------------
+' RUN REGRESSION CASES
+'------------------------------------------------------------------------------
+    'Restoration must reach the captured frame, not the active one
+        TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+
+    'A captured frame that has closed must be reported, never redirected
+        TST_Case_TitleBarCapturedFrameClosedIsReported
+
+    'Log successful completion before cleanup
+        TST_Log PROC, "PASS", _
+            "Restoration targeted the captured frame; a closed frame " & _
+            "was reported"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Leave no snapshot behind, and leave the frame visible
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
+
+            UI_SetExcelUI TitleBar:=UI_Show
+            Application.ScreenUpdating = OldScreenUpdating
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
         End If
 
         Exit Sub
@@ -721,6 +2474,9 @@ Private Sub TST_RunRegressionPack( _
     'Run the ScreenUpdating preservation case
         TST_Case_ScreenUpdatingPreserved
 
+    'Verify diagnostics degrade rather than raise when the list cannot grow
+        TST_Case_FailureAccumulatorDegradesSafely
+
 '------------------------------------------------------------------------------
 ' RUN OPTIONAL SNAPSHOT CASES
 '------------------------------------------------------------------------------
@@ -729,8 +2485,9 @@ Private Sub TST_RunRegressionPack( _
     'snapshot object safely
         If HadExplicitSnapshot Then
 
-            'Log that snapshot-destructive cases were skipped
-                TST_Log CallerProc, "SKIP", _
+            'Record that snapshot-destructive cases were skipped. Under the
+            'certification runner a skip is a failure, not a quiet log line.
+                TST_CertRecordSkip CallerProc, _
                     "Snapshot lifecycle cases skipped because an explicit EXCEL_UI snapshot already existed before the run"
 
         Else
@@ -763,7 +2520,7 @@ Private Sub TST_RunRegressionPack( _
         If IncludeTitleBarTests Then
             TST_Case_ConvenienceWrappers True
         Else
-            TST_Log CallerProc, "SKIP", _
+            TST_CertRecordSkip CallerProc, _
                 "Convenience-wrapper case skipped in core mode because the wrappers also toggle TitleBar"
         End If
 
@@ -861,6 +2618,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarRoundTrip
 '   - TST_Case_TitleBarOwnedBitPreservation
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
+'   - TST_Case_TitleBarFrameRefreshDebtRetried
 '
 ' UPDATED
 '   2026-08-18
@@ -930,9 +2688,12 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify that a show restores the frame with no captured baseline
         TST_Case_TitleBarShowRecoversWithoutBaseline
 
+    'Verify that a failed frame refresh is retried rather than short-circuited
+        TST_Case_TitleBarFrameRefreshDebtRetried
+
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
-            "Title-bar round-trip, owned-bit preservation, and show-recovery cases passed"
+            "Title-bar round-trip, owned-bit preservation, show-recovery, and refresh-debt cases passed"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
@@ -2792,7 +4553,7 @@ Private Sub TST_Case_SnapshotCapturePartialApplicationRead()
     Dim SavedErrSource      As String          'Captured assertion error source
     Dim SavedErrDescription As String          'Captured assertion description
 
-    Const PROC              As String = "TST_Case_SnapshotCapturePartialApplicationRead"
+    Const PROC As String = "TST_Case_SnapshotCapturePartialApplicationRead"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3274,6 +5035,195 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
 
 End Sub
 
+Private Sub TST_Case_FailureAccumulatorDegradesSafely()
+
+'
+'==============================================================================
+' TST_Case_FailureAccumulatorDegradesSafely
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a failure list which cannot be grown degrades visibly instead of
+'   raising, and that the authoritative status outputs survive intact.
+'
+' WHY THIS EXISTS
+'   This is the regression for ICR-UI-P2-02. The accumulator is reached FROM
+'   error handlers, so an allocation failure inside it used to replace the very
+'   failure it was invoked to record, and could abort a pass designed to
+'   continue.
+'
+'   The case drives UI_RuntimeHandleFailure directly with local buffers rather
+'   than through the public facade. That is deliberate: the facade clears its
+'   result buffers at the start of every call, so a facade-level test cannot
+'   arrange for one entry to be recorded successfully and the NEXT one to fail,
+'   which is the sequence that exercises the truncation marker.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Records one failure normally and asserts it was listed.
+'   - Arms a one-shot growth failure and records a second failure.
+'   - Asserts the call did not raise, the count still advanced, the list did
+'     not grow, and a truncation marker was written into the existing slot.
+'   - Repeats the growth failure against an empty buffer and asserts the count
+'     still advances with no list and no error.
+'
+' ERROR POLICY
+'   - Raises on assertion failure, after disarming the seam.
+'
+' NOTES
+'   Uses the internal seam UI_InternalInjectFailureListGrowthFailure. It is
+'   Public only for same-project regression access; Option Private Module keeps
+'   it out of the external automation namespace.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Succeeded           As Boolean         'Result contract success flag
+    Dim FailureCount        As Long            'Result contract failure count
+    Dim FailureList         As Variant         'Result contract failure list
+    Dim MarkerText          As String          'Final entry after truncation
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_FailureAccumulatorDegradesSafely"
+    Const MARKER_PREFIX As String = "Diagnostics |"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that failure accumulation degrades instead of raising"
+
+    'Start from the documented empty result contract
+        Succeeded = True
+        UI_RuntimeClearResultBuffer FailureCount, FailureList, True
+
+'------------------------------------------------------------------------------
+' RECORD ONE FAILURE NORMALLY
+'------------------------------------------------------------------------------
+    'A healthy append is the precondition for the truncation case below
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageOne", "first failure detail"
+
+        TST_AssertBooleanEquals _
+            False, Succeeded, "FailureAccumulator.SucceededCleared"
+
+        TST_AssertTrue _
+            (FailureCount = 1), "FailureAccumulator.FirstCount"
+
+        TST_AssertTrue _
+            IsArray(FailureList), "FailureAccumulator.FirstListIsArray"
+
+        TST_AssertTrue _
+            (UBound(FailureList) = 1), "FailureAccumulator.FirstListBound"
+
+'------------------------------------------------------------------------------
+' FAIL THE NEXT GROWTH
+'------------------------------------------------------------------------------
+    'Arm the one-shot seam, then record a second failure. Nothing here may
+    'raise: the accumulator runs inside error handlers.
+        UI_InternalInjectFailureListGrowthFailure True
+
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageTwo", "second failure detail"
+
+'------------------------------------------------------------------------------
+' ASSERT THE COUNT SURVIVED
+'------------------------------------------------------------------------------
+    'The count is authoritative and must advance even when nothing was listed
+        TST_AssertTrue _
+            (FailureCount = 2), "FailureAccumulator.CountAdvancedDespiteGrowthFailure"
+
+'------------------------------------------------------------------------------
+' ASSERT THE LIST DID NOT GROW
+'------------------------------------------------------------------------------
+    'A silently short list is the outcome this case exists to rule out
+        TST_AssertTrue _
+            (UBound(FailureList) = 1), "FailureAccumulator.ListDidNotGrow"
+
+'------------------------------------------------------------------------------
+' ASSERT THE TRUNCATION WAS REPORTED
+'------------------------------------------------------------------------------
+    'The marker must occupy a slot that already existed, so that reporting the
+    'allocation failure did not itself require an allocation
+        MarkerText = CStr(FailureList(UBound(FailureList)))
+
+        TST_AssertTrue _
+            (Left$(MarkerText, Len(MARKER_PREFIX)) = MARKER_PREFIX), _
+            "FailureAccumulator.TruncationMarkerWritten"
+
+'------------------------------------------------------------------------------
+' FAIL A GROWTH WITH NO EXISTING SLOT
+'------------------------------------------------------------------------------
+    'With an empty buffer there is nowhere to write a marker without
+    'allocating. The count must still advance and nothing may raise.
+        Succeeded = True
+        UI_RuntimeClearResultBuffer FailureCount, FailureList, True
+
+        UI_InternalInjectFailureListGrowthFailure True
+
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageThree", "third failure detail"
+
+        TST_AssertBooleanEquals _
+            False, Succeeded, "FailureAccumulator.EmptyBufferSucceededCleared"
+
+        TST_AssertTrue _
+            (FailureCount = 1), "FailureAccumulator.EmptyBufferCountAdvanced"
+
+        TST_AssertTrue _
+            Not IsArray(FailureList), "FailureAccumulator.EmptyBufferListUnallocated"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Accumulation degraded visibly and never raised"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Disarm the seam whatever happened above
+        On Error Resume Next
+            UI_InternalInjectFailureListGrowthFailure False
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
 Private Sub TST_Case_TitleBarRoundTrip()
 
 '
@@ -3600,7 +5550,7 @@ Private Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
     Dim SavedErrSource      As String          'Captured assertion error source
     Dim SavedErrDescription As String          'Captured assertion description
 
-    Const PROC              As String = "TST_Case_TitleBarShowRecoversWithoutBaseline"
+    Const PROC As String = "TST_Case_TitleBarShowRecoversWithoutBaseline"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3707,6 +5657,605 @@ Err_Handler:
 
     'Hand the original failure to the pack handler
         Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
+
+'
+'==============================================================================
+' TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that restoring a snapshot writes the captured title-bar state to the
+'   window it was captured from, and leaves a different active window alone.
+'
+' WHY THIS EXISTS
+'   This is the direct regression for ICR-UI-P1-01. Before the fix the snapshot
+'   stored a Boolean with no record of its window and re-resolved
+'   Application.Hwnd on restore, so this sequence applied the anchor window's
+'   captured frame to the second window and reported success for it.
+'
+'   The assertion that matters is the negative one: the second window must be
+'   untouched. A test that only checked the anchor window would have passed
+'   against the defective build.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Creates a second workbook window.
+'   - Captures with the anchor window active and its title bar visible.
+'   - Hides the anchor title bar, then activates the second window.
+'   - Records the second window's frame state, then restores.
+'   - Asserts the anchor frame is restored and the second frame is unchanged.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup of the temporary workbook.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window whose frame is captured
+    Dim SecondWorkbook      As Workbook        'Temporary second workbook
+    Dim SecondWindow        As Window          'Window of the second workbook
+
+#If VBA7 Then
+    Dim AnchorHwnd          As LongPtr         'Top-level frame of the anchor
+    Dim SecondHwnd          As LongPtr         'Top-level frame of the second
+#Else
+    Dim AnchorHwnd          As Long            'Top-level frame of the anchor
+    Dim SecondHwnd          As Long            'Top-level frame of the second
+#End If
+
+    Dim SecondVisibleBefore As Boolean         'Second frame state before restore
+    Dim SecondVisibleAfter  As Boolean         'Second frame state after restore
+    Dim AnchorVisibleAfter  As Boolean         'Anchor frame state after restore
+
+    Dim OK                  As Boolean         'Structured result flag
+    Dim FailureCount        As Long            'Structured result failure count
+    Dim FailureList         As Variant         'Structured result failure list
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarSdiRestoreTargetsCapturedFrame"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that restore targets the captured frame under SDI"
+
+'------------------------------------------------------------------------------
+' PREPARE TWO TOP-LEVEL FRAMES
+'------------------------------------------------------------------------------
+    'Start from the current window and make sure its frame is visible
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 10, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        AnchorHwnd = Application.hWnd
+
+    'A second workbook gives a second top-level window under SDI
+        Set SecondWorkbook = Workbooks.Add
+        Set SecondWindow = SecondWorkbook.Windows(1)
+
+        SecondWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        SecondHwnd = Application.hWnd
+
+    'Without two distinct frames the case proves nothing, so say so rather than
+    'passing vacuously. A host that reports one handle for both windows is not
+    'running the interface this case exists to exercise.
+        If SecondHwnd = AnchorHwnd Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 11, _
+                PROC, _
+                "both workbook windows report the same top-level handle; " & _
+                "this host is not running the Single Document Interface " & _
+                "and the case cannot be evaluated"
+        End If
+
+'------------------------------------------------------------------------------
+' CAPTURE WITH THE ANCHOR ACTIVE
+'------------------------------------------------------------------------------
+    'Return to the anchor and capture its frame while it is visible
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess OK, FailureCount, FailureList, _
+            "SdiRestoreTargetsCapturedFrame.Capture"
+
+'------------------------------------------------------------------------------
+' DIVERGE THE TWO FRAMES
+'------------------------------------------------------------------------------
+    'Hide the anchor frame, so restoration has something to put back
+        UI_SetExcelUI TitleBar:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertBooleanEquals _
+            False, _
+            TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC), _
+            "SdiRestoreTargetsCapturedFrame.AnchorHiddenBeforeRestore"
+
+'------------------------------------------------------------------------------
+' ACTIVATE THE OTHER FRAME
+'------------------------------------------------------------------------------
+    'Make a different window active, which is the whole point of the case
+        SecondWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'Record the second frame exactly as it stands before restoration
+        SecondVisibleBefore = TST_TitleBarVisibleForHwndOrRaise(SecondHwnd, PROC)
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+    'Restore while the WRONG window is active
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertResultSuccess OK, FailureCount, FailureList, _
+            "SdiRestoreTargetsCapturedFrame.Restore"
+
+'------------------------------------------------------------------------------
+' ASSERT THE CAPTURED FRAME WAS RESTORED
+'------------------------------------------------------------------------------
+    'The anchor frame must be visible again, even though it was not active
+        AnchorVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
+
+        TST_AssertBooleanEquals _
+            True, _
+            AnchorVisibleAfter, _
+            "SdiRestoreTargetsCapturedFrame.AnchorRestored"
+
+'------------------------------------------------------------------------------
+' ASSERT THE ACTIVE FRAME WAS NOT TOUCHED
+'------------------------------------------------------------------------------
+    'This is the assertion the defective build failed: the active window must
+    'not receive another window's captured state
+        SecondVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(SecondHwnd, PROC)
+
+        TST_AssertBooleanEquals _
+            SecondVisibleBefore, _
+            SecondVisibleAfter, _
+            "SdiRestoreTargetsCapturedFrame.SecondWindowUntouched"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Captured frame restored; the active frame was left unchanged"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Release the snapshot and the temporary workbook before leaving
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+            TST_SafeCloseWorkbook SecondWorkbook
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
+
+'
+'==============================================================================
+' TST_Case_TitleBarCapturedFrameClosedIsReported
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that restoring a snapshot whose captured title-bar window has since
+'   closed reports a TitleBar failure and writes nothing.
+'
+' WHY THIS EXISTS
+'   Reporting the miss is the other half of ICR-UI-P1-01. A closed captured
+'   frame must not silently fall back to whatever window is active: that is the
+'   same misdirection, reached by a different route.
+'
+'   The surviving window's frame is asserted unchanged for exactly that reason.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Creates a second workbook and captures with its window active.
+'   - Closes that workbook, destroying the captured frame.
+'   - Restores and asserts a TitleBar failure is reported.
+'   - Asserts the surviving window's frame is unchanged.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup of the temporary workbook.
+'
+' NOTES
+'   Closing the captured window also invalidates its captured Window entry, so
+'   the structured result legitimately carries more than one failure. The
+'   assertion therefore looks for a TitleBar entry within the list rather than
+'   requiring it to be the only one.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window that survives the case
+    Dim DoomedWorkbook      As Workbook        'Temporary workbook to be closed
+    Dim DoomedWindow        As Window          'Window whose frame is captured
+
+#If VBA7 Then
+    Dim AnchorHwnd          As LongPtr         'Top-level frame of the anchor
+#Else
+    Dim AnchorHwnd          As Long            'Top-level frame of the anchor
+#End If
+
+    Dim AnchorVisibleBefore As Boolean         'Anchor frame before restore
+    Dim AnchorVisibleAfter  As Boolean         'Anchor frame after restore
+
+    Dim OK                  As Boolean         'Structured result flag
+    Dim FailureCount        As Long            'Structured result failure count
+    Dim FailureList         As Variant         'Structured result failure list
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarCapturedFrameClosedIsReported"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a closed captured frame is reported"
+
+'------------------------------------------------------------------------------
+' PREPARE THE SURVIVING FRAME
+'------------------------------------------------------------------------------
+    'Hold the window that must remain untouched
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 20, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        AnchorHwnd = Application.hWnd
+
+'------------------------------------------------------------------------------
+' CAPTURE THE FRAME THAT WILL BE DESTROYED
+'------------------------------------------------------------------------------
+    'Capture with the temporary window active, so the snapshot names its frame
+        Set DoomedWorkbook = Workbooks.Add
+        Set DoomedWindow = DoomedWorkbook.Windows(1)
+
+        DoomedWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess OK, FailureCount, FailureList, _
+            "TitleBarCapturedFrameClosed.Capture"
+
+'------------------------------------------------------------------------------
+' DESTROY THE CAPTURED FRAME
+'------------------------------------------------------------------------------
+    'Close the captured window; the snapshot now names a frame that is gone
+        TST_SafeCloseWorkbook DoomedWorkbook
+
+        Set DoomedWindow = Nothing
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'Record the surviving frame exactly as it stands before restoration
+        AnchorVisibleBefore = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+    'Restoration must refuse the title bar rather than redirect it
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT THE MISS IS REPORTED
+'------------------------------------------------------------------------------
+    'A TitleBar entry must appear in the ordered failure list
+        TST_AssertFailureListContainsPrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="TitleBar", _
+            AssertionName:="TitleBarCapturedFrameClosed.Reported"
+
+'------------------------------------------------------------------------------
+' ASSERT THE SURVIVING FRAME WAS NOT TOUCHED
+'------------------------------------------------------------------------------
+    'Nothing may be written when the captured frame cannot be proven present
+        AnchorVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
+
+        TST_AssertBooleanEquals _
+            AnchorVisibleBefore, _
+            AnchorVisibleAfter, _
+            "TitleBarCapturedFrameClosed.SurvivorUntouched"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Closed captured frame was reported and no state was applied"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Release the snapshot and any surviving temporary workbook
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+            TST_SafeCloseWorkbook DoomedWorkbook
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarFrameRefreshDebtRetried()
+
+'
+'==============================================================================
+' TST_Case_TitleBarFrameRefreshDebtRetried
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a style write whose frame refresh failed is recorded as owed and
+'   retried on the next call, instead of being short-circuited as a no-op.
+'
+' WHY THIS EXISTS
+'   This is the regression for ICR-UI-P2-03. After a failed refresh the style
+'   already matches the request, so the no-op test would otherwise fire and
+'   report success over a frame Windows never re-measured. That false success is
+'   invisible from the outside, which is why the module exposes a debt-query
+'   seam: without it this case could only assert that the second call succeeded,
+'   which it would also do if the debt had simply been forgotten.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Clears the frame-state registry so the case starts from a known state.
+'   - Arms a one-shot frame-refresh failure.
+'   - Requests a hide and asserts it reports failure.
+'   - Asserts a refresh is recorded as owed for the window.
+'   - Repeats the request and asserts it succeeds and clears the debt.
+'
+' ERROR POLICY
+'   - Raises after best-effort restoration of the frame.
+'
+' NOTES
+'   Uses the internal seams UI_InternalInjectFrameRefreshFailure and
+'   UI_InternalIsFrameRefreshPending. They are Public only for same-project
+'   regression access; Option Private Module keeps them out of the external
+'   automation namespace.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim TargetHwnd          As LongPtr         'Frame under test
+#Else
+    Dim TargetHwnd          As Long            'Frame under test
+#End If
+
+    Dim FirstAttemptOK      As Boolean         'Result of the injected-failure call
+    Dim SecondAttemptOK     As Boolean         'Result of the retry call
+    Dim Msg                 As String          'Diagnostic buffer
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarFrameRefreshDebtRetried"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a failed frame refresh is retried"
+
+'------------------------------------------------------------------------------
+' PREPARE A KNOWN FRAME STATE
+'------------------------------------------------------------------------------
+    'Start from a visible frame and an empty registry
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_InternalResetTitleBarBaseline
+
+        TargetHwnd = Application.hWnd
+
+        If TargetHwnd = 0 Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 30, _
+                PROC, _
+                "no Excel window handle is available"
+        End If
+
+'------------------------------------------------------------------------------
+' FAIL THE FRAME REFRESH
+'------------------------------------------------------------------------------
+    'Arm the one-shot seam, then request a hide
+        UI_InternalInjectFrameRefreshFailure True
+
+        FirstAttemptOK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=False, _
+            FailMsg:=Msg)
+
+    'The style write succeeded and the repaint did not, so this must report
+    'failure rather than success
+        TST_AssertBooleanEquals _
+            False, _
+            FirstAttemptOK, _
+            "TitleBarFrameRefreshDebt.FirstAttemptReportsFailure"
+
+'------------------------------------------------------------------------------
+' ASSERT THE DEBT WAS RECORDED
+'------------------------------------------------------------------------------
+    'Without this the next call cannot know a repaint is still owed
+        TST_AssertBooleanEquals _
+            True, _
+            UI_InternalIsFrameRefreshPending(TargetHwnd), _
+            "TitleBarFrameRefreshDebt.DebtRecorded"
+
+'------------------------------------------------------------------------------
+' RETRY
+'------------------------------------------------------------------------------
+    'The same request again. The style already matches, so a build without the
+    'debt would short-circuit here and report a false success.
+        SecondAttemptOK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=False, _
+            FailMsg:=Msg)
+
+        TST_AssertBooleanEquals _
+            True, _
+            SecondAttemptOK, _
+            "TitleBarFrameRefreshDebt.RetrySucceeds"
+
+'------------------------------------------------------------------------------
+' ASSERT THE DEBT WAS SETTLED
+'------------------------------------------------------------------------------
+    'A confirmed repaint is the only thing that may clear the debt
+        TST_AssertBooleanEquals _
+            False, _
+            UI_InternalIsFrameRefreshPending(TargetHwnd), _
+            "TitleBarFrameRefreshDebt.DebtCleared"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Failed refresh was recorded as owed and retried on the next call"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Disarm the seam and put the frame back, whatever happened above
+        On Error Resume Next
+            UI_InternalInjectFrameRefreshFailure False
+            UI_SetExcelUI TitleBar:=UI_Show
+        On Error GoTo 0
+
+    'Raise the captured failure after restoration when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
 
 End Sub
 
@@ -5397,6 +7946,205 @@ End Sub
 '------------------------------------------------------------------------------
 '
 
+#If VBA7 Then
+Private Function TST_TitleBarVisibleForHwndOrRaise( _
+    ByVal TargetHwnd As LongPtr, _
+    ByVal CallerProc As String) As Boolean
+#Else
+Private Function TST_TitleBarVisibleForHwndOrRaise( _
+    ByVal TargetHwnd As Long, _
+    ByVal CallerProc As String) As Boolean
+#End If
+
+'
+'==============================================================================
+' TST_TitleBarVisibleForHwndOrRaise
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Read title-bar visibility for one explicitly supplied top-level window, and
+'   raise when it cannot be read.
+'
+' WHY THIS EXISTS
+'   TST_TryGetTitleBarVisible reads through Application.Hwnd, which under the
+'   Single Document Interface names whichever window is active. A multi-window
+'   case must be able to inspect a specific frame while a different one is
+'   active, or it cannot tell the two apart, which is the entire point of the
+'   cases that call this.
+'
+'   It raises rather than returning a flag because an unreadable frame makes the
+'   surrounding assertion meaningless; reporting False would silently weaken the
+'   case into one that could pass against a defective build.
+'
+' INPUTS
+'   TargetHwnd
+'     Top-level window to read.
+'
+'   CallerProc
+'     Calling case name, used as the error source.
+'
+' RETURNS
+'   Boolean
+'     TRUE when WS_CAPTION is set on the supplied window.
+'
+' ERROR POLICY
+'   - Raises when the style cannot be read.
+'
+' DEPENDENCIES
+'   - TST_TryGetWindowStyle
+'
+' CALLED FROM
+'   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+'   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim StyleValue          As LongPtr         'Live GWL_STYLE value
+#Else
+    Dim StyleValue          As Long            'Live GWL_STYLE value
+#End If
+
+    Dim FailMsg             As String          'Diagnostic returned by the read
+
+'------------------------------------------------------------------------------
+' READ STYLE
+'------------------------------------------------------------------------------
+    'Read the live style for the supplied window, never the active one
+        If Not TST_TryGetWindowStyle(TargetHwnd, StyleValue, FailMsg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 40, _
+                CallerProc, _
+                "unable to read the window style for the supplied " & _
+                "frame: " & FailMsg
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN RESULT
+'------------------------------------------------------------------------------
+    'Visibility is carried by the caption bit alone
+        TST_TitleBarVisibleForHwndOrRaise = _
+            ((StyleValue And TEST_WS_CAPTION) <> 0)
+
+End Function
+
+
+Private Sub TST_AssertFailureListContainsPrefix( _
+    ByVal Succeeded As Boolean, _
+    ByVal FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal ExpectedPrefix As String, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+' TST_AssertFailureListContainsPrefix
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert a structured result reported failure and that at least one ordered
+'   entry begins with the expected stage prefix.
+'
+' WHY THIS EXISTS
+'   TST_AssertSingleFailurePrefix requires the entry to be the only one. Closing
+'   a captured window legitimately produces more than one failure, because the
+'   window identity and the title-bar frame are both lost by the same act.
+'   Requiring exactly one entry there would assert a contract the component does
+'   not make.
+'
+' INPUTS
+'   Succeeded
+'     Structured result flag; must be FALSE.
+'
+'   FailureCount
+'     Structured result failure count; must be at least one.
+'
+'   FailureList
+'     Ordered failure entries.
+'
+'   ExpectedPrefix
+'     Stage prefix at least one entry must start with.
+'
+'   AssertionName
+'     Diagnostic label for the raised error.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises a descriptive assertion failure.
+'
+' CALLED FROM
+'   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the failure entries
+    Dim EntryText           As String          'One failure entry as text
+    Dim Found               As Boolean         'TRUE once a match is seen
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE WAS REPORTED
+'------------------------------------------------------------------------------
+    'A success here would mean the component wrote state it could not verify
+        If Succeeded Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 50, _
+                AssertionName, _
+                "expected a structured failure but the operation reported success"
+        End If
+
+        If FailureCount < 1 Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 51, _
+                AssertionName, _
+                "expected at least one ordered failure entry but " & _
+                "FailureCount was " & CStr(FailureCount)
+        End If
+
+        If Not IsArray(FailureList) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 52, _
+                AssertionName, _
+                "expected an ordered failure list but no array was returned"
+        End If
+
+'------------------------------------------------------------------------------
+' SCAN FOR THE EXPECTED STAGE
+'------------------------------------------------------------------------------
+    'Any entry carrying the prefix satisfies the contract under test
+        For ScanIdx = LBound(FailureList) To UBound(FailureList)
+
+            EntryText = CStr(FailureList(ScanIdx))
+
+            If Left$(EntryText, Len(ExpectedPrefix)) = ExpectedPrefix Then
+                Found = True
+                Exit For
+            End If
+
+        Next ScanIdx
+
+        If Not Found Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 53, _
+                AssertionName, _
+                "no ordered failure entry began with the expected stage " & _
+                "prefix " & ExpectedPrefix
+        End If
+
+End Sub
+
+
 Private Sub TST_Log( _
     ByVal ProcName As String, _
     ByVal Stage As String, _
@@ -5801,6 +8549,3 @@ Private Function TST_BuildRuntimeErrorText() As String
             IIf(ErrLine <> 0, " | Line: " & CStr(ErrLine), vbNullString)
 
 End Function
-
-
-

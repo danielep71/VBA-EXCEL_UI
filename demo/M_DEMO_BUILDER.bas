@@ -4070,6 +4070,3 @@ Private Sub DEMO_AddOneFormsCheckBox( _
         Cb.PrintObject = True
 
 End Sub
-
-
-

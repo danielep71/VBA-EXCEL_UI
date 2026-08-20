@@ -33,9 +33,21 @@
 #   procedure names in diff hunk headers, run once per clone:
 #
 #       git config diff.vba.xfuncname \
-#         "^[ \t]*((Public|Private|Friend)[ \t]+)?(Static[ \t]+)?(Sub|Function|Property[ \t]+(Get|Let|Set))[ \t]+.*$"
+#         "^([ \t]*(Public|Private|Friend)?[ \t]*(Static[ \t]+)?(Sub|Function|Property[ \t]+(Get|Let|Set))[ \t]+[A-Za-z_].*)$"
 #
-#   If it is not defined, Git silently falls back to default hunk headers.
+#   The outer capture group is load-bearing. Git renders capture group 1 when
+#   the pattern has one, so a regex that groups only the visibility keyword
+#   produces hunk headers reading "Public" instead of the signature. Wrapping
+#   the whole line makes group 1 the entire declaration:
+#
+#       @@ -6,7 +6,7 @@ Public Sub Alpha()
+#
+#   rather than:
+#
+#       @@ -6,7 +6,7 @@ Public
+#
+#   If the driver is not defined, Git silently falls back to default hunk
+#   headers. Nothing breaks; diffs are merely harder to read.
 #==============================================================================
 
 
@@ -135,18 +147,45 @@ CITATION.cff    text eol=lf
 *.xltm  office-doc
 *.xlam  office-doc
 *.xla   office-doc
+*.xlw   office-doc
+*.xll   opaque
+*.thmx  office-doc
 
 *.doc   office-doc
 *.docx  office-doc
 *.docm  office-doc
 *.dotx  office-doc
+*.dotm  office-doc
 *.ppt   office-doc
 *.pptx  office-doc
 *.pptm  office-doc
 *.potx  office-doc
+*.potm  office-doc
+*.ppsx  office-doc
+*.ppsm  office-doc
 
 *.accdb office-doc
+*.accde office-doc
+*.accdr office-doc
 *.mdb   office-doc
+*.mde   office-doc
+*.ade   office-doc
+
+
+#------------------------------------------------------------------------------
+# OFFICE LOCK FILES
+#
+# Office writes an owner file beside any open document. These are ignored by
+# .gitignore and must never be tracked, but the rule is stated here as well so
+# that a lock file which reaches the index by accident cannot be normalized,
+# line-merged, or counted as a language.
+#
+# tools/check_repo.py fails the build if one is ever tracked.
+#------------------------------------------------------------------------------
+
+~$*        opaque
+*.laccdb   opaque
+*.ldb      opaque
 
 
 #------------------------------------------------------------------------------
@@ -157,10 +196,15 @@ CITATION.cff    text eol=lf
 *.rar   opaque
 *.gz    opaque
 *.tgz   opaque
+*.bz2   opaque
+*.xz    opaque
+*.zst   opaque
 *.cab   opaque
 *.msi   opaque
 *.exe   opaque
 *.dll   opaque
+*.so    opaque
+*.dylib opaque
 *.ocx   opaque
 *.tlb   opaque
 
@@ -178,13 +222,20 @@ CITATION.cff    text eol=lf
 *.ico   opaque
 *.tif   opaque
 *.tiff  opaque
+*.avif  opaque
+*.heic  opaque
 *.pdf   opaque
 *.mp4   opaque
+*.mov   opaque
+*.webm  opaque
+*.mp3   opaque
+*.wav   opaque
 *.gifv  opaque
 *.ttf   opaque
 *.otf   opaque
 *.woff  opaque
 *.woff2 opaque
+*.eot   opaque
 
 
 #------------------------------------------------------------------------------

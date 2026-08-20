@@ -38,7 +38,37 @@
 #------------------------------------------------------------------------------
 # Keep demo source modules in Git, but publish tested macro-enabled workbooks
 # only as GitHub Release assets.
-demo/*.xlsm
+# Any macro-enabled or binary Excel file, anywhere in the tree. Scoping this to
+# demo/ was too narrow: a workbook saved at the repository root, in test/, or
+# with a different extension was silently trackable while the stated policy said
+# otherwise. tools/check_repo.py fails the build if one is tracked, so the two
+# now agree rather than the gate catching what this file let through.
+*.xlsm
+*.xlsb
+*.xltm
+*.xlam
+*.xla
+*.xll
+*.xls
+*.xlt
+*.xlsx
+*.xltx
+*.xlw
+
+# Macro-enabled documents from adjacent Office applications, on the same basis.
+*.docm
+*.dotm
+*.pptm
+*.potm
+*.ppsm
+*.accdb
+*.accde
+*.mdb
+*.mde
+
+# Re-include here if a fixture ever genuinely belongs in version control. Doing
+# it by explicit path keeps the exception visible in review.
+# !test/fixtures/example.xlsm
 
 # Optional local staging area for release binaries/checksums.
 release-assets/
@@ -51,13 +81,24 @@ ehthumbs.db
 ehthumbs_vista.db
 desktop.ini
 $RECYCLE.BIN/
+System Volume Information/
 *.stackdump
+nul
 
 .DS_Store
 .AppleDouble
 .LSOverride
 Icon?
 ._*
+.Trashes
+.Spotlight-V100
+.fseventsd
+
+# Linux desktop metadata, which appears when a tree is inspected from WSL or a
+# network share.
+.directory
+.fuse_hidden*
+.nfs*
 
 #------------------------------------------------------------------------------
 # EDITOR / IDE LOCAL SETTINGS
@@ -67,6 +108,10 @@ Icon?
 .vs/
 .history/
 *.code-workspace
+.claude/
+.cursor/
+.aider*
+.continue/
 *.swp
 *.swo
 *~
@@ -74,6 +119,18 @@ Icon?
 # Notepad++ and similar editor backup/session files
 *.nppBackup
 session.xml
+
+#------------------------------------------------------------------------------
+# MERGE AND PATCH ARTIFACTS
+#
+# A conflicted merge of an exported module leaves a .orig beside it. That file
+# is large, looks importable, and is easy to commit by accident.
+#------------------------------------------------------------------------------
+
+*.orig
+*.rej
+*.patch.tmp
+
 
 #------------------------------------------------------------------------------
 # LOGS / DIAGNOSTIC DUMPS
@@ -94,6 +151,14 @@ tmp/
 test-output/
 test-results/
 coverage/
+.coverage
+.tox/
+
+# Release-certification evidence. Test_EXCEL_UI_RunReleaseCertification writes
+# these to the temporary folder; copies pasted into the working tree are
+# transient. The verdict that matters is recorded in CHANGELOG.md.
+EXCEL_UI_certification_*.json
+EXCEL_UI_certification_*.txt
 
 #------------------------------------------------------------------------------
 # LOCAL ENVIRONMENT / SECRET MATERIAL
@@ -112,6 +177,9 @@ coverage/
 #------------------------------------------------------------------------------
 # Release, validation, or repository-maintenance scripts may be added later.
 # Source scripts themselves remain trackable.
+node_modules/
+.ipynb_checkpoints/
+
 __pycache__/
 *.py[cod]
 *.egg-info/

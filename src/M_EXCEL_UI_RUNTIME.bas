@@ -75,22 +75,53 @@ Option Private Module
 '   - Ribbon control uses Application.ExecuteExcel4Macro and is therefore
 '     best effort and dependent on legacy macro support in the host.
 '
+' DIAGNOSTIC DURABILITY
+'   The failure accumulator is called FROM error handlers. Anything it can do
+'   that raises therefore destroys the very failure it was invoked to record,
+'   and turns a documented fail-soft contract into an unexpected error for the
+'   whole operation.
+'
+'   It is consequently structured so that the most important outputs are the
+'   ones that cannot fail:
+'
+'       Succeeded     a Boolean assignment; cannot fail
+'       FailureCount  a Long increment; cannot fail
+'       FailureList   an allocation; can fail under memory pressure or when the
+'                     buffer holds something other than the expected array
+'
+'   FailureCount is therefore authoritative. FailureList is best effort and can
+'   hold fewer entries than the count, but never silently: a list that could not
+'   be grown carries a truncation marker written into a slot that already
+'   exists, so no allocation is required to report that allocation failed.
+'
 ' NOTES
 '   - VBA's And and Or are not short-circuit: both operands are always
 '     evaluated. Guards whose right operand can fault must be nested.
-'   - UI_RuntimeAddFailure grows the failure list with ReDim Preserve. The
-'     array bound and FailureCount are kept in step by construction; see the
-'     procedure notes.
+'   - UI_RuntimeAddFailure grows the failure list with ReDim Preserve. Growth
+'     is attempted, not assumed; see DIAGNOSTIC DURABILITY above.
 '
 ' UPDATED
+'   2026-08-19 - Failure accumulation made non-raising, so a diagnostic failure
+'                can no longer replace the failure being diagnosed. Fixes
+'                ICR-UI-P2-02.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.1.0
+'   1.1.1
 '==============================================================================
+
+
+'==============================================================================
+' PRIVATE MODULE STATE
+'==============================================================================
+
+'Regression seam. When True the next failure-list growth reports failure without
+'allocating, so the diagnostic-degradation path can be exercised without a way
+'to exhaust memory on demand.
+Private m_InjectFailureListGrowthFailure As Boolean
 
 
 Public Sub UI_RuntimeHandleFailure( _
@@ -147,7 +178,9 @@ Public Sub UI_RuntimeHandleFailure( _
 '   - Emits one Immediate Window line when logging is requested.
 '
 ' ERROR POLICY
-'   - Does not raise.
+'   - Does not raise, under any circumstances. This is a hard requirement, not
+'     a best effort: the procedure is called from error handlers.
+'   - Clears the success flag before anything that can fail is attempted.
 '
 ' DEPENDENCIES
 '   - UI_RuntimeAddFailure
@@ -168,6 +201,18 @@ Public Sub UI_RuntimeHandleFailure( _
 '
 
 '------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'This procedure runs inside the caller's error handler. Nothing it does may
+    'propagate, or the failure being recorded is replaced by the failure to
+    'record it.
+        On Error GoTo Err_Handler
+
+    'Mark the operation unsuccessful FIRST. It is the one output that cannot
+    'fail, and the one a caller must never be denied.
+        Succeeded = False
+
+'------------------------------------------------------------------------------
 ' RECORD FAILURE
 '------------------------------------------------------------------------------
     'Append the failure to the standard result contract
@@ -186,6 +231,22 @@ Public Sub UI_RuntimeHandleFailure( _
         If LogFailures Then
             UI_RuntimeLogFailure ProcName, Stage, Detail
         End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'A diagnostic path must never raise into an error handler. The success flag
+    'was already cleared above, so the caller still learns that the operation
+    'failed even when nothing else could be recorded.
+        Resume Safe_Exit
 
 End Sub
 
@@ -265,22 +326,35 @@ Private Sub UI_RuntimeAddFailure( _
 ' UI_RuntimeAddFailure
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Appends one failure to the standard Boolean / count / list result contract.
+'   Appends one failure to the standard Boolean / count / list result contract,
+'   without ever raising.
 '
 ' WHY THIS EXISTS
-'   The three result outputs must move together. Updating them in one place
-'   prevents a caller from seeing a False success flag with a zero count, or a
-'   count that disagrees with the number of list entries.
+'   The three result outputs must move together, and updating them in one place
+'   prevents a caller from seeing a False success flag with a zero count.
+'
+'   The three are not equally reliable, however, and pretending otherwise was a
+'   defect. Clearing a Boolean and incrementing a Long cannot fail. Growing an
+'   array can: under memory pressure, or when the buffer holds something other
+'   than the expected array. Because this procedure is reached from error
+'   handlers, a raise here does not merely lose one diagnostic entry - it
+'   replaces the original failure with a failure to record it, and can abort a
+'   pass that was designed to continue.
+'
+'   The order below is therefore deliberate: everything that cannot fail
+'   happens before anything that can.
 '
 ' INPUTS
 '   Succeeded
-'     ByRef success flag. Set to False.
+'     ByRef success flag. Set to False before any fallible work is attempted.
 '
 '   FailureCount
-'     ByRef running failure count. Incremented before the list is sized.
+'     ByRef running failure count. Incremented unconditionally, because a
+'     failure occurred whether or not it could be described.
 '
 '   FailureList
-'     ByRef failure-list buffer. Grown by one entry when captured.
+'     ByRef failure-list buffer. Grown by one entry when captured and when
+'     growth succeeds.
 '
 '   CaptureFailureList
 '     True when FailureList should be populated.
@@ -294,25 +368,293 @@ Private Sub UI_RuntimeAddFailure( _
 ' BEHAVIOR
 '   - Marks the operation unsuccessful.
 '   - Increments the failure count.
-'   - Grows the 1-based String array by one and writes the formatted entry.
+'   - Composes the entry text defensively, degrading to Stage alone and then to
+'     a fixed marker rather than failing.
+'   - Attempts to grow the list; on failure marks the list as truncated using a
+'     slot that already exists, which needs no allocation.
 '
 ' ERROR POLICY
-'   - Does not raise during normal operation.
+'   - Does not raise, under any circumstances.
+'   - Diagnostic degradation is reported in the list rather than hidden.
 '
 ' DEPENDENCIES
-'   None.
+'   - UI_RuntimeTryAppendFailureEntry
+'   - UI_RuntimeMarkFailureListTruncated
 '
 ' CALLED FROM
 '   - UI_RuntimeHandleFailure
 '
 ' NOTES
-'   FailureCount is incremented before the array is sized, so the new element
-'   index and the new upper bound are the same value by construction. The
-'   buffers are always cleared together by UI_RuntimeClearResultBuffer, which
-'   is what keeps the count and the array bound in step.
+'   FailureCount is authoritative and FailureList is best effort. The list can
+'   therefore hold fewer entries than the count, but never silently: a
+'   truncation marker is written whenever growth failed. The buffers are always
+'   cleared together by UI_RuntimeClearResultBuffer.
 '
 ' UPDATED
-'   2026-08-18
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim EntryText           As String          'Composed "Stage | Detail" entry
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' UPDATE STATUS
+'------------------------------------------------------------------------------
+    'Mark the overall operation unsuccessful. This assignment cannot fail and
+    'is the single output a caller must never be denied.
+        Succeeded = False
+
+    'Advance the ordered failure position. A failure occurred whether or not it
+    'can be described below, so the count is incremented unconditionally.
+        FailureCount = FailureCount + 1
+
+'------------------------------------------------------------------------------
+' COMPOSE ENTRY TEXT
+'------------------------------------------------------------------------------
+    'Concatenation allocates and can therefore fail on a pathological Detail.
+    'Degrade to the stage name, and then to a fixed marker, rather than losing
+    'the entry altogether.
+        On Error Resume Next
+
+        EntryText = Stage & " | " & Detail
+
+        If Err.Number <> 0 Then
+            Err.Clear
+            EntryText = Stage
+        End If
+
+        If Err.Number <> 0 Or Len(EntryText) = 0 Then
+            Err.Clear
+            EntryText = "Unknown | diagnostic text unavailable"
+        End If
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' APPEND DIAGNOSTIC ENTRY
+'------------------------------------------------------------------------------
+    'Grow and write the failure list only when the caller requested one
+        If CaptureFailureList Then
+
+            'A list that cannot grow must still say so. Marking an existing
+            'slot needs no allocation, which is what makes the report survive
+            'the very condition that caused the growth to fail.
+                If Not UI_RuntimeTryAppendFailureEntry( _
+                    FailureList:=FailureList, _
+                    EntryText:=EntryText) Then
+
+                    UI_RuntimeMarkFailureListTruncated _
+                        FailureList:=FailureList, _
+                        FailureCount:=FailureCount
+                End If
+
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'The status outputs were already set above, so the caller still learns that
+    'the operation failed even when nothing could be recorded about it.
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Function UI_RuntimeTryAppendFailureEntry( _
+    ByRef FailureList As Variant, _
+    ByVal EntryText As String) _
+    As Boolean
+'
+'==============================================================================
+' UI_RuntimeTryAppendFailureEntry
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Grows the failure-list buffer by one element and writes one entry into it.
+'
+' WHY THIS EXISTS
+'   Isolating the allocation is what lets the caller treat it as fallible. It
+'   also removes an assumption the previous implementation made: that the
+'   buffer either was Empty or already held a String array whose bound agreed
+'   with FailureCount. Neither is guaranteed. A buffer holding a Variant array,
+'   a scalar, or an array whose bound has drifted would previously raise from
+'   inside an error handler.
+'
+'   The new element index is taken from the array itself rather than from the
+'   failure count, so the list stays internally consistent even if the count
+'   and the buffer have diverged.
+'
+' INPUTS
+'   FailureList
+'     ByRef buffer. Replaced with the grown array on success, untouched on
+'     failure.
+'
+'   EntryText
+'     Pre-composed ordered entry to write.
+'
+' RETURNS
+'   Boolean
+'     True  => the entry was appended and published.
+'     False => the buffer could not be grown; it is left as it was.
+'
+' BEHAVIOR
+'   - Starts a new 1-based array when the buffer is Empty or unusable.
+'   - Extends an existing 1-based array by one element otherwise.
+'   - Publishes the grown array only after the write has succeeded.
+'
+' ERROR POLICY
+'   - Does not raise. Any failure is reported as False.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_RuntimeAddFailure
+'
+' NOTES
+'   A regression seam can force this to report failure; see
+'   UI_InternalInjectFailureListGrowthFailure.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Arr()               As String          'Working failure-list buffer
+    Dim NewIndex            As Long            'Index the entry is written to
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Assume failure until the entry has been published
+        UI_RuntimeTryAppendFailureEntry = False
+
+'------------------------------------------------------------------------------
+' CONSUME REGRESSION SEAM
+'------------------------------------------------------------------------------
+    'When armed, report failure without allocating. The seam is one-shot, so a
+    'test that forgets to disarm it cannot suppress diagnostics indefinitely.
+        If m_InjectFailureListGrowthFailure Then
+            m_InjectFailureListGrowthFailure = False
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' GROW BUFFER
+'------------------------------------------------------------------------------
+    'Start a fresh array whenever the buffer holds nothing usable. Treating an
+    'unusable buffer as empty is deliberate: losing earlier entries is bad, but
+    'raising from inside an error handler is worse.
+        If Not IsArray(FailureList) Then
+            ReDim Arr(1 To 1)
+            NewIndex = 1
+        Else
+            Arr = FailureList
+            NewIndex = UBound(Arr) + 1
+            ReDim Preserve Arr(1 To NewIndex)
+        End If
+
+'------------------------------------------------------------------------------
+' WRITE ENTRY
+'------------------------------------------------------------------------------
+    'Write the ordered entry, then publish the grown array to the caller
+        Arr(NewIndex) = EntryText
+
+        FailureList = Arr
+
+        UI_RuntimeTryAppendFailureEntry = True
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Leave the caller's buffer exactly as it was found
+        UI_RuntimeTryAppendFailureEntry = False
+
+End Function
+
+
+Private Sub UI_RuntimeMarkFailureListTruncated( _
+    ByRef FailureList As Variant, _
+    ByVal FailureCount As Long)
+'
+'==============================================================================
+' UI_RuntimeMarkFailureListTruncated
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records, inside the failure list itself, that the list could not be grown
+'   and no longer describes every counted failure.
+'
+' WHY THIS EXISTS
+'   A list that silently stops growing is worse than a short one, because a
+'   caller comparing FailureCount with the number of entries has no way to tell
+'   a truncated list from a bug in the count.
+'
+'   The marker is written into a slot that ALREADY EXISTS. That is the whole
+'   point: the report has to survive the condition that caused the growth to
+'   fail, so it must not itself allocate. Overwriting the final entry costs one
+'   diagnostic and buys the knowledge that diagnostics were lost, which is the
+'   better trade.
+'
+' INPUTS
+'   FailureList
+'     ByRef buffer to mark. Left untouched when it holds no usable slot.
+'
+'   FailureCount
+'     Authoritative failure count, reported in the marker text.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Overwrites the last existing element with the truncation marker.
+'   - Does nothing when the buffer holds no array to write into.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_RuntimeAddFailure
+'
+' NOTES
+'   The marker text is a literal joined to one CStr call. If even that cannot
+'   be composed the procedure leaves the list alone rather than raising, and
+'   FailureCount remains the caller's signal that failures occurred.
+'
+' UPDATED
+'   2026-08-19
 '==============================================================================
 '
 
@@ -322,35 +664,104 @@ Private Sub UI_RuntimeAddFailure( _
     Dim Arr()               As String          'Working failure-list buffer
 
 '------------------------------------------------------------------------------
-' UPDATE STATUS
+' INITIALIZE
 '------------------------------------------------------------------------------
-    'Mark the overall operation unsuccessful
-        Succeeded = False
-
-    'Advance the ordered failure position
-        FailureCount = FailureCount + 1
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
 
 '------------------------------------------------------------------------------
-' APPEND DIAGNOSTIC ENTRY
+' VALIDATE BUFFER
 '------------------------------------------------------------------------------
-    'Grow and write the failure list only when the caller requested one
-        If CaptureFailureList Then
-
-            'Create the first element, or extend the existing array by one
-                If IsEmpty(FailureList) Then
-                    ReDim Arr(1 To 1)
-                Else
-                    Arr = FailureList
-                    ReDim Preserve Arr(1 To FailureCount)
-                End If
-
-            'Write the ordered "Stage | Detail" entry
-                Arr(FailureCount) = Stage & " | " & Detail
-
-            'Publish the grown array back to the caller
-                FailureList = Arr
-
+    'Without an existing slot there is nowhere to write without allocating,
+    'which is precisely what must be avoided here
+        If Not IsArray(FailureList) Then
+            GoTo Safe_Exit
         End If
+
+        Arr = FailureList
+
+        If UBound(Arr) < 1 Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' WRITE MARKER
+'------------------------------------------------------------------------------
+    'Overwrite the final entry in place; no element is added
+        Arr(UBound(Arr)) = _
+            "Diagnostics | failure list could not be grown; " & _
+            CStr(FailureCount) & " failures were counted and fewer are listed"
+
+        FailureList = Arr
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Leave the caller's buffer exactly as it was found
+        Resume Safe_Exit
+
+End Sub
+
+
+Public Sub UI_InternalInjectFailureListGrowthFailure( _
+    ByVal FailNextGrowth As Boolean)
+'
+'==============================================================================
+' UI_InternalInjectFailureListGrowthFailure
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms or disarms a one-shot failure of the next failure-list growth.
+'
+' WHY THIS EXISTS
+'   The degradation path exists for conditions that cannot be produced on
+'   demand - exhausted memory, or a buffer corrupted by something outside this
+'   component. Without a seam the path could be reasoned about but never
+'   executed, which is indistinguishable from not having written it.
+'
+' INPUTS
+'   FailNextGrowth
+'     True arms the seam; False disarms it.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - The armed state is consumed by the next growth attempt and is not
+'     re-armed, so a test cannot leave the component silently unable to record
+'     diagnostics.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     prevents exposure to external VBA projects.
+'   - Production code must never call it.
+'
+' UPDATED
+'   2026-08-19
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' SET SEAM
+'------------------------------------------------------------------------------
+    'Record the armed state for the next growth attempt to consume
+        m_InjectFailureListGrowthFailure = FailNextGrowth
 
 End Sub
 
@@ -1393,5 +1804,3 @@ Public Sub UI_RuntimeLogFailure( _
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub
-
-

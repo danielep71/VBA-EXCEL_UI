@@ -138,13 +138,21 @@ Other add-ins active:
 Run the relevant procedures when practical.
 
 ```text
-Debug → Compile VBAProject          →
+Debug → Compile VBAProject             →
+Test_EXCEL_UI_RunReleaseCertification  →
+```
+
+If certification cannot be run, the narrower runners still help:
+
+```text
 Test_EXCEL_UI_RunCore               →
 Test_EXCEL_UI_RunTitleBarOnly       →
+Test_EXCEL_UI_RunSnapshotIdentity   →
 Test_EXCEL_UI_RunAll                →
 ```
 
-Paste the relevant Immediate Window output.
+Paste the relevant Immediate Window output. Certification also writes a JSON
+document and a text report to `%TEMP%`, either of which can be attached.
 
 ## 🆘 Recovery result
 

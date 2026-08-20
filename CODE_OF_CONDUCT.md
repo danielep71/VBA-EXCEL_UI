@@ -7,7 +7,7 @@
   <img alt="Enforcement" src="https://img.shields.io/badge/Enforcement-Maintainer-d97706">
 </p>
 
-**VBA-EXCEL_UI** is a focused open-source project. This Code of Conduct exists
+**VBA Excel UI** is a focused open-source project. This Code of Conduct exists
 to keep interaction around the project respectful, technical, constructive, and
 welcoming.
 
@@ -65,14 +65,19 @@ Participants are expected to:
 - respect that a contribution may be adopted, adapted, deferred, or declined to
   preserve project coherence.
 
-Good technical disagreement might say:
+Useful technical disagreement is about the work, and can be acted on by anyone
+who reads it:
 
-> “On Excel Microsoft 365 64-bit, build X, this style mask leaves the maximized
-> window without a restore frame. Here are the reproduction steps.”
+> "Capturing a snapshot with one workbook window active and restoring it with a
+> different window active leaves the first window's title bar hidden. Excel
+> version, bitness and reproduction steps below."
 
-It should not say:
+Unwelcome disagreement is about the author, and can be acted on by nobody:
 
-> “This code is useless and the author clearly does not understand Windows.”
+> "This code is useless and the author clearly does not understand Windows."
+
+Both describe the same defect. Only one of them can be investigated, and the
+other also makes the next person slower to report anything at all.
 
 ---
 
@@ -115,6 +120,19 @@ participants should make reasonable efforts to include:
 - observed behavior;
 - expected behavior;
 - logs, screenshots, or minimal examples where useful.
+
+Where the regression harness can be run, the fastest way to supply the
+environment is to attach the evidence it produces:
+
+```vb
+Test_EXCEL_UI_RunReleaseCertification
+```
+
+It writes a JSON document and a text report to the temporary folder, both naming
+the exact Excel version and build, Office bitness, operating system and VBA
+generation, alongside the result of every mandatory unit. Attaching one of those
+files replaces most of the list above and removes the transcription errors that
+come with retyping build numbers.
 
 Participants must not fabricate evidence, hide relevant limitations, or knowingly
 present untested behavior as verified.
@@ -226,6 +244,11 @@ review, such as:
 Do not upload client workbooks, proprietary VBA, credentials, personal data, or
 other confidential material to demonstrate a problem. Create a sanitized minimal
 reproduction instead.
+
+This protects you at least as much as it protects the project. A public issue
+cannot be unpublished, and a workbook carries more than its worksheets: defined
+names, connection strings, cached query results, comments and revision metadata
+all travel with the file.
 
 ---
 
