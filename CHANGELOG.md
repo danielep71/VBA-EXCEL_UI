@@ -39,6 +39,12 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ## [Unreleased]
 
+No unreleased changes are currently documented.
+
+---
+
+## [1.1.1] - 2026-08-20
+
 > 🩹 **Patch** · corrective release · public API unchanged
 
 ### 🧭 Release intent
@@ -342,8 +348,6 @@ The runner also emits a JSON document and a text report naming the exact host,
 written to the temporary folder, so a result can be attached to a release rather
 than retyped from the Immediate Window.
 
-> ⚠️ Re-certify on the final release SHA and replace this block before tagging.
-
 Static checks additionally run on every pull request via
 `.github/workflows/static-checks.yml`. They cannot execute VBA — a hosted runner
 has no Excel — so the two gates are complementary rather than alternatives.
@@ -625,6 +629,7 @@ All three regression runners completed successfully.
 - No executable VBA behavior was intentionally changed.
 - GitHub Actions workflows are intentionally not included in this release.
 
-[Unreleased]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/danielep71/VBA-EXCEL_UI/releases/tag/v1.0.1

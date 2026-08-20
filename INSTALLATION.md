@@ -190,7 +190,7 @@ Neither requires a code change. Both are described in
 
 ## 🎯 Public targeting API
 
-Version 1.1.0 adds:
+Window targeting, added in `1.1.0`:
 
 ```vb
 Public Enum UIWindowTargetScope
