@@ -112,8 +112,9 @@ Use a branch appropriate to the agreed scope, for example:
 fix/snapshot-window-identity
 test/titlebar-owned-bits
 docs/install-modules
+ci/static-release-gate
 feature/window-target-scope
-release/v1.1.0
+release/v1.1.1
 ```
 
 Confirm the current branch in GitHub Desktop before every commit.

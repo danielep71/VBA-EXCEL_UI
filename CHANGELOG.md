@@ -47,6 +47,24 @@ no existing call site requires modification.
   pack, which injects a frame-refresh failure and verifies that the outstanding
   repaint is recorded and retried on the next call rather than short-circuited
   as a no-op.
+- Added `.github/workflows/static-checks.yml`, the first automated check this
+  repository has ever carried. It runs on every pull request and push to `main`
+  and `release/**`, using only the Python standard library so that it cannot be
+  broken by an upstream release and runs identically on a maintainer's machine.
+- Added `tools/check_repo.py`, a static gate covering required files, module
+  names against filenames, `Option` policy, encoding and line endings, banner
+  widths, procedure and directive balance, label vocabulary, jump-target
+  resolution, `PtrSafe` on VBA7 declarations, duplicate procedure names, the
+  public API manifest, documentation release state, tracked binaries, markdown
+  links and house-style conformance.
+- Added `tools/public_api_manifest.txt`, recording all 38 public members
+  declared in `src/`. A public member can no longer be added or removed without
+  an intentional edit to the manifest, which is otherwise invisible in a diff of
+  several thousand lines.
+- Added `--check` and `--write` modes to `tools/reformat.py`, and module-name
+  detection from the file's own `Attribute VB_Name`. Taking the name from the
+  file removes a class of caller error: a mismatched name silently changes what
+  the hoisting and title passes do, and the result still looks plausible.
 - Added `TST_Case_FailureAccumulatorDegradesSafely` to the core regression
   pack, which injects a failure-list growth failure and verifies that the
   status outputs survive, the truncation is reported, and nothing raises.
@@ -144,11 +162,40 @@ no existing call site requires modification.
   code and repository review of the `v1.1.0` tag at commit
   `96360379a4bca7703cf649a69a2162961dfa6c9e`. Every issue in the `1.1.1`
   milestone cites it as a stable in-repo reference.
-- Added `docs/RIBBON_SDI_BEHAVIOR.md`, which records why the documented Ribbon
-  scope is currently an assumption, how to reproduce the measurement, and which
-  model each possible result would commit the component to. Measurements are
-  pending; the document is the place they are recorded rather than a summary of
-  them.
+- Added `docs/RIBBON_SDI_BEHAVIOR.md`, recording the measured behavior of the
+  Ribbon across multiple workbook windows, the reasoning that selects one model
+  from four candidates, and the split between what is corrected in `1.1.1` and
+  what is deferred. Measured on Excel 16.0 build 20131, Windows x64, VBA7.
+- Corrected `README.md`, which described a pre-release state after `v1.1.0` had
+  been merged and tagged: a Release Candidate badge, an entirely unchecked
+  release checklist, a remaining-maintenance list of work already completed, and
+  references to a branch line that no longer exists. All are removed.
+- Corrected the Ribbon's documented scope in `README.md` from *Excel
+  application* to *active window*, matching the measurement, and recorded that
+  Ribbon restoration is the one managed element that is not window-identity-safe.
+- Corrected the title bar's documented scope to name the captured window rather
+  than `Application.Hwnd`, and documented the per-window frame registry, the
+  self-healing baseline and the retried frame refresh.
+- Documented that `FailureCount` is authoritative while `FailureList` is best
+  effort, and that a truncated list is always marked rather than silently short.
+- Separated source compatibility from package migration in `README.md`: the
+  public API is unchanged from `1.0.1`, but all four `src/` modules must be
+  replaced together, because the boundaries between them changed at `1.1.0`.
+- Documented `Test_EXCEL_UI_RunReleaseCertification` as the release gate, and
+  `Test_EXCEL_UI_RunAll` explicitly as not being one.
+- Corrected `INSTALLATION.md`, which stated that the title bar retained its
+  established scope. It did not: the title bar follows the window a value was
+  captured from, and `TargetScope` never applied to it. The section now
+  separates the three genuinely application-level elements from the Ribbon and
+  the title bar, and states how far the component can keep the per-window
+  promise for each.
+- Corrected the `INSTALLATION.md` title-bar troubleshooting section, which
+  predated per-window frame state and offered no help to a reader who has hit a
+  reported `TitleBar` failure or changed the frame of the wrong window. Both
+  cases are now covered, along with the add-in interaction the self-healing
+  baseline was written for.
+- Corrected the branch-naming examples in `CONTRIBUTING.md`, which offered
+  `release/v1.1.0` — a branch line that no longer exists.
 
 ### Validation
 
@@ -202,8 +249,10 @@ Release type:            patch
   `1.2.0`; see `#23` and `docs/RIBBON_SDI_BEHAVIOR.md`.
 - Ribbon behavior has been measured on one host only. It can vary by Office
   channel, update ring and administrative policy.
-- `tools/reformat.py` does not round-trip the committed production modules
-  byte-for-byte, so a formatter check cannot yet be made blocking. See `#20`.
+- The static gate cannot execute VBA, because a hosted runner has no Excel. It
+  covers what is decidable from repository text and does not replace
+  `Test_EXCEL_UI_RunReleaseCertification`, which remains the behavioral gate and
+  is run by a maintainer on a real host.
 
 ## [1.1.0] - 2026-08-19
 

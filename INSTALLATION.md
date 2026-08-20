@@ -156,7 +156,24 @@ Workbook Tabs
 Gridlines
 ```
 
-Application-level elements and the title bar retain their established scope.
+Status Bar, Scroll Bars and Formula Bar are genuinely application-level and are
+unaffected by `TargetScope`.
+
+The Ribbon and the title bar are **not** application-level, despite `TargetScope`
+not applying to them either. Modern Excel uses the Single Document Interface, in
+which each workbook window is a separate top-level window with its own Ribbon and
+its own frame, so both act on whichever window is active when the call is made.
+
+The two differ in how far the component can keep that promise:
+
+- **Title bar.** A snapshot records the window a value was read from and restores
+  it to that same window. If that window has closed, restoration reports a
+  `TitleBar` failure naming it rather than applying the value elsewhere.
+- **Ribbon.** Every mechanism Excel exposes acts on the active window and none
+  accepts a window argument, so restoring a snapshot applies the captured Ribbon
+  value to whichever window is active at that moment, which need not be the
+  window it was captured from. See
+  [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md).
 
 Example:
 
@@ -296,6 +313,33 @@ Confirm:
 - the project compiles for the installed Office bitness.
 
 Title-bar behavior is best effort and can vary by Excel/Windows environment.
+
+If another add-in legitimately changes the owned frame bits between a hide and a
+show, the component adopts the change rather than reverting it: while it does not
+own a hidden state for a window, the live owned bits are re-read on every call.
+
+### A TitleBar failure is reported on restore
+
+The title bar is restored to the window it was captured from. If that window has
+since closed, restoration reports a failure such as
+
+```text
+TitleBar | captured title-bar window is no longer open; no state was applied
+```
+
+This is correct behaviour rather than a defect. The alternative would be to apply
+one window's captured frame to whichever window happens to be active, silently
+and with a success result.
+
+Capture again from the window you intend to restore, or call `UI_ShowExcelUI`,
+which acts on the active window and needs no snapshot.
+
+### The title bar changed on the wrong window
+
+Under the Single Document Interface each workbook window has its own frame, and
+`UI_HideExcelUI`, `UI_ShowExcelUI` and `UI_SetExcelUI` act on the **active**
+window. Activate the window you mean before calling them. Snapshot restoration
+is different: it targets the captured window regardless of which is active.
 
 ### Excel UI remains hidden after an interrupted test
 
