@@ -233,6 +233,164 @@ Private m_RibbonRowsText                As String
 Private m_RibbonRowsJson                As String
 
 
+Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunCertificationSelfTest
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a failure inside release certification reaches the caller with
+'   its error number and description intact.
+'
+' WHY THIS EXISTS
+'   The certification error handler calls TST_Log, which contains
+'   On Error Resume Next and therefore clears Err. Reading Err after that call
+'   yields zero, and Err.Raise 0 does not raise: a failed certification returned
+'   silently, and a programmatic caller saw a normal return.
+'
+'   The log line still said FAIL, which is why the defect survived a real failed
+'   run without being noticed. Only the raise was missing, and nothing asserted
+'   the raise.
+'
+' WHY IT IS NOT PART OF THE PACK
+'   The only errors that travel through the certification handler are raised
+'   after the handler is armed, which means the run has already reset the
+'   counters and set m_CertActive. Triggering one from inside the regression
+'   pack would corrupt the accounting of the very run executing it, and the
+'   re-entrancy guard deliberately refuses a nested invocation before the
+'   handler is reached, so the handler path cannot be exercised from within a
+'   certification run at all.
+'
+'   It is therefore a standalone runner, invoked directly.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Establishes a snapshot so that certification rejects its precondition.
+'   - Invokes certification and captures what it raises.
+'   - Asserts the error number and a non-empty description survived.
+'   - Clears the snapshot it created.
+'
+' ERROR POLICY
+'   - Raises on assertion failure, after cleanup.
+'
+' NOTES
+'   Asserting a non-empty description matters as much as the number. The
+'   original defect produced zero and an empty string together, so a test
+'   checking only that something was raised would have passed once the number
+'   was fixed and the text still lost.
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RaisedNumber        As Long            'Error number reaching the caller
+    Dim RaisedDescription   As String          'Error text reaching the caller
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "Test_EXCEL_UI_RunCertificationSelfTest"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a certification failure reaches the caller"
+
+'------------------------------------------------------------------------------
+' ESTABLISH A REJECTED PRECONDITION
+'------------------------------------------------------------------------------
+    'Certification refuses to start when an explicit snapshot exists. That
+    'refusal is raised after the handler is armed, so it travels the path under
+    'test.
+        UI_CaptureExcelUIState
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        If Not UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 20, _
+                PROC, _
+                "unable to establish a snapshot; the precondition under test " & _
+                "cannot be triggered"
+        End If
+
+'------------------------------------------------------------------------------
+' INVOKE AND CAPTURE
+'------------------------------------------------------------------------------
+    'Capture immediately, before anything else can clear Err
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunReleaseCertification
+
+            RaisedNumber = Err.Number
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' ASSERT THE FAILURE SURVIVED
+'------------------------------------------------------------------------------
+    'A silent return is the defect this case exists to catch
+        TST_AssertTrue _
+            (RaisedNumber = TEST_CERT_ERR_BASE + 1), _
+            "CertificationSelfTest.ErrorNumberPreserved"
+
+    'Zero and an empty description were produced together by the original
+    'defect, so the text is asserted as well as the number
+        TST_AssertTrue _
+            (Len(RaisedDescription) > 0), _
+            "CertificationSelfTest.ErrorDescriptionPreserved"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Certification failure reached the caller as " & _
+            CStr(RaisedNumber)
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Release the snapshot this case created
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        HasFailure = True
+
+        Resume Safe_Exit
+
+End Sub
+
+
 Public Sub Test_EXCEL_UI_RunReleaseCertification()
 
 '
@@ -318,7 +476,28 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
     Dim ReportPath          As String          'Path the report was written to
     Dim ScanIdx             As Long            'Cursor over recorded units
 
+    Dim FailNumber          As Long            'Error number captured on entry
+    Dim FailSource          As String          'Error source captured on entry
+    Dim FailDescription     As String          'Error text captured on entry
+    Dim FailLine            As Long            'Error line captured on entry
+
     Const PROC As String = "Test_EXCEL_UI_RunReleaseCertification"
+
+'------------------------------------------------------------------------------
+' GUARD RE-ENTRY
+'------------------------------------------------------------------------------
+    'Refuse a nested run BEFORE arming the handler or touching any counter. A
+    'nested invocation would reset the outer run's unit records and clear
+    'm_CertActive on exit, leaving the outer verdict describing work it never
+    'did. Raising here, ahead of On Error, sends the refusal straight to the
+    'caller without disturbing anything.
+        If m_CertActive Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 4, _
+                PROC, _
+                "release certification is already running; nested invocation " & _
+                "is not supported"
+        End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -482,12 +661,26 @@ Safe_Exit:
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 Err_Handler:
-    'Report the precondition or verdict failure to the caller
+    'Capture every error field BEFORE calling anything. TST_Log contains
+    'On Error Resume Next, which clears Err, so a read taken after it returns
+    'yields zero and an empty description. Raising from that reports no failure
+    'at all, and the caller sees a normal return from a certification that
+    'failed.
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        FailLine = Erl
+
+    'Certification accounting must not leak into a later legacy run
         m_CertActive = False
 
-        TST_Log PROC, "FAIL", Err.Description
+    'Log from the captured values, never from Err
+        TST_Log PROC, "FAIL", _
+            CStr(FailNumber) & ": " & FailDescription & _
+            IIf(FailLine <> 0, " | Line: " & CStr(FailLine), vbNullString)
 
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Re-raise from the captured values, so the failure keeps its identity
+        Err.Raise FailNumber, FailSource, FailDescription
 
 End Sub
 

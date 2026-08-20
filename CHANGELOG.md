@@ -39,7 +39,36 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ## [Unreleased]
 
-No unreleased changes are currently documented.
+> 🩹 **Patch** · correctness release · public API unchanged
+
+### 🧭 Release intent
+
+Corrects defects in the mechanisms that exist to catch defects. Every item here
+is a gate, a tool or a state registry that was reporting success where it should
+have reported failure. The component's public API is unchanged.
+
+### ➕ Added
+
+- Added a re-entrancy guard to `Test_EXCEL_UI_RunReleaseCertification`. A nested
+  invocation previously reset the outer run's unit records and cleared its
+  active flag on exit, leaving the outer verdict describing work it never did.
+  The refusal is raised before the error handler is armed, so it reaches the
+  caller without disturbing the run in progress.
+- Added `Test_EXCEL_UI_RunCertificationSelfTest`, which asserts that a failure
+  inside certification reaches the caller with its error number and description
+  intact. It is a standalone runner rather than a pack case, because the only
+  errors travelling the handler path are raised after the counters have been
+  reset, and the re-entrancy guard deliberately prevents reaching that path from
+  inside a run.
+
+### 🐛 Fixed
+
+- Fixed release certification destroying the error it re-raises. The handler
+  called `TST_Log`, which contains `On Error Resume Next` and therefore clears
+  `Err`, then read `Err` to re-raise. `Err.Number` was zero by that point, and
+  `Err.Raise 0` does not raise — so **a failed certification returned silently**
+  and a programmatic caller saw a normal return. All fields are now captured
+  into locals before anything is called. (`ICR-UI-111-P2-03`, #34)
 
 ---
 
