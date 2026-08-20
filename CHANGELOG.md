@@ -220,6 +220,17 @@ no existing call site requires modification.
   `v1.1.0` asset, that it does not exercise the current feature set and that its
   preset controls do not work. The release-asset name is now given as a pattern
   rather than a fixed filename.
+- Corrected the `diff.vba.xfuncname` recipe documented in `.gitattributes`. Git
+  renders capture group 1 when a pattern has one, so the previous regex — which
+  grouped only the visibility keyword — produced hunk headers reading `Public`
+  instead of the procedure signature. The whole declaration is now the outer
+  group.
+- Extended `.gitattributes` coverage: the remaining Office formats
+  (`.dotm`, `.potm`, `.ppsx`, `.ppsm`, `.accde`, `.accdr`, `.mde`, `.ade`,
+  `.xlw`, `.xll`, `.thmx`), Office lock files (`~$*`, `.laccdb`, `.ldb`),
+  further archive, library, media, font and image formats. Lock files are
+  already excluded by `.gitignore`; stating them here as well means one that
+  reaches the index by accident still cannot be normalized or line-merged.
 
 ### Validation
 
