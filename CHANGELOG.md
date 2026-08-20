@@ -245,6 +245,12 @@ no existing call site requires modification.
   baseline was written for.
 - Corrected the branch-naming examples in `CONTRIBUTING.md`, which offered
   `release/v1.1.0` — a branch line that no longer exists.
+- Restyled `CONTRIBUTING.md` to match `README.md` and `CHANGELOG.md`: glyphed
+  headings, a priorities table stating why each non-negotiable is
+  non-negotiable, a quick-reference block for the three commands a contributor
+  needs, branch-prefix and error-policy tables, and a copyable pull-request
+  checklist. The project layout now shows `tools/`, `docs/` and the workflow,
+  and the public API manifest is explained where a contributor will meet it.
 - Replaced the recommended validation sequence in `INSTALLATION.md`,
   `CONTRIBUTING.md`, the pull-request template and the bug-report template with
   `Test_EXCEL_UI_RunReleaseCertification`. All four still listed the four
