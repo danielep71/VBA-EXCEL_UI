@@ -7,7 +7,7 @@
   <img alt="Enforcement" src="https://img.shields.io/badge/Enforcement-Maintainer-d97706">
 </p>
 
-**VBA-EXCEL_UI** is a focused open-source project. This Code of Conduct exists
+**This repository** is a focused open-source project. This Code of Conduct exists
 to keep interaction around the project respectful, technical, constructive, and
 welcoming.
 
@@ -64,15 +64,6 @@ Participants are expected to:
 - allow maintainers time to investigate platform-sensitive behavior;
 - respect that a contribution may be adopted, adapted, deferred, or declined to
   preserve project coherence.
-
-Good technical disagreement might say:
-
-> “On Excel Microsoft 365 64-bit, build X, this style mask leaves the maximized
-> window without a restore frame. Here are the reproduction steps.”
-
-It should not say:
-
-> “This code is useless and the author clearly does not understand Windows.”
 
 ---
 
