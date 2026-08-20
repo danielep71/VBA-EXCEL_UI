@@ -1,20 +1,69 @@
-# Changelog
+<div align="center">
 
-All notable changes to **VBA Excel UI** are documented in this file.
+# 📄 Changelog
 
-The project follows [Semantic Versioning](https://semver.org/) for its public
-VBA API. Dates use the `YYYY-MM-DD` format.
+**All notable changes to VBA Excel UI**
+
+[![Semantic Versioning](https://img.shields.io/badge/versioning-semver-6f42c1?style=flat-square)](https://semver.org/)
+[![Format](https://img.shields.io/badge/format-keep_a_changelog-0969da?style=flat-square)](https://keepachangelog.com/)
+[![Dates](https://img.shields.io/badge/dates-YYYY--MM--DD-217346?style=flat-square)](#)
+
+</div>
+
+---
+
+Versioning applies to the **public VBA API** — every `UI_…` procedure, enum and
+parameter in `M_EXCEL_UI`. Internal module boundaries are not covered by it, so
+a release that changes nothing public may still require all four `src/` modules
+to be replaced together.
+
+<details>
+<summary><strong>Section legend</strong></summary>
+
+<br>
+
+| Section | Contains |
+|---|---|
+| ➕ **Added** | New members, runners, tools or files |
+| 🔧 **Changed** | Behaviour or contract changes to something that already existed |
+| 🐛 **Fixed** | Defects, each citing its review finding and issue |
+| 📖 **Documentation** | Corrections and additions to prose, with no code effect |
+| ✅ **Validation** | The evidence a release was actually certified on |
+| 🔗 **Compatibility** | What upgrading requires, and what becomes newly observable |
+| ⚠️ **Known limitations** | What is deliberately not fixed, and where it is tracked |
+
+Release types follow semver: 🩹 **patch** corrects defects, ✨ **minor** adds
+backward-compatible capability, 💥 **major** may break callers.
+
+</details>
 
 ## [Unreleased]
 
-### Planned for 1.1.1
+> 🩹 **Patch** · corrective release · public API unchanged
+
+### 🧭 Release intent
 
 A corrective release addressing the findings of the independent `v1.1.0` review
 recorded in `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`. The public API
 is unchanged: no procedure, enum or parameter is added, removed or renamed, and
 no existing call site requires modification.
 
-### Added
+#### At a glance
+
+| Finding | Issue | What it was |
+|---|:--:|---|
+| 🔴 `ICR-UI-P1-01` | [#14](https://github.com/danielep71/VBA-EXCEL_UI/issues/14) | Title-bar restoration wrote to whichever window was active |
+| 🟠 `ICR-UI-P2-04` | [#15](https://github.com/danielep71/VBA-EXCEL_UI/issues/15) | One frame baseline per process, silently displaced by a second window |
+| 🟠 `ICR-UI-P2-03` | [#16](https://github.com/danielep71/VBA-EXCEL_UI/issues/16) | A failed frame repaint reported as a successful no-op |
+| 🟠 `ICR-UI-P2-02` | [#17](https://github.com/danielep71/VBA-EXCEL_UI/issues/17) | Diagnostics could raise and destroy the failure being recorded |
+| 🟠 `ICR-UI-P2-07` | [#18](https://github.com/danielep71/VBA-EXCEL_UI/issues/18) | A green run could not be distinguished from a partial one |
+| 🟠 `ICR-UI-P2-06` | [#19](https://github.com/danielep71/VBA-EXCEL_UI/issues/19) | Tagged documentation still described a pre-release state |
+| 🟠 `ICR-UI-P2-05` | [#20](https://github.com/danielep71/VBA-EXCEL_UI/issues/20) | No automated check had ever run on any commit |
+| 🟠 `ICR-UI-P2-01` | [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21) | Ribbon scope documented without evidence |
+
+🔴 P1 · 🟠 P2 — priorities as assigned by the independent review.
+
+### ➕ Added
 
 - Added explicit-target title-bar entry points to `M_EXCEL_UI_TITLEBAR`:
   `UI_TryGetActiveTitleBarHwnd`, `UI_TryGetTitleBarVisibleForHwnd`,
@@ -83,7 +132,7 @@ no existing call site requires modification.
   to start when an explicit snapshot already exists, rather than degrading into
   a partial run that reads like a complete one.
 
-### Changed
+### 🔧 Changed
 
 - Replaced the single process-wide title-bar baseline with a frame-state
   registry keyed by top-level window handle. Operating on one workbook window
@@ -111,13 +160,13 @@ no existing call site requires modification.
   documented and implemented as active-window wrappers over the explicit-target
   entry points. Their signatures and behavior for existing callers are
   unchanged.
-
-### Fixed
-
 - Normalised all seven `.bas` modules to the formatter's normal form. Six had
   drifted from it, by 160 bytes in total: `Const PROC` declarations aligned on
   the `Dim` grid, which the formatter reserves for `Dim`, and between two and
   three trailing blank lines at end of file. No executable token changed.
+
+### 🐛 Fixed
+
 - Fixed title-bar snapshot restoration not being identity-safe under the Single
   Document Interface. `Application.Hwnd` reports the active workbook window's
   handle, and the snapshot re-resolved it on restore, so activating a different
@@ -156,7 +205,7 @@ no existing call site requires modification.
   runner; release certification now has its own gate.
   (`ICR-UI-P2-07`, #18)
 
-### Documentation
+### 📖 Documentation
 
 - Added `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`, the independent
   code and repository review of the `v1.1.0` tag at commit
@@ -242,30 +291,48 @@ no existing call site requires modification.
   already excluded by `.gitignore`; stating them here as well means one that
   reaches the index by accident still cannot be normalized or line-merged.
 
-### Validation
+### ✅ Validation
 
 Certified in desktop Microsoft Excel for Windows via
-`Test_EXCEL_UI_RunReleaseCertification`:
+`Test_EXCEL_UI_RunReleaseCertification`.
+
+| Host | Value |
+|---|---|
+| 🖥️ Excel | `16.0` build `20131` |
+| 🪟 Operating system | Windows (64-bit) NT 10.00 |
+| ⚙️ Bitness | x64 |
+| 🧾 VBA generation | VBA7 |
+| 🕒 Certified | 2026-08-20 20:13:12 |
 
 ```text
-Excel 16.0 build 20131 | Windows (64-bit) NT 10.00 | x64 | VBA7
 RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
   PASS  RegressionPack
   PASS  SnapshotIdentity
   PASS  TitleBarSdiIdentity
 ```
 
-The runner emits a JSON evidence document and a text report naming the exact
-host, both written to the temporary folder. Re-certify and replace the block
-above before tagging.
+All four counters are part of the verdict. `failed=0` alone is not a pass:
+`skipped=0` confirms nothing was silently omitted, and `cleanup=OK` confirms no
+snapshot, stray workbook or suppressed screen update was left behind.
 
-### Compatibility
+The runner also emits a JSON document and a text report naming the exact host,
+written to the temporary folder, so a result can be attached to a release rather
+than retyped from the Immediate Window.
 
-```text
-Existing calls affected: none
-Backward compatible:     Yes
-Release type:            patch
-```
+> ⚠️ Re-certify on the final release SHA and replace this block before tagging.
+
+Static checks additionally run on every pull request via
+`.github/workflows/static-checks.yml`. They cannot execute VBA — a hosted runner
+has no Excel — so the two gates are complementary rather than alternatives.
+
+### 🔗 Compatibility
+
+| Question | Answer |
+|---|---|
+| Existing calls affected | ✅ none |
+| Backward compatible | ✅ yes |
+| Release type | 🩹 patch |
+| Modules to replace | ⚠️ all four, together |
 
 - No public procedure was added, removed or renamed.
 - No existing parameter changed name, position, type or default.
@@ -283,7 +350,7 @@ Release type:            patch
   captured title-bar frame, released by `UI_ClearExcelUIStateSnapshot`, by a
   replacing capture, or by a project reset.
 
-### Known limitations
+### ⚠️ Known limitations
 
 - Ribbon visibility is **per workbook window**, not application-wide. Restoring
   a snapshot therefore applies the captured Ribbon value to whichever window is
@@ -301,11 +368,13 @@ Release type:            patch
 
 ## [1.1.0] - 2026-08-19
 
+> ✨ **Minor** · backward-compatible feature release
+
 Backward-compatible feature release. Every public `UI_...` procedure and enum
 member from `1.0.1` is preserved, with unchanged names, parameter order and
 defaults. No migration is required.
 
-### Added
+### ➕ Added
 
 - Added `UIWindowTargetScope`, a public enum selecting which Excel windows
   receive window-level UI changes:
@@ -340,7 +409,7 @@ defaults. No migration is required.
   application-level capture and restoration.
 - Added the `Test_EXCEL_UI_RunSnapshotIdentity` regression runner.
 
-### Changed
+### 🔧 Changed
 
 - Replaced index-based per-window snapshot restoration with identity-based
   matching. The snapshot now retains each captured `Window` object and restores
@@ -385,7 +454,7 @@ defaults. No migration is required.
   `Excel window`.
 - Updated all source, demo and regression module metadata to version `1.1.0`.
 
-### Fixed
+### 🐛 Fixed
 
 - Fixed `UI_ShowExcelUI` silently failing to restore the title bar when no
   owned-bit baseline had been captured and the frame was already hidden - the
@@ -428,7 +497,22 @@ defaults. No migration is required.
   the window, and returns so the enumeration continues; the label is built once
   on entry, so no window property is read while composing a failure message.
 
-### Compatibility
+### ✅ Validation
+
+Validated manually in desktop Microsoft Excel for Windows:
+
+```text
+Debug -> Compile VBAProject        PASS
+Test_EXCEL_UI_RunCore              PASS
+Test_EXCEL_UI_RunTitleBarOnly      PASS
+Test_EXCEL_UI_RunSnapshotIdentity  PASS
+Test_EXCEL_UI_RunAll               PASS
+```
+
+Manual checks completed: `UI_HideExcelUI` / `UI_ShowExcelUI` recovery, and
+capture / hide / reset validation.
+
+### 🔗 Compatibility
 
 ```text
 Existing calls affected: none
@@ -450,22 +534,7 @@ Release type:            minor
 - Installation now requires all four `src/` modules. Importing only
   `M_EXCEL_UI.bas` is not a valid installation; see `INSTALLATION.md`.
 
-### Validation
-
-Validated manually in desktop Microsoft Excel for Windows:
-
-```text
-Debug -> Compile VBAProject        PASS
-Test_EXCEL_UI_RunCore              PASS
-Test_EXCEL_UI_RunTitleBarOnly      PASS
-Test_EXCEL_UI_RunSnapshotIdentity  PASS
-Test_EXCEL_UI_RunAll               PASS
-```
-
-Manual checks completed: `UI_HideExcelUI` / `UI_ShowExcelUI` recovery, and
-capture / hide / reset validation.
-
-### Known limitations
+### ⚠️ Known limitations
 
 - Ribbon and title-bar control remain best effort and depend on Excel version,
   window state, Windows desktop composition and other loaded add-ins.
@@ -479,7 +548,9 @@ capture / hide / reset validation.
 
 ## [1.0.1] - 2026-07-25
 
-### Added
+> 🩹 **Patch** · documentation and repository governance
+
+### ➕ Added
 
 - Added `CONTRIBUTING.md` with repository-specific contribution, testing,
   compatibility, WinAPI, and release guidance.
@@ -493,7 +564,7 @@ capture / hide / reset validation.
 - Added a pull-request template tailored to Excel UI, snapshot, WinAPI,
   diagnostics, recovery, and compatibility changes.
 
-### Changed
+### 🔧 Changed
 
 - Redesigned `README.md` as the primary project, API, architecture, integration,
   testing, recovery, and release reference.
@@ -512,7 +583,7 @@ capture / hide / reset validation.
 - Synchronized `demo/EXCEL_UI_DEMO.xlsm` with the exported versioned VBA
   modules.
 
-### Validation
+### ✅ Validation
 
 The release candidate was validated manually in desktop Microsoft Excel:
 
@@ -523,7 +594,7 @@ The release candidate was validated manually in desktop Microsoft Excel:
 
 All three regression runners completed successfully.
 
-### Compatibility
+### 🔗 Compatibility
 
 - No public procedure signature changed.
 - No public enum member or value changed.
