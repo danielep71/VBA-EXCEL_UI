@@ -1976,6 +1976,3 @@ Private Sub Demo_LogFailure(ByVal ProcName As String, ByVal Stage As String, _
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub
-
-
-

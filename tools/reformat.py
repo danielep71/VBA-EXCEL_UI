@@ -274,7 +274,85 @@ def reformat(path, module_name):
     return "\r\n".join(lines) + "\r\n"
 
 
+VB_NAME_RE = re.compile(r'^Attribute\s+VB_Name\s*=\s*"([^"]+)"')
+
+
+def module_name_of(path):
+    """Read the module name from the file's own VB_Name attribute.
+
+    Taking the name from the file rather than the command line removes a class
+    of caller error: a mismatched name silently changes what hoist_options and
+    decentre_titles do, and the result still looks plausible.
+    """
+    with open(path, encoding="latin-1") as fh:
+        for line in fh:
+            m = VB_NAME_RE.match(line.strip())
+            if m:
+                return m.group(1)
+    return None
+
+
+def check(paths):
+    """Report which files are not already in the formatter's normal form.
+
+    Exit status is the point: this is what makes a formatter gate possible.
+    The formatter is idempotent, so a file that differs from its own formatted
+    output has drifted and can be corrected mechanically.
+    """
+    failed = []
+    for path in paths:
+        name = module_name_of(path)
+        if name is None:
+            print(f"FAIL {path}: no Attribute VB_Name")
+            failed.append(path)
+            continue
+
+        expected = reformat(path, name).encode("latin-1")
+        with open(path, "rb") as fh:
+            actual = fh.read()
+
+        if actual == expected:
+            print(f"ok   {path}")
+        else:
+            print(f"FAIL {path}: not in house-style normal form "
+                  f"({len(actual) - len(expected):+d} bytes)")
+            failed.append(path)
+
+    return 1 if failed else 0
+
+
+def write(paths):
+    """Rewrite each file in place in the formatter's normal form."""
+    for path in paths:
+        name = module_name_of(path)
+        if name is None:
+            print(f"skip {path}: no Attribute VB_Name")
+            continue
+        data = reformat(path, name).encode("latin-1")
+        with open(path, "wb") as fh:
+            fh.write(data)
+        print(f"wrote {path}")
+    return 0
+
+
+USAGE = """usage:
+  reformat.py --check <file.bas> [file.bas ...]   report drift, exit 1 if any
+  reformat.py --write <file.bas> [file.bas ...]   normalise in place
+  reformat.py <src> <dst> <module_name>           legacy explicit form
+"""
+
+
 if __name__ == "__main__":
-    src, dst, name = sys.argv[1], sys.argv[2], sys.argv[3]
-    open(dst, "wb").write(reformat(src, name).encode("latin-1"))
-    print(f"wrote {dst}")
+    args = sys.argv[1:]
+
+    if args and args[0] == "--check":
+        sys.exit(check(args[1:]))
+    elif args and args[0] == "--write":
+        sys.exit(write(args[1:]))
+    elif len(args) == 3:
+        src, dst, name = args
+        open(dst, "wb").write(reformat(src, name).encode("latin-1"))
+        print(f"wrote {dst}")
+    else:
+        sys.stderr.write(USAGE)
+        sys.exit(2)

@@ -96,6 +96,10 @@ no existing call site requires modification.
 
 ### Fixed
 
+- Normalised all seven `.bas` modules to the formatter's normal form. Six had
+  drifted from it, by 160 bytes in total: `Const PROC` declarations aligned on
+  the `Dim` grid, which the formatter reserves for `Dim`, and between two and
+  three trailing blank lines at end of file. No executable token changed.
 - Fixed title-bar snapshot restoration not being identity-safe under the Single
   Document Interface. `Application.Hwnd` reports the active workbook window's
   handle, and the snapshot re-resolved it on restore, so activating a different

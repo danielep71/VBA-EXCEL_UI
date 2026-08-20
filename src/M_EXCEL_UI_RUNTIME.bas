@@ -1804,5 +1804,3 @@ Public Sub UI_RuntimeLogFailure( _
         Debug.Print ProcName & " failed @ " & Stage & " | " & Detail
 
 End Sub
-
-

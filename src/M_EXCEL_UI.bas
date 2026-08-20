@@ -206,7 +206,7 @@ Public Sub UI_SetExcelUI( _
     Dim IgnoredFailureCount As Long            'Discarded result buffer
     Dim IgnoredFailureList  As Variant         'Discarded result buffer
 
-    Const PROC              As String = "UI_SetExcelUI"
+    Const PROC As String = "UI_SetExcelUI"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -295,7 +295,7 @@ Public Sub UI_HideExcelUI()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC              As String = "UI_HideExcelUI"
+    Const PROC As String = "UI_HideExcelUI"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -381,7 +381,7 @@ Public Sub UI_ShowExcelUI()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC              As String = "UI_ShowExcelUI"
+    Const PROC As String = "UI_ShowExcelUI"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -505,7 +505,7 @@ Public Function UI_SetExcelUI_WithResult( _
     Dim CaptureFailureList  As Boolean         'True when a list was requested
     Dim InternalFailureList As Variant         'Buffer published once on exit
 
-    Const PROC              As String = "UI_SetExcelUI_WithResult"
+    Const PROC As String = "UI_SetExcelUI_WithResult"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -627,7 +627,7 @@ Public Sub UI_CaptureExcelUIState()
     Dim IgnoredFailureCount As Long            'Discarded result buffer
     Dim IgnoredFailureList  As Variant         'Discarded result buffer
 
-    Const PROC              As String = "UI_CaptureExcelUIState"
+    Const PROC As String = "UI_CaptureExcelUIState"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -732,7 +732,7 @@ Public Function UI_CaptureExcelUIState_WithResult( _
     Dim CaptureFailureList  As Boolean         'True when a list was requested
     Dim InternalFailureList As Variant         'Buffer published once on exit
 
-    Const PROC              As String = "UI_CaptureExcelUIState_WithResult"
+    Const PROC As String = "UI_CaptureExcelUIState_WithResult"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -890,7 +890,7 @@ Public Sub UI_ResetExcelUIToSnapshot()
     Dim IgnoredFailureCount As Long            'Discarded result buffer
     Dim IgnoredFailureList  As Variant         'Discarded result buffer
 
-    Const PROC              As String = "UI_ResetExcelUIToSnapshot"
+    Const PROC As String = "UI_ResetExcelUIToSnapshot"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -996,7 +996,7 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
     Dim CaptureFailureList  As Boolean         'True when a list was requested
     Dim InternalFailureList As Variant         'Buffer published once on exit
 
-    Const PROC              As String = "UI_ResetExcelUIToSnapshot_WithResult"
+    Const PROC As String = "UI_ResetExcelUIToSnapshot_WithResult"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1849,5 +1849,3 @@ Private Function UI_VisibilityToBoolean( _
         UI_VisibilityToBoolean = (Visibility = UI_Show)
 
 End Function
-
-

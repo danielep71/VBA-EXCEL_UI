@@ -4553,7 +4553,7 @@ Private Sub TST_Case_SnapshotCapturePartialApplicationRead()
     Dim SavedErrSource      As String          'Captured assertion error source
     Dim SavedErrDescription As String          'Captured assertion description
 
-    Const PROC              As String = "TST_Case_SnapshotCapturePartialApplicationRead"
+    Const PROC As String = "TST_Case_SnapshotCapturePartialApplicationRead"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -5550,7 +5550,7 @@ Private Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
     Dim SavedErrSource      As String          'Captured assertion error source
     Dim SavedErrDescription As String          'Captured assertion description
 
-    Const PROC              As String = "TST_Case_TitleBarShowRecoversWithoutBaseline"
+    Const PROC As String = "TST_Case_TitleBarShowRecoversWithoutBaseline"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -8549,6 +8549,3 @@ Private Function TST_BuildRuntimeErrorText() As String
             IIf(ErrLine <> 0, " | Line: " & CStr(ErrLine), vbNullString)
 
 End Function
-
-
-

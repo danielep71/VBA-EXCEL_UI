@@ -1,0 +1,65 @@
+name: Static checks
+
+# Why this exists
+#
+# Until now no commit in this repository has ever carried a status check, and
+# release validation existed only as prose in CHANGELOG.md. A tag could be, and
+# was, published from a SHA with no automated evidence attached to it at all.
+#
+# What this workflow can and cannot do is worth stating plainly. A hosted runner
+# has no Excel, so it cannot execute a single line of VBA. It therefore covers
+# what is decidable from the repository text — module structure, the public
+# surface, house style, encoding, documentation state — and deliberately does
+# not pretend to replace Test_EXCEL_UI_RunReleaseCertification, which remains
+# the behavioural gate and is run by a maintainer on a real host.
+#
+# The division is the point: this catches the mechanical mistakes cheaply and
+# on every push, so that manual certification time is spent on behaviour.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+  push:
+    branches:
+      - main
+      - 'release/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Repository and module checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # No dependencies are installed on purpose. The gate uses only the
+      # standard library, so it cannot be broken by an upstream release and
+      # runs identically on a maintainer's machine.
+      - name: Run the static gate
+        run: python3 tools/check_repo.py
+
+      # Reported separately from the gate so that a style-only failure is
+      # obvious at a glance in the checks list, rather than being one finding
+      # among several in a combined log.
+      - name: Verify house-style normal form
+        if: always()
+        run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
+
+      - name: Remind how to fix formatting drift
+        if: failure()
+        run: |
+          echo "::notice::Formatting drift is mechanical. Run:"
+          echo "::notice::  python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas"
+          echo "::notice::then re-import the affected modules into the VBE before committing."

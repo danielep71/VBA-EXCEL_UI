@@ -2210,5 +2210,3 @@ Private Function UI_TitleBarBuildRuntimeErrorText() _
                 vbNullString)
 
 End Function
-
-
