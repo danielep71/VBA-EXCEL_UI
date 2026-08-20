@@ -67,6 +67,11 @@ have reported failure. The component's public API is unchanged.
   errors travelling the handler path are raised after the counters have been
   reset, and the re-entrancy guard deliberately prevents reaching that path from
   inside a run.
+- Added `tools/reformat.py --selftest`, a fixture set asserting the formatter's
+  own transformation rules, wired into `check_repo.py` so it runs on every push.
+  The formatter is the one tool whose defects the VBA suite cannot observe, and
+  `--check` passing proves only that today's modules contain no construct that
+  trips it.
 - Added `TST_Case_TitleBarStaleFrameEntryNotReused` to the title-bar pack, which
   contradicts a registry entry that claims the frame and asserts the live window
   survives the next show untouched. A reissued handle cannot be produced on
@@ -86,6 +91,17 @@ have reported failure. The component's public API is unchanged.
 
 ### 🐛 Fixed
 
+- Fixed `tools/reformat.py` rewriting text inside string literals. Two
+  transformations shared the assumption that an apostrophe or a keyword means
+  the same thing everywhere on a line. Label renaming rewrote `GoTo Fail` inside
+  quoted text, changing what a module printed at run time rather than where it
+  jumped; and declaration alignment treated the first apostrophe as the start of
+  a comment, so a `Const` whose literal contained one had the alignment padding
+  written into the literal itself. Both now split the line at the comment marker
+  that sits outside quoted text, and substitute only outside literals. Neither
+  defect was reachable from any module in the repository, which is why the gate
+  stayed green over them, and why the correction ships with its own fixtures.
+  (#25)
 - Fixed the title-bar frame registry treating a handle match as proof of
   identity. Windows reissues a window handle once the window holding it has
   closed, and `IsWindow` answers for whichever window holds the handle now, so

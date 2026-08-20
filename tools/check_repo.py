@@ -357,6 +357,30 @@ def check_formatter():
                               f"(run tools/reformat.py --write)")
 
 
+def check_formatter_selftest():
+    """Run the formatter's own rule fixtures.
+
+    The formatter is the one tool here whose defects the VBA suite cannot see,
+    and --check passing proves only that today's modules contain no construct
+    that trips it. Running the fixtures on every push is what turns that into
+    a gate rather than a hope.
+    """
+    sys.path.insert(0, os.path.join(REPO, "tools"))
+    try:
+        import reformat
+    except Exception as exc:                                  # pragma: no cover
+        fail("formatter-selftest",
+             f"tools/reformat.py could not be imported: {exc}")
+        return
+
+    if not hasattr(reformat, "selftest"):
+        fail("formatter-selftest", "tools/reformat.py exposes no selftest()")
+        return
+
+    for finding in reformat.selftest():
+        fail("formatter-selftest", finding.replace("\n", " | "))
+
+
 # --------------------------------------------------------------------------
 CHECKS = [
     ("required files", check_required_files),
@@ -372,6 +396,7 @@ CHECKS = [
     ("tracked binaries", check_no_binaries),
     ("markdown links", check_markdown_links),
     ("house-style formatter", check_formatter),
+    ("formatter self-test", check_formatter_selftest),
 ]
 
 

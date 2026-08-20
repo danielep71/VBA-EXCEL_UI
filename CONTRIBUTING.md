@@ -40,6 +40,7 @@ needs to say so explicitly:
 ```text
 python3 tools/check_repo.py                        the gate CI runs
 python3 tools/reformat.py --write src/*.bas …      fix house-style drift
+python3 tools/reformat.py --selftest               check the formatter itself
 Test_EXCEL_UI_RunReleaseCertification              certify behaviour in Excel
 ```
 
@@ -227,6 +228,15 @@ python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas
 
 Re-import any module it rewrites before committing, so the repository and the
 VBE do not diverge.
+
+The formatter must never alter a string literal. A literal is data the module
+evaluates at run time, so rewriting one changes behaviour rather than layout,
+and the change is invisible in a diff that is expected to be whitespace. Any
+new transformation therefore uses `split_code_comment` to find where a comment
+begins, and `sub_outside_literals` to substitute only outside quoted text —
+matching an apostrophe or a keyword directly is what let padding be written
+into a literal and a quoted label name be renamed. `--selftest` holds the
+fixtures for both rules, and `check_repo.py` runs them.
 
 A public member added or removed also requires an intentional edit to
 `tools/public_api_manifest.txt`. That is deliberate friction: a change to the

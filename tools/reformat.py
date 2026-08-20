@@ -14,7 +14,19 @@ Applies only mechanical, provably behaviour-neutral transformations:
   6. Return types moved onto their own continuation line.
   7. Trailing whitespace stripped, rules normalised to 79 columns, CRLF.
 
-Every transformation is line-local and never touches an executable token.
+Every transformation is line-local. None of them may alter a string literal: a
+literal is data the module evaluates at run time, so rewriting one changes
+behaviour rather than layout. Two rules follow, and --selftest enforces both
+rather than leaving them to the reader:
+
+  * text inside a literal is never substituted, so a label name quoted in a
+    diagnostic survives a label rename;
+  * a comment begins at the first apostrophe OUTSIDE a literal, so an
+    apostrophe within quoted text is data and not a comment marker.
+
+VBA escapes a quote by doubling it, which the literal scanner handles by
+toggling: the pair closes the literal and reopens it, which leaves the state
+correct at every position outside the pair.
 """
 
 import re
@@ -44,13 +56,20 @@ BANNER_MAP = {
     "DECLARE: WIN32 / WIN64 API": "WIN32 / WIN64 API DECLARATIONS",
 }
 
+# split_code_comment removes the comment before this is applied, so there is
+# deliberately no comment group here. There was one, and it treated the first
+# apostrophe on the line as the start of a comment wherever it sat, including
+# inside a quoted string, where the alignment padding was then written into
+# the literal itself.
 DECL_RE = re.compile(
     r"^(?P<ind>\s*)(?P<kw>Dim|Static|Const|Private Const|Public Const)\s+"
     r"(?P<name>[A-Za-z_]\w*(?:\(\))?)\s+"
     r"As\s+(?P<type>[A-Za-z_][\w.]*)"
-    r"(?P<rest>\s*=\s*.+?)?"
-    r"(?P<cmt>\s+'.*)?$"
+    r"(?P<rest>\s*=\s*.+)?$"
 )
+
+# One string literal, allowing VBA's doubled-quote escape inside it.
+LITERAL_RE = re.compile(r'"(?:[^"]|"")*"')
 
 PROC_RE = re.compile(
     r"^(Public |Private |Friend )?(Sub|Function|Property (?:Get|Let|Set))\s+[A-Za-z_]\w*"
@@ -59,6 +78,42 @@ PROC_RE = re.compile(
 
 def split_lines(text):
     return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def split_code_comment(line):
+    """Split a line at the apostrophe that begins a comment, if there is one.
+
+    An apostrophe inside a string literal is data. Treating it as a comment
+    marker is what let alignment padding be written into a literal, so every
+    transformation needing to know where a comment starts asks here instead of
+    matching an apostrophe directly.
+
+    Returns (code, comment). comment is "" when the line has none, and carries
+    its leading apostrophe when it has one.
+    """
+    in_literal = False
+    for i, ch in enumerate(line):
+        if ch == '"':
+            in_literal = not in_literal
+        elif ch == "'" and not in_literal:
+            return line[:i], line[i:]
+    return line, ""
+
+
+def sub_outside_literals(code, fn):
+    """Apply fn to every run of code that is not inside a string literal.
+
+    fn therefore sees only text the compiler treats as code, which is what
+    lets a substitution be written plainly instead of as a lookaround that
+    tries, and fails, to exclude quoted text.
+    """
+    out, last = [], 0
+    for m in LITERAL_RE.finditer(code):
+        out.append(fn(code[last:m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(fn(code[last:]))
+    return "".join(out)
 
 
 def is_rule(line):
@@ -86,7 +141,7 @@ def hoist_options(lines, module_name):
         s = ln.strip()
 
         if s.startswith("Option "):
-            opt = re.sub(r"\s+'.*$", "", s).strip()
+            opt = split_code_comment(s)[0].strip()
             if opt not in options:
                 options.append(opt)
             i += 1
@@ -172,7 +227,25 @@ def rename_banners(lines):
     return out
 
 
+def rename_label_text(text):
+    """Rewrite GoTo/Resume targets in one run of code or comment prose."""
+    for old, rep in LABEL_MAP.items():
+        text = re.sub(
+            r"\b(GoTo|Resume)\s+" + old + r"\b",
+            lambda mm, r=rep: mm.group(1) + " " + r,
+            text,
+        )
+    return text
+
+
 def rename_labels(lines):
+    """Rename error-handling labels, in code and in the prose describing it.
+
+    Not in string literals. A module quoting a label in a diagnostic - "use
+    GoTo Fail nowhere" - had the quoted text rewritten along with the jump,
+    which changed what the module printed at run time rather than where it
+    jumped.
+    """
     out = []
     for ln in lines:
         s = ln.strip()
@@ -180,14 +253,12 @@ def rename_labels(lines):
         if m and m.group(1) in LABEL_MAP:
             out.append(LABEL_MAP[m.group(1)] + ":")
             continue
-        new = ln
-        for old, rep in LABEL_MAP.items():
-            new = re.sub(
-                r"\b(GoTo|Resume)\s+" + old + r"\b",
-                lambda mm, r=rep: mm.group(1) + " " + r,
-                new,
-            )
-        out.append(new)
+
+        code, comment = split_code_comment(ln)
+        out.append(
+            sub_outside_literals(code, rename_label_text)
+            + rename_label_text(comment)
+        )
     return out
 
 
@@ -202,11 +273,13 @@ def align_declarations(lines):
         elif re.match(r"^End (Sub|Function|Property)\b", s):
             in_proc = False
 
-        if not in_proc or ln.rstrip().endswith("_"):
+        code, comment = split_code_comment(ln)
+
+        if not in_proc or code.rstrip().endswith("_"):
             out.append(ln)
             continue
 
-        m = DECL_RE.match(ln.rstrip())
+        m = DECL_RE.match(code.rstrip())
         if not m:
             out.append(ln)
             continue
@@ -216,7 +289,7 @@ def align_declarations(lines):
         name = m.group("name")
         typ = m.group("type")
         rest = (m.group("rest") or "").rstrip()
-        cmt = (m.group("cmt") or "").strip()
+        cmt = comment.strip()
 
         left = f"{kw} {name}"
         if kw == "Dim":
@@ -258,7 +331,16 @@ def collapse_blanks(lines):
 
 
 def reformat(path, module_name):
-    text = open(path, encoding="latin-1").read()
+    return reformat_text(open(path, encoding="latin-1").read(), module_name)
+
+
+def reformat_text(text, module_name):
+    """The whole pipeline, over text rather than a path.
+
+    Separated so the self-test can state a fixture as a few lines and assert
+    on the result, without a temporary file and without the test depending on
+    the filesystem to describe a formatting rule.
+    """
     lines = split_lines(text)
     lines = strip_trailing(lines)
     lines = normalise_rules(lines)
@@ -335,7 +417,120 @@ def write(paths):
     return 0
 
 
+
+
+# --------------------------------------------------------------------------
+# Self-test
+#
+# A defect in this file cannot be caught by the VBA regression suite, and
+# --check passing proves only that today's modules happen not to contain a
+# construct that trips it. Both defects corrected here were latent for exactly
+# that reason: no module in the repository quoted a label name or put an
+# apostrophe inside a literal, so the gate was green while the transformation
+# was wrong.
+#
+# Each fixture is a module fragment with a single line under test. The
+# expectation is stated as the line the formatter must produce, so a failure
+# names the rule rather than a byte count.
+
+SELFTEST_CASES = [
+    (
+        "a label name quoted in a literal is data, not a jump",
+        '        Msg = "use GoTo Fail nowhere"',
+        '        Msg = "use GoTo Fail nowhere"',
+    ),
+    (
+        "a real jump is still renamed",
+        "        On Error GoTo Fail",
+        "        On Error GoTo Err_Handler",
+    ),
+    (
+        "one line, one jump renamed and one literal left alone",
+        '        If X Then Msg = "GoTo Fail" Else GoTo Fail',
+        '        If X Then Msg = "GoTo Fail" Else GoTo Err_Handler',
+    ),
+    (
+        "comment prose is renamed, because it describes the jump",
+        "        On Error GoTo Fail  \'then Resume Fail",
+        "        On Error GoTo Err_Handler  \'then Resume Err_Handler",
+    ),
+    (
+        "an apostrophe inside a literal does not start a comment",
+        '    Const S As String = "a \'b\' c"',
+        '    Const S As String = "a \'b\' c"',
+    ),
+    (
+        "a trailing comment after such a literal is still aligned",
+        '    Const S As String = "a \'b\'" \'note',
+        '    Const S As String = "a \'b\'" \'note',
+    ),
+    (
+        "a doubled quote does not unbalance the literal scan",
+        '    Const T As String = "he said ""go"" \'x\' now"',
+        '    Const T As String = "he said ""go"" \'x\' now"',
+    ),
+    (
+        "an ordinary declaration is still aligned on the 20/19 grid",
+        "    Dim Msg As String \'Diagnostic buffer",
+        "    Dim Msg                 As String          \'Diagnostic buffer",
+    ),
+    (
+        "a label definition is still renamed",
+        "Fail:",
+        "Err_Handler:",
+    ),
+]
+
+SELFTEST_HEAD = [
+    'Attribute VB_Name = "M_SELFTEST"',
+    "Option Explicit",
+    "",
+    "Private Sub SelfTest_Probe()",
+]
+
+SELFTEST_TAIL = ["End Sub"]
+
+
+def selftest():
+    """Return a list of failure descriptions; empty means every rule holds."""
+    failures = []
+
+    for label, before, after in SELFTEST_CASES:
+        source = "\r\n".join(SELFTEST_HEAD + [before] + SELFTEST_TAIL) + "\r\n"
+        produced = reformat_text(source, "M_SELFTEST").split("\r\n")
+
+        if after not in produced:
+            got = [ln for ln in produced
+                   if ln not in SELFTEST_HEAD + SELFTEST_TAIL and ln.strip()]
+            failures.append(
+                f"{label}\n      expected: {after!r}\n      produced: {got!r}"
+            )
+            continue
+
+        # Idempotence is part of the contract check() relies on: a file that
+        # differs from its own formatted output is said to have drifted, which
+        # is only true while formatting twice equals formatting once.
+        again = reformat_text("\r\n".join(produced), "M_SELFTEST")
+        if again != "\r\n".join(produced):
+            failures.append(f"{label}\n      not idempotent on a second pass")
+
+    return failures
+
+
+def run_selftest():
+    failures = selftest()
+    if not failures:
+        print(f"ok   self-test: {len(SELFTEST_CASES)} formatting rules hold")
+        return 0
+    print(f"FAIL self-test: {len(failures)} rule(s) broken\n")
+    for f in failures:
+        print(f"  - {f}")
+    return 1
+
+
+
 USAGE = """usage:
+  reformat.py --selftest                         verify the rules themselves
   reformat.py --check <file.bas> [file.bas ...]   report drift, exit 1 if any
   reformat.py --write <file.bas> [file.bas ...]   normalise in place
   reformat.py <src> <dst> <module_name>           legacy explicit form
@@ -345,7 +540,9 @@ USAGE = """usage:
 if __name__ == "__main__":
     args = sys.argv[1:]
 
-    if args and args[0] == "--check":
+    if args and args[0] == "--selftest":
+        sys.exit(run_selftest())
+    elif args and args[0] == "--check":
         sys.exit(check(args[1:]))
     elif args and args[0] == "--write":
         sys.exit(write(args[1:]))
