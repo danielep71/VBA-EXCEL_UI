@@ -194,6 +194,11 @@ Option Private Module
     Private Const TST_SYNTHETIC_UNRELATED_BIT As Long = &H2000000
     Private Const TST_TITLEBAR_OWNED_MASK   As Long = &HCF0000
 
+    'A legal caption frame that is not the full owned set. Written behind the
+    'component to contradict an entry claiming the frame is hidden, which is
+    'the evidence a reissued handle presents to the registry.
+    Private Const TST_TITLEBAR_FOREIGN_FRAME As Long = &HC80000
+
     Private Const TST_SWP_NOSIZE            As Long = &H1
     Private Const TST_SWP_NOMOVE            As Long = &H2
     Private Const TST_SWP_NOZORDER          As Long = &H4
@@ -2908,9 +2913,10 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarOwnedBitPreservation
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
 '   - TST_Case_TitleBarFrameRefreshDebtRetried
+'   - TST_Case_TitleBarStaleFrameEntryNotReused
 '
 ' UPDATED
-'   2026-08-18
+'   2026-08-21
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2980,9 +2986,12 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify that a failed frame refresh is retried rather than short-circuited
         TST_Case_TitleBarFrameRefreshDebtRetried
 
+    'Verify that frame state which cannot be proved is discarded, not applied
+        TST_Case_TitleBarStaleFrameEntryNotReused
+
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
-            "Title-bar round-trip, owned-bit preservation, show-recovery, and refresh-debt cases passed"
+            "Title-bar round-trip, owned-bit preservation, show-recovery, refresh-debt and stale-entry cases passed"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
@@ -6670,6 +6679,251 @@ Safe_Exit:
     'Disarm the seam and put the frame back, whatever happened above
         On Error Resume Next
             UI_InternalInjectFrameRefreshFailure False
+            UI_SetExcelUI TitleBar:=UI_Show
+        On Error GoTo 0
+
+    'Raise the captured failure after restoration when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarStaleFrameEntryNotReused()
+
+'
+'==============================================================================
+' TST_Case_TitleBarStaleFrameEntryNotReused
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that the frame-state registry refuses to apply an entry it can no
+'   longer prove describes the window its handle names.
+'
+' WHY THIS EXISTS
+'   Windows reissues a window handle once the window holding it has closed, and
+'   IsWindow answers for whichever window holds the handle now, so a handle
+'   match was accepted as proof of identity. A show could then restore a closed
+'   window's captured frame onto an unrelated window that had merely inherited
+'   its handle.
+'
+'   A reissued handle cannot be forced on demand, so this case reproduces what
+'   the registry actually sees: an entry claiming the frame is hidden while the
+'   window it names carries owned bits the component never wrote. That is the
+'   same evidence a reissued handle presents, and it is the evidence the fix
+'   acts on.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Clears the frame-state registry so the case starts from a known state.
+'   - Hides the frame, leaving an entry that claims it.
+'   - Writes a different owned frame behind the component's back.
+'   - Requests a show and asserts the live frame survives it.
+'
+' ERROR POLICY
+'   - Raises after best-effort restoration of the frame.
+'
+' NOTES
+'   Windows may normalise or reject individual GWL_STYLE bits, so the frame
+'   written here is read back and the case asserts it is distinguishable from
+'   the stale baseline before drawing any conclusion from it.
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim TargetHwnd          As LongPtr         'Frame under test
+    Dim EntryStyle          As LongPtr         'Style to restore on the way out
+    Dim ForeignStyle        As LongPtr         'Style written behind the module
+    Dim ResultStyle         As LongPtr         'Style observed after the show
+    Dim BaselineOwned       As LongPtr         'Owned bits a stale show writes
+    Dim ForeignOwned        As LongPtr         'Owned bits actually accepted
+#Else
+    Dim TargetHwnd          As Long            'Frame under test
+    Dim EntryStyle          As Long            'Style to restore on the way out
+    Dim ForeignStyle        As Long            'Style written behind the module
+    Dim ResultStyle         As Long            'Style observed after the show
+    Dim BaselineOwned       As Long            'Owned bits a stale show writes
+    Dim ForeignOwned        As Long            'Owned bits actually accepted
+#End If
+
+    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle was read
+    Dim Msg                 As String          'Diagnostic buffer
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarStaleFrameEntryNotReused"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that an unprovable frame entry is not applied"
+
+'------------------------------------------------------------------------------
+' PREPARE A KNOWN FRAME STATE
+'------------------------------------------------------------------------------
+    'Start from a visible frame and an empty registry
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_InternalResetTitleBarBaseline
+
+        TargetHwnd = Application.hWnd
+
+        If TargetHwnd = 0 Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 60, _
+                PROC, _
+                "no Excel window handle is available"
+        End If
+
+    'Keep the entry style so the frame can be put back exactly
+        If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 61, _
+                PROC, _
+                "unable to read the entry window style | " & Msg
+        End If
+
+        StyleCaptured = True
+        BaselineOwned = EntryStyle And TST_TITLEBAR_OWNED_MASK
+
+'------------------------------------------------------------------------------
+' LEAVE AN ENTRY THAT CLAIMS THE FRAME
+'------------------------------------------------------------------------------
+    'Hide through the component, so the registry records a hidden frame and the
+    'owned bits it wrote to achieve it
+        If Not UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=False, _
+            FailMsg:=Msg) Then
+
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 62, _
+                PROC, _
+                "unable to hide the title bar | " & Msg
+        End If
+
+'------------------------------------------------------------------------------
+' CONTRADICT THE CLAIM
+'------------------------------------------------------------------------------
+    'Give the window an owned frame the component never wrote. To the registry
+    'this is indistinguishable from a handle Windows has issued to a different
+    'window, which is the condition under test.
+        ForeignStyle = _
+            (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+            TST_TITLEBAR_FOREIGN_FRAME
+
+        If Not TST_TrySetWindowStyle(TargetHwnd, ForeignStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 63, _
+                PROC, _
+                "unable to write the contradicting style | " & Msg
+        End If
+
+        If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 64, _
+                PROC, _
+                "unable to refresh the contradicting frame | " & Msg
+        End If
+
+    'Read back what Windows actually accepted rather than what was requested
+        If Not TST_TryGetWindowStyle(TargetHwnd, ForeignStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 65, _
+                PROC, _
+                "unable to read the contradicting style back | " & Msg
+        End If
+
+        ForeignOwned = ForeignStyle And TST_TITLEBAR_OWNED_MASK
+
+    'The case can only distinguish the two behaviours while the live frame and
+    'the stale baseline differ. Say so plainly rather than passing on a
+    'comparison that proves nothing.
+        If ForeignOwned = BaselineOwned Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 66, _
+                PROC, _
+                "Windows normalised the contradicting frame back to the " & _
+                "baseline; the case cannot distinguish the two outcomes"
+        End If
+
+'------------------------------------------------------------------------------
+' REQUEST A SHOW
+'------------------------------------------------------------------------------
+    'A build that trusts the handle match restores the stale baseline over this
+    'frame. A build that proves the entry first discards it, adopts the live
+    'bits and leaves the visible frame exactly as found.
+        If Not UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=True, _
+            FailMsg:=Msg) Then
+
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 67, _
+                PROC, _
+                "show reported failure | " & Msg
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT THE LIVE FRAME SURVIVED
+'------------------------------------------------------------------------------
+        If Not TST_TryGetWindowStyle(TargetHwnd, ResultStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 68, _
+                PROC, _
+                "unable to read the resulting window style | " & Msg
+        End If
+
+        If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> ForeignOwned Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 69, _
+                PROC, _
+                "the show applied a baseline this window never had; stale " & _
+                "frame state was reused"
+        End If
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "An unprovable frame entry was discarded instead of applied"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Put the frame back and drop the registry, whatever happened above
+        On Error Resume Next
+            TST_RestoreTitleBarStyle TargetHwnd, EntryStyle, StyleCaptured
+            UI_InternalResetTitleBarBaseline
             UI_SetExcelUI TitleBar:=UI_Show
         On Error GoTo 0
 

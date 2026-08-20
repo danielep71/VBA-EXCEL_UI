@@ -67,6 +67,12 @@ have reported failure. The component's public API is unchanged.
   errors travelling the handler path are raised after the counters have been
   reset, and the re-entrancy guard deliberately prevents reaching that path from
   inside a run.
+- Added `TST_Case_TitleBarStaleFrameEntryNotReused` to the title-bar pack, which
+  contradicts a registry entry that claims the frame and asserts the live window
+  survives the next show untouched. A reissued handle cannot be produced on
+  demand, so the case presents the registry with the same evidence one would:
+  an entry claiming a hidden frame against a window carrying owned bits the
+  component never wrote.
 
 ### 📖 Documentation
 
@@ -80,6 +86,16 @@ have reported failure. The component's public API is unchanged.
 
 ### 🐛 Fixed
 
+- Fixed the title-bar frame registry treating a handle match as proof of
+  identity. Windows reissues a window handle once the window holding it has
+  closed, and `IsWindow` answers for whichever window holds the handle now, so
+  liveness could not separate the two. An entry left by a closed window could
+  therefore be applied to an unrelated window that had inherited its handle,
+  and a show would write a frame that window never had. Every write now records
+  the owned bits it leaves behind, and an entry that claims the frame — because
+  this component hid it, or still owes it a repaint — must still match those
+  bits before it is reused. An entry that cannot be proved is discarded and the
+  window treated as one the component has never touched. (#32)
 - Fixed certification cleanup reporting false leakage. It required
   `Application.ScreenUpdating` to be `True` rather than comparing it with the
   value captured on entry, so a run started from within a quiet-update scope

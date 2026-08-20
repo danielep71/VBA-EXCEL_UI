@@ -76,6 +76,7 @@ Option Private Module
 '       ComponentHidden whether THIS component is the reason the frame is hidden
 '       RefreshPending  whether a style write succeeded but its frame refresh
 '                       did not, and must be retried before anything else
+'       LastWrittenBits the owned bits this component last wrote to that window
 '
 '   ComponentHidden is what makes the baseline self-healing. While the
 '   component does not own a hidden state, the live owned bits are the truth and
@@ -85,11 +86,22 @@ Option Private Module
 '   own zeros and the stored baseline is the only surviving record of what to
 '   restore, so it is left alone.
 '
+'   LastWrittenBits is what makes an entry provable. A handle is only a name,
+'   and Windows is free to issue that name again once the window holding it has
+'   closed, so a matching handle is not on its own evidence that the entry
+'   describes the window in front of it. An entry that claims the frame,
+'   because this component hid it or still owes it a repaint, is therefore
+'   checked against the live owned bits before it is reused and discarded when
+'   the two disagree. The window is then treated as one this component has
+'   never touched, which is exactly the state a new entry starts in.
+'
 ' DESIGN PRINCIPLES
 '   - The merge policy is a pure function, deliberately separated from the
 '     WinAPI write so it can be validated deterministically.
 '   - Frame state is per handle. Operating on a second window never destroys
 '     the state of the first.
+'   - An entry is reused only while its claim can still be proved against the
+'     window its handle names now. A handle on its own is not an identity.
 '   - A style write and its frame refresh are treated as one unit of work. If
 '     the refresh fails the debt is recorded and paid before the next call is
 '     allowed to conclude that there is nothing to do.
@@ -122,6 +134,15 @@ Option Private Module
 '     set, the Long mask would sign-extend when widened to LongPtr.
 '   - Module state is lost on a VBA project reset while the window style
 '     itself survives, because the style belongs to the running Excel process.
+'   - Windows reissues window handles once the window that held one has
+'     closed, and IsWindow cannot tell a reissued handle from the original: it
+'     answers for whatever window holds the handle now. That is why an entry
+'     that claims the frame is proved against the live owned bits rather than
+'     trusted on a handle match alone. The deliberate cost is that a frame
+'     change made by Excel or another add-in while this component holds the
+'     frame hidden also discards the entry. The baseline is then recaptured
+'     from the live bits, which is the same self-healing rule that already
+'     applies while the component owns nothing.
 '   - The frame-state registry is bounded by compaction, not by growth alone.
 '     Entries whose handle no longer passes IsWindow are reclaimed before the
 '     registry is extended, so a long session that opens and closes many
@@ -132,6 +153,10 @@ Option Private Module
 '     drift apart.
 '
 ' UPDATED
+'   2026-08-21 - Recorded the owned bits each write leaves behind and made the
+'                registry prove an entry before reusing it, so a reissued
+'                handle can no longer inherit the state of the window that
+'                used to hold it.
 '   2026-08-19 - Removed the unused per-handle baseline-reset seam.
 '   2026-08-19 - Replaced the singleton frame baseline with a per-handle
 '                registry, added the explicit-target entry points, and made a
@@ -267,9 +292,11 @@ Private Type tTitleBarFrameState
 #If VBA7 Then
     hWnd                As LongPtr             'Window the entry belongs to
     OwnedStyleBits      As LongPtr             'Baseline a show re-applies
+    LastWrittenBits     As LongPtr             'Owned bits last written here
 #Else
     hWnd                As Long                'Window the entry belongs to
     OwnedStyleBits      As Long                'Baseline a show re-applies
+    LastWrittenBits     As Long                'Owned bits last written here
 #End If
     HasBaseline         As Boolean             'OwnedStyleBits ever captured
     ComponentHidden     As Boolean             'This component hid the frame
@@ -1261,6 +1288,9 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 '     own a hidden state for the window.
 '   - Hiding supplies zero owned bits; showing supplies the stored baseline.
 '   - Short-circuits when no owned bit would change and nothing is owed.
+'   - Records the owned bits left behind wherever it adopts ownership, whether
+'     it wrote them or found them already in place, so the registry can later
+'     prove the entry against the window.
 '   - Records a refresh debt when the style write succeeds and the repaint
 '     does not.
 '
@@ -1287,6 +1317,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 '   keeps a show a real recovery path in that situation.
 '
 ' UPDATED
+'   2026-08-21 - Recorded the owned bits behind every adoption of ownership.
 '   2026-08-19
 '==============================================================================
 '
@@ -1415,7 +1446,16 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
     'Skip the write and the frame refresh when no owned bit would change. Any
     'refresh debt was already settled above, so this really is a no-op.
         If NewStyle = CurrentStyle Then
-            m_FrameStates(Slot).ComponentHidden = Not IsVisible
+
+            'Nothing is written here, but the component still adopts the state
+            'as its own. Record the owned bits the entry now claims, so a later
+            'call can tell this window from one that has merely inherited its
+            'handle.
+                m_FrameStates(Slot).LastWrittenBits = _
+                    NewStyle And TITLEBAR_OWNED_STYLE_MASK
+
+                m_FrameStates(Slot).ComponentHidden = Not IsVisible
+
             UI_TrySetTitleBarVisibleForHwndWorker = True
             GoTo Safe_Exit
         End If
@@ -1429,7 +1469,11 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
         End If
 
     'The style is committed, so this component now owns the resulting state
-    'whether or not the repaint below succeeds.
+    'whether or not the repaint below succeeds. Recording what was written is
+    'what lets a later call prove the entry still describes this window.
+        m_FrameStates(Slot).LastWrittenBits = _
+            NewStyle And TITLEBAR_OWNED_STYLE_MASK
+
         m_FrameStates(Slot).ComponentHidden = Not IsVisible
 
 '------------------------------------------------------------------------------
@@ -1501,7 +1545,8 @@ Private Function UI_FrameStateIndexForHwnd( _
 '
 '   CreateIfMissing
 '     True to append an entry when the handle is unknown; False to report the
-'     miss without mutating the registry.
+'     miss without creating one. Neither setting preserves an entry that has
+'     been disproved: evidence about another window is dropped on sight.
 '
 ' RETURNS
 '   Long
@@ -1510,6 +1555,8 @@ Private Function UI_FrameStateIndexForHwnd( _
 '
 ' BEHAVIOR
 '   - Scans the live entries for a matching handle.
+'   - Discards a matched entry that can no longer be proved to describe the
+'     window its handle names, and reports the handle as unknown instead.
 '   - Reclaims entries whose window no longer exists before extending the
 '     registry, so a long session cannot accumulate dead slots.
 '   - Initializes a new entry with no baseline, no ownership and no debt.
@@ -1519,20 +1566,23 @@ Private Function UI_FrameStateIndexForHwnd( _
 '
 ' DEPENDENCIES
 '   - UI_CompactFrameStates
+'   - UI_DiscardFrameStateEntry
+'   - UI_FrameStateEntryHolds
+'   - UI_FrameStateSlotForHwnd
 '
 ' CALLED FROM
 '   - UI_TrySetTitleBarVisibleForHwndWorker
 '   - UI_InternalIsFrameRefreshPending
 '
 ' UPDATED
-'   2026-08-19
+'   2026-08-21
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ScanIdx             As Long            'Cursor over the live entries
+    Dim Slot                As Long            'Entry already held, if any
     Dim Capacity            As Long            'Slots currently allocated
 
 '------------------------------------------------------------------------------
@@ -1553,17 +1603,26 @@ Private Function UI_FrameStateIndexForHwnd( _
         End If
 
 '------------------------------------------------------------------------------
-' SCAN EXISTING ENTRIES
+' RESOLVE EXISTING ENTRY
 '------------------------------------------------------------------------------
-    'Return the first entry whose handle matches
-        For ScanIdx = 1 To m_FrameStateCount
+    'Find the entry holding this handle, if the registry has one
+        Slot = UI_FrameStateSlotForHwnd(TargetHwnd)
 
-            If m_FrameStates(ScanIdx).hWnd = TargetHwnd Then
-                UI_FrameStateIndexForHwnd = ScanIdx
-                GoTo Safe_Exit
-            End If
+        If Slot >= 1 Then
 
-        Next ScanIdx
+            'Hand it back only while it can still be proved to describe the
+            'window the handle names now
+                If UI_FrameStateEntryHolds(Slot) Then
+                    UI_FrameStateIndexForHwnd = Slot
+                    GoTo Safe_Exit
+                End If
+
+            'It cannot. Either Windows has issued this handle to a different
+            'window or the frame has moved out from under the claim; in both
+            'cases the entry is evidence about a window that is not this one,
+            'so it is dropped rather than applied to whatever answers now.
+                UI_DiscardFrameStateEntry Slot
+        End If
 
 '------------------------------------------------------------------------------
 ' STOP WHEN NOT CREATING
@@ -1605,6 +1664,7 @@ Private Function UI_FrameStateIndexForHwnd( _
         m_FrameStates(m_FrameStateCount).HasBaseline = False
         m_FrameStates(m_FrameStateCount).ComponentHidden = False
         m_FrameStates(m_FrameStateCount).RefreshPending = False
+        m_FrameStates(m_FrameStateCount).LastWrittenBits = 0
 
         UI_FrameStateIndexForHwnd = m_FrameStateCount
 
@@ -1623,6 +1683,336 @@ Err_Handler:
         UI_FrameStateIndexForHwnd = -1
 
 End Function
+
+
+#If VBA7 Then
+Private Function UI_FrameStateSlotForHwnd( _
+    ByVal TargetHwnd As LongPtr) _
+    As Long
+#Else
+Private Function UI_FrameStateSlotForHwnd( _
+    ByVal TargetHwnd As Long) _
+    As Long
+#End If
+'
+'==============================================================================
+' UI_FrameStateSlotForHwnd
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the registry index whose stored handle matches, saying nothing
+'   about whether the entry still describes the window that handle names now.
+'
+' WHY THIS EXISTS
+'   Finding an entry and trusting it are two decisions, and running them
+'   together is what let a reissued handle inherit the state of the window
+'   that used to hold it. Keeping the scan a pure read leaves the judgement
+'   with the caller that can act on it, and keeps this loop worth reading.
+'
+' INPUTS
+'   TargetHwnd
+'     Window to look up. Never zero; the caller rejects that first.
+'
+' RETURNS
+'   Long
+'     1-based registry index, or -1 when no entry holds this handle.
+'
+' BEHAVIOR
+'   - Linear scan over the live entries, first match wins.
+'   - Never mutates the registry.
+'
+' ERROR POLICY
+'   - Does not raise. Any unexpected error is reported as -1.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_FrameStateIndexForHwnd
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the live entries
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Assume the handle is unknown until the scan says otherwise
+        UI_FrameStateSlotForHwnd = -1
+
+'------------------------------------------------------------------------------
+' SCAN EXISTING ENTRIES
+'------------------------------------------------------------------------------
+    'Return the first entry whose stored handle matches
+        For ScanIdx = 1 To m_FrameStateCount
+
+            If m_FrameStates(ScanIdx).hWnd = TargetHwnd Then
+                UI_FrameStateSlotForHwnd = ScanIdx
+                GoTo Safe_Exit
+            End If
+
+        Next ScanIdx
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'A scan that cannot complete must report a miss, not a doubtful index
+        UI_FrameStateSlotForHwnd = -1
+
+End Function
+
+
+Private Function UI_FrameStateEntryHolds( _
+    ByVal Slot As Long) _
+    As Boolean
+'
+'==============================================================================
+' UI_FrameStateEntryHolds
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a registry entry can still be proved to describe the
+'   window its stored handle names.
+'
+' WHY THIS EXISTS
+'   Windows reissues a window handle once the window that held it has closed,
+'   and IsWindow answers for whichever window holds the handle now. A handle
+'   match is therefore not evidence of identity, and acting on one was enough
+'   to restore a closed window's captured frame onto an unrelated window that
+'   happened to inherit its handle.
+'
+'   There is no free identity token for a top-level window, so this proves the
+'   entry the only way it can be proved from the window itself: an entry that
+'   claims the frame must still find the owned bits it last wrote. An entry
+'   that claims nothing needs no proof, because its baseline is recaptured
+'   from the live bits before anything is ever restored from it.
+'
+' INPUTS
+'   Slot
+'     1-based registry index. Anything outside the live range fails the check.
+'
+' RETURNS
+'   Boolean
+'     True  => the entry may be reused for this window.
+'     False => the entry cannot be shown to belong here and must be dropped.
+'
+' BEHAVIOR
+'   - Fails an entry whose window has closed.
+'   - Passes an entry that neither hid the frame nor owes a repaint.
+'   - Otherwise compares the live owned bits with LastWrittenBits.
+'   - Fails when the style cannot be read, since nothing is then proved.
+'
+' ERROR POLICY
+'   - Does not raise. Any unexpected error fails the check, which discards an
+'     entry rather than trusting one, and is the safe direction to fail in.
+'
+' DEPENDENCIES
+'   - UI_InternalIsTitleBarFrameAlive
+'   - UI_TryGetWindowStyle
+'
+' CALLED FROM
+'   - UI_FrameStateIndexForHwnd
+'
+' NOTES
+'   - A frame change made by Excel or another add-in while this component
+'     holds the frame hidden also fails the check. Discarding the entry is
+'     correct in that case too: the live bits are then the only description of
+'     the window this component can defend, and adopting them is the same
+'     self-healing rule that applies while it owns nothing.
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim CurrentStyle        As LongPtr         'Live GWL_STYLE value
+#Else
+    Dim CurrentStyle        As Long            'Live GWL_STYLE value
+#End If
+
+    Dim ProbeMsg            As String          'Style-read diagnostic, unused
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Assume the entry cannot be proved until a check says it can
+        UI_FrameStateEntryHolds = False
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'A slot outside the live range names no entry at all
+        If Slot < 1 Or Slot > m_FrameStateCount Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' PROBE WINDOW LIVENESS
+'------------------------------------------------------------------------------
+    'An entry whose window has closed describes nothing, whoever holds the
+    'handle next
+        If Not UI_InternalIsTitleBarFrameAlive(m_FrameStates(Slot).hWnd) Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' ACCEPT AN ENTRY THAT CLAIMS NOTHING
+'------------------------------------------------------------------------------
+    'While the entry neither owns a hidden frame nor owes a repaint it asserts
+    'nothing about this window. Its baseline is recaptured from the live bits
+    'before it is used, so a reissued handle inherits no stale value from it.
+        If Not m_FrameStates(Slot).ComponentHidden Then
+
+            If Not m_FrameStates(Slot).RefreshPending Then
+                UI_FrameStateEntryHolds = True
+                GoTo Safe_Exit
+            End If
+
+        End If
+
+'------------------------------------------------------------------------------
+' PROVE THE CLAIM
+'------------------------------------------------------------------------------
+    'A style that cannot be read confirms nothing
+        If Not UI_TryGetWindowStyle( _
+            m_FrameStates(Slot).hWnd, CurrentStyle, ProbeMsg) Then
+
+            GoTo Safe_Exit
+        End If
+
+    'The claim holds only while the window still carries the owned bits this
+    'component last wrote to it
+        If (CurrentStyle And TITLEBAR_OWNED_STYLE_MASK) = _
+            m_FrameStates(Slot).LastWrittenBits Then
+
+            UI_FrameStateEntryHolds = True
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Fail closed: an unproved entry is discarded, never applied
+        UI_FrameStateEntryHolds = False
+
+End Function
+
+
+Private Sub UI_DiscardFrameStateEntry( _
+    ByVal Slot As Long)
+'
+'==============================================================================
+' UI_DiscardFrameStateEntry
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes one registry entry and closes the gap it leaves behind.
+'
+' WHY THIS EXISTS
+'   Compaction reclaims entries whose window has closed, which is a liveness
+'   test and cannot recognise a handle that now names a different window. An
+'   entry disproved by UI_FrameStateEntryHolds has to go immediately: leaving
+'   it in place would let the very next call match it again.
+'
+' INPUTS
+'   Slot
+'     1-based registry index to remove. Anything outside the live range is
+'     ignored rather than treated as an error.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Moves every later entry down one slot, preserving order.
+'   - Reduces the live count; allocated capacity is deliberately kept.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_FrameStateIndexForHwnd
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim MoveIdx             As Long            'Cursor over the entries above
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'A slot outside the live range names no entry to remove
+        If Slot < 1 Or Slot > m_FrameStateCount Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' CLOSE THE GAP
+'------------------------------------------------------------------------------
+    'Move every entry above the removed one down a slot
+        For MoveIdx = Slot To m_FrameStateCount - 1
+            m_FrameStates(MoveIdx) = m_FrameStates(MoveIdx + 1)
+        Next MoveIdx
+
+    'Adopt the reduced count; capacity above it is left allocated for reuse
+        m_FrameStateCount = m_FrameStateCount - 1
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Leave the registry exactly as it was rather than truncating it on error
+        Resume Safe_Exit
+
+End Sub
 
 
 Private Sub UI_CompactFrameStates()
