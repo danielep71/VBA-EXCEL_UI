@@ -245,6 +245,14 @@ no existing call site requires modification.
   baseline was written for.
 - Corrected the branch-naming examples in `CONTRIBUTING.md`, which offered
   `release/v1.1.0` — a branch line that no longer exists.
+- Restyled `INSTALLATION.md` to match the other repository documents: a
+  requirements table, glyphed headings, a routing table that sends a reader to
+  the one upgrade path that applies to them, an indexed symptom table above the
+  troubleshooting entries, and an emergency-recovery section placed before the
+  problem list rather than buried inside it. A same-line upgrade section is
+  added, naming the two outcomes that become newly observable without any call
+  site changing. The guide is no longer pinned to a version, and the demo asset
+  filename is a pattern rather than a fixed name.
 - Restyled `CONTRIBUTING.md` to match `README.md` and `CHANGELOG.md`: glyphed
   headings, a priorities table stating why each non-negotiable is
   non-negotiable, a quick-reference block for the three commands a contributor
