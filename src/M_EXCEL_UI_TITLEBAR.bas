@@ -156,7 +156,7 @@ Option Private Module
 '   2026-08-21 - Recorded the owned bits each write leaves behind and made the
 '                registry prove an entry before reusing it, so a reissued
 '                handle can no longer inherit the state of the window that
-'                used to hold it.
+'                used to hold it. Fixes ICR-UI-111-P2-01.
 '   2026-08-19 - Removed the unused per-handle baseline-reset seam.
 '   2026-08-19 - Replaced the singleton frame baseline with a per-handle
 '                registry, added the explicit-target entry points, and made a

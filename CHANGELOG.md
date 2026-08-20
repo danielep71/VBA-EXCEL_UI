@@ -95,7 +95,8 @@ have reported failure. The component's public API is unchanged.
   the owned bits it leaves behind, and an entry that claims the frame — because
   this component hid it, or still owes it a repaint — must still match those
   bits before it is reused. An entry that cannot be proved is discarded and the
-  window treated as one the component has never touched. (#32)
+  window treated as one the component has never touched.
+  (`ICR-UI-111-P2-01`, #32)
 - Fixed certification cleanup reporting false leakage. It required
   `Application.ScreenUpdating` to be `True` rather than comparing it with the
   value captured on entry, so a run started from within a quiet-update scope

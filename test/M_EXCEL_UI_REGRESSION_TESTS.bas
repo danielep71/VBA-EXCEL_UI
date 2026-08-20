@@ -6714,11 +6714,11 @@ Private Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 '   longer prove describes the window its handle names.
 '
 ' WHY THIS EXISTS
-'   Windows reissues a window handle once the window holding it has closed, and
-'   IsWindow answers for whichever window holds the handle now, so a handle
-'   match was accepted as proof of identity. A show could then restore a closed
-'   window's captured frame onto an unrelated window that had merely inherited
-'   its handle.
+'   This is the regression for ICR-UI-111-P2-01. Windows reissues a window
+'   handle once the window holding it has closed, and IsWindow answers for
+'   whichever window holds the handle now, so a handle match was accepted as
+'   proof of identity. A show could then restore a closed window's captured
+'   frame onto an unrelated window that had merely inherited its handle.
 '
 '   A reissued handle cannot be forced on demand, so this case reproduces what
 '   the registry actually sees: an entry claiming the frame is hidden while the
