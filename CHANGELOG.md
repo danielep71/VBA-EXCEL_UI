@@ -225,6 +225,16 @@ no existing call site requires modification.
   grouped only the visibility keyword — produced hunk headers reading `Public`
   instead of the procedure signature. The whole declaration is now the outer
   group.
+- Broadened the binary-workbook exclusion in `.gitignore` from `demo/*.xlsm` to
+  every macro-enabled and binary Office format, anywhere in the tree. The
+  narrower rule left a workbook saved at the repository root, in `test/`, or
+  with any other extension silently trackable, while the file's stated policy
+  and `tools/check_repo.py` both said such files must not be tracked. The two
+  now agree, instead of the gate catching what the ignore rules let through.
+- Extended `.gitignore` coverage: merge and patch artifacts (`*.orig`, `*.rej`),
+  release-certification evidence copied into the working tree, further Windows,
+  macOS and Linux desktop metadata, and local state written by editors and
+  coding assistants.
 - Extended `.gitattributes` coverage: the remaining Office formats
   (`.dotm`, `.potm`, `.ppsx`, `.ppsm`, `.accde`, `.accdr`, `.mde`, `.ade`,
   `.xlw`, `.xll`, `.thmx`), Office lock files (`~$*`, `.laccdb`, `.ldb`),
