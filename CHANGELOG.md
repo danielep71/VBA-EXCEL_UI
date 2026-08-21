@@ -37,7 +37,7 @@ backward-compatible capability, 💥 **major** may break callers.
 
 </details>
 
-## [Unreleased]
+## [1.1.2] - 2026-08-21
 
 > 🩹 **Patch** · correctness release · public API unchanged
 
@@ -53,6 +53,20 @@ returned silently after failing, a cleanup check that reported a leak where none
 existed, a diagnostic that lost the error it was describing, a formatter that
 rewrote the text it was meant to align — each reported success, or the wrong
 failure, and none of them announced anything. The public API is unchanged.
+
+#### At a glance
+
+| Finding | Issue | What it was |
+|---|:--:|---|
+| 🟠 `ICR-UI-111-P2-01` | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | A recycled window handle could retrieve another window's frame state |
+| 🟠 `ICR-UI-111-P2-02` | [#33](https://github.com/danielep71/VBA-EXCEL_UI/issues/33) | Cleanup reported a leak whenever a run started inside a quiet scope |
+| 🟠 `ICR-UI-111-P2-03` | [#34](https://github.com/danielep71/VBA-EXCEL_UI/issues/34) | Certification destroyed the error it re-raised, so a failed run returned silently |
+| ⚪ — | [#39](https://github.com/danielep71/VBA-EXCEL_UI/issues/39) | A diagnostic read `Err` after suppressing errors and described nothing |
+| ⚪ — | [#25](https://github.com/danielep71/VBA-EXCEL_UI/issues/25) | The formatter rewrote text inside string literals |
+| ⚪ — | [#41](https://github.com/danielep71/VBA-EXCEL_UI/issues/41) | Two frame-state cases never ran under release certification |
+
+🟠 P2 — priorities as assigned by the independent review. ⚪ — found during this
+release.
 
 ### ➕ Added
 
@@ -146,6 +160,48 @@ failure, and none of them announced anything. The public API is unchanged.
   `Err.Raise 0` does not raise — so **a failed certification returned silently**
   and a programmatic caller saw a normal return. All fields are now captured
   into locals before anything is called. (`ICR-UI-111-P2-03`, #34)
+
+### ✅ Validation
+
+Certified in desktop Microsoft Excel for Windows via
+`Test_EXCEL_UI_RunReleaseCertification`.
+
+| Host | Value |
+|---|---|
+| 🖥️ Excel | `16.0` build `20131` |
+| 🪟 Operating system | Windows (64-bit) NT 10.00 |
+| ⚙️ Bitness | x64 |
+| 🧾 VBA generation | VBA7 |
+| 🕒 Certified | 2026-08-21 10:33:50 |
+| 🔖 Tree certified | `4ba380a72dffaad7ef01a27e88a6fc6b1a7110a2` |
+
+```text
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+  PASS  RegressionPack
+  PASS  SnapshotIdentity
+  PASS  TitleBarSdiIdentity
+```
+
+The certified tree is named because commits after it change only this entry and
+the matching README release note. No `.bas` module differs between the certified
+tree and the tag.
+
+Both title-bar frame-state cases appear in this run and did not appear in the
+one before it. `TST_Case_TitleBarFrameRefreshDebtRetried` and
+`TST_Case_TitleBarStaleFrameEntryNotReused` were registered only in the
+title-bar-only pack, so the counters below were previously true of a run that
+never dispatched them. See `#41`.
+
+All four counters are part of the verdict. `failed=0` alone is not a pass:
+`skipped=0` confirms nothing was silently omitted, and `cleanup=OK` confirms no
+snapshot, stray workbook or suppressed screen update was left behind. None of
+them confirms that a given case ran, which is what the case names in the log
+are for.
+
+Static checks additionally run on every pull request via
+`.github/workflows/static-checks.yml`, now including the formatter's own
+`--selftest` fixtures. They cannot execute VBA — a hosted runner has no Excel —
+so the two gates remain complementary rather than alternatives.
 
 ### 🔗 Compatibility
 
@@ -780,7 +836,8 @@ All three regression runners completed successfully.
 - No executable VBA behavior was intentionally changed.
 - GitHub Actions workflows are intentionally not included in this release.
 
-[Unreleased]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/danielep71/VBA-EXCEL_UI/releases/tag/v1.0.1

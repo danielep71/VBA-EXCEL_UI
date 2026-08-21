@@ -702,6 +702,31 @@ No third-party DLL, COM component, package manager, or non-standard VBA referenc
 
 ## 🧭 Release status
 
+### v1.1.2 — correctness release
+
+Addresses the findings of an independent review of `v1.1.1`, recorded in
+[docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md](docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md),
+together with three defects found while correcting them. The public API is
+unchanged: no procedure, enum or parameter was added, removed or renamed, and no
+existing call site requires modification.
+
+Every item is a mechanism that reported success, or the wrong failure, over work
+it had not done:
+
+- frame state no longer reused on a window handle alone, so a handle Windows has
+  issued to a different window cannot retrieve the state of the window that
+  closed;
+- release certification no longer destroys the error it re-raises, so a failed
+  run reaches its caller instead of returning silently;
+- cleanup judged against the state a run started from, rather than requiring a
+  fixed value it was never entitled to assume;
+- a runtime-error diagnostic that read `Err` after suppressing errors, and
+  described nothing;
+- a house-style formatter that rewrote text inside string literals, changing
+  what a module printed rather than how it was laid out;
+- two title-bar regression cases that had never run under release certification,
+  including the one written for this release's own frame-state fix.
+
 ### v1.1.1 — corrective release
 
 Addresses the findings of an independent review of `v1.1.0`, recorded in
