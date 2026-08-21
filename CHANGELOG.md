@@ -37,9 +37,232 @@ backward-compatible capability, 💥 **major** may break callers.
 
 </details>
 
-## [Unreleased]
+## [1.1.2] - 2026-08-21
 
-No unreleased changes are currently documented.
+> 🩹 **Patch** · correctness release · public API unchanged
+
+### 🧭 Release intent
+
+A correctness release. Four of the five defects come from an independent review
+of `v1.1.1` recorded in `docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md`; the
+fifth was found while writing the regression case for one of them.
+
+What they have in common is the direction of the failure. A registry that
+answered for a window it could not identify, a certification runner that
+returned silently after failing, a cleanup check that reported a leak where none
+existed, a diagnostic that lost the error it was describing, a formatter that
+rewrote the text it was meant to align — each reported success, or the wrong
+failure, and none of them announced anything. The public API is unchanged.
+
+#### At a glance
+
+| Finding | Issue | What it was |
+|---|:--:|---|
+| 🟠 `ICR-UI-111-P2-01` | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | A recycled window handle could retrieve another window's frame state |
+| 🟠 `ICR-UI-111-P2-02` | [#33](https://github.com/danielep71/VBA-EXCEL_UI/issues/33) | Cleanup reported a leak whenever a run started inside a quiet scope |
+| 🟠 `ICR-UI-111-P2-03` | [#34](https://github.com/danielep71/VBA-EXCEL_UI/issues/34) | Certification destroyed the error it re-raised, so a failed run returned silently |
+| ⚪ — | [#39](https://github.com/danielep71/VBA-EXCEL_UI/issues/39) | A diagnostic read `Err` after suppressing errors and described nothing |
+| ⚪ — | [#25](https://github.com/danielep71/VBA-EXCEL_UI/issues/25) | The formatter rewrote text inside string literals |
+| ⚪ — | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | Two frame-state cases never ran under release certification |
+| ⚪ — | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | A test runner replaced and then discarded a caller's snapshot |
+
+🟠 P2 — priorities as assigned by the independent review. ⚪ — found during this
+release.
+
+### ➕ Added
+
+- Added a re-entrancy guard to `Test_EXCEL_UI_RunReleaseCertification`. A nested
+  invocation previously reset the outer run's unit records and cleared its
+  active flag on exit, leaving the outer verdict describing work it never did.
+  The refusal is raised before the error handler is armed, so it reaches the
+  caller without disturbing the run in progress.
+- Added `TST_CertEvaluateCleanup`, which extracts the certification cleanup
+  decision from the runner so it can be tested with crafted inputs instead of a
+  full destructive run, and gives the further state comparisons planned for this
+  suite one place to live.
+- Added `TST_Case_CertificationCleanupUsesBaseline` to the core regression pack,
+  which asserts that a suppressed state matching its baseline is clean and that
+  a genuine difference is still reported with both values named.
+- Added `Test_EXCEL_UI_RunCertificationSelfTest`, which asserts that a failure
+  inside certification reaches the caller with its error number and description
+  intact. It is a standalone runner rather than a pack case, because the only
+  errors travelling the handler path are raised after the counters have been
+  reset, and the re-entrancy guard deliberately prevents reaching that path from
+  inside a run.
+- Added `tools/reformat.py --selftest`, a fixture set asserting the formatter's
+  own transformation rules, wired into `check_repo.py` so it runs on every push.
+  The formatter is the one tool whose defects the VBA suite cannot observe, and
+  `--check` passing proves only that today's modules contain no construct that
+  trips it.
+- Added `TST_Case_TitleBarStaleFrameEntryNotReused` to the title-bar pack, which
+  contradicts a registry entry that claims the frame and asserts the live window
+  survives the next show untouched. A reissued handle cannot be produced on
+  demand, so the case presents the registry with the same evidence one would:
+  an entry claiming a hidden frame against a window carrying owned bits the
+  component never wrote.
+
+### 📖 Documentation
+
+- `CONTRIBUTING.md` now states both rules that protect a diagnostic from
+  destroying the failure it describes: nothing reachable from an error handler
+  may raise, and `Err` must never be read after a call or after any `On Error`.
+  Both had been violated twice, each time by someone who had just fixed the
+  other instance. The safe exception — passing `Err.Number` as a call argument,
+  where evaluation precedes the call — is stated explicitly, because a sweep
+  that does not know it will "fix" correct code.
+
+### 🐛 Fixed
+
+- Fixed `Test_EXCEL_UI_RunCertificationSelfTest` destroying a caller's snapshot.
+  It captured one unconditionally to establish the precondition it tests, and
+  capture replaces any existing snapshot outright rather than merging, so a
+  caller who already held one lost it — and the runner's own cleanup then
+  discarded the replacement. It now refuses to run while an explicit snapshot
+  exists, which is what every other destructive runner in the module already
+  did. Found by automated review of the release pull request. (#43)
+- Fixed the release-certification runner not reaching two title-bar
+  regression cases. `TST_RunRegressionPack` is the body of the `RegressionPack`
+  certification unit, but `TST_Case_TitleBarFrameRefreshDebtRetried` and
+  `TST_Case_TitleBarStaleFrameEntryNotReused` were registered only in the
+  title-bar-only pack. Both passed there and neither appeared in the evidence a
+  release is tagged on — including the case written for this release's own
+  frame-registry fix. Every frame-state case is now registered in both. (#42)
+- Fixed `tools/reformat.py` rewriting text inside string literals. Two
+  transformations shared the assumption that an apostrophe or a keyword means
+  the same thing everywhere on a line. Label renaming rewrote `GoTo Fail` inside
+  quoted text, changing what a module printed at run time rather than where it
+  jumped; and declaration alignment treated the first apostrophe as the start of
+  a comment, so a `Const` whose literal contained one had the alignment padding
+  written into the literal itself. Both now split the line at the comment marker
+  that sits outside quoted text, and substitute only outside literals. Neither
+  defect was reachable from any module in the repository, which is why the gate
+  stayed green over them, and why the correction ships with its own fixtures.
+  (#25)
+- Fixed the title-bar frame registry treating a handle match as proof of
+  identity. Windows reissues a window handle once the window holding it has
+  closed, and `IsWindow` answers for whichever window holds the handle now, so
+  liveness could not separate the two. An entry left by a closed window could
+  therefore be applied to an unrelated window that had inherited its handle,
+  and a show would write a frame that window never had. Every write now records
+  the owned bits it leaves behind, and an entry that claims the frame — because
+  this component hid it, or still owes it a repaint — must still match those
+  bits before it is reused. An entry that cannot be proved is discarded and the
+  window treated as one the component has never touched.
+  (`ICR-UI-111-P2-01`, #32)
+- Fixed certification cleanup reporting false leakage. It required
+  `Application.ScreenUpdating` to be `True` rather than comparing it with the
+  value captured on entry, so a run started from within a quiet-update scope
+  failed certification even though the regression pack had correctly restored
+  the suppressed value it found. `OldScreenUpdating` was captured and never
+  read. Every cleanup check now compares the exit state with the entry state,
+  and a genuine change names both values so it can be diagnosed from the
+  evidence file alone. (`ICR-UI-111-P2-02`, #33)
+- Fixed `Demo_GetRuntimeErrorText` reading the `Err` object after
+  `On Error Resume Next`. Every form of `On Error` resets `Err`, so every
+  unexpected-error diagnostic the demo produced reported `0:` with an empty
+  description — the failure text was lost at exactly the moment it was needed.
+  The fields are now captured before errors are suppressed. (#39)
+- Fixed release certification destroying the error it re-raises. The handler
+  called `TST_Log`, which contains `On Error Resume Next` and therefore clears
+  `Err`, then read `Err` to re-raise. `Err.Number` was zero by that point, and
+  `Err.Raise 0` does not raise — so **a failed certification returned silently**
+  and a programmatic caller saw a normal return. All fields are now captured
+  into locals before anything is called. (`ICR-UI-111-P2-03`, #34)
+
+### ✅ Validation
+
+Certified in desktop Microsoft Excel for Windows via
+`Test_EXCEL_UI_RunReleaseCertification`.
+
+| Host | Value |
+|---|---|
+| 🖥️ Excel | `16.0` build `20131` |
+| 🪟 Operating system | Windows (64-bit) NT 10.00 |
+| ⚙️ Bitness | x64 |
+| 🧾 VBA generation | VBA7 |
+| 🕒 Certified | 2026-08-21 11:30:06 |
+| 🔖 Tree certified | `ef7455f511ba93da73d9b675f71ae942147cc0d6` |
+
+```text
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+  PASS  RegressionPack
+  PASS  SnapshotIdentity
+  PASS  TitleBarSdiIdentity
+```
+
+The certified tree is named so the claim can be checked rather than trusted.
+Commits after it change this Validation block and nothing else: no `.bas`
+module, no tool, no gate.
+
+Earlier runs were superseded rather than reused. Each certified a tree that was
+then changed — once by module-header corrections touching only comment lines,
+once by a guard in a runner this suite never dispatches. Neither change could
+have altered the result, and reusing the earlier evidence on that reasoning is
+exactly what this release exists to distrust: a verdict is only about the tree
+it ran against.
+
+Both title-bar frame-state cases appear in this run.
+`TST_Case_TitleBarFrameRefreshDebtRetried` and
+`TST_Case_TitleBarStaleFrameEntryNotReused` were registered only in the
+title-bar-only pack until `#42`, so certification reported these same four
+counters over runs that never dispatched them — including the run that certified
+`1.1.1`.
+
+All four counters are part of the verdict. `failed=0` alone is not a pass:
+`skipped=0` confirms nothing was silently omitted, and `cleanup=OK` confirms no
+snapshot, stray workbook or suppressed screen update was left behind. None of
+them confirms that a given case ran, which is what the case names in the log
+are for.
+
+Static checks additionally run on every pull request via
+`.github/workflows/static-checks.yml`, now including the formatter's own
+`--selftest` fixtures. They cannot execute VBA — a hosted runner has no Excel —
+so the two gates remain complementary rather than alternatives.
+
+### 🔗 Compatibility
+
+| Question | Answer |
+|---|---|
+| Existing calls affected | ✅ none |
+| Backward compatible | ✅ yes |
+| Release type | 🩹 patch |
+| Modules to replace | ⚠️ all four, together |
+
+- No public procedure was added, removed or renamed.
+- No existing parameter changed name, position, type or default.
+- No enum member or value changed.
+- One title-bar behaviour is newly observable. While this component holds a
+  frame hidden, a frame change made by Excel or another add-in now discards the
+  stored baseline instead of overriding it: the next show adopts the live frame
+  rather than restoring the one captured before the hide. From inside the
+  component that case cannot be told apart from a handle Windows has issued to a
+  different window, and adopting the live bits is the same self-healing rule
+  that already applied while the component owned nothing. A caller that hid a
+  frame, watched something else change it, and expected a show to undo both
+  changes will now see only its own undone.
+- `tools/reformat.py` no longer alters text inside a string literal. A module
+  quoting a label name in a diagnostic, or placing an apostrophe inside a quoted
+  string, was previously rewritten by `--write`. No module in this repository
+  does either, so no tracked file changes as a result.
+
+### ⚠️ Known limitations
+
+- Ribbon snapshot restoration is still not window-identity-safe. Ribbon
+  visibility is **per workbook window**, and every Ribbon mechanism Excel
+  exposes acts on the active window and accepts no window argument, so reaching
+  a captured window requires activating it — an observable side effect that does
+  not belong in a patch release. Unchanged from `1.1.1`; deferred to `1.2.0`.
+  See `#23` and `docs/RIBBON_SDI_BEHAVIOR.md`.
+- A frame-state registry entry that claims nothing is reused on a handle match
+  alone. That is safe, because its baseline is recaptured from the live window
+  before anything is restored from it, but it is a weaker guarantee than the
+  retained `Window` object the snapshot layer holds. The strong check exists
+  only where a capture and a restore are paired.
+- Ribbon behavior has been measured on one host only. It can vary by Office
+  channel, update ring and administrative policy.
+- The static gate cannot execute VBA, because a hosted runner has no Excel. It
+  covers what is decidable from repository text and does not replace
+  `Test_EXCEL_UI_RunReleaseCertification`.
 
 ---
 
@@ -629,7 +852,8 @@ All three regression runners completed successfully.
 - No executable VBA behavior was intentionally changed.
 - GitHub Actions workflows are intentionally not included in this release.
 
-[Unreleased]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/danielep71/VBA-EXCEL_UI/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/danielep71/VBA-EXCEL_UI/releases/tag/v1.0.1

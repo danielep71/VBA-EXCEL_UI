@@ -75,13 +75,15 @@ Option Explicit
 '   - Demo_CreateDemoSheet is the canonical builder
 '
 ' UPDATED
+'   2026-08-21 - Captured the Err fields before suppressing errors, so the
+'                runtime-error text describes the error it was given.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.1.0
+'   1.1.2
 '
 '==============================================================================
 '
@@ -1908,10 +1910,37 @@ Private Function Demo_GetRuntimeErrorText() As String
 ' ERROR POLICY
 '   Does NOT raise
 '
+' NOTES
+'   The Err object is read before the On Error statement, not after. Any form of
+'   On Error resets Err, so the obvious ordering silently produces "0:" with an
+'   empty description for every diagnostic this builder is asked to format.
+'
 ' UPDATED
+'   2026-08-21 - Capture Err before suppressing errors, so diagnostics carry the
+'                failure they were invoked to describe.
 '   2026-07-25
 '==============================================================================
 '
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrNumber           As Long            'Err.Number captured on entry
+    Dim ErrDescription      As String          'Err.Description captured on entry
+    Dim ErrSource           As String          'Err.Source captured on entry
+    Dim ErrLine             As Long            'Erl captured on entry
+
+'------------------------------------------------------------------------------
+' CAPTURE ERROR STATE
+'------------------------------------------------------------------------------
+    'Read the Err object BEFORE any On Error statement. Any form of On Error
+    'resets Err, so a read taken afterwards returns zero and an empty
+    'description, and every diagnostic this builder produces reports "0:" with
+    'nothing after it.
+        ErrNumber = Err.Number
+        ErrDescription = Err.Description
+        ErrSource = Err.Source
+        ErrLine = Erl
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1922,9 +1951,9 @@ Private Function Demo_GetRuntimeErrorText() As String
 '------------------------------------------------------------------------------
 ' BUILD ERROR TEXT
 '------------------------------------------------------------------------------
-        Demo_GetRuntimeErrorText = CStr(Err.Number) & ": " & Err.Description & _
-            IIf(Len(Err.Source) > 0, " | Source: " & Err.Source, vbNullString) & _
-            IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
+        Demo_GetRuntimeErrorText = CStr(ErrNumber) & ": " & ErrDescription & _
+            IIf(Len(ErrSource) > 0, " | Source: " & ErrSource, vbNullString) & _
+            IIf(ErrLine <> 0, " | Line: " & CStr(ErrLine), vbNullString)
 
 End Function
 

@@ -40,6 +40,7 @@ needs to say so explicitly:
 ```text
 python3 tools/check_repo.py                        the gate CI runs
 python3 tools/reformat.py --write src/*.bas …      fix house-style drift
+python3 tools/reformat.py --selftest               check the formatter itself
 Test_EXCEL_UI_RunReleaseCertification              certify behaviour in Excel
 ```
 
@@ -228,6 +229,15 @@ python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas
 Re-import any module it rewrites before committing, so the repository and the
 VBE do not diverge.
 
+The formatter must never alter a string literal. A literal is data the module
+evaluates at run time, so rewriting one changes behaviour rather than layout,
+and the change is invisible in a diff that is expected to be whitespace. Any
+new transformation therefore uses `split_code_comment` to find where a comment
+begins, and `sub_outside_literals` to substitute only outside quoted text —
+matching an apostrophe or a keyword directly is what let padding be written
+into a literal and a quoted label name be renamed. `--selftest` holds the
+fixtures for both rules, and `check_repo.py` runs them.
+
 A public member added or removed also requires an intentional edit to
 `tools/public_api_manifest.txt`. That is deliberate friction: a change to the
 public surface is exactly what breaks callers, and it is otherwise invisible in
@@ -322,10 +332,33 @@ Production entry points are fail-soft unless the public contract explicitly says
 | Preserve insertion order in diagnostics | Order is the only clue to which failure caused the others |
 
 > [!CAUTION]
-> Anything reachable **from** an error handler must not be able to raise. A
-> diagnostic that replaces the failure it was invoked to record is worse than no
-> diagnostic at all. Set the outputs that cannot fail before attempting anything
-> that can.
+> Two rules protect a diagnostic from destroying the failure it describes. Both
+> have been violated in this repository, twice each, in code written by someone
+> who had just fixed the other instance.
+>
+> **1. Anything reachable from an error handler must not be able to raise.**
+> A diagnostic that replaces the failure it was invoked to record is worse than
+> no diagnostic at all. Set the outputs that cannot fail before attempting
+> anything that can.
+>
+> **2. Never read `Err` after calling anything, or after any `On Error`.**
+> Every form of `On Error` resets `Err`, and any procedure you call may contain
+> one. Capture what you need into locals first:
+>
+> ```vb
+> ErrNumber = Err.Number
+> ErrDescription = Err.Description
+> ErrSource = Err.Source
+> ErrLine = Erl
+> ```
+>
+> Then log, format and re-raise from the locals. Reading `Err` afterwards yields
+> zero and an empty string — and `Err.Raise 0` does not raise at all, so a
+> failure reported this way is not reported.
+>
+> Passing `Err.Number` as a **call argument** is safe, because arguments are
+> evaluated before the call. That distinction is subtle enough to be worth
+> stating rather than leaving to be rediscovered.
 
 ## ✒️ Source style
 

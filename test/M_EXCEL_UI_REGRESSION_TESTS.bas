@@ -94,13 +94,19 @@ Option Private Module
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
+'   2026-08-21 - Registered every frame-state case in the pack certification
+'                runs, added the stale-frame-entry and certification-cleanup
+'                cases, and stopped certification destroying the error it
+'                re-raises.
+'   2026-08-19 - Added the certification runner, the SDI title-bar identity
+'                pack and the frame-refresh-debt case.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.1.0
+'   1.1.2
 '==============================================================================
 
 
@@ -194,6 +200,11 @@ Option Private Module
     Private Const TST_SYNTHETIC_UNRELATED_BIT As Long = &H2000000
     Private Const TST_TITLEBAR_OWNED_MASK   As Long = &HCF0000
 
+    'A legal caption frame that is not the full owned set. Written behind the
+    'component to contradict an entry claiming the frame is hidden, which is
+    'the evidence a reissued handle presents to the registry.
+    Private Const TST_TITLEBAR_FOREIGN_FRAME As Long = &HC80000
+
     Private Const TST_SWP_NOSIZE            As Long = &H1
     Private Const TST_SWP_NOMOVE            As Long = &H2
     Private Const TST_SWP_NOZORDER          As Long = &H4
@@ -231,6 +242,185 @@ Private m_CertSkipDetail()              As String
 Private m_RibbonRowCount                As Long
 Private m_RibbonRowsText                As String
 Private m_RibbonRowsJson                As String
+
+
+Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunCertificationSelfTest
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a failure inside release certification reaches the caller with
+'   its error number and description intact.
+'
+' WHY THIS EXISTS
+'   The certification error handler calls TST_Log, which contains
+'   On Error Resume Next and therefore clears Err. Reading Err after that call
+'   yields zero, and Err.Raise 0 does not raise: a failed certification returned
+'   silently, and a programmatic caller saw a normal return.
+'
+'   The log line still said FAIL, which is why the defect survived a real failed
+'   run without being noticed. Only the raise was missing, and nothing asserted
+'   the raise.
+'
+' WHY IT IS NOT PART OF THE PACK
+'   The only errors that travel through the certification handler are raised
+'   after the handler is armed, which means the run has already reset the
+'   counters and set m_CertActive. Triggering one from inside the regression
+'   pack would corrupt the accounting of the very run executing it, and the
+'   re-entrancy guard deliberately refuses a nested invocation before the
+'   handler is reached, so the handler path cannot be exercised from within a
+'   certification run at all.
+'
+'   It is therefore a standalone runner, invoked directly.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Refuses to run while an explicit snapshot exists.
+'   - Establishes a snapshot so that certification rejects its precondition.
+'   - Invokes certification and captures what it raises.
+'   - Asserts the error number and a non-empty description survived.
+'   - Clears the snapshot it created.
+'
+' ERROR POLICY
+'   - Raises on assertion failure, after cleanup.
+'
+' NOTES
+'   Asserting a non-empty description matters as much as the number. The
+'   original defect produced zero and an empty string together, so a test
+'   checking only that something was raised would have passed once the number
+'   was fixed and the text still lost.
+'
+'   The snapshot this runner captures replaces any existing one outright, and
+'   the cleanup discards what it captured, so running while the caller held a
+'   snapshot would destroy it silently. The precondition is refused instead,
+'   which is what every other destructive runner in this module does.
+'
+' UPDATED
+'   2026-08-21 - Refused to run while an explicit snapshot exists, rather than
+'                replacing and then discarding it.
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RaisedNumber        As Long            'Error number reaching the caller
+    Dim RaisedDescription   As String          'Error text reaching the caller
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "Test_EXCEL_UI_RunCertificationSelfTest"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a certification failure reaches the caller"
+
+'------------------------------------------------------------------------------
+' ESTABLISH A REJECTED PRECONDITION
+'------------------------------------------------------------------------------
+    'Refuse to destroy a snapshot the caller is relying on. Capturing here
+    'replaces any existing snapshot outright, and the cleanup below would then
+    'discard the replacement, so a caller who already held one would lose it
+    'with nothing said. Every other destructive runner in this module refuses
+    'the same way.
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 21, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before running this destructive test"
+        End If
+
+    'Certification refuses to start when an explicit snapshot exists. That
+    'refusal is raised after the handler is armed, so it travels the path under
+    'test.
+        UI_CaptureExcelUIState
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        If Not UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 20, _
+                PROC, _
+                "unable to establish a snapshot; the precondition under test " & _
+                "cannot be triggered"
+        End If
+
+'------------------------------------------------------------------------------
+' INVOKE AND CAPTURE
+'------------------------------------------------------------------------------
+    'Capture immediately, before anything else can clear Err
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunReleaseCertification
+
+            RaisedNumber = Err.Number
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' ASSERT THE FAILURE SURVIVED
+'------------------------------------------------------------------------------
+    'A silent return is the defect this case exists to catch
+        TST_AssertTrue _
+            (RaisedNumber = TEST_CERT_ERR_BASE + 1), _
+            "CertificationSelfTest.ErrorNumberPreserved"
+
+    'Zero and an empty description were produced together by the original
+    'defect, so the text is asserted as well as the number
+        TST_AssertTrue _
+            (Len(RaisedDescription) > 0), _
+            "CertificationSelfTest.ErrorDescriptionPreserved"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Certification failure reached the caller as " & _
+            CStr(RaisedNumber)
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Release the snapshot this case created
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        HasFailure = True
+
+        Resume Safe_Exit
+
+End Sub
 
 
 Public Sub Test_EXCEL_UI_RunReleaseCertification()
@@ -318,7 +508,28 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
     Dim ReportPath          As String          'Path the report was written to
     Dim ScanIdx             As Long            'Cursor over recorded units
 
+    Dim FailNumber          As Long            'Error number captured on entry
+    Dim FailSource          As String          'Error source captured on entry
+    Dim FailDescription     As String          'Error text captured on entry
+    Dim FailLine            As Long            'Error line captured on entry
+
     Const PROC As String = "Test_EXCEL_UI_RunReleaseCertification"
+
+'------------------------------------------------------------------------------
+' GUARD RE-ENTRY
+'------------------------------------------------------------------------------
+    'Refuse a nested run BEFORE arming the handler or touching any counter. A
+    'nested invocation would reset the outer run's unit records and clear
+    'm_CertActive on exit, leaving the outer verdict describing work it never
+    'did. Raising here, ahead of On Error, sends the refusal straight to the
+    'caller without disturbing anything.
+        If m_CertActive Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 4, _
+                PROC, _
+                "release certification is already running; nested invocation " & _
+                "is not supported"
+        End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -334,9 +545,11 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '------------------------------------------------------------------------------
 ' VALIDATE PRECONDITIONS
 '------------------------------------------------------------------------------
-    'A pre-existing snapshot cannot be preserved across these units. Refusing to
-    'start is the honest response; running anyway would produce a partial result
-    'that reads exactly like a complete one.
+    'A pre-existing snapshot cannot be preserved across these units, so it is
+    'rejected rather than compared. That asymmetry with the other cleanup checks
+    'is deliberate: ScreenUpdating and the workbook count can be observed on
+    'entry and restored, whereas a snapshot the caller depends on would be
+    'destroyed by the first unit that captures one.
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 1, _
@@ -383,34 +596,13 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 ' VERIFY CLEANUP
 '------------------------------------------------------------------------------
     'Cleanup failure is a run failure. A suite that leaves a snapshot, a stray
-    'workbook or suppressed screen updates behind has not finished, however many
+    'workbook or an altered host setting behind has not finished, however many
     'assertions passed on the way.
-        CleanupOK = True
-        CleanupDetail = vbNullString
-
-        If UI_HasExcelUIStateSnapshot Then
-            CleanupOK = False
-            CleanupDetail = "an EXCEL_UI snapshot was left behind"
-        End If
-
-        If Workbooks.Count <> BaselineBooks Then
-            CleanupOK = False
-            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
-                "workbook count changed from " & CStr(BaselineBooks) & _
-                " to " & CStr(Workbooks.Count))
-        End If
-
-        If Not Application.ScreenUpdating Then
-            CleanupOK = False
-            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
-                "ScreenUpdating was left suppressed")
-        End If
-
-        If Not TST_CertIsWindowUsable(AnchorWindow) Then
-            CleanupOK = False
-            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
-                "the anchor window is no longer usable")
-        End If
+        CleanupOK = TST_CertEvaluateCleanup( _
+            BaselineBooks:=BaselineBooks, _
+            BaselineScreenUpdating:=OldScreenUpdating, _
+            AnchorWindow:=AnchorWindow, _
+            CleanupDetail:=CleanupDetail)
 
 '------------------------------------------------------------------------------
 ' DETERMINE VERDICT
@@ -482,12 +674,26 @@ Safe_Exit:
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 Err_Handler:
-    'Report the precondition or verdict failure to the caller
+    'Capture every error field BEFORE calling anything. TST_Log contains
+    'On Error Resume Next, which clears Err, so a read taken after it returns
+    'yields zero and an empty description. Raising from that reports no failure
+    'at all, and the caller sees a normal return from a certification that
+    'failed.
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        FailLine = Erl
+
+    'Certification accounting must not leak into a later legacy run
         m_CertActive = False
 
-        TST_Log PROC, "FAIL", Err.Description
+    'Log from the captured values, never from Err
+        TST_Log PROC, "FAIL", _
+            CStr(FailNumber) & ": " & FailDescription & _
+            IIf(FailLine <> 0, " | Line: " & CStr(FailLine), vbNullString)
 
-        Err.Raise Err.Number, Err.Source, Err.Description
+    'Re-raise from the captured values, so the failure keeps its identity
+        Err.Raise FailNumber, FailSource, FailDescription
 
 End Sub
 
@@ -767,6 +973,118 @@ Private Sub TST_CertRecordUnit( _
             UnitName & IIf(Len(Detail) > 0, " | " & Detail, vbNullString)
 
 End Sub
+
+
+Private Function TST_CertEvaluateCleanup( _
+    ByVal BaselineBooks As Long, _
+    ByVal BaselineScreenUpdating As Boolean, _
+    ByVal AnchorWindow As Object, _
+    ByRef CleanupDetail As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertEvaluateCleanup
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decide whether a certification run returned the host to the state it found.
+'
+' WHY THIS EXISTS
+'   Every check compares the exit state with the state observed on ENTRY, never
+'   with an assumed ideal. Requiring ScreenUpdating to be True reported a false
+'   failure for any run started from within a quiet-update scope, where
+'   restoring the suppressed value it found is correct behavior rather than
+'   leakage.
+'
+'   A counter that fires when nothing is wrong is a counter a reader learns to
+'   discount, which defeats the verdict from the opposite direction to a missed
+'   failure.
+'
+'   Extracting the decision from the runner makes it testable with crafted
+'   inputs, without a full destructive run, and gives the additional state
+'   comparisons planned for this suite one place to live.
+'
+' INPUTS
+'   BaselineBooks
+'     Workbooks.Count observed on entry.
+'
+'   BaselineScreenUpdating
+'     Application.ScreenUpdating observed on entry.
+'
+'   AnchorWindow
+'     The window active on entry, held by object reference.
+'
+'   CleanupDetail
+'     ByRef. Receives every finding, joined in order. Empty when clean.
+'
+' RETURNS
+'   Boolean
+'     True  => the host matches its entry state.
+'     False => at least one difference was found, and all are in CleanupDetail.
+'
+' BEHAVIOR
+'   - Accumulates findings rather than stopping at the first, so one run reports
+'     every way cleanup failed.
+'   - Reports the snapshot check absolutely, because a snapshot is rejected as a
+'     precondition rather than preserved.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertAppendDetail
+'   - TST_CertIsWindowUsable
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_Case_CertificationCleanupUsesBaseline
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A cleanup verdict must never itself raise
+        On Error Resume Next
+
+        TST_CertEvaluateCleanup = True
+        CleanupDetail = vbNullString
+
+'------------------------------------------------------------------------------
+' COMPARE AGAINST ENTRY STATE
+'------------------------------------------------------------------------------
+    'A snapshot is rejected on entry rather than preserved, so any snapshot here
+    'was left by the run itself
+        If UI_HasExcelUIStateSnapshot Then
+            TST_CertEvaluateCleanup = False
+            CleanupDetail = "an EXCEL_UI snapshot was left behind"
+        End If
+
+        If Workbooks.Count <> BaselineBooks Then
+            TST_CertEvaluateCleanup = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "workbook count changed from " & CStr(BaselineBooks) & _
+                " to " & CStr(Workbooks.Count))
+        End If
+
+        If Application.ScreenUpdating <> BaselineScreenUpdating Then
+            TST_CertEvaluateCleanup = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "ScreenUpdating changed from " & _
+                CStr(BaselineScreenUpdating) & " to " & _
+                CStr(Application.ScreenUpdating))
+        End If
+
+        If Not TST_CertIsWindowUsable(AnchorWindow) Then
+            TST_CertEvaluateCleanup = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, _
+                "the anchor window is no longer usable")
+        End If
+
+End Function
 
 
 Private Function TST_CertIsWindowUsable( _
@@ -2375,7 +2693,14 @@ Private Sub TST_RunRegressionPack( _
 '   - regression case routines
 '   - TST_Log
 '
+' NOTES
+'   - This pack is the body of the RegressionPack certification unit, so a case
+'     reachable only from the title-bar-only pack is absent from the evidence a
+'     release is tagged on. Every frame-state case is registered here as well.
+'
 ' UPDATED
+'   2026-08-21 - Registered the frame-refresh-debt and stale-frame-entry cases,
+'                which certification did not reach.
 '   2026-07-29
 '==============================================================================
 '
@@ -2477,6 +2802,9 @@ Private Sub TST_RunRegressionPack( _
     'Verify diagnostics degrade rather than raise when the list cannot grow
         TST_Case_FailureAccumulatorDegradesSafely
 
+    'Verify cleanup is judged against the entry state, not an assumed ideal
+        TST_Case_CertificationCleanupUsesBaseline
+
 '------------------------------------------------------------------------------
 ' RUN OPTIONAL SNAPSHOT CASES
 '------------------------------------------------------------------------------
@@ -2524,11 +2852,16 @@ Private Sub TST_RunRegressionPack( _
                 "Convenience-wrapper case skipped in core mode because the wrappers also toggle TitleBar"
         End If
 
-    'Run the dedicated title-bar cases when requested
+    'Run the dedicated title-bar cases when requested. Every frame-state case
+    'belongs here, not only in the title-bar-only pack: this pack is what the
+    'certification runner executes, so a case reachable only from the other
+    'pack is absent from the evidence a release is tagged on.
         If IncludeTitleBarTests Then
             TST_Case_TitleBarRoundTrip
             TST_Case_TitleBarOwnedBitPreservation
             TST_Case_TitleBarShowRecoversWithoutBaseline
+            TST_Case_TitleBarFrameRefreshDebtRetried
+            TST_Case_TitleBarStaleFrameEntryNotReused
         End If
 
 '------------------------------------------------------------------------------
@@ -2619,9 +2952,10 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarOwnedBitPreservation
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
 '   - TST_Case_TitleBarFrameRefreshDebtRetried
+'   - TST_Case_TitleBarStaleFrameEntryNotReused
 '
 ' UPDATED
-'   2026-08-18
+'   2026-08-21
 '==============================================================================
 '
 '------------------------------------------------------------------------------
@@ -2691,9 +3025,12 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify that a failed frame refresh is retried rather than short-circuited
         TST_Case_TitleBarFrameRefreshDebtRetried
 
+    'Verify that frame state which cannot be proved is discarded, not applied
+        TST_Case_TitleBarStaleFrameEntryNotReused
+
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
-            "Title-bar round-trip, owned-bit preservation, show-recovery, and refresh-debt cases passed"
+            "Title-bar round-trip, owned-bit preservation, show-recovery, refresh-debt and stale-entry cases passed"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
@@ -5035,6 +5372,151 @@ Private Sub TST_Case_ScreenUpdatingPreserved()
 
 End Sub
 
+Private Sub TST_Case_CertificationCleanupUsesBaseline()
+
+'
+'==============================================================================
+' TST_Case_CertificationCleanupUsesBaseline
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that the certification cleanup verdict compares the host with the
+'   state observed on entry, rather than requiring an assumed ideal.
+'
+' WHY THIS EXISTS
+'   Cleanup required Application.ScreenUpdating to be True. A run started from
+'   within a quiet-update scope therefore failed certification even though the
+'   regression pack had correctly restored the suppressed value it found.
+'
+'   The damage was to the verdict's credibility rather than to the host: a
+'   counter that fires when nothing is wrong is a counter a reader stops
+'   believing, which defeats the verdict from the opposite direction to a missed
+'   failure.
+'
+'   The case drives TST_CertEvaluateCleanup directly. Reaching the same decision
+'   through Test_EXCEL_UI_RunReleaseCertification would require a full
+'   destructive run to assert one comparison, and could not run from inside the
+'   pack at all.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Suppresses screen updating and asserts a matching baseline is clean.
+'   - Asserts a mismatched baseline is reported, naming both values.
+'   - Restores the entry value on every path.
+'
+' ERROR POLICY
+'   - Raises on assertion failure, after restoration.
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim EntryScreenUpdating As Boolean         'Value to restore on exit
+    Dim AnchorWindow        As Window          'Window used as the anchor
+    Dim BaselineBooks       As Long            'Workbooks open during the case
+    Dim CleanupOK           As Boolean         'Result under test
+    Dim CleanupDetail       As String          'Findings returned by the helper
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_CertificationCleanupUsesBaseline"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that cleanup is judged against the entry state"
+
+        Set AnchorWindow = ActiveWindow
+        BaselineBooks = Workbooks.Count
+        EntryScreenUpdating = Application.ScreenUpdating
+
+'------------------------------------------------------------------------------
+' SUPPRESSED STATE MATCHING ITS BASELINE IS CLEAN
+'------------------------------------------------------------------------------
+    'This is the case the previous implementation failed: screen updating is
+    'suppressed, and that is exactly what the baseline says it should be.
+        Application.ScreenUpdating = False
+
+        CleanupOK = TST_CertEvaluateCleanup( _
+            BaselineBooks:=BaselineBooks, _
+            BaselineScreenUpdating:=False, _
+            AnchorWindow:=AnchorWindow, _
+            CleanupDetail:=CleanupDetail)
+
+        TST_AssertBooleanEquals _
+            True, CleanupOK, "CertificationCleanup.SuppressedMatchingBaselineIsClean"
+
+        TST_AssertTrue _
+            (Len(CleanupDetail) = 0), _
+            "CertificationCleanup.NoDetailWhenClean"
+
+'------------------------------------------------------------------------------
+' A GENUINE DIFFERENCE IS STILL REPORTED
+'------------------------------------------------------------------------------
+    'Same host state, opposite baseline: the run would have changed it, so this
+    'must fail. Loosening the check must not have disabled it.
+        CleanupOK = TST_CertEvaluateCleanup( _
+            BaselineBooks:=BaselineBooks, _
+            BaselineScreenUpdating:=True, _
+            AnchorWindow:=AnchorWindow, _
+            CleanupDetail:=CleanupDetail)
+
+        TST_AssertBooleanEquals _
+            False, CleanupOK, "CertificationCleanup.GenuineDifferenceReported"
+
+    'The detail must name both values, or a real leak cannot be diagnosed from
+    'the evidence file alone
+        TST_AssertTrue _
+            (InStr(1, CleanupDetail, "ScreenUpdating changed from") > 0), _
+            "CertificationCleanup.DetailNamesBothValues"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Cleanup compared the entry state and still reported a real change"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Restore the value found on entry, whatever happened above
+        On Error Resume Next
+            Application.ScreenUpdating = EntryScreenUpdating
+        On Error GoTo 0
+
+    'Raise the captured failure after restoration when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        HasFailure = True
+
+        Resume Safe_Exit
+
+End Sub
+
+
 Private Sub TST_Case_FailureAccumulatorDegradesSafely()
 
 '
@@ -6236,6 +6718,251 @@ Safe_Exit:
     'Disarm the seam and put the frame back, whatever happened above
         On Error Resume Next
             UI_InternalInjectFrameRefreshFailure False
+            UI_SetExcelUI TitleBar:=UI_Show
+        On Error GoTo 0
+
+    'Raise the captured failure after restoration when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarStaleFrameEntryNotReused()
+
+'
+'==============================================================================
+' TST_Case_TitleBarStaleFrameEntryNotReused
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that the frame-state registry refuses to apply an entry it can no
+'   longer prove describes the window its handle names.
+'
+' WHY THIS EXISTS
+'   This is the regression for ICR-UI-111-P2-01. Windows reissues a window
+'   handle once the window holding it has closed, and IsWindow answers for
+'   whichever window holds the handle now, so a handle match was accepted as
+'   proof of identity. A show could then restore a closed window's captured
+'   frame onto an unrelated window that had merely inherited its handle.
+'
+'   A reissued handle cannot be forced on demand, so this case reproduces what
+'   the registry actually sees: an entry claiming the frame is hidden while the
+'   window it names carries owned bits the component never wrote. That is the
+'   same evidence a reissued handle presents, and it is the evidence the fix
+'   acts on.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Clears the frame-state registry so the case starts from a known state.
+'   - Hides the frame, leaving an entry that claims it.
+'   - Writes a different owned frame behind the component's back.
+'   - Requests a show and asserts the live frame survives it.
+'
+' ERROR POLICY
+'   - Raises after best-effort restoration of the frame.
+'
+' NOTES
+'   Windows may normalise or reject individual GWL_STYLE bits, so the frame
+'   written here is read back and the case asserts it is distinguishable from
+'   the stale baseline before drawing any conclusion from it.
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim TargetHwnd          As LongPtr         'Frame under test
+    Dim EntryStyle          As LongPtr         'Style to restore on the way out
+    Dim ForeignStyle        As LongPtr         'Style written behind the module
+    Dim ResultStyle         As LongPtr         'Style observed after the show
+    Dim BaselineOwned       As LongPtr         'Owned bits a stale show writes
+    Dim ForeignOwned        As LongPtr         'Owned bits actually accepted
+#Else
+    Dim TargetHwnd          As Long            'Frame under test
+    Dim EntryStyle          As Long            'Style to restore on the way out
+    Dim ForeignStyle        As Long            'Style written behind the module
+    Dim ResultStyle         As Long            'Style observed after the show
+    Dim BaselineOwned       As Long            'Owned bits a stale show writes
+    Dim ForeignOwned        As Long            'Owned bits actually accepted
+#End If
+
+    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle was read
+    Dim Msg                 As String          'Diagnostic buffer
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarStaleFrameEntryNotReused"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that an unprovable frame entry is not applied"
+
+'------------------------------------------------------------------------------
+' PREPARE A KNOWN FRAME STATE
+'------------------------------------------------------------------------------
+    'Start from a visible frame and an empty registry
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_InternalResetTitleBarBaseline
+
+        TargetHwnd = Application.hWnd
+
+        If TargetHwnd = 0 Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 60, _
+                PROC, _
+                "no Excel window handle is available"
+        End If
+
+    'Keep the entry style so the frame can be put back exactly
+        If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 61, _
+                PROC, _
+                "unable to read the entry window style | " & Msg
+        End If
+
+        StyleCaptured = True
+        BaselineOwned = EntryStyle And TST_TITLEBAR_OWNED_MASK
+
+'------------------------------------------------------------------------------
+' LEAVE AN ENTRY THAT CLAIMS THE FRAME
+'------------------------------------------------------------------------------
+    'Hide through the component, so the registry records a hidden frame and the
+    'owned bits it wrote to achieve it
+        If Not UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=False, _
+            FailMsg:=Msg) Then
+
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 62, _
+                PROC, _
+                "unable to hide the title bar | " & Msg
+        End If
+
+'------------------------------------------------------------------------------
+' CONTRADICT THE CLAIM
+'------------------------------------------------------------------------------
+    'Give the window an owned frame the component never wrote. To the registry
+    'this is indistinguishable from a handle Windows has issued to a different
+    'window, which is the condition under test.
+        ForeignStyle = _
+            (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+            TST_TITLEBAR_FOREIGN_FRAME
+
+        If Not TST_TrySetWindowStyle(TargetHwnd, ForeignStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 63, _
+                PROC, _
+                "unable to write the contradicting style | " & Msg
+        End If
+
+        If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 64, _
+                PROC, _
+                "unable to refresh the contradicting frame | " & Msg
+        End If
+
+    'Read back what Windows actually accepted rather than what was requested
+        If Not TST_TryGetWindowStyle(TargetHwnd, ForeignStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 65, _
+                PROC, _
+                "unable to read the contradicting style back | " & Msg
+        End If
+
+        ForeignOwned = ForeignStyle And TST_TITLEBAR_OWNED_MASK
+
+    'The case can only distinguish the two behaviours while the live frame and
+    'the stale baseline differ. Say so plainly rather than passing on a
+    'comparison that proves nothing.
+        If ForeignOwned = BaselineOwned Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 66, _
+                PROC, _
+                "Windows normalised the contradicting frame back to the " & _
+                "baseline; the case cannot distinguish the two outcomes"
+        End If
+
+'------------------------------------------------------------------------------
+' REQUEST A SHOW
+'------------------------------------------------------------------------------
+    'A build that trusts the handle match restores the stale baseline over this
+    'frame. A build that proves the entry first discards it, adopts the live
+    'bits and leaves the visible frame exactly as found.
+        If Not UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=True, _
+            FailMsg:=Msg) Then
+
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 67, _
+                PROC, _
+                "show reported failure | " & Msg
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT THE LIVE FRAME SURVIVED
+'------------------------------------------------------------------------------
+        If Not TST_TryGetWindowStyle(TargetHwnd, ResultStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 68, _
+                PROC, _
+                "unable to read the resulting window style | " & Msg
+        End If
+
+        If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> ForeignOwned Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 69, _
+                PROC, _
+                "the show applied a baseline this window never had; stale " & _
+                "frame state was reused"
+        End If
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "An unprovable frame entry was discarded instead of applied"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Put the frame back and drop the registry, whatever happened above
+        On Error Resume Next
+            TST_RestoreTitleBarStyle TargetHwnd, EntryStyle, StyleCaptured
+            UI_InternalResetTitleBarBaseline
             UI_SetExcelUI TitleBar:=UI_Show
         On Error GoTo 0
 
