@@ -104,7 +104,7 @@ failure, and none of them announced anything. The public API is unchanged.
   `TST_Case_TitleBarStaleFrameEntryNotReused` were registered only in the
   title-bar-only pack. Both passed there and neither appeared in the evidence a
   release is tagged on — including the case written for this release's own
-  frame-registry fix. Every frame-state case is now registered in both. (#40)
+  frame-registry fix. Every frame-state case is now registered in both. (#41)
 - Fixed `tools/reformat.py` rewriting text inside string literals. Two
   transformations shared the assumption that an apostrophe or a keyword means
   the same thing everywhere on a line. Label renaming rewrote `GoTo Fail` inside
