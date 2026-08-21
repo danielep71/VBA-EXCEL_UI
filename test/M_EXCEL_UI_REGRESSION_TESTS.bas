@@ -94,13 +94,19 @@ Option Private Module
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
+'   2026-08-21 - Registered every frame-state case in the pack certification
+'                runs, added the stale-frame-entry and certification-cleanup
+'                cases, and stopped certification destroying the error it
+'                re-raises.
+'   2026-08-19 - Added the certification runner, the SDI title-bar identity
+'                pack and the frame-refresh-debt case.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.1.0
+'   1.1.2
 '==============================================================================
 
 

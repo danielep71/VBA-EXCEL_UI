@@ -75,13 +75,15 @@ Option Explicit
 '   - Demo_CreateDemoSheet is the canonical builder
 '
 ' UPDATED
+'   2026-08-21 - Captured the Err fields before suppressing errors, so the
+'                runtime-error text describes the error it was given.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.1.0
+'   1.1.2
 '
 '==============================================================================
 '

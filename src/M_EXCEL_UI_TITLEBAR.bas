@@ -168,7 +168,7 @@ Option Private Module
 '   Daniele Penza
 '
 ' VERSION
-'   1.1.1
+'   1.1.2
 '==============================================================================
 
 '==============================================================================
@@ -903,10 +903,14 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
 '
 ' NOTES
 '   Handle reuse means a True result proves a window exists, not that it is the
-'   same window. The snapshot engine therefore pairs this probe with a retained
-'   Window object, which cannot be recycled in the same way.
+'   same window. Every caller therefore pairs this probe with something a handle
+'   cannot carry: the snapshot engine holds a retained Window object, which
+'   cannot be reissued, and the frame registry checks an entry's claim against
+'   the live owned bits before reusing it.
 '
 ' UPDATED
+'   2026-08-21 - Recorded the second pairing, added with the frame-registry
+'                proof.
 '   2026-08-19
 '==============================================================================
 '
@@ -2163,9 +2167,12 @@ Private Function UI_TryGetWindowStyle( _
 '   - UI_TitleBarBuildRuntimeErrorText
 '
 ' CALLED FROM
+'   - UI_TryGetTitleBarVisibleForHwnd
 '   - UI_TrySetTitleBarVisibleForHwndWorker
+'   - UI_FrameStateEntryHolds
 '
 ' UPDATED
+'   2026-08-21 - Recorded the two callers the list had never named.
 '   2026-08-18
 '==============================================================================
 '
