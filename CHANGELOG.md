@@ -98,6 +98,13 @@ failure, and none of them announced anything. The public API is unchanged.
 
 ### 🐛 Fixed
 
+- Fixed the release-certification runner not reaching two title-bar
+  regression cases. `TST_RunRegressionPack` is the body of the `RegressionPack`
+  certification unit, but `TST_Case_TitleBarFrameRefreshDebtRetried` and
+  `TST_Case_TitleBarStaleFrameEntryNotReused` were registered only in the
+  title-bar-only pack. Both passed there and neither appeared in the evidence a
+  release is tagged on — including the case written for this release's own
+  frame-registry fix. Every frame-state case is now registered in both. (#40)
 - Fixed `tools/reformat.py` rewriting text inside string literals. Two
   transformations shared the assumption that an apostrophe or a keyword means
   the same thing everywhere on a line. Label renaming rewrote `GoTo Fail` inside

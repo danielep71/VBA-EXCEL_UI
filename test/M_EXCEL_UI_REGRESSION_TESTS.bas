@@ -2666,7 +2666,14 @@ Private Sub TST_RunRegressionPack( _
 '   - regression case routines
 '   - TST_Log
 '
+' NOTES
+'   - This pack is the body of the RegressionPack certification unit, so a case
+'     reachable only from the title-bar-only pack is absent from the evidence a
+'     release is tagged on. Every frame-state case is registered here as well.
+'
 ' UPDATED
+'   2026-08-21 - Registered the frame-refresh-debt and stale-frame-entry cases,
+'                which certification did not reach.
 '   2026-07-29
 '==============================================================================
 '
@@ -2818,11 +2825,16 @@ Private Sub TST_RunRegressionPack( _
                 "Convenience-wrapper case skipped in core mode because the wrappers also toggle TitleBar"
         End If
 
-    'Run the dedicated title-bar cases when requested
+    'Run the dedicated title-bar cases when requested. Every frame-state case
+    'belongs here, not only in the title-bar-only pack: this pack is what the
+    'certification runner executes, so a case reachable only from the other
+    'pack is absent from the evidence a release is tagged on.
         If IncludeTitleBarTests Then
             TST_Case_TitleBarRoundTrip
             TST_Case_TitleBarOwnedBitPreservation
             TST_Case_TitleBarShowRecoversWithoutBaseline
+            TST_Case_TitleBarFrameRefreshDebtRetried
+            TST_Case_TitleBarStaleFrameEntryNotReused
         End If
 
 '------------------------------------------------------------------------------
