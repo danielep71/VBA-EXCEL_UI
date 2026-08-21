@@ -63,7 +63,7 @@ failure, and none of them announced anything. The public API is unchanged.
 | 🟠 `ICR-UI-111-P2-03` | [#34](https://github.com/danielep71/VBA-EXCEL_UI/issues/34) | Certification destroyed the error it re-raised, so a failed run returned silently |
 | ⚪ — | [#39](https://github.com/danielep71/VBA-EXCEL_UI/issues/39) | A diagnostic read `Err` after suppressing errors and described nothing |
 | ⚪ — | [#25](https://github.com/danielep71/VBA-EXCEL_UI/issues/25) | The formatter rewrote text inside string literals |
-| ⚪ — | [#41](https://github.com/danielep71/VBA-EXCEL_UI/issues/41) | Two frame-state cases never ran under release certification |
+| ⚪ — | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | Two frame-state cases never ran under release certification |
 
 🟠 P2 — priorities as assigned by the independent review. ⚪ — found during this
 release.
@@ -118,7 +118,7 @@ release.
   `TST_Case_TitleBarStaleFrameEntryNotReused` were registered only in the
   title-bar-only pack. Both passed there and neither appeared in the evidence a
   release is tagged on — including the case written for this release's own
-  frame-registry fix. Every frame-state case is now registered in both. (#41)
+  frame-registry fix. Every frame-state case is now registered in both. (#42)
 - Fixed `tools/reformat.py` rewriting text inside string literals. Two
   transformations shared the assumption that an apostrophe or a keyword means
   the same thing everywhere on a line. Label renaming rewrote `GoTo Fail` inside
@@ -194,7 +194,7 @@ this release exists to distrust.
 Both title-bar frame-state cases appear in this run.
 `TST_Case_TitleBarFrameRefreshDebtRetried` and
 `TST_Case_TitleBarStaleFrameEntryNotReused` were registered only in the
-title-bar-only pack until `#41`, so certification reported these same four
+title-bar-only pack until `#42`, so certification reported these same four
 counters over runs that never dispatched them — including the run that certified
 `1.1.1`.
 
