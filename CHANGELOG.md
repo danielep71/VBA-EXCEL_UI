@@ -180,8 +180,8 @@ Certified in desktop Microsoft Excel for Windows via
 | 🪟 Operating system | Windows (64-bit) NT 10.00 |
 | ⚙️ Bitness | x64 |
 | 🧾 VBA generation | VBA7 |
-| 🕒 Certified | 2026-08-21 11:00:27 |
-| 🔖 Tree certified | `8a60c2486d02399c3b9e13017c04ba85a1d03093` |
+| 🕒 Certified | 2026-08-21 11:30:06 |
+| 🔖 Tree certified | `ef7455f511ba93da73d9b675f71ae942147cc0d6` |
 
 ```text
 RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
@@ -194,10 +194,12 @@ The certified tree is named so the claim can be checked rather than trusted.
 Commits after it change this Validation block and nothing else: no `.bas`
 module, no tool, no gate.
 
-An earlier run was superseded rather than reused. It certified a tree whose
-module headers were then corrected, and although that correction touched only
-comment lines, deciding that a change is too small to re-check is the reasoning
-this release exists to distrust.
+Earlier runs were superseded rather than reused. Each certified a tree that was
+then changed — once by module-header corrections touching only comment lines,
+once by a guard in a runner this suite never dispatches. Neither change could
+have altered the result, and reusing the earlier evidence on that reasoning is
+exactly what this release exists to distrust: a verdict is only about the tree
+it ran against.
 
 Both title-bar frame-state cases appear in this run.
 `TST_Case_TitleBarFrameRefreshDebtRetried` and
