@@ -279,6 +279,7 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '   None.
 '
 ' BEHAVIOR
+'   - Refuses to run while an explicit snapshot exists.
 '   - Establishes a snapshot so that certification rejects its precondition.
 '   - Invokes certification and captures what it raises.
 '   - Asserts the error number and a non-empty description survived.
@@ -293,7 +294,14 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '   checking only that something was raised would have passed once the number
 '   was fixed and the text still lost.
 '
+'   The snapshot this runner captures replaces any existing one outright, and
+'   the cleanup discards what it captured, so running while the caller held a
+'   snapshot would destroy it silently. The precondition is refused instead,
+'   which is what every other destructive runner in this module does.
+'
 ' UPDATED
+'   2026-08-21 - Refused to run while an explicit snapshot exists, rather than
+'                replacing and then discarding it.
 '   2026-08-21
 '==============================================================================
 '
@@ -322,6 +330,19 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '------------------------------------------------------------------------------
 ' ESTABLISH A REJECTED PRECONDITION
 '------------------------------------------------------------------------------
+    'Refuse to destroy a snapshot the caller is relying on. Capturing here
+    'replaces any existing snapshot outright, and the cleanup below would then
+    'discard the replacement, so a caller who already held one would lose it
+    'with nothing said. Every other destructive runner in this module refuses
+    'the same way.
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 21, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before running this destructive test"
+        End If
+
     'Certification refuses to start when an explicit snapshot exists. That
     'refusal is raised after the handler is armed, so it travels the path under
     'test.

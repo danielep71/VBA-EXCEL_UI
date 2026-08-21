@@ -64,6 +64,7 @@ failure, and none of them announced anything. The public API is unchanged.
 | ⚪ — | [#39](https://github.com/danielep71/VBA-EXCEL_UI/issues/39) | A diagnostic read `Err` after suppressing errors and described nothing |
 | ⚪ — | [#25](https://github.com/danielep71/VBA-EXCEL_UI/issues/25) | The formatter rewrote text inside string literals |
 | ⚪ — | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | Two frame-state cases never ran under release certification |
+| ⚪ — | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | A test runner replaced and then discarded a caller's snapshot |
 
 🟠 P2 — priorities as assigned by the independent review. ⚪ — found during this
 release.
@@ -112,6 +113,13 @@ release.
 
 ### 🐛 Fixed
 
+- Fixed `Test_EXCEL_UI_RunCertificationSelfTest` destroying a caller's snapshot.
+  It captured one unconditionally to establish the precondition it tests, and
+  capture replaces any existing snapshot outright rather than merging, so a
+  caller who already held one lost it — and the runner's own cleanup then
+  discarded the replacement. It now refuses to run while an explicit snapshot
+  exists, which is what every other destructive runner in the module already
+  did. Found by automated review of the release pull request. (#43)
 - Fixed the release-certification runner not reaching two title-bar
   regression cases. `TST_RunRegressionPack` is the body of the `RegressionPack`
   certification unit, but `TST_Case_TitleBarFrameRefreshDebtRetried` and
