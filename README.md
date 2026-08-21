@@ -658,6 +658,7 @@ The source repository intentionally contains no versioned demo `.xlsm`. Release 
 | [SECURITY.md](SECURITY.md) | Security reporting and safe-use boundaries |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
 | [docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md](docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md) | Independent review of the `v1.1.0` tag, and the source of the `1.1.1` issue set |
+| [docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md](docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md) | Independent review of the `v1.1.1` tag, and the source of the current corrective issue set |
 | [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |
 | [GitHub Releases](https://github.com/danielep71/VBA-EXCEL_UI/releases) | Tested binary demo workbooks and release notes |
 

@@ -43,9 +43,16 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### 🧭 Release intent
 
-Corrects defects in the mechanisms that exist to catch defects. Every item here
-is a gate, a tool or a state registry that was reporting success where it should
-have reported failure. The component's public API is unchanged.
+A correctness release. Four of the five defects come from an independent review
+of `v1.1.1` recorded in `docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md`; the
+fifth was found while writing the regression case for one of them.
+
+What they have in common is the direction of the failure. A registry that
+answered for a window it could not identify, a certification runner that
+returned silently after failing, a cleanup check that reported a leak where none
+existed, a diagnostic that lost the error it was describing, a formatter that
+rewrote the text it was meant to align — each reported success, or the wrong
+failure, and none of them announced anything. The public API is unchanged.
 
 ### ➕ Added
 
@@ -132,6 +139,51 @@ have reported failure. The component's public API is unchanged.
   `Err.Raise 0` does not raise — so **a failed certification returned silently**
   and a programmatic caller saw a normal return. All fields are now captured
   into locals before anything is called. (`ICR-UI-111-P2-03`, #34)
+
+### 🔗 Compatibility
+
+| Question | Answer |
+|---|---|
+| Existing calls affected | ✅ none |
+| Backward compatible | ✅ yes |
+| Release type | 🩹 patch |
+| Modules to replace | ⚠️ all four, together |
+
+- No public procedure was added, removed or renamed.
+- No existing parameter changed name, position, type or default.
+- No enum member or value changed.
+- One title-bar behaviour is newly observable. While this component holds a
+  frame hidden, a frame change made by Excel or another add-in now discards the
+  stored baseline instead of overriding it: the next show adopts the live frame
+  rather than restoring the one captured before the hide. From inside the
+  component that case cannot be told apart from a handle Windows has issued to a
+  different window, and adopting the live bits is the same self-healing rule
+  that already applied while the component owned nothing. A caller that hid a
+  frame, watched something else change it, and expected a show to undo both
+  changes will now see only its own undone.
+- `tools/reformat.py` no longer alters text inside a string literal. A module
+  quoting a label name in a diagnostic, or placing an apostrophe inside a quoted
+  string, was previously rewritten by `--write`. No module in this repository
+  does either, so no tracked file changes as a result.
+
+### ⚠️ Known limitations
+
+- Ribbon snapshot restoration is still not window-identity-safe. Ribbon
+  visibility is **per workbook window**, and every Ribbon mechanism Excel
+  exposes acts on the active window and accepts no window argument, so reaching
+  a captured window requires activating it — an observable side effect that does
+  not belong in a patch release. Unchanged from `1.1.1`; deferred to `1.2.0`.
+  See `#23` and `docs/RIBBON_SDI_BEHAVIOR.md`.
+- A frame-state registry entry that claims nothing is reused on a handle match
+  alone. That is safe, because its baseline is recaptured from the live window
+  before anything is restored from it, but it is a weaker guarantee than the
+  retained `Window` object the snapshot layer holds. The strong check exists
+  only where a capture and a restore are paired.
+- Ribbon behavior has been measured on one host only. It can vary by Office
+  channel, update ring and administrative policy.
+- The static gate cannot execute VBA, because a hosted runner has no Excel. It
+  covers what is decidable from repository text and does not replace
+  `Test_EXCEL_UI_RunReleaseCertification`.
 
 ---
 
