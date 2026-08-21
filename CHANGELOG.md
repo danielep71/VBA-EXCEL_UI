@@ -172,8 +172,8 @@ Certified in desktop Microsoft Excel for Windows via
 | 🪟 Operating system | Windows (64-bit) NT 10.00 |
 | ⚙️ Bitness | x64 |
 | 🧾 VBA generation | VBA7 |
-| 🕒 Certified | 2026-08-21 10:33:50 |
-| 🔖 Tree certified | `4ba380a72dffaad7ef01a27e88a6fc6b1a7110a2` |
+| 🕒 Certified | 2026-08-21 11:00:27 |
+| 🔖 Tree certified | `8a60c2486d02399c3b9e13017c04ba85a1d03093` |
 
 ```text
 RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
@@ -182,15 +182,21 @@ RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
   PASS  TitleBarSdiIdentity
 ```
 
-The certified tree is named because commits after it change only this entry and
-the matching README release note. No `.bas` module differs between the certified
-tree and the tag.
+The certified tree is named so the claim can be checked rather than trusted.
+Commits after it change this Validation block and nothing else: no `.bas`
+module, no tool, no gate.
 
-Both title-bar frame-state cases appear in this run and did not appear in the
-one before it. `TST_Case_TitleBarFrameRefreshDebtRetried` and
+An earlier run was superseded rather than reused. It certified a tree whose
+module headers were then corrected, and although that correction touched only
+comment lines, deciding that a change is too small to re-check is the reasoning
+this release exists to distrust.
+
+Both title-bar frame-state cases appear in this run.
+`TST_Case_TitleBarFrameRefreshDebtRetried` and
 `TST_Case_TitleBarStaleFrameEntryNotReused` were registered only in the
-title-bar-only pack, so the counters below were previously true of a run that
-never dispatched them. See `#41`.
+title-bar-only pack until `#41`, so certification reported these same four
+counters over runs that never dispatched them — including the run that certified
+`1.1.1`.
 
 All four counters are part of the verdict. `failed=0` alone is not a pass:
 `skipped=0` confirms nothing was silently omitted, and `cleanup=OK` confirms no
