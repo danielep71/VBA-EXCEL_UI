@@ -413,6 +413,61 @@ def declarations_of_text(text):
 PTR_RE = re.compile(r"\b(?:LongPtr|LongLong)\b")
 
 
+def arm_key(path):
+    """Render a condition path as stable text, with no line numbers in it.
+
+    The arms a member is declared in are part of its contract. Deleting the
+    #Else arm of a VBA7 pair removes the member from every 32-bit build while
+    leaving the recorded declaration identical, so the declaration alone is not
+    enough to record. Line numbers are excluded deliberately: they churn on
+    every edit above, and the contract is which arms exist, not where.
+    """
+    if not path:
+        return ""
+    return ">".join(f"{cond}#{arm}" for cond, _, arm in path)
+
+
+def arms_field(paths):
+    return " | ".join(sorted(arm_key(p) for p in paths if p))
+
+
+def exclusivity_finding(name, arms):
+    """Return a finding when two arms are not provably mutually exclusive.
+
+    Two declarations are alternatives only when they sit in different arms of
+    the *same* directive. Separate #If VBA7 and #If Win64 blocks are not
+    alternatives: both conditions hold on a 64-bit VBA7 host, so the second
+    declaration is a duplicate the compiler rejects. Folding them into one
+    contract hid a build break behind a tidy manifest.
+    """
+    for i, first in enumerate(arms):
+        for second in arms[i + 1:]:
+            depth = 0
+            limit = min(len(first.path), len(second.path))
+            while depth < limit and first.path[depth] == second.path[depth]:
+                depth += 1
+
+            if depth == limit:
+                return (
+                    f"{name}: one declaration is reachable wherever the other "
+                    f"is, so they are duplicates rather than alternatives "
+                    f"({first.where()} and {second.where()})"
+                )
+
+            a_cond, a_line, _ = first.path[depth]
+            b_cond, b_line, _ = second.path[depth]
+            if (a_cond, a_line) != (b_cond, b_line):
+                return (
+                    f"{name}: declared in two separate conditional blocks "
+                    f"({a_cond} at line {a_line} and {b_cond} at line "
+                    f"{b_line}). Different blocks are not mutually exclusive, "
+                    f"so a host satisfying both compiles two declarations of "
+                    f"the same member\n"
+                    f"      {first.where()}\n      {second.where()}"
+                )
+    return None
+
+
 def fold_conditionals(declarations):
     """Collapse the conditional arms of one member into its logical contract.
 
@@ -447,7 +502,7 @@ def fold_conditionals(declarations):
         arms = grouped[key]
 
         if len(arms) == 1:
-            records.append((kind, arms[0].text))
+            records.append((kind, arms[0].text, arms_field([arms[0].path])))
             continue
 
         # Two declarations reachable under the same conditions are a duplicate,
@@ -467,12 +522,9 @@ def fold_conditionals(declarations):
         if duplicated:
             continue
 
-        if any(not decl.path for decl in arms):
-            findings.append(
-                f"{name}: declared unconditionally and again inside a "
-                f"conditional block; the unconditional declaration always wins "
-                f"and the other is unreachable"
-            )
+        overlap = exclusivity_finding(name, arms)
+        if overlap:
+            findings.append(overlap)
             continue
 
         pointered = [decl for decl in arms if PTR_RE.search(decl.text)]
@@ -512,7 +564,7 @@ def fold_conditionals(declarations):
             )
             continue
 
-        records.append((kind, wide))
+        records.append((kind, wide, arms_field(decl.path for decl in arms)))
 
     return records, findings
 
@@ -520,7 +572,10 @@ def fold_conditionals(declarations):
 def records_of_text(text, module):
     """Return (manifest lines, findings) for one module's source text."""
     records, findings = fold_conditionals(declarations_of_text(text))
-    lines = sorted(f"{module}\t{kind}\t{body}" for kind, body in records)
+    lines = sorted(
+        f"{module}\t{kind}\t{body}" + (f"\t{arms}" if arms else "")
+        for kind, body, arms in records
+    )
     return lines, [f"{module}: {f}" for f in findings]
 
 
@@ -601,7 +656,13 @@ MANIFEST_HEADER = """\
 # by tools/check_repo.py. Editing a line here is how an intentional API change
 # is declared; the gate fails on any difference that is not recorded.
 #
-# Format: <module>\\t<kind>\\t<canonical declaration>
+# Format: <module>\\t<kind>\\t<canonical declaration>[\\t<arms>]
+#
+# The fourth field lists the compilation arms a conditional member is declared
+# in, as <condition>#<arm index> joined by > for nesting. It is absent for an
+# unconditional member. Which arms exist is part of the contract: deleting the
+# #Else arm of a VBA7 pair removes the member from every 32-bit build while
+# leaving the declaration itself identical.
 #
 # Passing mode, parameter names and order, Optional status, defaults, types,
 # return types and enum values are all part of the recorded contract, so a
@@ -757,6 +818,39 @@ Public Function UI_Frame(ByRef HwndOut As Long) As Boolean
 #End If
 """
 
+ARM_REMOVED = CONDITIONAL_OK.replace(
+    "#Else\nPublic Function UI_Frame( _\n    ByRef HwndOut As Long) _\n"
+    "    As Boolean\n#End If",
+    "#End If",
+)
+
+SEPARATE_BLOCKS = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If VBA7 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#End If
+
+#If Win64 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#End If
+"""
+
+NESTED_INNER_DUPLICATE = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If VBA7 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#If Win64 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#End If
+#Else
+Public Function UI_Frame(ByRef HwndOut As Long) As Boolean
+#End If
+"""
+
 DUPLICATE_UNCONDITIONAL = """\
 Attribute VB_Name = "M_SELFTEST"
 Option Explicit
@@ -829,6 +923,19 @@ CONDITIONAL_CASES = [
      DUPLICATE_UNCONDITIONAL, None, True),
     ("member declared unconditionally and in an arm is reported",
      UNCONDITIONAL_PLUS_ARM, None, True),
+    ("separate VBA7 and Win64 blocks are duplicates, not alternatives",
+     SEPARATE_BLOCKS, None, True),
+    ("a declaration inside a nested arm of its own branch is a duplicate",
+     NESTED_INNER_DUPLICATE, None, True),
+]
+
+# Arms are contract. Each pair is (label, source, other source) whose recorded
+# manifests must differ, because the declaration text alone is identical.
+ARM_CASES = [
+    ("deleting the #Else arm changes the recorded contract",
+     CONDITIONAL_OK, ARM_REMOVED),
+    ("a nested Win64 split is not the same contract as a flat VBA7 pair",
+     CONDITIONAL_OK, NESTED_OK),
 ]
 
 NEUTRAL_CASES = [
@@ -901,6 +1008,24 @@ def selftest():
                     f"gate would not see it\n      records: {changed}"
                 )
 
+    for label, left, right in ARM_CASES:
+        try:
+            a, a_findings = records_of_text(left, "M_SELFTEST")
+            b, b_findings = records_of_text(right, "M_SELFTEST")
+        except ApiError as exc:
+            failures.append(f"{label}\n      fixture did not parse: {exc}")
+            continue
+        if a_findings or b_findings:
+            failures.append(
+                f"{label}\n      a fixture was reported: "
+                f"{a_findings + b_findings}"
+            )
+        elif a == b:
+            failures.append(
+                f"{label}\n      both recorded the same manifest, so the gate "
+                f"would not see it\n      records: {a}"
+            )
+
     for label, source, expected_count, expect_finding in CONDITIONAL_CASES:
         try:
             lines, findings = records_of_text(source, "M_SELFTEST")
@@ -935,7 +1060,7 @@ def selftest():
 def run_selftest():
     failures = selftest()
     total = (len(BREAKING_CASES) + len(NEUTRAL_CASES)
-             + len(PROPERTY_CASES) + len(CONDITIONAL_CASES))
+             + len(PROPERTY_CASES) + len(CONDITIONAL_CASES) + len(ARM_CASES))
     if not failures:
         print(f"ok   self-test: {total} API-contract rules hold")
         return 0

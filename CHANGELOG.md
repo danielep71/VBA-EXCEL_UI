@@ -99,6 +99,18 @@ measured against that baseline.
   identical arms satisfy that too. Anything else is a real disagreement between
   two compilations and is reported rather than normalized away, which is the
   32-bit half of the contract nothing previously checked.
+- Added a fourth manifest field recording the compilation arms a conditional
+  member is declared in, as `<condition>#<arm index>` joined by `>` for
+  nesting. Which arms exist is part of the contract: deleting the `#Else` arm
+  of a VBA7 pair removes the member from every 32-bit build while leaving the
+  declaration itself byte-identical, so the declaration alone was not enough to
+  record.
+- Added an arm-exclusivity rule. Two declarations are alternatives only when
+  they sit in different arms of the same directive. Separate `#If VBA7` and
+  `#If Win64` blocks are not alternatives — both conditions hold on a 64-bit
+  VBA7 host — so a member declared in each is a duplicate the compiler rejects,
+  and folding the two into one contract hid a build break behind a tidy
+  manifest.
 - Added a `[baseline vX.Y.Z]` section to **tools/public_api_manifest.txt**
   holding the supported facade as it stood at the last release, frozen between
   releases and rebased only at one with `tools/vba_api.py --rebase-baseline`.
@@ -122,7 +134,10 @@ measured against that baseline.
   return type and an added companion accessor. Conditional fixtures cover a
   matched and a divergent VBA7 pair, nested VBA7 and `Win64` arms, identical
   `Win64` arms that must not read as a divergence, an `#ElseIf` chain, and two
-  duplicate-declaration forms. A model that silently normalized a `ByRef` flip away would
+  duplicate-declaration forms, separate overlapping `#If VBA7` and `#If Win64`
+  blocks, a declaration nested inside its own branch, and two arm-structure
+  pairs whose declarations are identical and whose recorded contracts must
+  differ. A model that silently normalized a `ByRef` flip away would
   keep the gate green through exactly the change it exists to catch, and no VBA
   test can see that.
 - Added a root **.editorconfig** aligned with the established
@@ -281,7 +296,7 @@ python3 tools/reformat.py --selftest
 ok   self-test: 9 formatting rules hold
 
 python3 tools/vba_api.py --selftest
-ok   self-test: 29 API-contract rules hold
+ok   self-test: 33 API-contract rules hold
 ~~~
 
 The API contract gate was additionally exercised by mutation rather than by
@@ -294,9 +309,18 @@ compilations rather than folded away.
 
 The declaration gate was exercised the same way. Renumbering a `UIVisibility`
 member and regenerating the manifest still fails while the changelog claims the
-facade is unchanged, and passes only once the row names a release type. That is
-the loop the check exists to close: a maintainer who regenerates the manifest to
+facade is unchanged, and passes once the row names a release type. That is the
+loop the check exists to close: a maintainer who regenerates the manifest to
 clear a finding has recorded the change but not yet declared it.
+
+The individual facade differences are reported as notes rather than findings.
+Raising them through the failure path made the gate reject the very change it
+had just been correctly told about, which trains a reader to regenerate the
+manifest again instead of reading the report.
+
+Deleting the `#Else` arm of `UI_TryGetActiveTitleBarHwnd`, and adding a second
+`#If Win64` declaration of it beside the existing `#If VBA7` one, are both
+reported. Neither was before.
 
 This is **static validation**, not release certification:
 

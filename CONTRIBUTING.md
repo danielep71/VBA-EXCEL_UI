@@ -267,6 +267,16 @@ types narrowed; arms that are simply identical satisfy that too, which is what a
 disagreement between two compilations and is reported rather than normalised
 away.
 
+Two declarations are alternatives only when they sit in different arms of the
+same directive. Separate `#If VBA7` and `#If Win64` blocks are not alternatives,
+because both conditions hold on a 64-bit VBA7 host, so a member declared in each
+is a duplicate the compiler rejects.
+
+The arms themselves are recorded, in a fourth manifest field written as
+`<condition>#<arm index>` and joined by `>` for nesting. Deleting the `#Else`
+arm of a VBA7 pair removes the member from every 32-bit build while leaving its
+declaration byte-identical, so the declaration alone is not the whole contract.
+
 The manifest also carries a `[baseline vX.Y.Z]` section holding the
 `[supported]` facade as it stood at the last release. When the two differ,
 `CHANGELOG.md` must say so in its `Supported API contract` row and name the

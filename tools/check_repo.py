@@ -98,6 +98,17 @@ def fail(check, detail):
     failures.append(f"{check}: {detail}")
 
 
+def note(check, detail):
+    """Record something the reader should see that is not a failure.
+
+    A correctly declared API change still has to be legible in the log. Raising
+    it through fail() made the gate reject the very change it had just been
+    told about, which trained the reader to regenerate the manifest again
+    rather than to read the finding.
+    """
+    notes.append(f"{check}: {detail}")
+
+
 def read(path):
     with open(os.path.join(REPO, path), "rb") as fh:
         return fh.read()
@@ -388,9 +399,11 @@ def check_supported_api_declaration():
 
     if changed:
         for gone in sorted(baseline - supported):
-            fail("supported-api-declaration", f"facade member changed or removed: {gone}")
+            note("supported-api-declaration",
+                 f"no longer in the facade since {baseline_version}: {gone}")
         for added in sorted(supported - baseline):
-            fail("supported-api-declaration", f"facade member changed or added: {added}")
+            note("supported-api-declaration",
+                 f"new in the facade since {baseline_version}: {added}")
 
 
 def check_public_api_selftest():
@@ -644,6 +657,12 @@ def main():
               + (f"  ({added})" if added else ""))
 
     print()
+    if notes:
+        print(f"{len(notes)} note(s):\n")
+        for n in notes:
+            print(f"  {n}")
+        print()
+
     if failures:
         print(f"{len(failures)} finding(s):\n")
         for f in failures:
