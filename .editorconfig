@@ -1,0 +1,160 @@
+#==============================================================================
+# VBA-EXCEL_UI .editorconfig
+#------------------------------------------------------------------------------
+# PURPOSE
+#   Keep editor-created files consistent with the repository's .gitattributes
+#   policy before Git normalization is involved.
+#
+# POLICY
+#   - Exported VBA source uses CRLF and 4-space indentation.
+#   - Documentation, GitHub configuration, and Python tooling use LF.
+#   - YAML, JSON, and CFF use 2-space indentation; Python uses 4 spaces.
+#   - Trailing whitespace is removed except in Markdown, where two trailing
+#     spaces can be meaningful as an explicit line break.
+#   - VBA source encoding is intentionally NOT forced here. The VBE exports
+#     text using the Windows system code page, and .gitattributes leaves
+#     working-tree-encoding disabled unless non-ASCII source requires it.
+#
+# RELATIONSHIP WITH .gitattributes
+#   .editorconfig controls how supporting editors create and save working-tree
+#   files. .gitattributes remains authoritative for Git normalization, binary
+#   classification, merge behavior, diff behavior, Linguist, and archives.
+#==============================================================================
+
+root = true
+
+
+#------------------------------------------------------------------------------
+# DEFAULT TEXT POLICY
+#------------------------------------------------------------------------------
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+tab_width = 4
+
+
+#------------------------------------------------------------------------------
+# EXPORTED VBA SOURCE
+#------------------------------------------------------------------------------
+# Do not set charset here: preserve the VBE/system-code-page export contract.
+
+[*.{bas,cls,frm}]
+end_of_line = crlf
+indent_style = space
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+
+#------------------------------------------------------------------------------
+# PYTHON TOOLING
+#------------------------------------------------------------------------------
+
+[*.{py,pyw}]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+
+#------------------------------------------------------------------------------
+# GITHUB / STRUCTURED CONFIGURATION
+#------------------------------------------------------------------------------
+
+[*.{yml,yaml,json,jsonc}]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+tab_width = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+
+#------------------------------------------------------------------------------
+# OTHER CROSS-PLATFORM TEXT CONFIGURATION
+#------------------------------------------------------------------------------
+
+[*.{xml,toml,cfg,csv,tsv,svg}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+
+#------------------------------------------------------------------------------
+# DOCUMENTATION
+#------------------------------------------------------------------------------
+# Markdown may intentionally use two trailing spaces for a hard line break.
+
+[*.md]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = false
+
+[*.txt]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[LICENSE]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[CITATION.cff]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+tab_width = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+
+#------------------------------------------------------------------------------
+# WINDOWS-NATIVE SCRIPTS / HOST-SENSITIVE TEXT
+#------------------------------------------------------------------------------
+# Keep line endings aligned with .gitattributes. Encoding is deliberately not
+# forced because some Windows-native formats may use host-specific encoding.
+
+[*.{bat,cmd,ps1,psm1,psd1,vbs,reg,ini}]
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+
+#------------------------------------------------------------------------------
+# POSIX SHELL SCRIPTS
+#------------------------------------------------------------------------------
+
+[*.sh]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+
+#------------------------------------------------------------------------------
+# REPOSITORY CONTROL FILES
+#------------------------------------------------------------------------------
+
+[{.gitattributes,.gitignore,.gitkeep,.editorconfig}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
