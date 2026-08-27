@@ -14,8 +14,10 @@ their time.
 Exit status is 0 when every check passed, 1 otherwise.
 """
 
+import fnmatch
 import os
 import re
+import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +39,8 @@ DEMO_MODULES = [
 ALL_MODULES = PRODUCTION_MODULES + TEST_MODULES + DEMO_MODULES
 
 REQUIRED_FILES = ALL_MODULES + [
+    ".gitattributes",
+    ".gitignore",
     "README.md",
     "CHANGELOG.md",
     "INSTALLATION.md",
@@ -57,11 +61,33 @@ JUMP_RE = re.compile(r"\b(?:GoTo|Resume)\s+([A-Za-z_]\w*)")
 RULE_RE = re.compile(r"^'(=+|-+)$")
 PUBLIC_RE = re.compile(r"^Public\s+(Sub|Function|Enum|Const|Type)\s+(\w+)")
 
-FORBIDDEN_PATTERNS = [
-    ("~$", "Office lock file"),
-    (".xlsm", "workbook binary"),
-    (".xlam", "add-in binary"),
-    (".xls", "workbook binary"),
+FORBIDDEN_TRACKED_ARTIFACTS = [
+    ("~$*", "Microsoft Office owner/lock file"),
+    (".~lock.*#", "LibreOffice/OpenOffice lock file"),
+    ("*.laccdb", "Microsoft Access lock file"),
+    ("*.ldb", "Microsoft Access lock file"),
+    ("*.xls", "Excel workbook binary"),
+    ("*.xlsx", "Excel workbook package"),
+    ("*.xlsm", "macro-enabled Excel workbook"),
+    ("*.xlsb", "binary Excel workbook"),
+    ("*.xlt", "Excel template binary"),
+    ("*.xltx", "Excel template package"),
+    ("*.xltm", "macro-enabled Excel template"),
+    ("*.xla", "legacy Excel add-in"),
+    ("*.xlam", "macro-enabled Excel add-in"),
+    ("*.xll", "compiled Excel add-in"),
+    ("*.xlw", "Excel workspace file"),
+    ("*.docm", "macro-enabled Word document"),
+    ("*.dotm", "macro-enabled Word template"),
+    ("*.pptm", "macro-enabled PowerPoint presentation"),
+    ("*.potm", "macro-enabled PowerPoint template"),
+    ("*.ppsm", "macro-enabled PowerPoint slideshow"),
+    ("*.accdb", "Microsoft Access database"),
+    ("*.accde", "compiled Microsoft Access database"),
+    ("*.accdr", "Microsoft Access runtime database"),
+    ("*.mdb", "legacy Microsoft Access database"),
+    ("*.mde", "compiled legacy Microsoft Access database"),
+    ("*.ade", "Microsoft Access project binary"),
 ]
 
 failures = []
@@ -295,15 +321,105 @@ def check_release_state():
 
 
 # --------------------------------------------------------------------------
-def check_no_binaries():
-    for root, dirs, files in os.walk(REPO):
-        dirs[:] = [d for d in dirs if d != ".git"]
-        for name in files:
-            low = name.lower()
-            for pattern, why in FORBIDDEN_PATTERNS:
-                if low.startswith(pattern) or low.endswith(pattern):
-                    rel = os.path.relpath(os.path.join(root, name), REPO)
-                    fail("tracked-binaries", f"{rel}: {why} must not be tracked")
+def git_tracked_files():
+    """Return the exact index-backed file set, or fail closed.
+
+    Walking the working tree is incorrect here: an ignored local demo workbook
+    or release asset is permitted to exist, but a force-added copy must fail the
+    gate. ``git ls-files`` makes that distinction mechanically.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", REPO, "ls-files", "-z"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except OSError as exc:
+        fail("repository-hygiene", f"cannot enumerate tracked files: {exc}")
+        return None
+
+    if result.returncode:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        fail("repository-hygiene",
+             f"git ls-files failed ({result.returncode}): {detail}")
+        return None
+
+    return sorted(
+        os.fsdecode(path)
+        for path in result.stdout.split(b"\0")
+        if path
+    )
+
+
+def git_ignored_files(paths):
+    """Return tracked paths that the current .gitignore would hide."""
+    if not paths:
+        return []
+
+    payload = b"\0".join(os.fsencode(path) for path in paths) + b"\0"
+    try:
+        result = subprocess.run(
+            ["git", "-C", REPO, "check-ignore", "--no-index", "-z", "--stdin"],
+            input=payload,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except OSError as exc:
+        fail("repository-hygiene", f"cannot evaluate .gitignore: {exc}")
+        return []
+
+    if result.returncode not in (0, 1):
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        fail("repository-hygiene",
+             f"git check-ignore failed ({result.returncode}): {detail}")
+        return []
+
+    return sorted(
+        os.fsdecode(path)
+        for path in result.stdout.split(b"\0")
+        if path
+    )
+
+
+def forbidden_tracked_reason(path):
+    """Return why a tracked path is forbidden, or None when it is allowed."""
+    name = path.rsplit("/", 1)[-1].lower()
+    for pattern, reason in FORBIDDEN_TRACKED_ARTIFACTS:
+        if fnmatch.fnmatchcase(name, pattern.lower()):
+            return reason
+    return None
+
+
+def check_repository_hygiene():
+    """Keep .gitignore, the Git index, and the release-binary policy aligned."""
+    ignore_rules = {
+        line.strip()
+        for line in read(".gitignore").decode("utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    for pattern, _ in FORBIDDEN_TRACKED_ARTIFACTS:
+        if pattern not in ignore_rules:
+            fail("repository-hygiene",
+                 f".gitignore is missing required blocked pattern {pattern!r}")
+
+    tracked = git_tracked_files()
+    if tracked is None:
+        return
+
+    forbidden_paths = set()
+    for rel in tracked:
+        reason = forbidden_tracked_reason(rel)
+        if reason:
+            forbidden_paths.add(rel)
+            fail("repository-hygiene", f"{rel}: {reason} must not be tracked")
+
+    for rel in git_ignored_files(tracked):
+        if rel not in forbidden_paths:
+            fail("repository-hygiene",
+                 f"{rel}: tracked file is hidden by the current .gitignore")
 
 
 # --------------------------------------------------------------------------
@@ -393,7 +509,7 @@ CHECKS = [
     ("duplicate procedures", check_duplicate_procedures),
     ("public API manifest", check_public_api),
     ("release state", check_release_state),
-    ("tracked binaries", check_no_binaries),
+    ("repository hygiene", check_repository_hygiene),
     ("markdown links", check_markdown_links),
     ("house-style formatter", check_formatter),
     ("formatter self-test", check_formatter_selftest),
