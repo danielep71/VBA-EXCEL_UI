@@ -67,6 +67,7 @@ DECL_RE = re.compile(
 )
 
 IF_RE = re.compile(r"^#If\s+(.+?)\s+Then$")
+ELSEIF_RE = re.compile(r"^#ElseIf\s+(.+?)\s+Then$")
 
 POINTER_NARROWING = [
     (re.compile(r"\bLongPtr\b"), "Long"),
@@ -336,7 +337,8 @@ class Declaration:
     def where(self):
         if not self.path:
             return f"line {self.line}, unconditional"
-        trail = " > ".join(f"{cond} arm {arm}" for cond, _, arm in self.path)
+        trail = " > ".join(f"{cond} arm {arm} ({pred})"
+                           for cond, _, arm, pred in self.path)
         return f"line {self.line}, {trail}"
 
 
@@ -349,18 +351,36 @@ def declarations_of_text(text):
     terminator = None
 
     for line, code in logical_lines(text):
-        if IF_RE.match(code):
-            stack.append([IF_RE.match(code).group(1), line, 0])
+        m_if = IF_RE.match(code)
+        if m_if:
+            # [condition of this block, line, arm index, arm predicate,
+            #  whether an #ElseIf has been seen]
+            stack.append([m_if.group(1), line, 0, m_if.group(1), False])
             continue
-        if re.match(r"^#ElseIf\s+.+\bThen$", code):
+
+        m_elseif = ELSEIF_RE.match(code)
+        if m_elseif:
             if not stack:
                 raise ApiError(f"line {line}: #ElseIf without #If")
-            stack[-1][2] += 1
+            frame = stack[-1]
+            frame[2] += 1
+            frame[3] = m_elseif.group(1)
+            frame[4] = True
             continue
+
         if code == "#Else":
             if not stack:
                 raise ApiError(f"line {line}: #Else without #If")
-            stack[-1][2] += 1
+            frame = stack[-1]
+            frame[2] += 1
+
+            # In a two-arm block the else arm is exactly the negation of the
+            # condition, which is what makes a separate #If Not X block its
+            # equivalent. Once an #ElseIf has narrowed the block, the else arm
+            # is whatever is left over and cannot be written as one predicate,
+            # so it stays opaque and any overlap involving it is reported
+            # rather than reasoned about.
+            frame[3] = f"Not ({frame[0]})" if not frame[4] else "Else"
             continue
         if code == "#End If":
             if not stack:
@@ -385,7 +405,7 @@ def declarations_of_text(text):
 
         kind = re.sub(r"\s+", " ", m.group(1))
         name = m.group(2)
-        path = tuple((c, ln, arm) for c, ln, arm in stack)
+        path = tuple((cond, ln, arm, pred) for cond, ln, arm, pred, _ in stack)
 
         if kind in ("Enum", "Type"):
             pending = [kind, name, line, path, []]
@@ -424,11 +444,38 @@ def arm_key(path):
     """
     if not path:
         return ""
-    return ">".join(f"{cond}#{arm}" for cond, _, arm in path)
+    return ">".join(f"{pred}#{arm}" for _, _, arm, pred in path)
 
 
 def arms_field(paths):
     return " | ".join(sorted(arm_key(p) for p in paths if p))
+
+
+def normalise_predicate(text):
+    """Collapse a conditional predicate to a comparable form."""
+    text = re.sub(r"\s+", " ", text).strip().casefold()
+    while text.startswith("(") and text.endswith(")"):
+        text = text[1:-1].strip()
+    return text
+
+
+def are_complementary(first, second):
+    """Return True when two predicates are syntactic negations of each other.
+
+    Declaring a member under #If VBA7 and again under #If Not VBA7 is two
+    blocks and one member, and rejecting it as a duplicate was wrong. The test
+    is deliberately syntactic: proving arbitrary predicates disjoint is not
+    something this tool should attempt, so anything it cannot show complementary
+    is reported for a person to restructure or confirm.
+    """
+    a = normalise_predicate(first)
+    b = normalise_predicate(second)
+
+    for outer, inner in ((a, b), (b, a)):
+        if outer.startswith("not "):
+            if normalise_predicate(outer[4:]) == inner:
+                return True
+    return False
 
 
 def exclusivity_finding(name, arms):
@@ -454,17 +501,23 @@ def exclusivity_finding(name, arms):
                     f"({first.where()} and {second.where()})"
                 )
 
-            a_cond, a_line, _ = first.path[depth]
-            b_cond, b_line, _ = second.path[depth]
-            if (a_cond, a_line) != (b_cond, b_line):
-                return (
-                    f"{name}: declared in two separate conditional blocks "
-                    f"({a_cond} at line {a_line} and {b_cond} at line "
-                    f"{b_line}). Different blocks are not mutually exclusive, "
-                    f"so a host satisfying both compiles two declarations of "
-                    f"the same member\n"
-                    f"      {first.where()}\n      {second.where()}"
-                )
+            a_cond, a_line, _, a_pred = first.path[depth]
+            b_cond, b_line, _, b_pred = second.path[depth]
+
+            if (a_cond, a_line) == (b_cond, b_line):
+                continue                     # different arms of one block
+
+            if are_complementary(a_pred, b_pred):
+                continue                     # #If X and #If Not X
+
+            return (
+                f"{name}: declared in two separate conditional blocks whose "
+                f"predicates are not complementary ({a_pred} at line {a_line} "
+                f"and {b_pred} at line {b_line}). A host satisfying both "
+                f"compiles two declarations of the same member; write them as "
+                f"arms of one block, or as a predicate and its negation\n"
+                f"      {first.where()}\n      {second.where()}"
+            )
     return None
 
 
@@ -659,10 +712,12 @@ MANIFEST_HEADER = """\
 # Format: <module>\\t<kind>\\t<canonical declaration>[\\t<arms>]
 #
 # The fourth field lists the compilation arms a conditional member is declared
-# in, as <condition>#<arm index> joined by > for nesting. It is absent for an
-# unconditional member. Which arms exist is part of the contract: deleting the
-# #Else arm of a VBA7 pair removes the member from every 32-bit build while
-# leaving the declaration itself identical.
+# in, as <arm predicate>#<arm index> joined by > for nesting. It is absent for
+# an unconditional member. Which arms exist is part of the contract: deleting
+# the #Else arm of a VBA7 pair removes the member from every 32-bit build while
+# leaving the declaration itself identical, and replacing that #Else with
+# #ElseIf Mac Then narrows it to one platform. Each arm therefore records its
+# own predicate, not the position it happens to occupy.
 #
 # Passing mode, parameter names and order, Optional status, defaults, types,
 # return types and enum values are all part of the recorded contract, so a
@@ -824,6 +879,36 @@ ARM_REMOVED = CONDITIONAL_OK.replace(
     "#End If",
 )
 
+ELSEIF_INSTEAD_OF_ELSE = CONDITIONAL_OK.replace("#Else", "#ElseIf Mac Then")
+
+COMPLEMENTARY_BLOCKS = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If VBA7 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#End If
+
+#If Not VBA7 Then
+Public Function UI_Frame(ByRef HwndOut As Long) As Boolean
+#End If
+"""
+
+ELSE_AND_NEGATED_BLOCK = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If VBA7 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#Else
+Public Function UI_Frame(ByRef HwndOut As Long) As Boolean
+#End If
+
+#If Not VBA7 Then
+Public Function UI_Frame(ByRef HwndOut As Long) As Boolean
+#End If
+"""
+
 SEPARATE_BLOCKS = """\
 Attribute VB_Name = "M_SELFTEST"
 Option Explicit
@@ -927,6 +1012,10 @@ CONDITIONAL_CASES = [
      SEPARATE_BLOCKS, None, True),
     ("a declaration inside a nested arm of its own branch is a duplicate",
      NESTED_INNER_DUPLICATE, None, True),
+    ("complementary #If X and #If Not X blocks are one member",
+     COMPLEMENTARY_BLOCKS, 1, False),
+    ("an #Else arm and a separately negated block overlap",
+     ELSE_AND_NEGATED_BLOCK, None, True),
 ]
 
 # Arms are contract. Each pair is (label, source, other source) whose recorded
@@ -936,6 +1025,8 @@ ARM_CASES = [
      CONDITIONAL_OK, ARM_REMOVED),
     ("a nested Win64 split is not the same contract as a flat VBA7 pair",
      CONDITIONAL_OK, NESTED_OK),
+    ("replacing #Else with #ElseIf Mac changes the recorded contract",
+     CONDITIONAL_OK, ELSEIF_INSTEAD_OF_ELSE),
 ]
 
 NEUTRAL_CASES = [

@@ -267,15 +267,21 @@ types narrowed; arms that are simply identical satisfy that too, which is what a
 disagreement between two compilations and is reported rather than normalised
 away.
 
-Two declarations are alternatives only when they sit in different arms of the
-same directive. Separate `#If VBA7` and `#If Win64` blocks are not alternatives,
-because both conditions hold on a 64-bit VBA7 host, so a member declared in each
-is a duplicate the compiler rejects.
+Two declarations are alternatives when they sit in different arms of the same
+directive, or in two blocks whose predicates are a condition and its negation —
+`#If VBA7` beside `#If Not VBA7` is one member. `#If VBA7` beside `#If Win64` is
+not: both hold on a 64-bit VBA7 host, so the member is declared twice and the
+compiler rejects it. The negation test is syntactic on purpose. Proving
+arbitrary predicates disjoint is not something this tool should attempt, so
+anything it cannot show complementary is reported for you to restructure or
+confirm.
 
 The arms themselves are recorded, in a fourth manifest field written as
-`<condition>#<arm index>` and joined by `>` for nesting. Deleting the `#Else`
-arm of a VBA7 pair removes the member from every 32-bit build while leaving its
-declaration byte-identical, so the declaration alone is not the whole contract.
+`<arm predicate>#<arm index>` and joined by `>` for nesting. Deleting the
+`#Else` arm of a VBA7 pair removes the member from every 32-bit build, and
+replacing that `#Else` with `#ElseIf Mac Then` narrows it to one platform —
+both while leaving the declaration byte-identical. Each arm therefore records
+its own predicate rather than the position it occupies.
 
 The manifest also carries a `[baseline vX.Y.Z]` section holding the
 `[supported]` facade as it stood at the last release. When the two differ,
