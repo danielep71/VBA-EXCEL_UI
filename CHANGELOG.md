@@ -68,11 +68,12 @@ measured against that baseline.
 |---|---|
 | Production VBA | Unchanged from v1.1.2 |
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
+| Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
 | Runtime correctness fixes | Not yet implemented |
 | Regression and certification fixes | Not yet implemented |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | Fifteen checks; the release branch passes |
+| Static validation | Sixteen checks; the release branch passes |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
@@ -91,20 +92,37 @@ measured against that baseline.
   so an `Option Private Module` project can see them across its own modules,
   tracked for compile integrity with no external compatibility claimed. Gate
   findings name the section, so a report says which promise was broken.
-- Added conditional-declaration folding. A procedure declared under
-  `#If VBA7 Then` and again under `#Else` is one logical member: the VBA7 arm is
-  recorded, and the gate separately proves the `#Else` arm is that same
-  declaration with `LongPtr` narrowed to `Long`. An arm differing in any other
-  way is reported rather than normalized away, which is the 32-bit half of the
-  contract nothing previously checked.
+- Added conditional-declaration folding. A member declared in several
+  compilation arms is recorded once, and arms nest: a `Win64` split inside a
+  `VBA7` branch declares one member three times. Every arm must be either the
+  widest declaration or that same declaration with the pointer types narrowed;
+  identical arms satisfy that too. Anything else is a real disagreement between
+  two compilations and is reported rather than normalized away, which is the
+  32-bit half of the contract nothing previously checked.
+- Added a `[baseline vX.Y.Z]` section to **tools/public_api_manifest.txt**
+  holding the supported facade as it stood at the last release, frozen between
+  releases and rebased only at one with `tools/vba_api.py --rebase-baseline`.
+  Keeping the baseline in the file rather than deriving it from Git history is
+  deliberate: continuous integration checks out a single commit and has no
+  history to compare against.
+- Added a sixteenth static check requiring a Semantic Versioning statement
+  whenever the supported facade differs from that baseline. `CHANGELOG.md` must
+  carry a `Supported API contract` row, and when the facade has moved the row
+  must name patch, minor or major. Regenerating the manifest no longer clears
+  the gate on its own, so the manifest records the change and the changelog
+  declares what it means.
 - Added **tools/vba_api.py --selftest** and registered it as a fifteenth static
   check. Its fixtures cover parameter reorder, parameter rename, `ByVal` to
   `ByRef`, parameter type change, dropped `Optional`, changed default, changed
-  return type, changed enum value, added and removed enum members, and removed
-  and renamed members, alongside formatting-only changes — continuation reflow,
-  indentation, trailing comments and added header examples — that must
-  normalize identically. Two further fixtures cover a matched and a divergent
-  conditional pair. A model that silently normalized a `ByRef` flip away would
+  return type, changed enum value, added and removed enum members, a standalone
+  member addition, and removed and renamed members, alongside formatting-only
+  changes — continuation reflow, indentation, trailing comments and added header
+  examples — that must normalize identically. Property fixtures cover an
+  accessor kind changing from `Get` to `Let` and to `Set`, a changed property
+  return type and an added companion accessor. Conditional fixtures cover a
+  matched and a divergent VBA7 pair, nested VBA7 and `Win64` arms, identical
+  `Win64` arms that must not read as a divergence, an `#ElseIf` chain, and two
+  duplicate-declaration forms. A model that silently normalized a `ByRef` flip away would
   keep the gate green through exactly the change it exists to catch, and no VBA
   test can see that.
 - Added a root **.editorconfig** aligned with the established
@@ -248,6 +266,7 @@ RESULT: PASS
   duplicate procedures
   public API manifest
   public API self-test
+  supported API declaration
   release state
   repository hygiene
   markdown links
@@ -262,7 +281,7 @@ python3 tools/reformat.py --selftest
 ok   self-test: 9 formatting rules hold
 
 python3 tools/vba_api.py --selftest
-ok   self-test: 18 API-contract rules hold
+ok   self-test: 29 API-contract rules hold
 ~~~
 
 The API contract gate was additionally exercised by mutation rather than by
@@ -272,6 +291,12 @@ default, a renamed parameter and a changed return type each produced a
 `[supported]` finding; flipping the passing mode in only the `#Else` arm of
 `UI_TryGetActiveTitleBarHwnd` was reported as a divergence between the two
 compilations rather than folded away.
+
+The declaration gate was exercised the same way. Renumbering a `UIVisibility`
+member and regenerating the manifest still fails while the changelog claims the
+facade is unchanged, and passes only once the row names a release type. That is
+the loop the check exists to close: a maintainer who regenerates the manifest to
+clear a finding has recorded the change but not yet declared it.
 
 This is **static validation**, not release certification:
 

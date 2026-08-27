@@ -11,9 +11,11 @@
 # reorder, a ByVal/ByRef flip, a widened return or a renumbered enum member is
 # a manifest change and cannot land silently.
 #
-# A procedure declared under #If VBA7 Then and again under #Else is one member.
-# The VBA7 arm is recorded; the gate separately proves the #Else arm is that
-# same declaration with LongPtr narrowed to Long.
+# A member declared in several compilation arms is recorded once. Arms nest, so
+# a Win64 split inside a VBA7 branch is three declarations of one member. Every
+# arm must be either the widest declaration or that declaration with pointer
+# types narrowed; arms that are simply identical satisfy that too. Anything else
+# is a real disagreement between two compilations and is reported.
 #
 # [supported]
 #   The caller-facing facade in M_EXCEL_UI. Covered by Semantic Versioning: a
@@ -26,6 +28,14 @@
 #   compile-breaking change is never silent. No external compatibility is
 #   claimed for them, and importing the four modules together remains the
 #   supported deployment unit.
+#
+# [baseline vX.Y.Z]
+#   The [supported] facade as it stood at the named release. It is frozen
+#   between releases and rebased only at one, with
+#   tools/vba_api.py --rebase-baseline vX.Y.Z. The gate compares [supported]
+#   against it, so an in-flight change to the external contract is detected in
+#   the branch rather than in the release diff, and a shallow CI checkout can
+#   detect it without any Git history.
 
 [supported]
 M_EXCEL_UI	Enum	UIVisibility(UI_LeaveUnchanged = -1, UI_Hide = 0, UI_Show = 1)
@@ -68,3 +78,17 @@ M_EXCEL_UI_TITLEBAR	Function	UI_TrySetTitleBarVisibleForHwndIfNeeded(ByVal Targe
 M_EXCEL_UI_TITLEBAR	Function	UI_TrySetTitleBarVisibleIfNeeded(ByVal IsVisible As Boolean, ByRef FailMsg As String) As Boolean
 M_EXCEL_UI_TITLEBAR	Sub	UI_InternalInjectFrameRefreshFailure(ByVal FailNextRefresh As Boolean)
 M_EXCEL_UI_TITLEBAR	Sub	UI_InternalResetTitleBarBaseline()
+
+[baseline v1.1.2]
+M_EXCEL_UI	Enum	UIVisibility(UI_LeaveUnchanged = -1, UI_Hide = 0, UI_Show = 1)
+M_EXCEL_UI	Enum	UIWindowTargetScope(UI_TargetAllExcelWindows = 0, UI_TargetActiveWindow = 1, UI_TargetActiveWorkbookWindows = 2)
+M_EXCEL_UI	Function	UI_CaptureExcelUIState_WithResult(Optional ByRef FailureCount As Long = 0, Optional ByRef FailureList As Variant) As Boolean
+M_EXCEL_UI	Function	UI_HasExcelUIStateSnapshot() As Boolean
+M_EXCEL_UI	Function	UI_ResetExcelUIToSnapshot_WithResult(Optional ByRef FailureCount As Long = 0, Optional ByRef FailureList As Variant) As Boolean
+M_EXCEL_UI	Function	UI_SetExcelUI_WithResult(Optional ByVal Ribbon As UIVisibility = UI_LeaveUnchanged, Optional ByVal StatusBar As UIVisibility = UI_LeaveUnchanged, Optional ByVal ScrollBars As UIVisibility = UI_LeaveUnchanged, Optional ByVal FormulaBar As UIVisibility = UI_LeaveUnchanged, Optional ByVal Headings As UIVisibility = UI_LeaveUnchanged, Optional ByVal WorkbookTabs As UIVisibility = UI_LeaveUnchanged, Optional ByVal Gridlines As UIVisibility = UI_LeaveUnchanged, Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged, Optional ByRef FailureCount As Long = 0, Optional ByRef FailureList As Variant, Optional ByVal TargetScope As UIWindowTargetScope = UI_TargetAllExcelWindows) As Boolean
+M_EXCEL_UI	Sub	UI_CaptureExcelUIState()
+M_EXCEL_UI	Sub	UI_ClearExcelUIStateSnapshot()
+M_EXCEL_UI	Sub	UI_HideExcelUI()
+M_EXCEL_UI	Sub	UI_ResetExcelUIToSnapshot()
+M_EXCEL_UI	Sub	UI_SetExcelUI(Optional ByVal Ribbon As UIVisibility = UI_LeaveUnchanged, Optional ByVal StatusBar As UIVisibility = UI_LeaveUnchanged, Optional ByVal ScrollBars As UIVisibility = UI_LeaveUnchanged, Optional ByVal FormulaBar As UIVisibility = UI_LeaveUnchanged, Optional ByVal Headings As UIVisibility = UI_LeaveUnchanged, Optional ByVal WorkbookTabs As UIVisibility = UI_LeaveUnchanged, Optional ByVal Gridlines As UIVisibility = UI_LeaveUnchanged, Optional ByVal TitleBar As UIVisibility = UI_LeaveUnchanged, Optional ByVal TargetScope As UIWindowTargetScope = UI_TargetAllExcelWindows)
+M_EXCEL_UI	Sub	UI_ShowExcelUI()

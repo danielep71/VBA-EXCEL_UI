@@ -66,7 +66,7 @@ VBA-EXCEL_UI/
 │  ├─ reformat.py                house-style formatter
 │  ├─ vba_api.py                 public-declaration contract model
 │  ├─ check_repo.py              the static gate CI runs
-│  └─ public_api_manifest.txt    versioned declaration contract
+│  └─ public_api_manifest.txt    declaration contract and release baseline
 ├─ docs/
 │  └─ …                          measurements and reviews
 ├─ .github/workflows/
@@ -259,10 +259,22 @@ type and enum value — alongside formatting-only changes that must normalise
 identically. `check_repo.py` runs those fixtures too, so the model is verified
 on every push rather than only when someone suspects it.
 
-A procedure declared under `#If VBA7 Then` and again under `#Else` is one
-logical member. The VBA7 arm is recorded, and the gate separately proves the
-`#Else` arm is that same declaration with `LongPtr` narrowed to `Long`. An arm
-that differs in any other way is reported rather than normalised away.
+A member declared in several compilation arms is recorded once. Arms nest, so a
+`Win64` split inside a `VBA7` branch declares one member three times. Every arm
+must be either the widest declaration or that same declaration with the pointer
+types narrowed; arms that are simply identical satisfy that too, which is what a
+`Win64` split that changes no signature looks like. Anything else is a real
+disagreement between two compilations and is reported rather than normalised
+away.
+
+The manifest also carries a `[baseline vX.Y.Z]` section holding the
+`[supported]` facade as it stood at the last release. When the two differ,
+`CHANGELOG.md` must say so in its `Supported API contract` row and name the
+release type — patch, minor or major — or the gate fails. Regenerating the
+manifest is therefore not enough on its own to make a facade change pass, which
+is the point: the manifest records the change and the changelog declares what it
+means. The baseline is rebased only at a release, with
+`tools/vba_api.py --rebase-baseline vX.Y.Z`.
 
 The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
 

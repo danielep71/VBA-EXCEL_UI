@@ -58,7 +58,9 @@ SECTIONS = [
     ("project-public", PROJECT_PUBLIC_MODULES),
 ]
 
-SECTION_RE = re.compile(r"^\[([a-z-]+)\]$")
+SECTION_RE = re.compile(r"^\[([a-z-]+)(?:\s+(v[0-9][0-9A-Za-z.\-+]*))?\]$")
+
+BASELINE_SECTION = "baseline"
 
 DECL_RE = re.compile(
     r"^Public\s+(Sub|Function|Property\s+(?:Get|Let|Set)|Enum|Const|Type)\s+(\w+)"
@@ -316,15 +318,26 @@ def canonical_type(name, members):
 # DECLARATION EXTRACTION
 # --------------------------------------------------------------------------
 class Declaration:
-    __slots__ = ("kind", "name", "text", "line", "cond", "arm")
+    __slots__ = ("kind", "name", "text", "line", "path")
 
-    def __init__(self, kind, name, text, line, cond, arm):
+    def __init__(self, kind, name, text, line, path):
         self.kind = kind
         self.name = name
         self.text = text
         self.line = line
-        self.cond = cond
-        self.arm = arm
+
+        # The full stack of enclosing conditionals as
+        # ((condition, line, arm_index), ...). Nesting is ordinary here:
+        # a Win64 split inside a VBA7 branch produces three declarations of
+        # one member, and a model that assumed a flat Then/Else pair would
+        # call that a duplicate.
+        self.path = path
+
+    def where(self):
+        if not self.path:
+            return f"line {self.line}, unconditional"
+        trail = " > ".join(f"{cond} arm {arm}" for cond, _, arm in self.path)
+        return f"line {self.line}, {trail}"
 
 
 def declarations_of_text(text):
@@ -332,22 +345,22 @@ def declarations_of_text(text):
     found = []
     stack = []
 
-    pending = None          # (kind, name, line, cond, arm, [members])
+    pending = None          # (kind, name, line, path, [members])
     terminator = None
 
     for line, code in logical_lines(text):
         if IF_RE.match(code):
-            stack.append([IF_RE.match(code).group(1), line, "then"])
+            stack.append([IF_RE.match(code).group(1), line, 0])
             continue
         if re.match(r"^#ElseIf\s+.+\bThen$", code):
             if not stack:
                 raise ApiError(f"line {line}: #ElseIf without #If")
-            stack[-1][2] = "elseif"
+            stack[-1][2] += 1
             continue
         if code == "#Else":
             if not stack:
                 raise ApiError(f"line {line}: #Else without #If")
-            stack[-1][2] = "else"
+            stack[-1][2] += 1
             continue
         if code == "#End If":
             if not stack:
@@ -357,13 +370,13 @@ def declarations_of_text(text):
 
         if pending is not None:
             if code == terminator:
-                kind, name, at, cond, arm, members = pending
+                kind, name, at, path, members = pending
                 body = (canonical_enum(name, members) if kind == "Enum"
                         else canonical_type(name, members))
-                found.append(Declaration(kind, name, body, at, cond, arm))
+                found.append(Declaration(kind, name, body, at, path))
                 pending, terminator = None, None
             else:
-                pending[5].append(code)
+                pending[4].append(code)
             continue
 
         m = DECL_RE.match(code)
@@ -372,22 +385,21 @@ def declarations_of_text(text):
 
         kind = re.sub(r"\s+", " ", m.group(1))
         name = m.group(2)
-        cond = (stack[-1][0], stack[-1][1]) if stack else None
-        arm = stack[-1][2] if stack else None
+        path = tuple((c, ln, arm) for c, ln, arm in stack)
 
         if kind in ("Enum", "Type"):
-            pending = [kind, name, line, cond, arm, []]
+            pending = [kind, name, line, path, []]
             terminator = f"End {kind}"
             continue
 
         if kind == "Const":
             body = re.sub(r"^Public\s+Const\s+", "", code).strip()
-            found.append(Declaration(kind, name, body, line, cond, arm))
+            found.append(Declaration(kind, name, body, line, path))
             continue
 
         found.append(
             Declaration(kind, name, canonical_procedure(kind, name, code),
-                        line, cond, arm)
+                        line, path)
         )
 
     if pending is not None:
@@ -398,13 +410,25 @@ def declarations_of_text(text):
     return found
 
 
-def fold_conditionals(declarations):
-    """Collapse a #If/#Else pair of one member into its logical contract.
+PTR_RE = re.compile(r"\b(?:LongPtr|LongLong)\b")
 
-    Returns (records, findings). A member declared in both arms is emitted once
-    from the VBA7 arm; the other arm has to be that same declaration with the
-    pointer types narrowed, or the two compilations do not agree and the
-    difference is reported instead of hidden.
+
+def fold_conditionals(declarations):
+    """Collapse the conditional arms of one member into its logical contract.
+
+    Returns (records, findings).
+
+    A member can be declared in more than one compilation arm, and the arms
+    nest: a Win64 split inside a VBA7 branch declares one member three times.
+    The rule is therefore stated over the whole set rather than over a Then and
+    an Else. Every arm must be either the widest declaration or that same
+    declaration with the pointer types narrowed. Arms that are simply identical
+    satisfy it too, which is what a Win64 split that does not change any
+    signature looks like, and reporting those as a divergence was a false
+    positive.
+
+    Anything else is a genuine disagreement between two compilations and is
+    reported rather than normalised away.
     """
     records = []
     findings = []
@@ -426,41 +450,69 @@ def fold_conditionals(declarations):
             records.append((kind, arms[0].text))
             continue
 
-        if len(arms) != 2:
+        # Two declarations reachable under the same conditions are a duplicate,
+        # not a variant, whether that is twice at top level or twice inside one
+        # arm. VBA would reject it; so does this.
+        seen = {}
+        duplicated = False
+        for decl in arms:
+            if decl.path in seen:
+                duplicated = True
+                findings.append(
+                    f"{name}: declared twice under the same conditions "
+                    f"({seen[decl.path].where()} and {decl.where()})"
+                )
+            else:
+                seen[decl.path] = decl
+        if duplicated:
+            continue
+
+        if any(not decl.path for decl in arms):
             findings.append(
-                f"{name}: declared {len(arms)} times; only one #If/#Else pair "
-                f"can be folded into a single contract"
+                f"{name}: declared unconditionally and again inside a "
+                f"conditional block; the unconditional declaration always wins "
+                f"and the other is unreachable"
             )
             continue
 
-        first, second = arms
-        if first.cond is None or first.cond != second.cond:
+        pointered = [decl for decl in arms if PTR_RE.search(decl.text)]
+
+        if pointered:
+            widest = {decl.text for decl in pointered}
+            if len(widest) > 1:
+                findings.append(
+                    f"{name}: pointer-typed arms declare different contracts\n"
+                    + "\n".join(f"      {decl.where()}: {decl.text}"
+                                for decl in pointered)
+                )
+                continue
+            wide = pointered[0].text
+        else:
+            uniform = {decl.text for decl in arms}
+            if len(uniform) > 1:
+                findings.append(
+                    f"{name}: arms differ but none declares a pointer type, so "
+                    f"the difference is not a pointer-width variant\n"
+                    + "\n".join(f"      {decl.where()}: {decl.text}"
+                                for decl in arms)
+                )
+                continue
+            wide = arms[0].text
+
+        allowed = {wide, narrow_pointers(wide)}
+        divergent = [decl for decl in arms if decl.text not in allowed]
+        if divergent:
             findings.append(
-                f"{name}: declared twice outside one conditional block "
-                f"(lines {first.line} and {second.line})"
+                f"{name}: an arm is neither the widest declaration nor that "
+                f"declaration with pointer types narrowed\n"
+                f"      widest   : {wide}\n"
+                f"      narrowed : {narrow_pointers(wide)}\n"
+                + "\n".join(f"      {decl.where()}: {decl.text}"
+                            for decl in divergent)
             )
             continue
 
-        wide = next((d for d in arms if d.arm == "then"), None)
-        narrow = next((d for d in arms if d.arm == "else"), None)
-        if wide is None or narrow is None:
-            findings.append(
-                f"{name}: conditional arms are not a Then/Else pair "
-                f"(lines {first.line} and {second.line})"
-            )
-            continue
-
-        expected = narrow_pointers(wide.text)
-        if narrow.text != expected:
-            findings.append(
-                f"{name}: the #Else arm is not the #If arm with pointer types "
-                f"narrowed\n      #If arm  : {wide.text}\n"
-                f"      #Else arm: {narrow.text}\n"
-                f"      expected : {expected}"
-            )
-            continue
-
-        records.append((kind, wide.text))
+        records.append((kind, wide))
 
     return records, findings
 
@@ -502,8 +554,15 @@ def surface(repo=REPO):
 
 
 def parse_manifest(path):
-    """Read the manifest into {section: [lines]}."""
+    """Read the manifest into ({section: [lines]}, baseline_version).
+
+    The baseline section carries the release it was captured from in its own
+    header, because a frozen contract that does not say what it is frozen at is
+    not evidence of anything.
+    """
     sections = {name: [] for name, _ in SECTIONS}
+    sections[BASELINE_SECTION] = []
+    baseline_version = None
     current = None
 
     with open(path, encoding="utf-8") as fh:
@@ -516,12 +575,23 @@ def parse_manifest(path):
                 current = m.group(1)
                 if current not in sections:
                     raise ApiError(f"unknown manifest section [{current}]")
+                if current == BASELINE_SECTION:
+                    if not m.group(2):
+                        raise ApiError(
+                            "the [baseline] section header must name the "
+                            "release it was captured from, as [baseline vX.Y.Z]"
+                        )
+                    baseline_version = m.group(2)
                 continue
             if current is None:
                 raise ApiError(f"manifest entry before any section header: {line!r}")
             sections[current].append(line)
 
-    return {name: sorted(lines) for name, lines in sections.items()}
+    if baseline_version is None:
+        raise ApiError("the manifest has no [baseline vX.Y.Z] section")
+
+    return ({name: sorted(lines) for name, lines in sections.items()},
+            baseline_version)
 
 
 MANIFEST_HEADER = """\
@@ -538,9 +608,11 @@ MANIFEST_HEADER = """\
 # reorder, a ByVal/ByRef flip, a widened return or a renumbered enum member is
 # a manifest change and cannot land silently.
 #
-# A procedure declared under #If VBA7 Then and again under #Else is one member.
-# The VBA7 arm is recorded; the gate separately proves the #Else arm is that
-# same declaration with LongPtr narrowed to Long.
+# A member declared in several compilation arms is recorded once. Arms nest, so
+# a Win64 split inside a VBA7 branch is three declarations of one member. Every
+# arm must be either the widest declaration or that declaration with pointer
+# types narrowed; arms that are simply identical satisfy that too. Anything else
+# is a real disagreement between two compilations and is reported.
 #
 # [supported]
 #   The caller-facing facade in M_EXCEL_UI. Covered by Semantic Versioning: a
@@ -553,15 +625,26 @@ MANIFEST_HEADER = """\
 #   compile-breaking change is never silent. No external compatibility is
 #   claimed for them, and importing the four modules together remains the
 #   supported deployment unit.
+#
+# [baseline vX.Y.Z]
+#   The [supported] facade as it stood at the named release. It is frozen
+#   between releases and rebased only at one, with
+#   tools/vba_api.py --rebase-baseline vX.Y.Z. The gate compares [supported]
+#   against it, so an in-flight change to the external contract is detected in
+#   the branch rather than in the release diff, and a shallow CI checkout can
+#   detect it without any Git history.
 """
 
 
-def render_manifest(sections):
+def render_manifest(sections, baseline_version, baseline_lines):
     out = [MANIFEST_HEADER]
     for name, _ in SECTIONS:
         out.append(f"\n[{name}]\n")
         for line in sections[name]:
             out.append(line + "\n")
+    out.append(f"\n[{BASELINE_SECTION} {baseline_version}]\n")
+    for line in baseline_lines:
+        out.append(line + "\n")
     return "".join(out)
 
 
@@ -594,41 +677,12 @@ def _records(text):
     return lines
 
 
-def _mutate(old, new):
-    if old not in BASE:
+def _mutate(old, new, source=None):
+    source = BASE if source is None else source
+    if old not in source:
         raise ApiError(f"self-test fixture does not contain {old!r}")
-    return BASE.replace(old, new)
+    return source.replace(old, new)
 
-
-BREAKING_CASES = [
-    ("parameter reorder",
-     "ByVal Scope As UIVisibility, _\n    Optional ByRef FailMsg As String = \"\"",
-     "Optional ByRef FailMsg As String = \"\", _\n    ByVal Scope As UIVisibility"),
-    ("parameter rename", "ByVal Scope As", "ByVal Target As"),
-    ("ByVal to ByRef", "ByVal Scope As UIVisibility", "ByRef Scope As UIVisibility"),
-    ("parameter type change", "Scope As UIVisibility", "Scope As Long"),
-    ("Optional dropped", "Optional ByRef FailMsg", "ByRef FailMsg"),
-    ("default value change", 'FailMsg As String = ""', 'FailMsg As String = "x"'),
-    ("return type change", "As Boolean\nEnd Function", "As Long\nEnd Function"),
-    ("enum value change", "UI_Hide = 0", "UI_Hide = 7"),
-    ("enum member removed", "    UI_Show = 1\n", ""),
-    ("enum member added", "    UI_Show = 1\n", "    UI_Show = 1\n    UI_Toggle = 2\n"),
-    ("member removed", "Public Function UI_Probe(", "Private Function UI_Probe("),
-    ("member renamed", "Public Function UI_Probe(", "Public Function UI_Probe2("),
-]
-
-NEUTRAL_CASES = [
-    ("continuation reflow",
-     "Public Function UI_Probe( _\n    ByVal Scope As UIVisibility, _\n"
-     "    Optional ByRef FailMsg As String = \"\") _\n    As Boolean",
-     "Public Function UI_Probe(ByVal Scope As UIVisibility, "
-     "Optional ByRef FailMsg As String = \"\") As Boolean"),
-    ("indentation change", "    UI_Hide = 0", "        UI_Hide = 0"),
-    ("trailing comment added", "    UI_Hide = 0", "    UI_Hide = 0    'hide it"),
-    ("header example added",
-     "Public Function UI_Probe(",
-     "'   Public Sub UI_NotReal(ByVal A As Long)\n'\nPublic Function UI_Probe("),
-]
 
 CONDITIONAL_OK = """\
 Attribute VB_Name = "M_SELFTEST"
@@ -650,6 +704,145 @@ CONDITIONAL_BAD = CONDITIONAL_OK.replace(
     "    ByVal HwndOut As Long) _\n    As Boolean\n#End If",
 )
 
+
+PROPERTY_BASE = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+Public Property Get UI_Mode() As Long
+End Property
+"""
+
+NESTED_OK = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If VBA7 Then
+#If Win64 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#Else
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#End If
+#Else
+Public Function UI_Frame(ByRef HwndOut As Long) As Boolean
+#End If
+"""
+
+NESTED_BAD = NESTED_OK.replace(
+    "#Else\nPublic Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean\n#End If",
+    "#Else\nPublic Function UI_Frame(ByVal HwndOut As LongPtr) As Boolean\n#End If",
+)
+
+WIN64_IDENTICAL = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If Win64 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#Else
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#End If
+"""
+
+ELSEIF_CHAIN = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If Win64 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#ElseIf VBA7 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#Else
+Public Function UI_Frame(ByRef HwndOut As Long) As Boolean
+#End If
+"""
+
+DUPLICATE_UNCONDITIONAL = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+Public Sub UI_Twice()
+End Sub
+
+Public Sub UI_Twice()
+End Sub
+"""
+
+UNCONDITIONAL_PLUS_ARM = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+Public Sub UI_Twice()
+End Sub
+
+#If VBA7 Then
+Public Sub UI_Twice()
+End Sub
+#End If
+"""
+
+BREAKING_CASES = [
+    ("parameter reorder",
+     "ByVal Scope As UIVisibility, _\n    Optional ByRef FailMsg As String = \"\"",
+     "Optional ByRef FailMsg As String = \"\", _\n    ByVal Scope As UIVisibility"),
+    ("parameter rename", "ByVal Scope As", "ByVal Target As"),
+    ("ByVal to ByRef", "ByVal Scope As UIVisibility", "ByRef Scope As UIVisibility"),
+    ("parameter type change", "Scope As UIVisibility", "Scope As Long"),
+    ("Optional dropped", "Optional ByRef FailMsg", "ByRef FailMsg"),
+    ("default value change", 'FailMsg As String = ""', 'FailMsg As String = "x"'),
+    ("return type change", "As Boolean\nEnd Function", "As Long\nEnd Function"),
+    ("enum value change", "UI_Hide = 0", "UI_Hide = 7"),
+    ("enum member removed", "    UI_Show = 1\n", ""),
+    ("enum member added", "    UI_Show = 1\n", "    UI_Show = 1\n    UI_Toggle = 2\n"),
+    ("member removed", "Public Function UI_Probe(", "Private Function UI_Probe("),
+    ("member renamed", "Public Function UI_Probe(", "Public Function UI_Probe2("),
+    ("standalone member added", "End Function\n",
+     "End Function\n\nPublic Sub UI_Extra()\nEnd Sub\n"),
+]
+
+PROPERTY_CASES = [
+    ("property accessor kind Get to Let",
+     "Public Property Get UI_Mode() As Long",
+     "Public Property Let UI_Mode(ByVal NewValue As Long)"),
+    ("property accessor kind Get to Set",
+     "Public Property Get UI_Mode() As Long",
+     "Public Property Set UI_Mode(ByVal NewValue As Object)"),
+    ("property return type change",
+     "Public Property Get UI_Mode() As Long",
+     "Public Property Get UI_Mode() As Variant"),
+    ("property companion accessor added",
+     "End Property\n",
+     "End Property\n\nPublic Property Let UI_Mode(ByVal NewValue As Long)\n"
+     "End Property\n"),
+]
+
+CONDITIONAL_CASES = [
+    ("matched VBA7 pointer pair folds to one member", CONDITIONAL_OK, 1, False),
+    ("VBA7 pair diverging beyond pointer width is reported",
+     CONDITIONAL_BAD, None, True),
+    ("nested VBA7 and Win64 arms fold to one member", NESTED_OK, 1, False),
+    ("identical Win64 arms are not a divergence", WIN64_IDENTICAL, 1, False),
+    ("ElseIf chain folds to one member", ELSEIF_CHAIN, 1, False),
+    ("nested arm diverging beyond pointer width is reported",
+     NESTED_BAD, None, True),
+    ("member declared twice unconditionally is reported",
+     DUPLICATE_UNCONDITIONAL, None, True),
+    ("member declared unconditionally and in an arm is reported",
+     UNCONDITIONAL_PLUS_ARM, None, True),
+]
+
+NEUTRAL_CASES = [
+    ("continuation reflow",
+     "Public Function UI_Probe( _\n    ByVal Scope As UIVisibility, _\n"
+     "    Optional ByRef FailMsg As String = \"\") _\n    As Boolean",
+     "Public Function UI_Probe(ByVal Scope As UIVisibility, "
+     "Optional ByRef FailMsg As String = \"\") As Boolean"),
+    ("indentation change", "    UI_Hide = 0", "        UI_Hide = 0"),
+    ("trailing comment added", "    UI_Hide = 0", "    UI_Hide = 0    'hide it"),
+    ("header example added",
+     "Public Function UI_Probe(",
+     "'   Public Sub UI_NotReal(ByVal A As Long)\n'\nPublic Function UI_Probe("),
+]
 
 def selftest():
     """Return a list of failure descriptions; empty means the model holds."""
@@ -689,30 +882,60 @@ def selftest():
                 f"      expected: {baseline}\n      produced: {changed}"
             )
 
-    lines, findings = records_of_text(CONDITIONAL_OK, "M_SELFTEST")
-    if findings:
-        failures.append(
-            f"matched VBA7 pair\n      reported: {findings}"
-        )
-    elif len(lines) != 1 or "LongPtr" not in lines[0]:
-        failures.append(
-            f"matched VBA7 pair\n      should fold to one LongPtr record\n"
-            f"      produced: {lines}"
-        )
+    try:
+        property_baseline = _records(PROPERTY_BASE)
+    except ApiError as exc:
+        failures.append(f"property fixture does not parse: {exc}")
+        property_baseline = None
 
-    _, findings = records_of_text(CONDITIONAL_BAD, "M_SELFTEST")
-    if not findings:
-        failures.append(
-            "divergent VBA7 pair\n      arms differ by more than pointer width "
-            "and the model accepted them"
-        )
+    if property_baseline is not None:
+        for label, old, new in PROPERTY_CASES:
+            try:
+                changed = _records(_mutate(old, new, PROPERTY_BASE))
+            except ApiError as exc:
+                failures.append(f"{label}\n      fixture did not parse: {exc}")
+                continue
+            if changed == property_baseline:
+                failures.append(
+                    f"{label}\n      produced an identical manifest, so the "
+                    f"gate would not see it\n      records: {changed}"
+                )
+
+    for label, source, expected_count, expect_finding in CONDITIONAL_CASES:
+        try:
+            lines, findings = records_of_text(source, "M_SELFTEST")
+        except ApiError as exc:
+            failures.append(f"{label}\n      fixture did not parse: {exc}")
+            continue
+
+        if expect_finding:
+            if not findings:
+                failures.append(
+                    f"{label}\n      the model accepted it silently\n"
+                    f"      records: {lines}"
+                )
+            continue
+
+        if findings:
+            failures.append(f"{label}\n      reported: {findings}")
+        elif len(lines) != expected_count:
+            failures.append(
+                f"{label}\n      expected {expected_count} record(s), got "
+                f"{len(lines)}\n      records: {lines}"
+            )
+        elif "LongPtr" not in lines[0]:
+            failures.append(
+                f"{label}\n      the widest declaration was not the one "
+                f"recorded\n      records: {lines}"
+            )
 
     return failures
 
 
 def run_selftest():
     failures = selftest()
-    total = len(BREAKING_CASES) + len(NEUTRAL_CASES) + 2
+    total = (len(BREAKING_CASES) + len(NEUTRAL_CASES)
+             + len(PROPERTY_CASES) + len(CONDITIONAL_CASES))
     if not failures:
         print(f"ok   self-test: {total} API-contract rules hold")
         return 0
@@ -724,9 +947,12 @@ def run_selftest():
 
 # --------------------------------------------------------------------------
 USAGE = """usage:
-  vba_api.py --selftest   verify the contract model against its own fixtures
-  vba_api.py --emit       print the manifest the current source would produce
-  vba_api.py --write      regenerate tools/public_api_manifest.txt
+  vba_api.py --selftest              verify the model against its own fixtures
+  vba_api.py --emit                  print the manifest the source would produce
+  vba_api.py --write                 regenerate tools/public_api_manifest.txt
+  vba_api.py --rebase-baseline vX.Y.Z
+                                     freeze the current [supported] facade as
+                                     the baseline for a release just made
 """
 
 
@@ -736,20 +962,43 @@ def main():
     if args and args[0] == "--selftest":
         return run_selftest()
 
-    if args and args[0] in ("--emit", "--write"):
+    if args and args[0] in ("--emit", "--write", "--rebase-baseline"):
+        manifest_path = os.path.join(REPO, MANIFEST)
+
+        try:
+            recorded, baseline_version = parse_manifest(manifest_path)
+        except (OSError, ApiError) as exc:
+            print(f"FAIL {MANIFEST}: {exc}", file=sys.stderr)
+            return 1
+
+        baseline_lines = recorded[BASELINE_SECTION]
+
+        if args[0] == "--rebase-baseline":
+            if len(args) != 2 or not re.match(r"^v[0-9]", args[1]):
+                print(USAGE, file=sys.stderr)
+                return 2
+            baseline_version = args[1]
+
         sections, findings = surface()
         for f in findings:
             print(f"FAIL {f}", file=sys.stderr)
         if findings:
             return 1
-        text = render_manifest(sections)
+
+        if args[0] == "--rebase-baseline":
+            baseline_lines = sections["supported"]
+
+        text = render_manifest(sections, baseline_version, baseline_lines)
+
         if args[0] == "--emit":
             sys.stdout.write(text)
-        else:
-            with open(os.path.join(REPO, MANIFEST), "w",
-                      encoding="utf-8", newline="\n") as fh:
-                fh.write(text)
-            print(f"wrote {MANIFEST}")
+            return 0
+
+        with open(manifest_path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        print(f"wrote {MANIFEST}"
+              + (f" with the baseline frozen at {baseline_version}"
+                 if args[0] == "--rebase-baseline" else ""))
         return 0
 
     print(USAGE, file=sys.stderr)

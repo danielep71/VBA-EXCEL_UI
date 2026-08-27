@@ -150,9 +150,14 @@ change, or reason an existing workbook can observe different behavior.
 > change what it does, and that belongs in the statement above.
 >
 > A change under [supported] is a Semantic Versioning event for external
-> callers and must be declared as one here and in CHANGELOG.md. A change under
-> [project-public] only has to be deliberate. Neither is the same as the
-> deployment rule that all four src modules are replaced together.
+> callers and must be declared as one here and in CHANGELOG.md. The gate
+> enforces that: the manifest carries the facade as it stood at the last
+> release in its [baseline] section, and when the two differ the CHANGELOG
+> Supported API contract row has to name the release type or the build fails.
+> Regenerating the manifest alone does not clear it.
+>
+> A change under [project-public] only has to be deliberate. Neither is the
+> same as the deployment rule that all four src modules are replaced together.
 
 ### Production source package
 

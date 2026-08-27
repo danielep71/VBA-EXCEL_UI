@@ -296,7 +296,7 @@ def check_public_api():
         return
 
     try:
-        recorded = vba_api.parse_manifest(manifest_path)
+        recorded, baseline_version = vba_api.parse_manifest(manifest_path)
     except vba_api.ApiError as exc:
         fail("public-api", f"tools/public_api_manifest.txt: {exc}")
         return
@@ -323,6 +323,74 @@ def check_public_api():
              "run tools/vba_api.py --write to record an intended API change, "
              "and declare it in CHANGELOG.md; a [supported] change is a "
              "Semantic Versioning event")
+
+
+SEMVER_ROW_RE = re.compile(
+    r"^\|\s*Supported API contract\s*\|\s*(.+?)\s*\|\s*$", re.M)
+
+SEMVER_WORDS = ("patch", "minor", "major")
+
+
+def check_supported_api_declaration():
+    """Require a Semantic Versioning statement whenever the facade moves.
+
+    Documented policy is not a gate. The manifest carries the facade as it
+    stood at the last release in its [baseline] section, so a change to the
+    external contract is detectable in the branch that makes it rather than
+    only in the release diff — and detectable from the checkout alone, which
+    matters because CI clones one commit and has no history to compare against.
+
+    When the two differ, CHANGELOG.md has to say so in words a reader sees,
+    not only in a manifest a reader has to diff.
+    """
+    vba_api = import_vba_api()
+    if vba_api is None:
+        return
+
+    manifest_path = os.path.join(REPO, "tools/public_api_manifest.txt")
+    if not os.path.exists(manifest_path):
+        return                       # already reported by check_public_api
+
+    try:
+        recorded, baseline_version = vba_api.parse_manifest(manifest_path)
+    except vba_api.ApiError:
+        return                       # already reported by check_public_api
+
+    baseline = set(recorded.get(vba_api.BASELINE_SECTION, []))
+    supported = set(recorded.get("supported", []))
+    changed = baseline != supported
+
+    changelog = read("CHANGELOG.md").decode("utf-8")
+    match = SEMVER_ROW_RE.search(changelog)
+
+    if match is None:
+        fail("supported-api-declaration",
+             "CHANGELOG.md has no '| Supported API contract | ... |' row; the "
+             "facade cannot be silently unchanged, it has to be stated")
+        return
+
+    stated = match.group(1).strip()
+    unchanged_claim = stated.lower().startswith("unchanged")
+
+    if changed and unchanged_claim:
+        fail("supported-api-declaration",
+             f"[supported] differs from [baseline {baseline_version}], but "
+             f"CHANGELOG.md still claims {stated!r}")
+    elif changed and not any(w in stated.lower() for w in SEMVER_WORDS):
+        fail("supported-api-declaration",
+             f"[supported] differs from [baseline {baseline_version}]; "
+             f"CHANGELOG.md must name the release type (patch, minor or "
+             f"major), and says {stated!r}")
+    elif not changed and not unchanged_claim:
+        fail("supported-api-declaration",
+             f"[supported] is identical to [baseline {baseline_version}], but "
+             f"CHANGELOG.md claims {stated!r}")
+
+    if changed:
+        for gone in sorted(baseline - supported):
+            fail("supported-api-declaration", f"facade member changed or removed: {gone}")
+        for added in sorted(supported - baseline):
+            fail("supported-api-declaration", f"facade member changed or added: {added}")
 
 
 def check_public_api_selftest():
@@ -556,6 +624,7 @@ CHECKS = [
     ("duplicate procedures", check_duplicate_procedures),
     ("public API manifest", check_public_api),
     ("public API self-test", check_public_api_selftest),
+    ("supported API declaration", check_supported_api_declaration),
     ("release state", check_release_state),
     ("repository hygiene", check_repository_hygiene),
     ("markdown links", check_markdown_links),
