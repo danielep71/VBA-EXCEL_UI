@@ -15,6 +15,18 @@ name: Static checks
 #
 # The division is the point: this catches the mechanical mistakes cheaply and
 # on every push, so that manual certification time is spent on behaviour.
+#
+# The tag trigger exists because a tag is the artefact people install from, and
+# until now nothing ran against one. A release could be, and was, published
+# from a SHA carrying no evidence. actions/checkout resolves a tag to its exact
+# commit, and every check here reads repository text only, so the same job is
+# correct on a tag without knowing it is running on one.
+#
+# Actions are pinned by full commit SHA rather than by a version tag. A tag is
+# mutable: v4 moved to a different commit as recently as this pin, and an
+# upstream account compromise would otherwise reach this repository silently.
+# The trailing comment names the release that SHA was, so a reader can audit
+# the pin without resolving it by hand. tools/check_repo.py enforces both.
 
 on:
   pull_request:
@@ -25,6 +37,8 @@ on:
     branches:
       - main
       - 'release/**'
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -37,10 +51,10 @@ jobs:
 
     steps:
       - name: Check out the exact SHA under review
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 

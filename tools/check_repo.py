@@ -428,6 +428,167 @@ def check_public_api_selftest():
 
 
 # --------------------------------------------------------------------------
+USES_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*(?P<ref>[^\s#]+)\s*(?P<rest>.*)$")
+
+PINNED_RE = re.compile(r"^[\w.\-]+/[\w.\-]+(?:/[^@]+)?@(?P<sha>[0-9a-f]+)$")
+
+AUDIT_COMMENT_RE = re.compile(r"^#\s*v[0-9][0-9A-Za-z.\-+]*\s*$")
+
+TAG_TRIGGER_RE = re.compile(
+    r"^\s*tags:\s*$\n(?:\s*#.*\n)*\s*-\s*['\"]?v\*['\"]?\s*$", re.M)
+
+GATE_WORKFLOW = ".github/workflows/static-checks.yml"
+
+
+def workflow_findings(rel, text, require_tag_trigger=False):
+    """Return every pin-policy violation in one workflow file.
+
+    A version tag is a mutable pointer. actions/checkout@v4 moved to a
+    different commit as recently as the pin this check was written against, so
+    a workflow referencing it runs whatever the upstream account publishes next
+    — including whatever an attacker publishes after compromising it. Only a
+    full commit SHA is immutable.
+
+    The trailing version comment is required because a bare 40-hex string is
+    unauditable in review: nobody can tell v4.4.0 from an arbitrary commit by
+    reading it. The comment states the claim; resolving the tag checks it.
+    """
+    findings = []
+
+    for n, line in enumerate(text.split("\n"), 1):
+        m = USES_RE.match(line)
+        if not m:
+            continue
+
+        ref = m.group("ref").strip("\"'")
+        rest = m.group("rest").strip()
+
+        # A repository-local action is versioned by this repository's own
+        # history, so there is nothing to pin it to.
+        if ref.startswith("./"):
+            continue
+
+        pinned = PINNED_RE.match(ref)
+        if not pinned:
+            findings.append(
+                f"{rel}:{n}: {ref} is not pinned to a commit SHA; a version "
+                f"tag or branch can be moved by the upstream account"
+            )
+            continue
+
+        sha = pinned.group("sha")
+        if len(sha) != 40:
+            findings.append(
+                f"{rel}:{n}: {ref} is pinned to a {len(sha)}-character SHA; "
+                f"a truncated SHA is ambiguous and must be the full 40"
+            )
+            continue
+
+        if not AUDIT_COMMENT_RE.match(rest):
+            findings.append(
+                f"{rel}:{n}: {ref} carries no audited-version comment; write "
+                f"the release it resolves to, as '# v1.2.3', so the pin can be "
+                f"reviewed without resolving it by hand"
+            )
+
+    if require_tag_trigger and not TAG_TRIGGER_RE.search(text):
+        findings.append(
+            f"{rel}: no push trigger on tags 'v*'; a tag is the artefact "
+            f"people install from, and nothing would run against it"
+        )
+
+    return findings
+
+
+def check_workflow_policy():
+    """Enforce immutable Action pins across every tracked workflow."""
+    tracked = git_tracked_files()
+    if tracked is None:
+        return
+
+    workflows = [
+        rel for rel in tracked
+        if rel.startswith(".github/workflows/")
+        and rel.endswith((".yml", ".yaml"))
+    ]
+
+    if not workflows:
+        fail("workflow-policy", "no workflow is tracked under .github/workflows")
+        return
+
+    if GATE_WORKFLOW not in workflows:
+        fail("workflow-policy", f"{GATE_WORKFLOW} is missing")
+
+    for rel in sorted(workflows):
+        text = read(rel).decode("utf-8")
+        for finding in workflow_findings(
+                rel, text, require_tag_trigger=(rel == GATE_WORKFLOW)):
+            fail("workflow-policy", finding)
+
+
+WORKFLOW_HEAD = """\
+name: Example
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+"""
+
+WORKFLOW_SELFTEST_CASES = [
+    ("a pinned action with a tag trigger passes",
+     WORKFLOW_HEAD
+     + "      - uses: actions/checkout@" + "1" * 40 + " # v4.4.0\n",
+     0),
+    ("a repository-local action needs no pin",
+     WORKFLOW_HEAD + "      - uses: ./.github/actions/house-style\n",
+     0),
+    ("a moving version tag is rejected",
+     WORKFLOW_HEAD + "      - uses: actions/checkout@v4\n",
+     1),
+    ("a branch reference is rejected",
+     WORKFLOW_HEAD + "      - uses: actions/checkout@main\n",
+     1),
+    ("a truncated SHA is rejected",
+     WORKFLOW_HEAD + "      - uses: actions/checkout@" + "1" * 8 + " # v4.4.0\n",
+     1),
+    ("a full SHA without an audited-version comment is rejected",
+     WORKFLOW_HEAD + "      - uses: actions/checkout@" + "1" * 40 + "\n",
+     1),
+    ("a full SHA with a non-version comment is rejected",
+     WORKFLOW_HEAD
+     + "      - uses: actions/checkout@" + "1" * 40 + " # latest\n",
+     1),
+    ("a missing tag trigger is rejected",
+     WORKFLOW_HEAD.replace("    tags:\n      - 'v*'\n", "")
+     + "      - uses: actions/checkout@" + "1" * 40 + " # v4.4.0\n",
+     1),
+]
+
+
+def check_workflow_policy_selftest():
+    """Run the pin policy against its own fixtures.
+
+    The policy is one regular expression away from accepting everything, and
+    the only symptom would be a green gate. #53 will add a second workflow that
+    inherits this rule, so it has to be a rule rather than a habit.
+    """
+    for label, text, expected in WORKFLOW_SELFTEST_CASES:
+        found = workflow_findings("fixture.yml", text, require_tag_trigger=True)
+        if len(found) != expected:
+            fail("workflow-policy-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
+
+
+# --------------------------------------------------------------------------
 def check_release_state():
     """Documentation must not describe a release that has not happened.
 
@@ -638,6 +799,8 @@ CHECKS = [
     ("public API manifest", check_public_api),
     ("public API self-test", check_public_api_selftest),
     ("supported API declaration", check_supported_api_declaration),
+    ("workflow pin policy", check_workflow_policy),
+    ("workflow policy self-test", check_workflow_policy_selftest),
     ("release state", check_release_state),
     ("repository hygiene", check_repository_hygiene),
     ("markdown links", check_markdown_links),

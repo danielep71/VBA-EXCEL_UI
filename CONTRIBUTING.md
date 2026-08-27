@@ -301,6 +301,41 @@ means. The baseline is rebased only at a release, with
 
 The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
 
+## 🔗 Updating a pinned Action
+
+Every `uses:` reference in `.github/workflows/` is pinned to a full 40-character
+commit SHA with a trailing comment naming the release it is, and
+`tools/check_repo.py` fails on anything else. A version tag is a mutable
+pointer: `actions/checkout@v4` moved to a different commit as recently as the
+pin currently in the tree, so a workflow referencing it runs whatever the
+upstream account publishes next, including whatever an attacker publishes after
+compromising it.
+
+The comment is not decoration. A bare 40-hex string cannot be reviewed — nobody
+can tell a real release from an arbitrary commit by reading it. The comment
+states the claim, and resolving the tag is what checks it.
+
+To move a pin:
+
+1. Find the intended release in the official Action repository and note its tag,
+   for example `v4.4.0`. Read its release notes; a pin bump is a dependency
+   change, not housekeeping.
+2. Resolve that tag to a commit without trusting a web page:
+
+   ```text
+   git ls-remote https://github.com/actions/checkout.git refs/tags/v4.4.0
+   ```
+
+   If the tag is annotated, resolve `refs/tags/v4.4.0^{}` as well and pin the
+   commit it dereferences to, not the tag object.
+3. Replace the SHA and the version comment **together**, in one edit. A SHA
+   updated without its comment, or a comment updated without its SHA, is worse
+   than no pin: it is a false statement a reviewer will believe.
+4. Run `python3 tools/check_repo.py`.
+
+A repository-local action — `uses: ./…` — is versioned by this repository's own
+history and is exempt. Nothing else is.
+
 ## ✅ Required validation
 
 For production code changes:

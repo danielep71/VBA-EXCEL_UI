@@ -73,7 +73,7 @@ measured against that baseline.
 | Regression and certification fixes | Not yet implemented |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | Sixteen checks; the release branch passes |
+| Static validation | Eighteen checks; the release branch passes |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
@@ -161,6 +161,23 @@ measured against that baseline.
   coverage it does not have. A model that silently normalized a `ByRef` flip away would
   keep the gate green through exactly the change it exists to catch, and no VBA
   test can see that.
+- Added a push trigger on `v*` tags to **.github/workflows/static-checks.yml**.
+  A tag is the artefact people install from, and until now nothing ran against
+  one: `v1.1.1` and `v1.1.2` were published from commits carrying no automated
+  evidence of their own. The existing job needed no other change, because
+  `actions/checkout` resolves a tag to its exact commit and every check reads
+  repository text only.
+- Added a workflow pin policy to **tools/check_repo.py**. Every `uses:`
+  reference in a tracked workflow must name a full 40-character commit SHA and
+  carry a trailing comment naming the release that SHA is. Repository-local
+  actions are exempt; nothing else is. The gate workflow must additionally
+  carry the `v*` tag trigger.
+- Added fixtures for the pin policy covering a compliant workflow, a
+  repository-local action, a moving version tag, a branch reference, a
+  truncated SHA, a full SHA with no version comment, a full SHA with a
+  non-version comment, and a missing tag trigger. The policy is one regular
+  expression away from accepting everything, and the only symptom would be a
+  green gate.
 - Added a root **.editorconfig** aligned with the established
   **.gitattributes** policy. It defines four-space VBA and Python indentation,
   two-space structured-data indentation, LF for cross-platform repository text,
@@ -173,6 +190,14 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- Pinned both Actions in **.github/workflows/static-checks.yml** to immutable
+  commit SHAs: `actions/checkout` to `11d5960a…` and `actions/setup-python` to
+  `a26af69b…`, each with the release it resolves to written beside it. A
+  version tag is a mutable pointer, and `actions/checkout@v4` moved to a
+  different commit as recently as this pin. The
+  `sync-label-colors.yml` workflow already followed the convention; it is now a
+  rule rather than a habit, which is what makes #53's workflow subject to it
+  before it is written.
 - Changed **tools/public_api_manifest.txt** to record the complete normalized
   declaration of each public member rather than module, kind and name. The
   member count is unchanged at thirty-eight, so nothing was added or dropped in
@@ -272,6 +297,11 @@ measured against that baseline.
 
 ### 🔐 Security
 
+- Closed a supply-chain gap in continuous integration. Both Actions in the
+  static-checks workflow referenced moving version tags, so a compromise of an
+  upstream Action account would have reached this repository on the next run
+  with no change to any file here. They are now pinned to immutable commits and
+  the pin policy is enforced by the gate rather than by memory.
 - Extended ignored secret-material coverage to include common private-key and
   certificate formats while stating explicitly that ignore rules are not a
   substitute for credential rotation after exposure.
@@ -303,6 +333,8 @@ RESULT: PASS
   public API manifest
   public API self-test
   supported API declaration
+  workflow pin policy
+  workflow policy self-test
   release state
   repository hygiene
   markdown links
@@ -405,6 +437,7 @@ practical closure status of any item that has since been reopened.
 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | Full cleanup proof | Open |
 | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | Mandatory certification case inventory | Reopened |
 | [#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46) | Exact-source certification evidence | Open |
+| [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | Tag CI and immutable Action pins | Implemented; open until the v1.1.3 tag run and ruleset evidence exist |
 | [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | Full public API contract gate | Implemented; open until the release diff shows no supported facade change |
 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | Accurate v1.1.2/v1.1.3 closure documentation | Open |
 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | Exact-head review and certification gate | Open |
