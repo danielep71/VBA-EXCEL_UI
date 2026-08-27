@@ -100,13 +100,19 @@ measured against that baseline.
   two compilations and is reported rather than normalized away, which is the
   32-bit half of the contract nothing previously checked.
 - Added a fourth manifest field recording the compilation arms a conditional
-  member is declared in, as `<arm predicate>#<arm index>` joined by `>` for
-  nesting. Which arms exist is part of the contract: deleting the `#Else` arm
-  of a VBA7 pair removes the member from every 32-bit build, and replacing that
-  `#Else` with `#ElseIf Mac Then` narrows it to one platform, both while
-  leaving the declaration byte-identical. Each arm records its own predicate
-  rather than its position, so an `#ElseIf` that changes the condition changes
-  the recorded contract.
+  member is declared in, as `<effective predicate>#<arm index>` joined by `>`
+  for nesting. Which arms exist is part of the contract: deleting the `#Else`
+  arm of a VBA7 pair removes the member from every 32-bit build, and replacing
+  that `#Else` with `#ElseIf Mac Then` narrows it to one platform, both while
+  leaving the declaration byte-identical.
+- Recorded the effective predicate of each arm rather than its own condition.
+  An arm is reached only when every earlier arm of its block was not taken, so
+  the `#ElseIf VBA7` arm of an `#If Win64` block records
+  `Not (Win64) And VBA7`, and the trailing `#Else` records
+  `Not (Win64) And Not (VBA7)`. Changing that leading condition to `Mac` moves
+  which hosts reach the later arms; recording `VBA7` and `Else` named a
+  position in the block rather than a condition on the host, and left that
+  move invisible.
 - Added an arm-exclusivity rule. Two declarations are alternatives when they
   sit in different arms of the same directive, or in two blocks whose
   predicates are a condition and its negation, so `#If VBA7` beside
@@ -141,8 +147,10 @@ measured against that baseline.
   duplicate-declaration forms, separate overlapping `#If VBA7` and `#If Win64`
   blocks, complementary `#If X` and `#If Not X` blocks that must fold, an
   `#Else` arm overlapping a separately negated block, a declaration nested
-  inside its own branch, and three arm-structure pairs whose declarations are
-  identical and whose recorded contracts must differ. A model that silently normalized a `ByRef` flip away would
+  inside its own branch, a three-arm block that must fold, and four
+  arm-structure pairs whose declarations are identical and whose recorded
+  contracts must differ — including one that changes only the leading `#If`
+  condition of a block whose later arms hold the member. A model that silently normalized a `ByRef` flip away would
   keep the gate green through exactly the change it exists to catch, and no VBA
   test can see that.
 - Added a root **.editorconfig** aligned with the established
@@ -301,7 +309,7 @@ python3 tools/reformat.py --selftest
 ok   self-test: 9 formatting rules hold
 
 python3 tools/vba_api.py --selftest
-ok   self-test: 36 API-contract rules hold
+ok   self-test: 38 API-contract rules hold
 ~~~
 
 The API contract gate was additionally exercised by mutation rather than by
@@ -325,7 +333,10 @@ manifest again instead of reading the report.
 
 Deleting the `#Else` arm of `UI_TryGetActiveTitleBarHwnd`, replacing that arm
 with `#ElseIf Mac Then`, and adding a second `#If Win64` declaration beside the
-existing `#If VBA7` one are all reported. None was before.
+existing `#If VBA7` one are all reported. None was before. The recorded
+manifest is unchanged by the effective-predicate work, because every
+conditional member in the tree sits in a two-arm block where the two forms
+agree.
 
 This is **static validation**, not release certification:
 

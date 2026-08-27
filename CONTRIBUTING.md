@@ -277,11 +277,18 @@ anything it cannot show complementary is reported for you to restructure or
 confirm.
 
 The arms themselves are recorded, in a fourth manifest field written as
-`<arm predicate>#<arm index>` and joined by `>` for nesting. Deleting the
+`<effective predicate>#<arm index>` and joined by `>` for nesting. Deleting the
 `#Else` arm of a VBA7 pair removes the member from every 32-bit build, and
 replacing that `#Else` with `#ElseIf Mac Then` narrows it to one platform —
-both while leaving the declaration byte-identical. Each arm therefore records
-its own predicate rather than the position it occupies.
+both while leaving the declaration byte-identical.
+
+The predicate recorded is the effective one, not the arm's own condition. An
+arm is reached only when every earlier arm of its block was not taken, so the
+`#ElseIf VBA7` arm of an `#If Win64` block records `Not (Win64) And VBA7`, and
+its trailing `#Else` records `Not (Win64) And Not (VBA7)`. Changing that
+leading `Win64` to `Mac` therefore changes which hosts reach the later arms,
+and the manifest says so. Recording `VBA7` and `Else` would not have: those
+name a position in the block rather than a condition on the host.
 
 The manifest also carries a `[baseline vX.Y.Z]` section holding the
 `[supported]` facade as it stood at the last release. When the two differ,

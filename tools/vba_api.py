@@ -353,9 +353,10 @@ def declarations_of_text(text):
     for line, code in logical_lines(text):
         m_if = IF_RE.match(code)
         if m_if:
-            # [condition of this block, line, arm index, arm predicate,
-            #  whether an #ElseIf has been seen]
-            stack.append([m_if.group(1), line, 0, m_if.group(1), False])
+            # [condition of this block, line, arm index, effective predicate,
+            #  conditions of the arms already opened]
+            stack.append([m_if.group(1), line, 0, m_if.group(1),
+                          [m_if.group(1)]])
             continue
 
         m_elseif = ELSEIF_RE.match(code)
@@ -364,8 +365,8 @@ def declarations_of_text(text):
                 raise ApiError(f"line {line}: #ElseIf without #If")
             frame = stack[-1]
             frame[2] += 1
-            frame[3] = m_elseif.group(1)
-            frame[4] = True
+            frame[3] = effective_predicate(frame[4], m_elseif.group(1))
+            frame[4] = frame[4] + [m_elseif.group(1)]
             continue
 
         if code == "#Else":
@@ -373,14 +374,7 @@ def declarations_of_text(text):
                 raise ApiError(f"line {line}: #Else without #If")
             frame = stack[-1]
             frame[2] += 1
-
-            # In a two-arm block the else arm is exactly the negation of the
-            # condition, which is what makes a separate #If Not X block its
-            # equivalent. Once an #ElseIf has narrowed the block, the else arm
-            # is whatever is left over and cannot be written as one predicate,
-            # so it stays opaque and any overlap involving it is reported
-            # rather than reasoned about.
-            frame[3] = f"Not ({frame[0]})" if not frame[4] else "Else"
+            frame[3] = effective_predicate(frame[4], None)
             continue
         if code == "#End If":
             if not stack:
@@ -449,6 +443,22 @@ def arm_key(path):
 
 def arms_field(paths):
     return " | ".join(sorted(arm_key(p) for p in paths if p))
+
+
+def effective_predicate(preceding, own):
+    """Return what actually has to hold for an arm to compile.
+
+    An arm is reached only when every earlier arm of its block was not taken.
+    Recording just the arm's own condition loses that: the #ElseIf VBA7 arm of
+    an #If Win64 block is not VBA7, it is VBA7 on a host that is not Win64, and
+    changing the leading condition to Mac changes which hosts reach the arm
+    while leaving its own condition untouched. The trailing #Else is the same
+    problem stated as a word — "Else" names a position, not a condition.
+    """
+    negated = [f"Not ({cond})" for cond in preceding]
+    if own is None:
+        return " And ".join(negated)
+    return " And ".join(negated + [own])
 
 
 def normalise_predicate(text):
@@ -881,6 +891,25 @@ ARM_REMOVED = CONDITIONAL_OK.replace(
 
 ELSEIF_INSTEAD_OF_ELSE = CONDITIONAL_OK.replace("#Else", "#ElseIf Mac Then")
 
+def _three_arm(lead):
+    return (
+        'Attribute VB_Name = "M_SELFTEST"\n'
+        "Option Explicit\n"
+        "\n"
+        f"#If {lead} Then\n"
+        "Public Sub UI_Elsewhere()\n"
+        "End Sub\n"
+        "#ElseIf VBA7 Then\n"
+        "Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean\n"
+        "#Else\n"
+        "Public Function UI_Frame(ByRef HwndOut As Long) As Boolean\n"
+        "#End If\n"
+    )
+
+
+THREE_ARM_WIN64 = _three_arm("Win64")
+THREE_ARM_MAC = _three_arm("Mac")
+
 COMPLEMENTARY_BLOCKS = """\
 Attribute VB_Name = "M_SELFTEST"
 Option Explicit
@@ -1016,6 +1045,7 @@ CONDITIONAL_CASES = [
      COMPLEMENTARY_BLOCKS, 1, False),
     ("an #Else arm and a separately negated block overlap",
      ELSE_AND_NEGATED_BLOCK, None, True),
+    ("a three-arm block folds to one member", THREE_ARM_WIN64, 2, False),
 ]
 
 # Arms are contract. Each pair is (label, source, other source) whose recorded
@@ -1027,6 +1057,8 @@ ARM_CASES = [
      CONDITIONAL_OK, NESTED_OK),
     ("replacing #Else with #ElseIf Mac changes the recorded contract",
      CONDITIONAL_OK, ELSEIF_INSTEAD_OF_ELSE),
+    ("changing an earlier arm's condition changes the later arms' contract",
+     THREE_ARM_WIN64, THREE_ARM_MAC),
 ]
 
 NEUTRAL_CASES = [
