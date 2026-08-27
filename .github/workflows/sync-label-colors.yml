@@ -1,0 +1,51 @@
+name: Sync issue label colors
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/sync-label-colors.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    name: Apply label color policy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Update label colors
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const colors = {
+              "api": "0052cc",
+              "bug": "d73a4a",
+              "ci": "24292f",
+              "demo": "f9d0c4",
+              "docs": "0075ca",
+              "enhancement": "a2eeef",
+              "P1": "b60205",
+              "P2": "d93f0b",
+              "P3": "fbca04",
+              "release-engineering": "b60276",
+              "ribbon": "6f42c1",
+              "runtime": "1d76db",
+              "sdi": "bfd4f2",
+              "security": "ee0701",
+              "snapshots": "0e8a16",
+              "tests": "006b75",
+              "titlebar": "5319e7"
+            };
+
+            for (const [name, color] of Object.entries(colors)) {
+              await github.rest.issues.updateLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name,
+                color
+              });
+              core.info(name + ": #" + color);
+            }
