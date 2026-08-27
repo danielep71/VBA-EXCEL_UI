@@ -49,6 +49,7 @@ REQUIRED_FILES = ALL_MODULES + [
     "CODE_OF_CONDUCT.md",
     "LICENSE",
     "tools/reformat.py",
+    "tools/vba_api.py",
     "tools/public_api_manifest.txt",
 ]
 
@@ -59,7 +60,6 @@ END_RE = re.compile(r"^End (Sub|Function|Property)\b")
 LABEL_RE = re.compile(r"^([A-Za-z_]\w*):\s*$")
 JUMP_RE = re.compile(r"\b(?:GoTo|Resume)\s+([A-Za-z_]\w*)")
 RULE_RE = re.compile(r"^'(=+|-+)$")
-PUBLIC_RE = re.compile(r"^Public\s+(Sub|Function|Enum|Const|Type)\s+(\w+)")
 
 FORBIDDEN_TRACKED_ARTIFACTS = [
     ("~$*", "Microsoft Office owner/lock file"),
@@ -262,41 +262,88 @@ def check_duplicate_procedures():
 
 
 # --------------------------------------------------------------------------
-def public_surface():
-    surface = []
-    for rel in PRODUCTION_MODULES:
-        for line in read_lines(rel):
-            m = PUBLIC_RE.match(line)
-            if m:
-                surface.append(f"{os.path.basename(rel)[:-4]}\t{m.group(1)}\t{m.group(2)}")
-    return sorted(set(surface))
+def import_vba_api():
+    sys.path.insert(0, os.path.join(REPO, "tools"))
+    try:
+        import vba_api
+    except Exception as exc:                                  # pragma: no cover
+        fail("public-api", f"tools/vba_api.py could not be imported: {exc}")
+        return None
+    return vba_api
 
 
 def check_public_api():
-    """Diff the public surface against the versioned manifest.
+    """Diff the full declaration contract against the versioned manifest.
 
-    The manifest is the point. A public member added or removed without an
-    intentional edit here is exactly the change that breaks callers, and it is
-    otherwise invisible in a diff of several thousand lines.
+    Recording only module, kind and name detected a member appearing or
+    disappearing and nothing else, so a reordered parameter, a ByVal turned
+    ByRef, a changed default or a renumbered enum could break every caller
+    while this check stayed green. The manifest now carries the whole
+    normalised declaration, and any difference at all is a finding.
+
+    The two sections are diffed separately so the report says which promise
+    was broken: a [supported] change is a Semantic Versioning event for
+    external callers, while a [project-public] change only has to be
+    deliberate.
     """
+    vba_api = import_vba_api()
+    if vba_api is None:
+        return
+
     manifest_path = os.path.join(REPO, "tools/public_api_manifest.txt")
     if not os.path.exists(manifest_path):
         fail("public-api", "tools/public_api_manifest.txt is missing")
         return
 
-    with open(manifest_path, encoding="utf-8") as fh:
-        recorded = sorted(
-            line.rstrip("\n")
-            for line in fh
-            if line.strip() and not line.startswith("#")
-        )
+    try:
+        recorded = vba_api.parse_manifest(manifest_path)
+    except vba_api.ApiError as exc:
+        fail("public-api", f"tools/public_api_manifest.txt: {exc}")
+        return
 
-    actual = public_surface()
+    actual, findings = vba_api.surface(REPO)
+    for finding in findings:
+        fail("public-api", finding)
 
-    for gone in sorted(set(recorded) - set(actual)):
-        fail("public-api", f"removed from the public surface: {gone}")
-    for added in sorted(set(actual) - set(recorded)):
-        fail("public-api", f"added to the public surface without a manifest entry: {added}")
+    drifted = False
+    for section, _ in vba_api.SECTIONS:
+        was = set(recorded.get(section, []))
+        now = set(actual.get(section, []))
+
+        for gone in sorted(was - now):
+            drifted = True
+            fail("public-api", f"[{section}] no longer declared: {gone}")
+        for added in sorted(now - was):
+            drifted = True
+            fail("public-api",
+                 f"[{section}] declared without a manifest entry: {added}")
+
+    if drifted:
+        fail("public-api",
+             "run tools/vba_api.py --write to record an intended API change, "
+             "and declare it in CHANGELOG.md; a [supported] change is a "
+             "Semantic Versioning event")
+
+
+def check_public_api_selftest():
+    """Run the contract model's own fixtures.
+
+    The manifest is only as good as the parser that produces it. A model that
+    silently normalised a ByRef flip away would keep the gate green through
+    exactly the change it exists to catch, and no VBA test can see that. The
+    fixtures cover every breaking class the gate claims, plus the formatting
+    changes it must ignore.
+    """
+    vba_api = import_vba_api()
+    if vba_api is None:
+        return
+
+    if not hasattr(vba_api, "selftest"):
+        fail("public-api-selftest", "tools/vba_api.py exposes no selftest()")
+        return
+
+    for finding in vba_api.selftest():
+        fail("public-api-selftest", finding.replace("\n", " | "))
 
 
 # --------------------------------------------------------------------------
@@ -508,6 +555,7 @@ CHECKS = [
     ("PtrSafe declarations", check_ptrsafe),
     ("duplicate procedures", check_duplicate_procedures),
     ("public API manifest", check_public_api),
+    ("public API self-test", check_public_api_selftest),
     ("release state", check_release_state),
     ("repository hygiene", check_repository_hygiene),
     ("markdown links", check_markdown_links),
