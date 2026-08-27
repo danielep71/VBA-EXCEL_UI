@@ -26,8 +26,9 @@ to be replaced together.
 |---|---|
 | ➕ **Added** | New members, runners, tools or files |
 | 🔧 **Changed** | Behaviour or contract changes to something that already existed |
-| 🐛 **Fixed** | Defects, each citing its review finding and issue |
+| 🐛 **Fixed** | Defects, citing the public issue and evidence where applicable |
 | 📖 **Documentation** | Corrections and additions to prose, with no code effect |
+| 🔐 **Security** | Trust boundaries, disclosure, secret handling or supply-chain controls |
 | ✅ **Validation** | The evidence a release was actually certified on |
 | 🔗 **Compatibility** | What upgrading requires, and what becomes newly observable |
 | ⚠️ **Known limitations** | What is deliberately not fixed, and where it is tracked |
@@ -36,6 +37,224 @@ Release types follow semver: 🩹 **patch** corrects defects, ✨ **minor** adds
 backward-compatible capability, 💥 **major** may break callers.
 
 </details>
+
+## [Unreleased]
+
+> 🩹 **Planned patch** · v1.1.3 correctness and hardening · not yet certified
+
+### 🧭 Release intent
+
+Development toward **v1.1.3 — correctness & hardening**.
+
+The release is intended to correct wrong-target and native-frame identity
+failures, strengthen snapshot ownership, and make cleanup, mandatory-case,
+public-API, exact-source, documentation and exact-head evidence genuine release
+gates.
+
+Work completed so far is limited to repository hygiene, contributor governance,
+installation guidance, security boundaries and reporting templates. No
+production VBA module, regression module, demo module, public API, or runtime
+behavior has changed in this Unreleased section yet.
+
+#### At a glance
+
+| Area | Current state |
+|---|---|
+| Production VBA | Unchanged from v1.1.2 |
+| Public API | Unchanged from v1.1.2 |
+| Runtime correctness fixes | Not yet implemented |
+| Regression and certification fixes | Not yet implemented |
+| Repository hygiene | Strengthened in the current working tree |
+| Governance and contributor documentation | Rebuilt in the current working tree |
+| Static validation | Current working tree passes locally |
+| Excel runtime certification | Not yet run for v1.1.3 |
+| Release status | Not releasable while P1/P2 blockers remain open |
+
+### ➕ Added
+
+- Added a root **.editorconfig** aligned with the established
+  **.gitattributes** policy. It defines four-space VBA and Python indentation,
+  two-space structured-data indentation, LF for cross-platform repository text,
+  CRLF for Windows-native and exported VBA formats, final-newline rules, and
+  format-specific whitespace handling.
+- Kept VBA source encoding deliberately unspecified in **.editorconfig**.
+  Visual Basic Editor exports can use the Windows system code page, so forcing
+  UTF-8 at editor level would make the editor policy conflict with the actual
+  export path.
+
+### 🔧 Changed
+
+- Rebuilt **.gitignore** as a source-first repository policy rather than a
+  short extension list. It now covers generated Office binaries, release
+  staging, certification output, local test results, editor and assistant
+  state, caches, logs, secrets, signing keys, lock/recovery files and operating
+  system debris while explicitly protecting authoritative source,
+  documentation, tooling, workflows and images from broad ignore rules.
+- Expanded the forbidden tracked-artifact inventory in
+  **tools/check_repo.py** to match the complete Office-binary and lock-file
+  policy expressed by **.gitignore**.
+- Changed the repository hygiene gate to inspect the Git index through
+  **git ls-files** instead of walking every file in the working directory.
+  Ignored local release workbooks and certification output are permitted;
+  force-added or otherwise tracked forbidden artifacts fail the gate.
+- Added a consistency check that fails when a tracked authoritative file is
+  hidden by the current **.gitignore**, and made **.gitattributes** and
+  **.gitignore** required repository files.
+- Rebuilt the pull-request template around issue acceptance criteria, exact
+  PR-head evidence, public-contract impact, the four-module package, Excel
+  runtime certification, rollback and recovery, subsystem-specific review,
+  documentation closure and release-artifact provenance.
+- Rebuilt the bug-report template around exact source identity, a minimal
+  reproduction, active-window and snapshot transitions, structured result
+  evidence, native-frame recovery, host environment and safe attachment rules.
+- Rebuilt the feature-request template around a user problem, testable
+  acceptance criteria, targeting and ownership, compatibility, failure policy,
+  recovery, verification, alternatives and explicit non-goals.
+
+### 🐛 Fixed
+
+- Fixed the repository checker treating any forbidden-looking file present in
+  the working directory as if it were tracked. That made a correctly ignored
+  local demo workbook or release artifact fail the gate even though the
+  repository policy explicitly permits local staging. The gate now evaluates
+  the index-backed file set and fails the state that actually matters: a
+  forbidden artifact entering version control.
+- Fixed the opposite policy gap by detecting tracked files that the current
+  ignore rules would hide from an ordinary working-tree review.
+
+### 📖 Documentation
+
+- Replaced **CODE_OF_CONDUCT.md** with a project-specific collaboration policy
+  covering respectful, evidence-led technical review; reproducible claims;
+  security and privacy; attribution and licensing; maintainer enforcement; and
+  appeal and correction paths.
+- Rebuilt **INSTALLATION.md** as the authoritative four-module, source-first
+  deployment and upgrade guide. It now separates source compatibility from
+  runtime certification and covers supported hosts, macro security, compile and
+  smoke tests, public APIs, target scopes, snapshot ownership, emergency
+  recovery, upgrades, troubleshooting, removal and release verification.
+- Added an explicit current-release boundary section to **INSTALLATION.md** so
+  v1.1.2 Ribbon, title-bar, snapshot and certification limitations are not
+  masked by generic success wording.
+- Replaced **SECURITY.md** with a complete project-specific security policy
+  covering private disclosure, supported versions, same-process VBA trust,
+  fixed Ribbon commands, owned-bit native-frame mutation, snapshot identity and
+  ownership, diagnostic sensitivity, macro-enabled artifacts, supply-chain
+  limits, repository automation, secrets, future Windows/Excel runners and
+  coordinated disclosure.
+- Corrected security and installation language so hidden Excel UI is never
+  represented as authorization, confidentiality, segregation of duties or
+  another security boundary.
+- Updated contributor templates to distinguish hosted static analysis from
+  Excel execution and to prohibit evidence from an earlier or merely similar
+  source state being presented as certification of the final PR head.
+- Kept confidential, credential-bearing, client and other private material out
+  of issue, pull-request, certification and release-artifact guidance.
+
+### 🔐 Security
+
+- Extended ignored secret-material coverage to include common private-key and
+  certificate formats while stating explicitly that ignore rules are not a
+  substitute for credential rotation after exposure.
+- Documented the production Ribbon command surface as fixed internally
+  generated Excel 4 macro text rather than caller-controlled executable input.
+- Documented the native title-bar trust boundary: only the component-owned
+  frame bits may be merged, handle liveness is not object identity, and
+  Window/hWnd pairing and handle reuse require explicit review.
+- Added least-privilege and isolation requirements for any future self-hosted
+  Windows/Excel runner. Static testing, runtime execution, signing and release
+  publication remain separate trust stages.
+
+### ✅ Validation
+
+The current working tree passes the complete local static gate:
+
+~~~text
+python3 tools/check_repo.py
+
+RESULT: PASS
+  required files
+  module names
+  option policy
+  encoding and line endings
+  banner rule widths
+  procedure structure
+  PtrSafe declarations
+  duplicate procedures
+  public API manifest
+  release state
+  repository hygiene
+  markdown links
+  house-style formatter
+  formatter self-test
+~~~
+
+Focused whitespace checks also pass for every file changed in this
+documentation and governance batch.
+
+This is **working-tree validation**, not release certification:
+
+- the tree contains uncommitted changes and therefore is not an exact release
+  commit;
+- hosted static checks do not execute Excel or VBA;
+- no v1.1.3 runtime certification has been performed;
+- no claim is made for Win32 or Office 32-bit runtime execution;
+- final evidence must be regenerated against the exact reviewed release head.
+
+### 🔗 Compatibility
+
+| Question | Current Unreleased answer |
+|---|---|
+| Existing VBA calls affected | None so far |
+| Public API changed | No |
+| Production modules changed | No |
+| Runtime behavior changed | No |
+| Workbook migration required for this batch | No |
+| Developer tooling behavior changed | Yes — repository hygiene now evaluates the Git index |
+| Intended release type | Patch |
+
+The future v1.1.3 runtime corrections can change defective behavior while
+remaining backward-compatible. Their final compatibility assessment belongs to
+the commits that implement and certify them, not to this documentation batch.
+
+### ⚠️ Open release blockers
+
+The historical v1.1.2 entry below records what that release claimed and the
+evidence available when it was published. It is not rewritten retroactively.
+Post-release verification and the current public issue backlog supersede the
+practical closure status of any item that has since been reopened.
+
+#### Runtime correctness
+
+| Issue | Required v1.1.3 outcome | Current status |
+|:---:|---|---|
+| [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | Ribbon wrong-target restoration fails closed | Open |
+| [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | Pair Excel Window and native hWnd identity defensibly | Open |
+| [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened |
+| [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Open |
+| [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | Preserve a caller-owned snapshot during certification self-test | Reopened |
+
+#### Certification and release assurance
+
+| Issue | Required v1.1.3 outcome | Current status |
+|:---:|---|---|
+| [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | Full cleanup proof | Open |
+| [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | Mandatory certification case inventory | Reopened |
+| [#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46) | Exact-source certification evidence | Open |
+| [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | Full public API contract gate | Open |
+| [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | Accurate v1.1.2/v1.1.3 closure documentation | Open |
+| [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | Exact-head review and certification gate | Open |
+
+P1 and P2 items block release until implementation, regression coverage,
+documentation, static checks, runtime certification and final exact-source
+evidence are verified together.
+
+Automatic Ribbon activation
+([#44](https://github.com/danielep71/VBA-EXCEL_UI/issues/44)) and the rebuilt
+demo ([#22](https://github.com/danielep71/VBA-EXCEL_UI/issues/22)) remain
+v1.2.0 features and are outside v1.1.3.
+
+---
 
 ## [1.1.2] - 2026-08-21
 
