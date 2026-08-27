@@ -52,26 +52,61 @@ public-API, exact-source, documentation and exact-head evidence genuine release
 gates.
 
 Work completed so far is limited to repository hygiene, contributor governance,
-installation guidance, security boundaries and reporting templates. No
-production VBA module, regression module, demo module, public API, or runtime
-behavior has changed in this Unreleased section yet.
+installation guidance, security boundaries, reporting templates and the public
+API contract gate. No production VBA module, regression module, demo module,
+public API, or runtime behavior has changed in this Unreleased section yet.
+
+The API contract gate was implemented first and deliberately. It records the
+shipped v1.1.2 declarations while the production tree is still byte-identical to
+the tag, so the recorded contract is the one that was released rather than one
+reconstructed from partly edited source. Every later correctness change is
+measured against that baseline.
 
 #### At a glance
 
 | Area | Current state |
 |---|---|
 | Production VBA | Unchanged from v1.1.2 |
-| Public API | Unchanged from v1.1.2 |
+| Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Runtime correctness fixes | Not yet implemented |
 | Regression and certification fixes | Not yet implemented |
-| Repository hygiene | Strengthened in the current working tree |
-| Governance and contributor documentation | Rebuilt in the current working tree |
-| Static validation | Current working tree passes locally |
+| Repository hygiene | Strengthened on `release/v1.1.3` |
+| Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
+| Static validation | Fifteen checks; the release branch passes |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
 ### ➕ Added
 
+- Added **tools/vba_api.py**, a canonical model of every public VBA declaration
+  in `src/`. It parses each `Public` member into one normalized line carrying
+  visibility, kind, name, ordered parameters with their names, `ByVal`/`ByRef`
+  passing mode, types, `Optional` status, defaults and return type, and it
+  resolves enum member values rather than copying them. Continuation lines are
+  joined and comments are discarded, so a procedure header quoting an example
+  call cannot enter the contract.
+- Added a second section to **tools/public_api_manifest.txt**. `[supported]` is
+  the caller-facing facade in `M_EXCEL_UI`, covered by Semantic Versioning;
+  `[project-public]` is the helpers and regression seams that are `Public` only
+  so an `Option Private Module` project can see them across its own modules,
+  tracked for compile integrity with no external compatibility claimed. Gate
+  findings name the section, so a report says which promise was broken.
+- Added conditional-declaration folding. A procedure declared under
+  `#If VBA7 Then` and again under `#Else` is one logical member: the VBA7 arm is
+  recorded, and the gate separately proves the `#Else` arm is that same
+  declaration with `LongPtr` narrowed to `Long`. An arm differing in any other
+  way is reported rather than normalized away, which is the 32-bit half of the
+  contract nothing previously checked.
+- Added **tools/vba_api.py --selftest** and registered it as a fifteenth static
+  check. Its fixtures cover parameter reorder, parameter rename, `ByVal` to
+  `ByRef`, parameter type change, dropped `Optional`, changed default, changed
+  return type, changed enum value, added and removed enum members, and removed
+  and renamed members, alongside formatting-only changes — continuation reflow,
+  indentation, trailing comments and added header examples — that must
+  normalize identically. Two further fixtures cover a matched and a divergent
+  conditional pair. A model that silently normalized a `ByRef` flip away would
+  keep the gate green through exactly the change it exists to catch, and no VBA
+  test can see that.
 - Added a root **.editorconfig** aligned with the established
   **.gitattributes** policy. It defines four-space VBA and Python indentation,
   two-space structured-data indentation, LF for cross-platform repository text,
@@ -84,6 +119,14 @@ behavior has changed in this Unreleased section yet.
 
 ### 🔧 Changed
 
+- Changed **tools/public_api_manifest.txt** to record the complete normalized
+  declaration of each public member rather than module, kind and name. The
+  member count is unchanged at thirty-eight, so nothing was added or dropped in
+  the conversion; what changed is how much of each declaration is now under the
+  gate.
+- Changed the public API check in **tools/check_repo.py** to diff those
+  declarations section by section, and to name `tools/vba_api.py --write` as the
+  way an intentional change is recorded.
 - Rebuilt **.gitignore** as a source-first repository policy rather than a
   short extension list. It now covers generated Office binaries, release
   staging, certification output, local test results, editor and assistant
@@ -113,6 +156,14 @@ behavior has changed in this Unreleased section yet.
 
 ### 🐛 Fixed
 
+- Fixed the public API gate detecting only the appearance or disappearance of a
+  member. Recording module, kind and name left every compatibility-breaking
+  change to an existing member invisible: a reordered parameter, a `ByVal`
+  turned `ByRef`, a changed type or default, a widened return type or a
+  renumbered enum member could break every caller while the check stayed green.
+  Reordering the arguments of `UI_SetExcelUI`, or renumbering `UI_Hide`, now
+  fails the gate and names the declaration on both sides
+  ([#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47)).
 - Fixed the repository checker treating any forbidden-looking file present in
   the working directory as if it were tracked. That made a correctly ignored
   local demo workbook or release artifact fail the gate even though the
@@ -124,6 +175,20 @@ behavior has changed in this Unreleased section yet.
 
 ### 📖 Documentation
 
+- Corrected the pull-request template, which told reviewers the manifest gate
+  proved only that exported names matched the file. It now proves parameter
+  order and names, passing mode, types, `Optional` status, defaults, return
+  types and enum values. Understating a gate invites a signature change to pass
+  unexamined. The template still says what the gate does not prove: a procedure
+  whose declaration is untouched can change what it does, and behavior belongs
+  in the reviewer's own statement.
+- Separated three promises in **README.md**, **CONTRIBUTING.md** and the
+  pull-request template that were previously blurred together. External
+  compatibility applies to the `[supported]` facade. A `[project-public]` change
+  only has to be deliberate. Replacing all four `src/` modules together is a
+  deployment rule that holds even when the external API is untouched, because
+  internal boundaries can move in a patch release without any caller-visible
+  change.
 - Replaced **CODE_OF_CONDUCT.md** with a project-specific collaboration policy
   covering respectful, evidence-led technical review; reproducible claims;
   security and privacy; attribution and licensing; maintainer enforcement; and
@@ -167,7 +232,7 @@ behavior has changed in this Unreleased section yet.
 
 ### ✅ Validation
 
-The current working tree passes the complete local static gate:
+The `release/v1.1.3` branch passes the complete static gate:
 
 ~~~text
 python3 tools/check_repo.py
@@ -182,6 +247,7 @@ RESULT: PASS
   PtrSafe declarations
   duplicate procedures
   public API manifest
+  public API self-test
   release state
   repository hygiene
   markdown links
@@ -189,13 +255,27 @@ RESULT: PASS
   formatter self-test
 ~~~
 
-Focused whitespace checks also pass for every file changed in this
-documentation and governance batch.
+The formatter and API-contract self-tests pass alongside it:
 
-This is **working-tree validation**, not release certification:
+~~~text
+python3 tools/reformat.py --selftest
+ok   self-test: 9 formatting rules hold
 
-- the tree contains uncommitted changes and therefore is not an exact release
-  commit;
+python3 tools/vba_api.py --selftest
+ok   self-test: 18 API-contract rules hold
+~~~
+
+The API contract gate was additionally exercised by mutation rather than by
+inspection. Applied one at a time to the real facade and reverted after each,
+a `ByVal` turned `ByRef`, a dropped `Optional`, a changed enum value, a changed
+default, a renamed parameter and a changed return type each produced a
+`[supported]` finding; flipping the passing mode in only the `#Else` arm of
+`UI_TryGetActiveTitleBarHwnd` was reported as a divergence between the two
+compilations rather than folded away.
+
+This is **static validation**, not release certification:
+
+- hosted static checks are not an exact-source certification of a release head;
 - hosted static checks do not execute Excel or VBA;
 - no v1.1.3 runtime certification has been performed;
 - no claim is made for Win32 or Office 32-bit runtime execution;
@@ -210,7 +290,7 @@ This is **working-tree validation**, not release certification:
 | Production modules changed | No |
 | Runtime behavior changed | No |
 | Workbook migration required for this batch | No |
-| Developer tooling behavior changed | Yes — repository hygiene now evaluates the Git index |
+| Developer tooling behavior changed | Yes — repository hygiene evaluates the Git index, and the public API gate now protects full declarations |
 | Intended release type | Patch |
 
 The future v1.1.3 runtime corrections can change defective behavior while
@@ -241,7 +321,7 @@ practical closure status of any item that has since been reopened.
 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | Full cleanup proof | Open |
 | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | Mandatory certification case inventory | Reopened |
 | [#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46) | Exact-source certification evidence | Open |
-| [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | Full public API contract gate | Open |
+| [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | Full public API contract gate | Implemented; open until the release diff shows no supported facade change |
 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | Accurate v1.1.2/v1.1.3 closure documentation | Open |
 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | Exact-head review and certification gate | Open |
 

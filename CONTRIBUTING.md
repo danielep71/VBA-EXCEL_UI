@@ -66,7 +66,7 @@ VBA-EXCEL_UI/
 │  ├─ reformat.py                house-style formatter
 │  ├─ vba_api.py                 public-declaration contract model
 │  ├─ check_repo.py              the static gate CI runs
-│  └─ public_api_manifest.txt    versioned public surface
+│  └─ public_api_manifest.txt    versioned declaration contract
 ├─ docs/
 │  └─ …                          measurements and reviews
 ├─ .github/workflows/
