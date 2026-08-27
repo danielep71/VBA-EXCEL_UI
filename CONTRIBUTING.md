@@ -64,6 +64,7 @@ VBA-EXCEL_UI/
 │  └─ M_EXCEL_UI_REGRESSION_TESTS.bas
 ├─ tools/
 │  ├─ reformat.py                house-style formatter
+│  ├─ vba_api.py                 public-declaration contract model
 │  ├─ check_repo.py              the static gate CI runs
 │  └─ public_api_manifest.txt    versioned public surface
 ├─ docs/
@@ -76,10 +77,22 @@ VBA-EXCEL_UI/
 ```
 
 > [!IMPORTANT]
-> `tools/public_api_manifest.txt` records every `Public` member in `src/`. Adding
-> or removing one requires an intentional edit there, and CI fails otherwise.
-> That friction is the point: a change to the public surface is exactly what
-> breaks callers, and it is invisible in a diff of several thousand lines.
+> `tools/public_api_manifest.txt` records the complete normalised declaration of
+> every `Public` member in `src/` — parameter order and names, `ByVal`/`ByRef`,
+> types, `Optional` status, defaults, return types and enum values. Changing any
+> of them requires an intentional edit there, and CI fails otherwise. That
+> friction is the point: those are exactly the changes that break callers, and
+> they are invisible in a diff of several thousand lines.
+>
+> The manifest has two sections, and they carry different promises. `[supported]`
+> is the caller-facing facade in `M_EXCEL_UI`, covered by Semantic Versioning: a
+> change there is a compatibility event for external callers. `[project-public]`
+> is the helpers and regression seams that are `Public` only so an
+> `Option Private Module` project can see them across its own modules; they are
+> tracked so a compile-breaking change is never silent, but no external
+> compatibility is claimed for them. Neither section is the deployment unit —
+> importing all four `src/` modules together is, and that is a separate promise
+> from external API compatibility.
 
 ## 🧱 Production module boundaries
 
@@ -238,10 +251,18 @@ matching an apostrophe or a keyword directly is what let padding be written
 into a literal and a quoted label name be renamed. `--selftest` holds the
 fixtures for both rules, and `check_repo.py` runs them.
 
-A public member added or removed also requires an intentional edit to
-`tools/public_api_manifest.txt`. That is deliberate friction: a change to the
-public surface is exactly what breaks callers, and it is otherwise invisible in
-a large diff.
+Any change to a public declaration also requires an intentional edit to
+`tools/public_api_manifest.txt`. `tools/vba_api.py --write` regenerates it, and
+`--selftest` holds fixtures for every breaking class the gate claims to catch —
+parameter reorder and rename, `ByVal`/`ByRef`, type, `Optional`, default, return
+type and enum value — alongside formatting-only changes that must normalise
+identically. `check_repo.py` runs those fixtures too, so the model is verified
+on every push rather than only when someone suspects it.
+
+A procedure declared under `#If VBA7 Then` and again under `#Else` is one
+logical member. The VBA7 arm is recorded, and the gate separately proves the
+`#Else` arm is that same declaration with `LongPtr` narrowed to `Long`. An arm
+that differs in any other way is reported rather than normalised away.
 
 The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
 
@@ -276,7 +297,14 @@ Record only environments actually tested.
 
 ## 🔒 Public API compatibility
 
-Preserve unless an explicitly approved breaking release requires otherwise:
+External compatibility is a promise about the `[supported]` facade in
+`M_EXCEL_UI`. It is not the same promise as the deployment rule that all four
+`src/` modules are replaced together: internal boundaries may move in a patch
+release without any caller-visible change, which is why a mixed-version project
+fails to compile even when the external API is untouched.
+
+Preserve the `[supported]` facade unless an explicitly approved breaking release
+requires otherwise:
 
 - public procedure and function names;
 - parameter order;

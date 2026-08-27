@@ -283,6 +283,16 @@ Snapshot capture/restore retains its established all-managed-windows semantics. 
 
 # 🧩 Public API
 
+> [!NOTE]
+> This section is the supported surface. It is recorded declaration by
+> declaration in the `[supported]` section of `tools/public_api_manifest.txt`
+> and covered by Semantic Versioning, so a changed parameter, default, return
+> type or enum value cannot reach a release without being declared. The
+> `Public` helpers in the other three modules are visible only inside an
+> `Option Private Module` project, are tracked in `[project-public]`, and carry
+> no external compatibility promise. Neither is the deployment rule: all four
+> `src/` modules are still replaced together.
+
 ## Public enums
 
 ```vb

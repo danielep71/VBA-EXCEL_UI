@@ -140,10 +140,19 @@ change, or reason an existing workbook can observe different behavior.
 
 
 > [!IMPORTANT]
-> Adding or removing a Public member under src requires an intentional update
-> to tools/public_api_manifest.txt. Passing the manifest gate proves the
-> exported names match that file; it does not by itself prove every public
-> contract, default, or behavior.
+> Any change to a Public declaration under src requires an intentional update to
+> tools/public_api_manifest.txt, which records the full normalised signature:
+> parameter order and names, ByVal/ByRef, types, Optional status, defaults,
+> return types and enum values. Regenerate it with tools/vba_api.py --write.
+>
+> Passing the manifest gate proves the declared contract matches that file. It
+> does not prove behavior. A procedure whose signature is untouched can still
+> change what it does, and that belongs in the statement above.
+>
+> A change under [supported] is a Semantic Versioning event for external
+> callers and must be declared as one here and in CHANGELOG.md. A change under
+> [project-public] only has to be deliberate. Neither is the same as the
+> deployment rule that all four src modules are replaced together.
 
 ### Production source package
 
