@@ -910,6 +910,48 @@ def _three_arm(lead):
 THREE_ARM_WIN64 = _three_arm("Win64")
 THREE_ARM_MAC = _three_arm("Mac")
 
+
+def _elseif_only(lead):
+    """One member, in the #ElseIf arm, and nothing public before it.
+
+    The three-arm fixture cannot prove that an #ElseIf arm records the
+    conditions preceding it, because a member in its leading arm changes the
+    manifest on its own and satisfies the comparison. Here the leading arm
+    declares nothing, so only the member under test can carry the difference.
+    """
+    return (
+        'Attribute VB_Name = "M_SELFTEST"\n'
+        "Option Explicit\n"
+        "\n"
+        f"#If {lead} Then\n"
+        "' no public declaration in the leading arm\n"
+        "#ElseIf VBA7 Then\n"
+        "Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean\n"
+        "#End If\n"
+    )
+
+
+def _final_else_only(lead):
+    """One member, in the final #Else, and nothing public before it."""
+    return (
+        'Attribute VB_Name = "M_SELFTEST"\n'
+        "Option Explicit\n"
+        "\n"
+        f"#If {lead} Then\n"
+        "' no public declaration in the leading arm\n"
+        "#ElseIf VBA7 Then\n"
+        "' no public declaration in the intermediate arm\n"
+        "#Else\n"
+        "Public Function UI_Frame(ByRef HwndOut As Long) As Boolean\n"
+        "#End If\n"
+    )
+
+
+ELSEIF_ONLY_WIN64 = _elseif_only("Win64")
+ELSEIF_ONLY_MAC = _elseif_only("Mac")
+FINAL_ELSE_ONLY_WIN64 = _final_else_only("Win64")
+FINAL_ELSE_ONLY_MAC = _final_else_only("Mac")
+
 COMPLEMENTARY_BLOCKS = """\
 Attribute VB_Name = "M_SELFTEST"
 Option Explicit
@@ -1057,8 +1099,21 @@ ARM_CASES = [
      CONDITIONAL_OK, NESTED_OK),
     ("replacing #Else with #ElseIf Mac changes the recorded contract",
      CONDITIONAL_OK, ELSEIF_INSTEAD_OF_ELSE),
-    ("changing an earlier arm's condition changes the later arms' contract",
-     THREE_ARM_WIN64, THREE_ARM_MAC),
+    (
+        "changing a preceding predicate changes an isolated #ElseIf arm",
+        ELSEIF_ONLY_WIN64,
+        ELSEIF_ONLY_MAC,
+    ),
+    (
+        "changing preceding predicates changes an isolated final #Else arm",
+        FINAL_ELSE_ONLY_WIN64,
+        FINAL_ELSE_ONLY_MAC,
+    ),
+    (
+        "changing a leading predicate changes a three-arm manifest",
+        THREE_ARM_WIN64,
+        THREE_ARM_MAC,
+    ),
 ]
 
 NEUTRAL_CASES = [

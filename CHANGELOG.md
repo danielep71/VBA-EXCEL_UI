@@ -147,10 +147,18 @@ measured against that baseline.
   duplicate-declaration forms, separate overlapping `#If VBA7` and `#If Win64`
   blocks, complementary `#If X` and `#If Not X` blocks that must fold, an
   `#Else` arm overlapping a separately negated block, a declaration nested
-  inside its own branch, a three-arm block that must fold, and four
+  inside its own branch, a three-arm block that must fold, and six
   arm-structure pairs whose declarations are identical and whose recorded
-  contracts must differ — including one that changes only the leading `#If`
-  condition of a block whose later arms hold the member. A model that silently normalized a `ByRef` flip away would
+  contracts must differ.
+- Added isolated fixtures for a member declared only in an `#ElseIf` arm and
+  only in a final `#Else`, each compared across two leading conditions with no
+  public declaration in the arms before it. The three-arm fixture cannot prove
+  those arms record their preceding conditions: a member in its leading arm
+  changes the manifest on its own and satisfies the comparison, so the case is
+  now named for what it tests. Reverting the arm predicate to the arm's own
+  label leaves the three-arm case passing and fails both isolated cases, which
+  is the evidence that the suite detects this regression rather than reporting
+  coverage it does not have. A model that silently normalized a `ByRef` flip away would
   keep the gate green through exactly the change it exists to catch, and no VBA
   test can see that.
 - Added a root **.editorconfig** aligned with the established
@@ -309,7 +317,7 @@ python3 tools/reformat.py --selftest
 ok   self-test: 9 formatting rules hold
 
 python3 tools/vba_api.py --selftest
-ok   self-test: 38 API-contract rules hold
+ok   self-test: 40 API-contract rules hold
 ~~~
 
 The API contract gate was additionally exercised by mutation rather than by
@@ -337,6 +345,17 @@ existing `#If VBA7` one are all reported. None was before. The recorded
 manifest is unchanged by the effective-predicate work, because every
 conditional member in the tree sits in a two-arm block where the two forms
 agree.
+
+The fixtures were checked against the implementation they replaced rather than
+only against the current one. With the arm predicate reverted to the arm's own
+label, the two isolated cases fail and everything else passes:
+
+~~~text
+effective_predicate reverted to local labels -> 2 failure(s)
+  - changing a preceding predicate changes an isolated #ElseIf arm
+  - changing preceding predicates changes an isolated final #Else arm
+correct implementation                       -> 0 failure(s)
+~~~
 
 This is **static validation**, not release certification:
 
