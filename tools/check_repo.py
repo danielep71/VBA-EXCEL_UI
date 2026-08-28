@@ -48,10 +48,14 @@ REQUIRED_FILES = ALL_MODULES + [
     "SECURITY.md",
     "CODE_OF_CONDUCT.md",
     "LICENSE",
+    "VERSION",
     "tools/reformat.py",
     "tools/vba_api.py",
+    "tools/wiki_badges.py",
     "tools/public_api_manifest.txt",
 ]
+
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?$")
 
 HOUSE_LABELS = {"Safe_Exit", "Fail_Num", "Err_Handler", "Clean_Exit", "Clean_Fail"}
 
@@ -406,6 +410,28 @@ def check_supported_api_declaration():
                  f"new in the facade since {baseline_version}: {added}")
 
 
+def check_wiki_badge_selftest():
+    """Run the wiki badge rules against their own fixtures.
+
+    The wiki itself is not reachable from here — check_repo.py reads the tree
+    and never the network, so a machine without wiki access still gets a
+    meaningful gate. The wiki-badges workflow does the clone. What can be
+    checked offline is that the rules themselves still hold, which is what
+    stops the badge policy rotting between the rare occasions the workflow
+    reports something.
+    """
+    sys.path.insert(0, os.path.join(REPO, "tools"))
+    try:
+        import wiki_badges
+    except Exception as exc:                                  # pragma: no cover
+        fail("wiki-badge-selftest",
+             f"tools/wiki_badges.py could not be imported: {exc}")
+        return
+
+    for finding in wiki_badges.selftest():
+        fail("wiki-badge-selftest", finding.replace("\n", " | "))
+
+
 def check_public_api_selftest():
     """Run the contract model's own fixtures.
 
@@ -705,6 +731,19 @@ def check_release_state():
     if "_Nothing yet._" in changelog:
         fail("release-state", "CHANGELOG.md contains an unfilled placeholder section")
 
+    # The root VERSION file is the single version this repository states. Module
+    # headers and the wiki badges both derive from it, so a malformed value
+    # silently weakens two other checks rather than announcing itself.
+    version = read("VERSION").decode("utf-8")
+
+    if version != version.rstrip("\n") + "\n":
+        fail("release-state",
+             "VERSION must hold one line ending in a single newline")
+
+    if not VERSION_RE.match(version.strip()):
+        fail("release-state",
+             f"VERSION does not hold a release number: {version.strip()!r}")
+
 
 # --------------------------------------------------------------------------
 def git_tracked_files():
@@ -898,6 +937,7 @@ CHECKS = [
     ("supported API declaration", check_supported_api_declaration),
     ("workflow pin policy", check_workflow_policy),
     ("workflow policy self-test", check_workflow_policy_selftest),
+    ("wiki badge self-test", check_wiki_badge_selftest),
     ("release state", check_release_state),
     ("repository hygiene", check_repository_hygiene),
     ("markdown links", check_markdown_links),

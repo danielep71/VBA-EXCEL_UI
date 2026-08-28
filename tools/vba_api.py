@@ -1090,27 +1090,37 @@ CONDITIONAL_CASES = [
     ("a three-arm block folds to one member", THREE_ARM_WIN64, 2, False),
 ]
 
-# Arms are contract. Each pair is (label, source, other source) whose recorded
-# manifests must differ, because the declaration text alone is identical.
+# Arms are contract. Each case is (label, member, source, other source): the
+# records for that one member must differ, because its declaration text is
+# identical in both.
+#
+# Naming the member is load-bearing. Comparing whole manifests let an unrelated
+# declaration in another arm carry the difference, which is how the three-arm
+# case passed against an implementation that ignored preceding arms entirely.
+# The isolated fixtures below close that by declaring nothing else public, but
+# the next case someone adds will not necessarily be written that way.
 ARM_CASES = [
     ("deleting the #Else arm changes the recorded contract",
-     CONDITIONAL_OK, ARM_REMOVED),
+     "UI_Frame", CONDITIONAL_OK, ARM_REMOVED),
     ("a nested Win64 split is not the same contract as a flat VBA7 pair",
-     CONDITIONAL_OK, NESTED_OK),
+     "UI_Frame", CONDITIONAL_OK, NESTED_OK),
     ("replacing #Else with #ElseIf Mac changes the recorded contract",
-     CONDITIONAL_OK, ELSEIF_INSTEAD_OF_ELSE),
+     "UI_Frame", CONDITIONAL_OK, ELSEIF_INSTEAD_OF_ELSE),
     (
         "changing a preceding predicate changes an isolated #ElseIf arm",
+        "UI_Frame",
         ELSEIF_ONLY_WIN64,
         ELSEIF_ONLY_MAC,
     ),
     (
         "changing preceding predicates changes an isolated final #Else arm",
+        "UI_Frame",
         FINAL_ELSE_ONLY_WIN64,
         FINAL_ELSE_ONLY_MAC,
     ),
     (
         "changing a leading predicate changes a three-arm manifest",
+        "UI_Frame",
         THREE_ARM_WIN64,
         THREE_ARM_MAC,
     ),
@@ -1186,22 +1196,33 @@ def selftest():
                     f"gate would not see it\n      records: {changed}"
                 )
 
-    for label, left, right in ARM_CASES:
+    for label, member, left, right in ARM_CASES:
         try:
             a, a_findings = records_of_text(left, "M_SELFTEST")
             b, b_findings = records_of_text(right, "M_SELFTEST")
         except ApiError as exc:
             failures.append(f"{label}\n      fixture did not parse: {exc}")
             continue
+
         if a_findings or b_findings:
             failures.append(
                 f"{label}\n      a fixture was reported: "
                 f"{a_findings + b_findings}"
             )
-        elif a == b:
+            continue
+
+        a_member = [line for line in a if member in line]
+        b_member = [line for line in b if member in line]
+
+        if not a_member or not b_member:
             failures.append(
-                f"{label}\n      both recorded the same manifest, so the gate "
-                f"would not see it\n      records: {a}"
+                f"{label}\n      {member} is missing from a fixture, so the "
+                f"comparison proves nothing\n      left: {a}\n      right: {b}"
+            )
+        elif a_member == b_member:
+            failures.append(
+                f"{label}\n      {member} recorded identically, so the gate "
+                f"would not see it\n      records: {a_member}"
             )
 
     for label, source, expected_count, expect_finding in CONDITIONAL_CASES:
