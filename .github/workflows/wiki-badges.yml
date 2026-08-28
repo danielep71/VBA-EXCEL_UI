@@ -21,11 +21,24 @@
 # introduced directly in the wiki editor stays invisible until the next commit
 # lands here, which is exactly the window the v1.1.2 drift lived in.
 #
+# It runs on pull requests as well, so a VERSION bump is checked against the
+# wiki before it reaches a branch rather than after. During a release that is
+# the moment the two legitimately disagree, and seeing it in the pull request
+# is the difference between a planned wiki update and a surprise.
+#
 # This job does not gate a merge. It makes a silent failure loud.
 
 name: Wiki badges
 
 on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'VERSION'
+      - 'tools/wiki_badges.py'
+      - '.github/workflows/wiki-badges.yml'
   push:
     branches:
       - main
@@ -49,6 +62,11 @@ jobs:
     steps:
       - name: Check out the exact SHA under review
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The pinned Action leaves the job's token in .git/config by
+          # default. This job clones a second repository; a credential it has
+          # no use for is a credential that can only be misused.
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0

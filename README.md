@@ -284,6 +284,13 @@ Snapshot capture/restore retains its established all-managed-windows semantics. 
 # 🧩 Public API
 
 > [!NOTE]
+> The wiki carries a `wiki_tracks-vX.Y.Z` badge on every page, stating the
+> release it was written against. During a release the wiki is re-badged before
+> the tag is cut, so the badge is a release-candidate claim rather than proof
+> the tag exists; `.github/workflows/wiki-badges.yml` checks that every page
+> agrees with the root `VERSION` file.
+
+> [!NOTE]
 > This section is the supported surface. It is recorded declaration by
 > declaration in the `[supported]` section of `tools/public_api_manifest.txt`
 > and covered by Semantic Versioning, so a changed parameter, default, return

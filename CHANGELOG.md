@@ -183,9 +183,26 @@ measured against that baseline.
   drift lived in.
 - Added fixtures for the `VERSION` rules, run as a twentieth check: a plain
   release number, a pre-release suffix, a missing or doubled trailing newline, a
-  leading `v`, a two-part version, an empty file and prose. Two other checks
+  leading `v`, a two-part version, an empty file and prose. Badge fixtures now
+  also cover the same badge twice on one page, a badge missing its `v` prefix, a
+  badge with a truncated colour, a malformed badge beside a valid one, and the
+  inventory naming every page including navigation. Two other checks
   derive from that file, so a rule that quietly accepted anything would weaken
   them without ever reporting a thing.
+- Added duplicate and malformed badge detection. A page carrying the same badge
+  twice passed, because the rule compared distinct values rather than counting
+  them; the second badge is the one nobody reviewed, and the next release moves
+  one of them and leaves the page contradicting itself. A token naming
+  `wiki_tracks` without matching the badge pattern is now reported as malformed
+  rather than as absent, since it reads as a badge to anyone skimming the page.
+- Added evidence output to every badge run: the expected track, the wiki commit
+  inspected, and an ordered inventory naming each page and the badge it carried.
+  A passing run that records nothing cannot be tied to anything later, and a
+  wiki of fourteen agreeing pages was indistinguishable from a wiki of one.
+- Added a `pull_request` trigger to the wiki workflow, so a `VERSION` bump is
+  checked against the wiki before it reaches a branch. During a release that is
+  the moment the two legitimately disagree, and seeing it in the pull request is
+  the difference between a planned wiki update and a surprise.
 - Added the badge rules to the static gate as a nineteenth check. It runs the
   fixtures, not the wiki: `tools/check_repo.py` never touches the network, so a
   machine without wiki access still gets a meaningful gate, and the policy
@@ -240,6 +257,14 @@ measured against that baseline.
   `sync-label-colors.yml` workflow already followed the convention; it is now a
   rule rather than a habit, which is what makes #53's workflow subject to it
   before it is written.
+- Changed the wiki workflow checkout to `persist-credentials: false`. The pinned
+  Action leaves the job's token in `.git/config` by default, and this job clones
+  a second repository; a credential it has no use for is a credential that can
+  only be misused.
+- Changed the arm-structure member guard to match the declaration's leading
+  identifier exactly, once. Substring matching let `UI_Frame` match a record for
+  `UI_FrameState`, so a fixture could satisfy its comparison through a member
+  nobody meant to test, and a member declared twice would have passed unnoticed.
 - Changed each arm-structure fixture in **tools/vba_api.py** to name the member
   under test and compare only its records. Comparing whole manifests let an
   unrelated declaration in another arm carry the difference, which is how the
@@ -321,6 +346,14 @@ measured against that baseline.
   unexamined. The template still says what the gate does not prove: a procedure
   whose declaration is untouched can change what it does, and behavior belongs
   in the reviewer's own statement.
+- Documented what a track badge claims and when the wiki and the repository
+  legitimately disagree. `wiki_tracks-v1.1.3` means a page was written against
+  the v1.1.3 contract, not that the tag exists — the wiki is reviewed before the
+  tag is cut, so a badge that could only be written afterwards would make the
+  gate impossible to satisfy at the moment it matters. The resulting wave 7
+  window is now written down in order: bump `VERSION`, watch the gate go red,
+  re-badge the wiki, and do all of it before the release freeze, because
+  `VERSION` is tracked and wiki edits are not.
 - Separated three promises in **README.md**, **CONTRIBUTING.md** and the
   pull-request template that were previously blurred together. External
   compatibility applies to the `[supported]` facade. A `[project-public]` change

@@ -796,6 +796,20 @@ End Function
 """
 
 
+def declares(record, member):
+    """Return True when a manifest record declares exactly this member.
+
+    Substring matching would let UI_Frame match a record for UI_FrameState, so
+    a fixture could satisfy the comparison through a member nobody meant to
+    test. The member is the leading identifier of the declaration field.
+    """
+    fields = record.split("\t")
+    if len(fields) < 3:
+        return False
+    m = re.match(r"^(\w+)", fields[2])
+    return bool(m) and m.group(1) == member
+
+
 def _records(text):
     lines, findings = records_of_text(text, "M_SELFTEST")
     if findings:
@@ -1211,13 +1225,14 @@ def selftest():
             )
             continue
 
-        a_member = [line for line in a if member in line]
-        b_member = [line for line in b if member in line]
+        a_member = [line for line in a if declares(line, member)]
+        b_member = [line for line in b if declares(line, member)]
 
-        if not a_member or not b_member:
+        if len(a_member) != 1 or len(b_member) != 1:
             failures.append(
-                f"{label}\n      {member} is missing from a fixture, so the "
-                f"comparison proves nothing\n      left: {a}\n      right: {b}"
+                f"{label}\n      {member} must be declared exactly once in "
+                f"each fixture; found {len(a_member)} and {len(b_member)}\n"
+                f"      left: {a}\n      right: {b}"
             )
         elif a_member == b_member:
             failures.append(

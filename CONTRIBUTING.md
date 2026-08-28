@@ -328,6 +328,34 @@ the next commit lands here.
 their own fixtures so the policy cannot rot, and leaves the clone to the
 workflow.
 
+Every run records what it inspected: the expected track, the wiki commit it read,
+and an ordered inventory naming each page and the badge it carried. A passing run
+that records nothing cannot be tied to anything later, and a wiki of fourteen
+agreeing pages would be indistinguishable from a wiki of one.
+
+### What the badge means, and when the two legitimately disagree
+
+`wiki_tracks-v1.1.3` means *this page was written against the v1.1.3 contract*.
+It does not mean the tag exists. The badge is a release-candidate claim, and it
+has to be, because the wiki is reviewed before the tag is cut rather than after
+— a badge that could only be written post-tag would make the gate impossible to
+satisfy at the moment it matters.
+
+That produces one deliberate window per release, in wave 7:
+
+1. `VERSION` moves to the new release, together with the module headers under
+   [#36](https://github.com/danielep71/VBA-EXCEL_UI/issues/36).
+2. The wiki gate goes red. Every page still claims the previous release, and
+   the repository now states the new one. **This is the signal working**, not a
+   fault.
+3. The wiki pages are reviewed against the new contract and re-badged.
+4. The gate goes green again, before the tree is frozen.
+
+Order matters. Wiki edits do not touch this repository, so re-badging cannot
+invalidate a frozen tree — but bumping `VERSION` can, because it is a tracked
+file. Bump `VERSION` and re-badge the wiki *before* the release freeze, never
+during it.
+
 The wiki gates no merge. It makes a silent failure loud, which is the failure
 that let the wiki fall a full release behind before v1.1.2.
 
