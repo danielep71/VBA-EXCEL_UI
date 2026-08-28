@@ -15,7 +15,6 @@ Exit status is 0 when every check passed, 1 otherwise.
 """
 
 import fnmatch
-import fnmatch
 import os
 import re
 import subprocess
@@ -774,7 +773,7 @@ def strip_inline_code(line):
 
 
 def escape_findings(rel, text):
-    """Report Markdown punctuation escaped outside code.
+    r"""Report Markdown punctuation escaped outside code.
 
     A WYSIWYG editor escapes every character it thinks is markup, and both
     independent review archives arrived with several hundred of them: headings
@@ -790,15 +789,19 @@ def escape_findings(rel, text):
     the editor, not every symptom.
     """
     findings = []
-    fence = None
+    fence = None                      # (character, opening length)
 
     for n, line in enumerate(text.split("\n"), 1):
         m = FENCE_RE.match(line)
         if m:
             token = m.group(1)
             if fence is None:
-                fence = token[0] * 3
-            elif line.lstrip().startswith(fence):
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1]:
+                # A closing fence must use the same character and be at least
+                # as long as the one that opened it. Collapsing every opener to
+                # three let a ``` line close a ```` block, and everything after
+                # it was then read as prose that happened to look fenced.
                 fence = None
             continue
 
@@ -808,10 +811,10 @@ def escape_findings(rel, text):
         found = ESCAPE_RE.findall(strip_inline_code(line))
         if found:
             findings.append(
-                f"{rel}:{n}: {len(found)} escaped Markdown character(s) "
-                f"({''.join(sorted(set(found)))}) outside code; this is what a "
-                f"WYSIWYG editor leaves behind, and it renders as a literal "
-                f"backslash"
+                f"{rel}:{n}: escaped Markdown outside code: "
+                + ", ".join(f"\\{c}" for c in found)
+                + "; this is what a WYSIWYG editor leaves behind, and it "
+                  "renders as a literal backslash"
             )
 
     return findings
@@ -829,6 +832,35 @@ def check_markdown_escapes():
 
 
 ESCAPE_SELFTEST_CASES = [
+    # Every escape class observed in the two withdrawn archives.
+    ("an escaped underscore is reported (\\_)", "The M\\_EXCEL\\_UI module.\n", 1),
+    ("an escaped asterisk is reported (\\*)", "\\*\\*Repository:\\*\\*\n", 1),
+    ("an escaped hyphen is reported (\\-)", "\\---\n", 1),
+    ("an escaped period is reported (\\.)", "## 1\\. Executive assessment\n", 1),
+    ("an escaped bracket is reported (\\[)", "\\[a link](x)\n", 1),
+    ("an escaped ampersand is reported (\\&)", "Discussions/Q\\&A channel\n", 1),
+
+    # Fence boundaries: the character and its length both matter.
+    ("a four-backtick fence is not closed by three backticks",
+     "````text\nA\\_B\n```\nM\\_EXCEL\\_UI still inside\n````\n", 0),
+    ("a four-backtick fence is closed by four backticks",
+     "````text\nA\\_B\n````\nM\\_EXCEL\\_UI in prose\n", 1),
+    ("a tilde fence is not closed by backticks",
+     "~~~text\nA\\_B\n```\nM\\_EXCEL\\_UI still inside\n~~~\n", 0),
+    ("a longer closing fence still closes the block",
+     "```text\nA\\_B\n`````\nM\\_EXCEL\\_UI in prose\n", 1),
+
+    # Content that legitimately contains backslashes or looks like it does.
+    ("a URL is not an escape", "See https://example.com/a_b/c-d.html for more.\n", 0),
+    ("a bare Windows path in a fence is data",
+     "```text\n%TEMP%\\commit-msg.txt\n```\n", 0),
+    ("a VBA listing in a fence is data",
+     "```vb\nUI_Hide = 0\nUI\\_Show = 1\n```\n", 0),
+    ("a regular expression in a fence is data",
+     "```python\nre.compile(r\"^\\d+\\.\\d+$\")\n```\n", 0),
+    ("an underscore without a backslash is not an escape",
+     "The M_EXCEL_UI module and its UI_Hide member.\n", 0),
+    ("a table row is not an escape", "| Area | State |\n|---|---|\n", 0),
     ("clean prose passes", "# Heading\n\nSome text with M_EXCEL_UI in it.\n", 0),
     ("an escaped heading is reported", "## 1\\. Executive assessment\n", 1),
     ("an escaped underscore is reported", "The M\\_EXCEL\\_UI module.\n", 1),
@@ -884,6 +916,37 @@ PRIVATE_PATTERNS = [
 ]
 
 
+def denies(rel, pattern):
+    """Match a path against a denylist pattern, ignoring case.
+
+    fnmatch is case-sensitive on Linux, which is where the gate runs. A file
+    named independent_code_review_v1.1.2.md passed every pattern while being
+    exactly the document they exist to exclude, and it would have been caught
+    only on a maintainer's Windows machine — the one place the check is
+    optional.
+    """
+    rel = rel.casefold()
+    pattern = pattern.casefold()
+    return (fnmatch.fnmatchcase(rel, pattern)
+            or fnmatch.fnmatchcase(os.path.basename(rel), pattern))
+
+
+def denylist_findings(tracked, present):
+    """Return (path, reason, where) for every denied document."""
+    findings = []
+
+    for pattern, why in PRIVATE_PATTERNS:
+        for rel in sorted(tracked):
+            if denies(rel, pattern):
+                findings.append((rel, why, "tracked"))
+
+        for rel in sorted(set(present) - set(tracked)):
+            if denies(rel, pattern):
+                findings.append((rel, why, "working tree"))
+
+    return findings
+
+
 def check_private_review_denylist():
     """Fail when a private document is tracked or present in the tree.
 
@@ -901,18 +964,61 @@ def check_private_review_denylist():
             present.add(os.path.relpath(os.path.join(root, name), REPO)
                         .replace(os.sep, "/"))
 
-    for pattern, why in PRIVATE_PATTERNS:
-        for rel in sorted(tracked):
-            if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(
-                    os.path.basename(rel), pattern):
-                fail("private-review", f"{rel} is tracked, but {why}")
+    for rel, why, where in denylist_findings(tracked, present):
+        if where == "tracked":
+            fail("private-review", f"{rel} is tracked, but {why}")
+        else:
+            fail("private-review",
+                 f"{rel} is present in the working tree, but {why}; "
+                 f"move it outside the repository before committing")
 
-        for rel in sorted(present - set(tracked)):
-            if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(
-                    os.path.basename(rel), pattern):
-                fail("private-review",
-                     f"{rel} is present in the working tree, but {why}; "
-                     f"move it outside the repository before committing")
+
+DENYLIST_SELFTEST_CASES = [
+    ("the withdrawn v1.1.0 archive is denied",
+     "docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md", True),
+    ("the withdrawn v1.1.1 archive is denied",
+     "docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md", True),
+    ("the private v1.1.2 review is denied",
+     "docs/INDEPENDENT_CODE_REVIEW_V1.1.2_2026-08-26.md", True),
+    ("a future review is denied by the family pattern",
+     "docs/INDEPENDENT_CODE_REVIEW_V2.0.0_2027-01-01.md", True),
+    ("a lowercase variant is denied",
+     "docs/independent_code_review_v1.1.2.md", True),
+    ("a mixed-case variant is denied",
+     "docs/Independent_Code_Review_v1.1.2.md", True),
+    ("a review at the repository root is denied",
+     "INDEPENDENT_CODE_REVIEW_V1.1.2_draft.md", True),
+    ("a review in an unexpected directory is denied",
+     "notes/scratch/INDEPENDENT_CODE_REVIEW_V1.1.2.md", True),
+    ("a document marked private is denied", "docs/NOTES_PRIVATE.md", True),
+    ("a document marked confidential is denied",
+     "docs/AUDIT_CONFIDENTIAL.pdf", True),
+    ("a lowercase private marker is denied", "docs/notes_private.md", True),
+    ("the Ribbon behaviour note is allowed",
+     "docs/RIBBON_SDI_BEHAVIOR.md", False),
+    ("the changelog is allowed", "CHANGELOG.md", False),
+    ("a module is allowed", "src/M_EXCEL_UI.bas", False),
+    ("a file merely mentioning review is allowed",
+     "docs/CODE_REVIEW_CHECKLIST.md", False),
+    ("a private-sounding word inside a name is allowed",
+     "docs/PRIVATE_MODULE_NOTES.md", False),
+]
+
+
+def check_private_review_denylist_selftest():
+    """Run the denylist against its own fixtures.
+
+    A denylist with no fixtures is a list of strings nobody has ever seen
+    reject anything. Both directions matter: a pattern that denies everything
+    would look identical to one that works, until it blocked a legitimate
+    document and someone widened it back.
+    """
+    for label, rel, denied in DENYLIST_SELFTEST_CASES:
+        hit = bool(denylist_findings([rel], [rel]))
+        if hit != denied:
+            fail("private-review-selftest",
+                 f"{label}: {rel} should have been "
+                 f"{'denied' if denied else 'allowed'}")
 
 
 def check_release_state():
@@ -1150,6 +1256,7 @@ CHECKS = [
     ("markdown escapes", check_markdown_escapes),
     ("markdown escape self-test", check_markdown_escape_selftest),
     ("private review denylist", check_private_review_denylist),
+    ("private review denylist self-test", check_private_review_denylist_selftest),
     ("house-style formatter", check_formatter),
     ("formatter self-test", check_formatter_selftest),
 ]

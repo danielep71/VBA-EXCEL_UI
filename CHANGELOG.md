@@ -73,7 +73,7 @@ measured against that baseline.
 | Regression and certification fixes | Not yet implemented |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | Twenty-three checks; the release branch passes |
+| Static validation | Twenty-four checks; the release branch passes |
 | Wiki | Tracks v1.1.2; badge consistency now checked on push and weekly |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
@@ -214,13 +214,23 @@ measured against that baseline.
   regular expression — because a check that is wrong about correct documents
   gets disabled. An editor that escapes a fence escapes the prose around it too,
   so the rule detects the editor rather than every symptom.
-- Added twelve fixtures for the escape rules, run as a twenty-second check:
-  clean prose, an escaped heading, underscore and horizontal rule, backslashes
-  and escapable characters inside fenced blocks and inline code spans, a tilde
-  fence, a fence that closes correctly, an escape beside a code span, and
-  several escapes on one line. Fence handling is the part that can silently
-  invert — a rule treating the whole file as fenced would report nothing and
-  look healthy.
+- Added twenty-eight fixtures for the escape rules. They cover every escape
+  class observed in the two withdrawn archives — `\_`, `\*`, `\-`, `\.`, `\[`
+  and `\&` — the fence boundary in both directions, including a four-backtick
+  block that three backticks must not close and a tilde block that backticks
+  must not close, and content that legitimately contains backslashes: a Windows
+  path, a regular expression, a VBA listing, a URL and a table row. Fence
+  handling is the part that can silently invert — a rule treating the whole file
+  as fenced would report nothing and look healthy.
+- Added sixteen fixtures for the private-document denylist, run as a
+  twenty-fourth check. They cover the withdrawn archives, the private v1.1.2
+  review, a future review admitted only by the family pattern, lowercase and
+  mixed-case variants, a review at the repository root and in an unexpected
+  directory, and documents marked private or confidential — alongside five that
+  must be allowed, including a checklist whose name contains "review" and a
+  module note whose name contains "private". A denylist with no fixtures is a
+  list of strings nobody has seen reject anything, and a pattern that denies
+  everything looks identical to one that works.
 - Added an explicit private-document denylist as a twenty-third check. The
   v1.1.2 independent review is private, and the public archives are named for
   the release they reviewed, so the pattern admitting them is the pattern that
@@ -355,6 +365,21 @@ measured against that baseline.
   changes nothing else: line, heading, fence and table-row counts are identical
   before and after, and each repaired file equals the original with backslashes
   deleted.
+- Fixed the escaped-Markdown check collapsing every fence to three characters.
+  A four-backtick block was closed by the first three-backtick line inside it,
+  and everything after that was read as prose. A closing fence must now use the
+  same character and be at least as long as the one that opened it.
+- Fixed the private-document denylist being case-sensitive. `fnmatch` compares
+  case-sensitively on Linux, which is where the gate runs, so a file named
+  `independent_code_review_v1.1.2.md` passed every pattern while being exactly
+  the document they exist to exclude — and would have been caught only on a
+  maintainer's Windows machine, the one place the check is optional. Paths and
+  patterns are now case-folded.
+- Fixed the escape diagnostics reporting only a count and a character set. A
+  finding read `3 escaped Markdown character(s) (-_)`, which says how many and
+  which kinds but not what to look for. It now lists the exact sequences.
+- Fixed a duplicated `import fnmatch` and a `SyntaxWarning` under Python 3.12
+  from unescaped examples in the checker's own docstring.
 - Fixed the static gate exiting successfully when one of its own checks raised.
   The traceback went to standard error, `sys.exit(main())` never ran, and the
   process returned zero, so a continuous-integration step reading only the
@@ -487,6 +512,7 @@ RESULT: PASS
   markdown escapes
   markdown escape self-test
   private review denylist
+  private review denylist self-test
   house-style formatter
   formatter self-test
 ~~~
