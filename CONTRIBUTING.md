@@ -381,6 +381,36 @@ created from the reviewed merge commit belongs to
 evidence gathered on one as evidence for another; a green check on the PR head
 is not a certified tag.
 
+## ✍️ Markdown is edited as text
+
+Never edit a Markdown file in a WYSIWYG editor. One escapes every character it
+believes is markup, and the result is a document that renders as literal
+backslashes: `## 1\. Executive assessment`, `M\_EXCEL\_UI`, `\---` where a
+horizontal rule was meant. Both independent review archives arrived that way and
+carried 669 escapes between them for two releases before anyone noticed.
+
+`tools/check_repo.py` now fails on escaped Markdown punctuation in any tracked
+document. The check is fence-aware and deliberately ignores fenced blocks and
+inline code spans, because a backslash there is data — a Windows path, a regular
+expression — and flagging it would make the gate wrong about correct documents.
+An editor that escapes a fence escapes the prose around it too, so the rule
+detects the editor rather than every symptom.
+
+## 🔒 The private v1.1.2 review
+
+The v1.1.2 independent review is private. It must not appear in this repository,
+in any branch, in the wiki, or among release assets. The public v1.1.0 and v1.1.1
+archives are named for the release they reviewed, so the naming pattern that
+admits them is the pattern that would admit the private one; `check_repo.py`
+carries an explicit denylist so the boundary is a gate rather than a habit.
+
+The denylist is checked against both the Git index and the working tree. The
+index catches the file after a commit; the working tree catches it before one,
+which is the only moment the mistake is cheap to undo.
+
+Public issue bodies stay self-contained and cite `ICR-UI-112-*` identifiers.
+Cite a finding identifier; never quote or attach the document.
+
 ## 🔗 Updating a pinned Action
 
 Every `uses:` reference in `.github/workflows/` is pinned to a full 40-character

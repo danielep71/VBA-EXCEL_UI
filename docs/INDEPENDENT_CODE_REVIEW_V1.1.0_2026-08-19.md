@@ -1,15 +1,15 @@
 # Independent Code and Repository Review — VBA Excel UI v1.1.0
 
-> \*\*Repository:\*\* \[`danielep71/VBA-EXCEL\_UI`](https://github.com/danielep71/VBA-EXCEL\_UI)  
-> \*\*Tag reviewed:\*\* \[`v1.1.0`](https://github.com/danielep71/VBA-EXCEL\_UI/tree/v1.1.0)  
-> \*\*Commit reviewed:\*\* \[`96360379a4bca7703cf649a69a2162961dfa6c9e`](https://github.com/danielep71/VBA-EXCEL\_UI/commit/96360379a4bca7703cf649a69a2162961dfa6c9e)  
-> \*\*Branch relationship at review time:\*\* `main` and `v1.1.0` resolve to the same commit  
-> \*\*Review date:\*\* 2026-08-19  
-> \*\*Suggested repository path:\*\* `docs/INDEPENDENT\_CODE\_REVIEW\_V1.1.0\_2026-08-19.md`
+> **Repository:** [`danielep71/VBA-EXCEL_UI`](https://github.com/danielep71/VBA-EXCEL_UI)  
+> **Tag reviewed:** [`v1.1.0`](https://github.com/danielep71/VBA-EXCEL_UI/tree/v1.1.0)  
+> **Commit reviewed:** [`96360379a4bca7703cf649a69a2162961dfa6c9e`](https://github.com/danielep71/VBA-EXCEL_UI/commit/96360379a4bca7703cf649a69a2162961dfa6c9e)  
+> **Branch relationship at review time:** `main` and `v1.1.0` resolve to the same commit  
+> **Review date:** 2026-08-19  
+> **Suggested repository path:** `docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md`
 
-\---
+---
 
-## 1\. Executive assessment
+## 1. Executive assessment
 
 ### Overall repository score: **8.0 / 10**
 
@@ -51,7 +51,7 @@ The strongest parts of the release are:
 
 A material correctness defect nevertheless remains in the title-bar snapshot contract on modern Excel's Single Document Interface (SDI):
 
-> \*\*The snapshot records one title-bar Boolean but does not retain the top-level window handle or Excel `Window` identity from which that Boolean was captured. Restoration resolves `Application.Hwnd` again, and Microsoft documents that this returns the currently active workbook window's handle. Activating another workbook between capture and restore can therefore apply the captured title-bar state to the wrong top-level Excel window.\*\*
+> **The snapshot records one title-bar Boolean but does not retain the top-level window handle or Excel `Window` identity from which that Boolean was captured. Restoration resolves `Application.Hwnd` again, and Microsoft documents that this returns the currently active workbook window's handle. Activating another workbook between capture and restore can therefore apply the captured title-bar state to the wrong top-level Excel window.**
 
 The defect is structurally distinct from the otherwise strong per-window snapshot implementation. Headings, Workbook Tabs, and Gridlines are restored through retained `Window` objects; the title bar is not. This creates a split identity model inside one advertised snapshot:
 
@@ -75,11 +75,11 @@ Other important hardening items are:
 
 ### Independent verdict
 
-> \*\*VBA Excel UI v1.1.0 is a strong professional VBA component with excellent modularization, API discipline, documentation, and per-window snapshot engineering. It is suitable for controlled Windows Excel use when the exact operating environment is validated. It should not yet claim fully identity-safe title-bar snapshot restoration across multiple modern Excel workbook windows. That SDI identity defect should be the first corrective item in v1.1.1.\*\*
+> **VBA Excel UI v1.1.0 is a strong professional VBA component with excellent modularization, API discipline, documentation, and per-window snapshot engineering. It is suitable for controlled Windows Excel use when the exact operating environment is validated. It should not yet claim fully identity-safe title-bar snapshot restoration across multiple modern Excel workbook windows. That SDI identity defect should be the first corrective item in v1.1.1.**
 
-\---
+---
 
-# 2\. Review scope and methodology
+# 2. Review scope and methodology
 
 ## 2.1 Exact source basis
 
@@ -87,16 +87,16 @@ The review was performed against the exact `v1.1.0` revision identified above. T
 
 ### Production source
 
-* [`src/M\_EXCEL\_UI.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/src/M_EXCEL_UI.bas)
-* [`src/M\_EXCEL\_UI\_RUNTIME.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/src/M_EXCEL_UI_RUNTIME.bas)
-* [`src/M\_EXCEL\_UI\_SNAPSHOT.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/src/M_EXCEL_UI_SNAPSHOT.bas)
-* [`src/M\_EXCEL\_UI\_TITLEBAR.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/src/M_EXCEL_UI_TITLEBAR.bas)
+* [`src/M_EXCEL_UI.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/src/M_EXCEL_UI.bas)
+* [`src/M_EXCEL_UI_RUNTIME.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/src/M_EXCEL_UI_RUNTIME.bas)
+* [`src/M_EXCEL_UI_SNAPSHOT.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/src/M_EXCEL_UI_SNAPSHOT.bas)
+* [`src/M_EXCEL_UI_TITLEBAR.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/src/M_EXCEL_UI_TITLEBAR.bas)
 
 ### Tests and demo
 
-* [`test/M\_EXCEL\_UI\_REGRESSION\_TESTS.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/test/M_EXCEL_UI_REGRESSION_TESTS.bas)
-* [`demo/M\_EXCEL\_UI\_DEMO.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/demo/M_EXCEL_UI_DEMO.bas)
-* [`demo/M\_DEMO\_BUILDER.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/demo/M_DEMO_BUILDER.bas)
+* [`test/M_EXCEL_UI_REGRESSION_TESTS.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/test/M_EXCEL_UI_REGRESSION_TESTS.bas)
+* [`demo/M_EXCEL_UI_DEMO.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/demo/M_EXCEL_UI_DEMO.bas)
+* [`demo/M_DEMO_BUILDER.bas`](https://github.com/danielep71/VBA-EXCEL_UI/blob/v1.1.0/demo/M_DEMO_BUILDER.bas)
 
 ### Repository tooling and policy
 
@@ -118,7 +118,7 @@ The review also checked the implementation against primary Microsoft documentati
 * [Excel Single Document Interface behavior](https://learn.microsoft.com/en-us/office/vba/excel/concepts/programming-for-the-single-document-interface-in-excel);
 * `Application.Hwnd` and workbook-window behavior under SDI;
 * [SetWindowLong / SetWindowLongPtr behavior](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowlonga);
-* the requirement to call `SetWindowPos(..., SWP\_FRAMECHANGED)` after frame-style changes;
+* the requirement to call `SetWindowPos(..., SWP_FRAMECHANGED)` after frame-style changes;
 * [VBA `Err.LastDllError`](https://learn.microsoft.com/en-us/office/vba/language/reference/user-interface-help/lastdllerror-property).
 
 ## 2.2 Review dimensions
@@ -168,9 +168,9 @@ The SDI title-bar identity finding is high confidence because:
 
 The Ribbon SDI concern is classified as a contract and test-coverage gap rather than a confirmed wrong-result defect because the exact cross-window behavior of the fixed XLM command should be measured in Excel.
 
-\---
+---
 
-# 3\. Hard repository metrics
+# 3. Hard repository metrics
 
 ## 3.1 Production surface
 
@@ -194,33 +194,33 @@ The Ribbon SDI concern is classified as a contract and test-coverage gap rather 
 
 ```vb
 Public Enum UIVisibility
-    UI\_LeaveUnchanged = -1
-    UI\_Hide = 0
-    UI\_Show = 1
+    UI_LeaveUnchanged = -1
+    UI_Hide = 0
+    UI_Show = 1
 End Enum
 ```
 
 ```vb
 Public Enum UIWindowTargetScope
-    UI\_TargetAllExcelWindows = 0
-    UI\_TargetActiveWindow = 1
-    UI\_TargetActiveWorkbookWindows = 2
+    UI_TargetAllExcelWindows = 0
+    UI_TargetActiveWindow = 1
+    UI_TargetActiveWorkbookWindows = 2
 End Enum
 ```
 
 ### Public procedures/functions
 
 ```text
-UI\_SetExcelUI
-UI\_SetExcelUI\_WithResult
-UI\_HideExcelUI
-UI\_ShowExcelUI
-UI\_CaptureExcelUIState
-UI\_CaptureExcelUIState\_WithResult
-UI\_ResetExcelUIToSnapshot
-UI\_ResetExcelUIToSnapshot\_WithResult
-UI\_HasExcelUIStateSnapshot
-UI\_ClearExcelUIStateSnapshot
+UI_SetExcelUI
+UI_SetExcelUI_WithResult
+UI_HideExcelUI
+UI_ShowExcelUI
+UI_CaptureExcelUIState
+UI_CaptureExcelUIState_WithResult
+UI_ResetExcelUIToSnapshot
+UI_ResetExcelUIToSnapshot_WithResult
+UI_HasExcelUIStateSnapshot
+UI_ClearExcelUIStateSnapshot
 ```
 
 ## 3.3 Managed UI surface
@@ -257,9 +257,9 @@ The manual results are useful release evidence, but they are not machine-readabl
 
 The repository is approximately **20 MB**, materially larger than the source itself because it includes several high-resolution media assets. The VBA production code is compact relative to that footprint.
 
-\---
+---
 
-# 4\. Scoring methodology
+# 4. Scoring methodology
 
 A score of 10 requires:
 
@@ -307,16 +307,16 @@ Rounded overall score:
 |7.0–7.9|Good foundation with significant correctness or assurance gaps|
 |Below 7.0|Major design, correctness, or repository-control deficiencies|
 
-\---
+---
 
-# 5\. Component scores
+# 5. Component scores
 
 |Component|Score|Assessment|
 |-|-:|-|
-|`M\_EXCEL\_UI`|**9.1**|Strong façade, backward-compatible targeting, validation, orchestration, and per-window continuation|
-|`M\_EXCEL\_UI\_RUNTIME`|**8.2**|Cohesive shared services; failure accumulation itself needs a fail-safe boundary|
-|`M\_EXCEL\_UI\_SNAPSHOT`|**8.4**|Excellent retained-object model for window properties; title-bar/Ribbon state remains singleton and not identity-bound|
-|`M\_EXCEL\_UI\_TITLEBAR`|**7.7**|Good owned-bit and bitness design; SDI handle semantics, singleton baseline, and refresh-failure transaction gap are material|
+|`M_EXCEL_UI`|**9.1**|Strong façade, backward-compatible targeting, validation, orchestration, and per-window continuation|
+|`M_EXCEL_UI_RUNTIME`|**8.2**|Cohesive shared services; failure accumulation itself needs a fail-safe boundary|
+|`M_EXCEL_UI_SNAPSHOT`|**8.4**|Excellent retained-object model for window properties; title-bar/Ribbon state remains singleton and not identity-bound|
+|`M_EXCEL_UI_TITLEBAR`|**7.7**|Good owned-bit and bitness design; SDI handle semantics, singleton baseline, and refresh-failure transaction gap are material|
 |Regression harness|**8.1**|Broad and thoughtful; `RunAll` is incomplete, important cases can be skipped, cleanup failures can be hidden|
 |Demo layer|**7.2**|Polished source and builder, but does not demonstrate the principal v1.1.0 targeting and structured-result features|
 |`tools/reformat.py`|**6.8**|Useful deterministic intent; regex-based rewriting is not generally token-safe and lacks tests/check mode|
@@ -324,26 +324,26 @@ Rounded overall score:
 |Security policy|**8.6**|Clear trust boundaries, private reporting, safe-use guidance, and explicit non-security role of UI hiding|
 |Repository quality|**7.6**|Excellent structure and editorial governance; weak automation, evidence, release-state synchronization, and independent review controls|
 
-\---
+---
 
-# 6\. Architectural review
+# 6. Architectural review
 
 ## 6.1 Dependency architecture
 
 The production dependency graph is clear and acyclic:
 
 ```text
-M\_EXCEL\_UI
-├── M\_EXCEL\_UI\_RUNTIME
-├── M\_EXCEL\_UI\_TITLEBAR
-└── M\_EXCEL\_UI\_SNAPSHOT
-    ├── M\_EXCEL\_UI\_RUNTIME
-    └── M\_EXCEL\_UI\_TITLEBAR
+M_EXCEL_UI
+├── M_EXCEL_UI_RUNTIME
+├── M_EXCEL_UI_TITLEBAR
+└── M_EXCEL_UI_SNAPSHOT
+    ├── M_EXCEL_UI_RUNTIME
+    └── M_EXCEL_UI_TITLEBAR
 ```
 
 This is a major improvement over the earlier single-module architecture.
 
-### `M\_EXCEL\_UI`
+### `M_EXCEL_UI`
 
 Owns:
 
@@ -354,7 +354,7 @@ Owns:
 * selective application orchestration;
 * compatibility wrappers.
 
-### `M\_EXCEL\_UI\_RUNTIME`
+### `M_EXCEL_UI_RUNTIME`
 
 Owns:
 
@@ -366,7 +366,7 @@ Owns:
 * quiet `ScreenUpdating` scopes;
 * shared diagnostic labels and error text.
 
-### `M\_EXCEL\_UI\_SNAPSHOT`
+### `M_EXCEL_UI_SNAPSHOT`
 
 Owns:
 
@@ -377,7 +377,7 @@ Owns:
 * dead-window detection;
 * snapshot lifecycle and release.
 
-### `M\_EXCEL\_UI\_TITLEBAR`
+### `M_EXCEL_UI_TITLEBAR`
 
 Owns:
 
@@ -437,24 +437,24 @@ Modern Excel does not have one permanent top-level frame per process. Each workb
 
 No wholesale rewrite is needed. The correct next architectural step is to extend the existing ownership model to explicit SDI frame and Ribbon scopes rather than undo the four-module design.
 
-\---
+---
 
-# 7\. Production-code review
+# 7. Production-code review
 
-## 7.1 `M\_EXCEL\_UI` — **9.1 / 10**
+## 7.1 `M_EXCEL_UI` — **9.1 / 10**
 
 ### Strengths
 
 #### Stable façade
 
-The public `UI\_...` surface remains concentrated in one module. Callers do not need to understand snapshot internals, WinAPI details, or the structured-result implementation.
+The public `UI_...` surface remains concentrated in one module. Callers do not need to understand snapshot internals, WinAPI details, or the structured-result implementation.
 
 #### Backward-compatible extension
 
 `TargetScope` is optional, trailing, and defaults to:
 
 ```vb
-UI\_TargetAllExcelWindows
+UI_TargetAllExcelWindows
 ```
 
 Existing call sites retain their prior parameter positions and behavior for Headings, Workbook Tabs, and Gridlines.
@@ -479,13 +479,13 @@ Ribbon, Status Bar, Scroll Bars, Formula Bar, and Title Bar retain their own est
 
 #### Per-window continuation
 
-`UI\_ApplyWindowLevelState` now has a local error boundary. An unusable window no longer escapes to the outer apply handler and silently prevents later windows from being attempted.
+`UI_ApplyWindowLevelState` now has a local error boundary. An unusable window no longer escapes to the outer apply handler and silently prevents later windows from being attempted.
 
 The diagnostic label is built before the write sequence so a failing `Window.Caption` read cannot turn a property failure into a pass-level abort.
 
 #### No-op semantics
 
-`UI\_LeaveUnchanged` is a real no-op, not an alias for the current Boolean value. The design also uses IfNeeded helpers to avoid unnecessary writes when the current state is readable.
+`UI_LeaveUnchanged` is a real no-op, not an alias for the current Boolean value. The design also uses IfNeeded helpers to avoid unnecessary writes when the current state is readable.
 
 ### Minor concerns
 
@@ -512,9 +512,9 @@ The target resolver and later write loop operate against live Excel collections.
 3. Add a machine-readable static API inventory for the façade.
 4. Add a public-result case where multiple visibility values and the target scope are simultaneously invalid, asserting complete deterministic ordering.
 
-\---
+---
 
-## 7.2 `M\_EXCEL\_UI\_RUNTIME` — **8.2 / 10**
+## 7.2 `M_EXCEL_UI_RUNTIME` — **8.2 / 10**
 
 ### Strengths
 
@@ -571,7 +571,7 @@ No user-controlled macro text is interpolated, which materially limits injection
 
 ### Finding: failure recording can itself raise
 
-The central failure path calls `UI\_RuntimeAddFailure`, which:
+The central failure path calls `UI_RuntimeAddFailure`, which:
 
 1. marks the pass unsuccessful;
 2. increments `FailureCount`;
@@ -615,16 +615,16 @@ The installation and troubleshooting documentation should explicitly identify XL
 
 ### Recommended improvements
 
-1. Make `UI\_RuntimeAddFailure` non-raising under every ordinary condition.
+1. Make `UI_RuntimeAddFailure` non-raising under every ordinary condition.
 2. Keep a small emergency fallback string when array growth fails.
 3. Preserve the original error detail before entering the diagnostic path.
 4. Add optional readback verification for release validation.
 5. Add a fault-injection seam for result-buffer growth and logging failure.
 6. Document XLM policy requirements and expected failure stages.
 
-\---
+---
 
-## 7.3 `M\_EXCEL\_UI\_SNAPSHOT` — **8.4 / 10**
+## 7.3 `M_EXCEL_UI_SNAPSHOT` — **8.4 / 10**
 
 ### Strengths
 
@@ -672,7 +672,7 @@ Snapshot replacement, retention, replay, and clearing are documented. The implem
 The installation guide correctly explains that retained `Window` references must eventually be released through:
 
 ```vb
-UI\_ClearExcelUIStateSnapshot
+UI_ClearExcelUIStateSnapshot
 ```
 
 ### Material limitation: not every part of the snapshot has an identity
@@ -680,8 +680,8 @@ UI\_ClearExcelUIStateSnapshot
 The module-level state for the title bar is only:
 
 ```vb
-Private m\_SnapshotTitleBarKnown   As Boolean
-Private m\_SnapshotTitleBarVisible As Boolean
+Private m_SnapshotTitleBarKnown   As Boolean
+Private m_SnapshotTitleBarVisible As Boolean
 ```
 
 There is no corresponding:
@@ -721,11 +721,11 @@ Retained COM object references are necessary for identity safety, but they can p
 2. Characterize and model Ribbon state under SDI.
 3. Resolve the complete window object list before allocating property arrays.
 4. Add snapshot metadata: capture timestamp, captured active window label, window count, completeness count.
-5. Add an optional `UI\_GetExcelUIStateSnapshotInfo` result for diagnostics without exposing mutable internals.
+5. Add an optional `UI_GetExcelUIStateSnapshotInfo` result for diagnostics without exposing mutable internals.
 
-\---
+---
 
-## 7.4 `M\_EXCEL\_UI\_TITLEBAR` — **7.7 / 10**
+## 7.4 `M_EXCEL_UI_TITLEBAR` — **7.7 / 10**
 
 ### Strengths
 
@@ -750,28 +750,28 @@ with the expected `GetWindowLongPtr`/`SetWindowLongPtr` route on 64-bit Office a
 The module claims only:
 
 ```text
-WS\_CAPTION
-WS\_SYSMENU
-WS\_THICKFRAME
-WS\_MINIMIZEBOX
-WS\_MAXIMIZEBOX
+WS_CAPTION
+WS_SYSMENU
+WS_THICKFRAME
+WS_MINIMIZEBOX
+WS_MAXIMIZEBOX
 ```
 
 through:
 
 ```text
-TITLEBAR\_OWNED\_STYLE\_MASK = \&HCF0000
+TITLEBAR_OWNED_STYLE_MASK = &HCF0000
 ```
 
-This is materially safer than restoring a complete historical `GWL\_STYLE` value.
+This is materially safer than restoring a complete historical `GWL_STYLE` value.
 
 #### Pure merge function
 
 The merge rule is isolated as pure arithmetic:
 
 ```vb
-(CurrentStyle And Not TITLEBAR\_OWNED\_STYLE\_MASK) Or \_
-(OwnedStyleBits And TITLEBAR\_OWNED\_STYLE\_MASK)
+(CurrentStyle And Not TITLEBAR_OWNED_STYLE_MASK) Or _
+(OwnedStyleBits And TITLEBAR_OWNED_STYLE_MASK)
 ```
 
 That makes the central ownership policy deterministic and testable without touching a live Excel window.
@@ -793,9 +793,9 @@ This fixes a real recovery blocker found during the v1.1.0 release review.
 The module stores one current-handle baseline:
 
 ```text
-m\_OriginalMainWindowOwnedStyleBits
-m\_OriginalMainWindowHwnd
-m\_HasOriginalMainWindowOwnedStyleBits
+m_OriginalMainWindowOwnedStyleBits
+m_OriginalMainWindowHwnd
+m_HasOriginalMainWindowOwnedStyleBits
 ```
 
 Whenever `Application.Hwnd` changes, the singleton baseline is replaced.
@@ -815,7 +815,7 @@ The write sequence is:
 
 ```text
 SetWindowLong / SetWindowLongPtr
-SetWindowPos(... SWP\_FRAMECHANGED)
+SetWindowPos(... SWP_FRAMECHANGED)
 ```
 
 If the style write succeeds but the frame refresh fails:
@@ -827,7 +827,7 @@ If the style write succeeds but the frame refresh fails:
 5. a later retry can see `NewStyle = CurrentStyle` and take the no-op path;
 6. that no-op path does not call `SetWindowPos` again.
 
-Microsoft explicitly states that frame-style changes do not take effect correctly until `SetWindowPos` is called with `SWP\_FRAMECHANGED`. The retry path must therefore not treat “style bits already match” as complete success when the prior frame refresh failed.
+Microsoft explicitly states that frame-style changes do not take effect correctly until `SetWindowPos` is called with `SWP_FRAMECHANGED`. The retry path must therefore not treat “style bits already match” as complete success when the prior frame refresh failed.
 
 #### Baseline staleness
 
@@ -849,11 +849,11 @@ The current declarations call `GetLastError` directly. VBA also exposes `Err.Las
 6. Consider rollback to the prior style when frame refresh fails.
 7. Use `Err.LastDllError` immediately after DLL calls, or document and test the direct `GetLastError` design.
 8. Add readback and visual-state verification in the release harness.
-9. Add `SWP\_NOACTIVATE` if future code mutates non-active SDI windows.
+9. Add `SWP_NOACTIVATE` if future code mutates non-active SDI windows.
 
-\---
+---
 
-# 8\. Dedicated SDI scope and identity review
+# 8. Dedicated SDI scope and identity review
 
 This section is central to the assessment because Excel's window architecture changed materially in Excel 2013.
 
@@ -886,7 +886,7 @@ The current snapshot sequence is effectively:
 ```text
 CAPTURE
 1. Read Application.Hwnd for whichever workbook window is active.
-2. Read WS\_CAPTION from that handle.
+2. Read WS_CAPTION from that handle.
 3. Store only Visible/Not Visible.
 
 RESTORE
@@ -901,27 +901,27 @@ No identity check connects the two handles.
 Assume two workbook windows in one Excel instance:
 
 ```text
-Window A -> HWND\_A -> title bar visible
-Window B -> HWND\_B -> title bar hidden
+Window A -> HWND_A -> title bar visible
+Window B -> HWND_B -> title bar hidden
 ```
 
 Sequence:
 
 ```vb
 'Window A active
-UI\_CaptureExcelUIState
+UI_CaptureExcelUIState
 
 'User activates Window B
-UI\_ResetExcelUIToSnapshot
+UI_ResetExcelUIToSnapshot
 ```
 
 Current title-bar result:
 
 ```text
-Captured value from: HWND\_A
-Applied value to:    HWND\_B
-HWND\_A restored:     No
-HWND\_B modified:     Yes
+Captured value from: HWND_A
+Applied value to:    HWND_B
+HWND_A restored:     No
+HWND_B modified:     Yes
 Failure reported:    No, provided both API operations succeed
 ```
 
@@ -941,11 +941,11 @@ The title-bar worker is therefore unaware of:
 
 ## 8.5 Public-contract implications
 
-### `UI\_CaptureExcelUIState` / `UI\_ResetExcelUIToSnapshot`
+### `UI_CaptureExcelUIState` / `UI_ResetExcelUIToSnapshot`
 
 The phrase “identity-safe snapshot restore” is accurate for the three object-model window properties, but not for the title bar. The documentation should qualify the guarantee until fixed.
 
-### `UI\_HideExcelUI` / `UI\_ShowExcelUI`
+### `UI_HideExcelUI` / `UI_ShowExcelUI`
 
 The wrappers apply Headings, Workbook Tabs, and Gridlines to all Excel windows by default, but the title-bar function uses one active `Application.Hwnd`.
 
@@ -968,8 +968,8 @@ The documentation says `TargetScope` does not apply to Title Bar. That is intern
 Microsoft documents one Ribbon UI per workbook window under SDI. The current library stores:
 
 ```text
-m\_SnapshotRibbonKnown
-m\_SnapshotRibbonVisible
+m_SnapshotRibbonKnown
+m_SnapshotRibbonVisible
 ```
 
 and uses `Application.CommandBars("Ribbon")` / fixed XLM commands without activating and validating each workbook window.
@@ -991,7 +991,7 @@ The project should choose and document one of these title-bar models.
 ### Model A — Active window only
 
 ```text
-UI\_SetExcelUI TitleBar:=... operates on the current active workbook window.
+UI_SetExcelUI TitleBar:=... operates on the current active workbook window.
 Snapshot captures the active Window/HWND and restores only that exact frame.
 ```
 
@@ -1010,7 +1010,7 @@ This is more expressive but changes the conceptual public model. It can remain b
 
 ```text
 Selective title-bar calls remain active-window-only.
-UI\_HideExcelUI/UI\_ShowExcelUI enumerate all current top-level workbook windows.
+UI_HideExcelUI/UI_ShowExcelUI enumerate all current top-level workbook windows.
 Snapshot stores one frame state per captured Window/HWND.
 ```
 
@@ -1032,19 +1032,19 @@ At minimum, add live Excel cases for:
 
 ## 8.9 SDI verdict
 
-> \*\*The per-window object-model snapshot design is genuinely strong. The title-bar and Ribbon subsystems have not yet been brought to the same SDI-aware identity standard.\*\*
+> **The per-window object-model snapshot design is genuinely strong. The title-bar and Ribbon subsystems have not yet been brought to the same SDI-aware identity standard.**
 
-\---
+---
 
-# 9\. Public API and compatibility review
+# 9. Public API and compatibility review
 
 ## 9.1 Naming and discoverability
 
 The public naming convention is consistent:
 
 ```text
-UI\_<Verb><Object>
-UI\_<Verb><Object>\_WithResult
+UI_<Verb><Object>
+UI_<Verb><Object>_WithResult
 ```
 
 The two enums provide readable named arguments and avoid Boolean ambiguity.
@@ -1055,9 +1055,9 @@ The two enums provide readable named arguments and avoid Boolean ambiguity.
 
 |Value|Meaning|
 |-|-|
-|`UI\_LeaveUnchanged`|do not read or write for the purpose of applying a new state|
-|`UI\_Hide`|request hidden state|
-|`UI\_Show`|request visible state|
+|`UI_LeaveUnchanged`|do not read or write for the purpose of applying a new state|
+|`UI_Hide`|request hidden state|
+|`UI_Show`|request visible state|
 
 This is materially better than many UI helper APIs that require callers to construct separate include/exclude lists or pass nullable Variants.
 
@@ -1115,9 +1115,9 @@ until a stronger model is implemented.
 
 The interface is compact, readable, and compatibility-conscious. The remaining issue is not naming but the precision of cross-window scope guarantees.
 
-\---
+---
 
-# 10\. Error handling, diagnostics, and transactional behavior
+# 10. Error handling, diagnostics, and transactional behavior
 
 ## 10.1 Positive design
 
@@ -1155,7 +1155,7 @@ Current `ReDim Preserve` growth does not guarantee that invariant.
 A robust pattern is:
 
 ```vb
-Private Sub UI\_RuntimeTryRecordFailure(...)
+Private Sub UI_RuntimeTryRecordFailure(...)
     On Error GoTo MinimalFallback
     'normal array accumulation
     Exit Sub
@@ -1197,19 +1197,19 @@ Document three levels:
 
 The current Boolean contract can remain unchanged, while detailed status text or a future result type can distinguish the first two.
 
-\---
+---
 
-# 11\. Regression-test review
+# 11. Regression-test review
 
 ## 11.1 Test inventory
 
 The harness exposes:
 
 ```vb
-Test\_EXCEL\_UI\_RunCore
-Test\_EXCEL\_UI\_RunTitleBarOnly
-Test\_EXCEL\_UI\_RunSnapshotIdentity
-Test\_EXCEL\_UI\_RunAll
+Test_EXCEL_UI_RunCore
+Test_EXCEL_UI_RunTitleBarOnly
+Test_EXCEL_UI_RunSnapshotIdentity
+Test_EXCEL_UI_RunAll
 ```
 
 The release review reports 22 cases, covering:
@@ -1262,25 +1262,25 @@ The harness snapshots the existing host state and attempts to restore it after p
 
 ### `RunAll` does not run all release-critical tests
 
-`Test\_EXCEL\_UI\_RunAll` invokes the main regression pack, but the dedicated `Test\_EXCEL\_UI\_RunSnapshotIdentity` runner is separate. The documented release sequence runs both, but the name `RunAll` overstates its coverage.
+`Test_EXCEL_UI_RunAll` invokes the main regression pack, but the dedicated `Test_EXCEL_UI_RunSnapshotIdentity` runner is separate. The documented release sequence runs both, but the name `RunAll` overstates its coverage.
 
 Recommended correction:
 
 ```text
-Test\_EXCEL\_UI\_RunAll -> calls core, title-bar, and identity packs
+Test_EXCEL_UI_RunAll -> calls core, title-bar, and identity packs
 ```
 
 or rename the existing procedure to:
 
 ```text
-Test\_EXCEL\_UI\_RunGeneral
+Test_EXCEL_UI_RunGeneral
 ```
 
 while preserving the old public name as a compatibility wrapper that now runs everything.
 
 ### Important cases can be skipped
 
-When a pre-existing EXCEL\_UI snapshot exists, snapshot-destructive cases are skipped because the harness cannot reconstruct the caller's prior snapshot object.
+When a pre-existing EXCEL_UI snapshot exists, snapshot-destructive cases are skipped because the harness cannot reconstruct the caller's prior snapshot object.
 
 A green `RunAll` can therefore mean:
 
@@ -1300,7 +1300,7 @@ The harness should retain exact `Window` objects just as the production snapshot
 
 ### Cleanup failure is suppressed
 
-The main runner calls `TST\_RestoreState` under `On Error Resume Next`. A cleanup error does not necessarily fail the test run, and the harness logs PASS before cleanup.
+The main runner calls `TST_RestoreState` under `On Error Resume Next`. A cleanup error does not necessarily fail the test run, and the harness logs PASS before cleanup.
 
 For UI-manipulating tests, cleanup is part of test correctness. A run that passes assertions but leaves Excel in an altered or constrained state is not a clean pass.
 
@@ -1308,9 +1308,9 @@ Recommended result classes:
 
 ```text
 PASS
-FAIL\_ASSERTION
-FAIL\_CLEANUP
-INCOMPLETE\_SKIPPED
+FAIL_ASSERTION
+FAIL_CLEANUP
+INCOMPLETE_SKIPPED
 ```
 
 ### No machine-readable counters
@@ -1334,16 +1334,16 @@ The source candidly notes that some host-refusal states cannot be forced determi
 Add permanent cases for:
 
 ```text
-SDI\_TitleBar\_CaptureA\_ActivateB\_Restore
-SDI\_TitleBar\_TwoWindowDistinctStates
-SDI\_TitleBar\_ClosedCapturedFrame
-SDI\_Ribbon\_TwoWorkbookWindows
-TitleBar\_FrameRefreshFailureRetry
-FailureAccumulator\_FaultInjection
-QuietScope\_WriteRefused
-RunAll\_ReportsSkippedAsIncomplete
-Harness\_CleanupFailureIsFailure
-Snapshot\_WindowCollectionMutation
+SDI_TitleBar_CaptureA_ActivateB_Restore
+SDI_TitleBar_TwoWindowDistinctStates
+SDI_TitleBar_ClosedCapturedFrame
+SDI_Ribbon_TwoWorkbookWindows
+TitleBar_FrameRefreshFailureRetry
+FailureAccumulator_FaultInjection
+QuietScope_WriteRefused
+RunAll_ReportsSkippedAsIncomplete
+Harness_CleanupFailureIsFailure
+Snapshot_WindowCollectionMutation
 ```
 
 ## 11.5 Test verdict
@@ -1352,9 +1352,9 @@ Snapshot\_WindowCollectionMutation
 
 The harness is thoughtful and materially better than typical VBA tests. It needs stronger release-runner semantics, exact object identity for its own cleanup, deterministic fault injection, and automated result capture.
 
-\---
+---
 
-# 12\. Demo and repository tooling review
+# 12. Demo and repository tooling review
 
 ## 12.1 Demo layer
 
@@ -1377,7 +1377,7 @@ The demo should expose:
 * a target-scope selector;
 * active-window targeting;
 * active-workbook-window targeting;
-* `UI\_SetExcelUI\_WithResult` output;
+* `UI_SetExcelUI_WithResult` output;
 * structured snapshot-capture results;
 * structured snapshot-restore results;
 * failure-list rendering;
@@ -1386,7 +1386,7 @@ The demo should expose:
 
 ### Demo-builder size
 
-`M\_DEMO\_BUILDER.bas` is larger than any production module. It is generic and potentially reusable, but it materially increases review surface for a small UI component.
+`M_DEMO_BUILDER.bas` is larger than any production module. It is generic and potentially reusable, but it materially increases review surface for a small UI component.
 
 Options:
 
@@ -1401,9 +1401,9 @@ The repository intentionally excludes `.xlsm` demo files and instructs users to 
 For stronger supply-chain assurance, each release should publish:
 
 ```text
-EXCEL\_UI\_DEMO\_v1.1.0.xlsm
-EXCEL\_UI\_DEMO\_v1.1.0.sha256
-RELEASE\_MANIFEST\_v1.1.0.json
+EXCEL_UI_DEMO_v1.1.0.xlsm
+EXCEL_UI_DEMO_v1.1.0.sha256
+RELEASE_MANIFEST_v1.1.0.json
 ```
 
 The manifest should identify:
@@ -1482,9 +1482,9 @@ pytest                             validates golden cases and idempotence
 
 The tool should either tokenize VBA lines or explicitly skip transformations once a string/comment boundary is reached.
 
-\---
+---
 
-# 13\. Dedicated repository-quality assessment
+# 13. Dedicated repository-quality assessment
 
 ## Repository-quality score: **7.6 / 10**
 
@@ -1492,7 +1492,7 @@ This score is deliberately separate from production-code quality.
 
 The repository has unusually high **editorial and structural maturity** for a VBA project, but substantially lower **operational and enforceable maturity**. In practical terms:
 
-> \*\*The repository explains good engineering discipline better than it automatically proves and enforces it.\*\*
+> **The repository explains good engineering discipline better than it automatically proves and enforces it.**
 
 ## 13.1 Repository-quality scorecard
 
@@ -1759,11 +1759,11 @@ For a tag:
 
 ## 13.5 Repository-quality verdict
 
-> \*\*The repository is professionally written and thoughtfully governed, but its controls are primarily documentary and manual. The next maturity step is not more prose; it is executable enforcement, evidence provenance, and release-state synchronization.\*\*
+> **The repository is professionally written and thoughtfully governed, but its controls are primarily documentary and manual. The next maturity step is not more prose; it is executable enforcement, evidence provenance, and release-state synchronization.**
 
-\---
+---
 
-# 14\. Documentation and release-management review
+# 14. Documentation and release-management review
 
 ## 14.1 README
 
@@ -1812,7 +1812,7 @@ all open workbook windows
 
 #### “Show every managed element” overstatement
 
-`UI\_ShowExcelUI` shows all targetable object-model window elements under the default scope, but title-bar execution is active-frame-dependent. The current phrase should be qualified until the SDI model is fixed.
+`UI_ShowExcelUI` shows all targetable object-model window elements under the default scope, but title-bar execution is active-frame-dependent. The current phrase should be qualified until the SDI model is fixed.
 
 #### XLM requirement
 
@@ -1827,7 +1827,7 @@ Requirements should identify the fixed Excel 4 macro command used for Ribbon con
 * v1.0.1 single-module installations must be replaced as a complete set;
 * mixed internal versions are unsafe;
 * snapshot object references have a release lifecycle;
-* `Workbook\_BeforeClose` is a natural clear point;
+* `Workbook_BeforeClose` is a natural clear point;
 * the binary demo belongs in releases, not Git.
 
 The main improvement is to add an SDI behavior section with a two-workbook example and explicit title-bar/Ribbon scope.
@@ -1889,9 +1889,9 @@ The template asks the right questions about:
 
 The release PR was detailed, but there were no visible formal review submissions. Template quality cannot substitute for approval evidence.
 
-\---
+---
 
-# 15\. Security and platform assessment
+# 15. Security and platform assessment
 
 ## 15.1 Security posture
 
@@ -1940,7 +1940,7 @@ The implementation correctly:
 * validates zero handles;
 * disambiguates ambiguous zero returns;
 * merges only owned bits;
-* uses `SWP\_FRAMECHANGED`;
+* uses `SWP_FRAMECHANGED`;
 * avoids changing position, size, or Z-order.
 
 The next corrections are transactionality and explicit SDI handle identity, not basic declaration repair.
@@ -1962,15 +1962,15 @@ Plain-text source is easy to inspect. The `.xlsm` release asset is executable co
 
 The identified P1 is a correctness/integrity defect rather than an exploit in the conventional sense, unless a concrete adversarial availability or integrity impact is demonstrated.
 
-\---
+---
 
-# 16\. Findings summary
+# 16. Findings summary
 
 |ID|Severity|Area|Finding|
 |-|-|-|-|
 |ICR-UI-P1-01|**P1**|SDI / snapshot correctness|Title-bar snapshot state is not bound to the captured SDI window; activation changes can restore the state to the wrong top-level frame|
 |ICR-UI-P2-01|**P2**|Ribbon / SDI contract|Ribbon state is modeled as one application Boolean although modern Excel has one Ribbon per workbook window; cross-window behavior is unspecified and untested|
-|ICR-UI-P2-02|**P2**|Error handling|`UI\_RuntimeAddFailure` can raise while handling another failure and mask the original error|
+|ICR-UI-P2-02|**P2**|Error handling|`UI_RuntimeAddFailure` can raise while handling another failure and mask the original error|
 |ICR-UI-P2-03|**P2**|WinAPI transaction|A successful style write followed by failed frame refresh leaves partial mutation; a retry can no-op without refreshing|
 |ICR-UI-P2-04|**P2**|Title-bar ownership|Owned title-bar bits are cached once per currently observed handle and can become stale or be displaced when active SDI windows change|
 |ICR-UI-P2-05|**P2**|CI / release evidence|The exact release commit has no automated workflow/status evidence; manual PASS claims are not machine-readable or environment-complete|
@@ -1986,9 +1986,9 @@ The identified P1 is a correctness/integrity defect rather than an exploit in th
 |ICR-UI-P3-07|**P3**|Compatibility wording|“No migration required” is true for caller code but not for deployment from the prior single-module package|
 |ICR-UI-P3-08|**P3**|Repository footprint|Large media assets dominate a small source repository and can be optimized or moved outside Git history|
 
-\---
+---
 
-# 17\. Detailed findings
+# 17. Detailed findings
 
 ## ICR-UI-P1-01 — Title-bar snapshot restoration is not SDI identity-safe
 
@@ -1999,10 +1999,10 @@ The identified P1 is a correctness/integrity defect rather than an exploit in th
 ### Affected public behavior
 
 ```text
-UI\_CaptureExcelUIState
-UI\_CaptureExcelUIState\_WithResult
-UI\_ResetExcelUIToSnapshot
-UI\_ResetExcelUIToSnapshot\_WithResult
+UI_CaptureExcelUIState
+UI_CaptureExcelUIState_WithResult
+UI_ResetExcelUIToSnapshot
+UI_ResetExcelUIToSnapshot_WithResult
 ```
 
 The same underlying scope issue also affects selective and show/hide title-bar operations.
@@ -2012,8 +2012,8 @@ The same underlying scope issue also affects selective and show/hide title-bar o
 Snapshot state contains only:
 
 ```vb
-m\_SnapshotTitleBarKnown
-m\_SnapshotTitleBarVisible
+m_SnapshotTitleBarKnown
+m_SnapshotTitleBarVisible
 ```
 
 The title-bar worker resolves:
@@ -2094,13 +2094,13 @@ End Type
 The internal title-bar surface should accept an explicit handle:
 
 ```vb
-UI\_TryGetTitleBarVisibleForHwnd
-UI\_TrySetTitleBarVisibleForHwndIfNeeded
+UI_TryGetTitleBarVisibleForHwnd
+UI_TrySetTitleBarVisibleForHwndIfNeeded
 ```
 
 The existing no-argument helpers can remain as active-window compatibility wrappers.
 
-\---
+---
 
 ## ICR-UI-P2-01 — Ribbon scope under SDI is unspecified and unverified
 
@@ -2133,7 +2133,7 @@ A P2 contract can be closed either by:
 * implementing deterministic all-window behavior; or
 * narrowing the public contract to the empirically confirmed active-window behavior.
 
-\---
+---
 
 ## ICR-UI-P2-02 — Failure accumulation can mask the original failure
 
@@ -2143,14 +2143,14 @@ A P2 contract can be closed either by:
 
 ### Root cause
 
-`UI\_RuntimeAddFailure` grows a dynamic array without an internal error boundary and is called from failure paths.
+`UI_RuntimeAddFailure` grows a dynamic array without an internal error boundary and is called from failure paths.
 
 ### Failure sequence
 
 ```text
 Original Excel/WinAPI failure
-    -> UI\_RuntimeHandleFailure
-        -> UI\_RuntimeAddFailure
+    -> UI_RuntimeHandleFailure
+        -> UI_RuntimeAddFailure
             -> ReDim Preserve or assignment raises
                 -> original failure detail lost or replaced
 ```
@@ -2171,7 +2171,7 @@ Original Excel/WinAPI failure
 * add a fault-injection test;
 * document whether failure-count overflow/list-allocation failure is itself returned.
 
-\---
+---
 
 ## ICR-UI-P2-03 — Title-bar write and frame refresh are not transactional
 
@@ -2181,7 +2181,7 @@ Original Excel/WinAPI failure
 
 ### Root cause
 
-`SetWindowLong` can succeed before `SetWindowPos(... SWP\_FRAMECHANGED)` fails.
+`SetWindowLong` can succeed before `SetWindowPos(... SWP_FRAMECHANGED)` fails.
 
 The module then returns failure but retains no state that the frame refresh is incomplete.
 
@@ -2212,7 +2212,7 @@ This is the minimum corrective behavior.
 
 The API boundary needs a test seam so `SetWindowPos` can be forced to fail after a successful style write. The next call must prove that refresh is retried.
 
-\---
+---
 
 ## ICR-UI-P2-04 — Title-bar baseline can become stale or be displaced
 
@@ -2241,7 +2241,7 @@ Under SDI, activating another workbook replaces the singleton handle/baseline pa
 * document conflict policy with other add-ins;
 * add cross-component simulation tests using synthetic style-bit changes.
 
-\---
+---
 
 ## ICR-UI-P2-05 — No automated release evidence on the exact SHA
 
@@ -2277,7 +2277,7 @@ Manual evidence does not prove these are identical.
 * require green checks before tag publication;
 * include the test artifact in the release.
 
-\---
+---
 
 ## ICR-UI-P2-06 — Tagged README remains in release-candidate state
 
@@ -2311,7 +2311,7 @@ release/v1.1.0 line wording
 * move future release tasks to an issue/project;
 * add CI that checks README version/status markers against the tag/changelog.
 
-\---
+---
 
 ## ICR-UI-P2-07 — Regression runner semantics permit incomplete green results
 
@@ -2338,7 +2338,7 @@ release/v1.1.0 line wording
 * fail separately on cleanup failure;
 * export machine-readable evidence.
 
-\---
+---
 
 ## ICR-UI-P2-08 — Demo does not exercise v1.1.0's main features
 
@@ -2362,7 +2362,7 @@ explain SDI title-bar target
 
 Update both demo source and release workbook, then test the final binary against the exact tag. Include screenshots that reflect the current controls.
 
-\---
+---
 
 ## ICR-UI-P3-01 — Prefer immediate `Err.LastDllError` handling
 
@@ -2382,7 +2382,7 @@ LastErr = Err.LastDllError
 
 Capture it before any other VBA or API operation.
 
-\---
+---
 
 ## ICR-UI-P3-02 — State writes are not read back
 
@@ -2401,7 +2401,7 @@ compare
 
 Production calls can remain best effort to avoid excessive host interaction.
 
-\---
+---
 
 ## ICR-UI-P3-03 — Quiet-scope state flag is optimistic
 
@@ -2411,7 +2411,7 @@ Production calls can remain best effort to avoid excessive host interaction.
 
 Only mark the quiet scope as changed when the `ScreenUpdating=False` write succeeds. Otherwise cleanup should not imply ownership of a state transition that did not occur.
 
-\---
+---
 
 ## ICR-UI-P3-04 — Reformatter is not token-safe
 
@@ -2421,7 +2421,7 @@ Only mark the quiet scope as changed when the `ScreenUpdating=False` write succe
 
 The release-specific transformation was independently checked at statement level, but the general tool can alter matching text inside comments or strings. Add tokenizer-aware processing and golden tests before treating it as a general source formatter.
 
-\---
+---
 
 ## ICR-UI-P3-05 — Release asset and evidence provenance are incomplete
 
@@ -2431,7 +2431,7 @@ The release-specific transformation was independently checked at statement level
 
 Make checksums and release manifests mandatory, not optional. Publish the exact final workbook tested after final save.
 
-\---
+---
 
 ## ICR-UI-P3-06 — Known debt should be in the issue tracker
 
@@ -2441,7 +2441,7 @@ Make checksums and release manifests mandatory, not optional. Publish the exact 
 
 Convert every explicit merged-PR follow-up into an issue with severity, acceptance criteria, and target milestone. A zero-open-issue dashboard should not conceal known deferred defects.
 
-\---
+---
 
 ## ICR-UI-P3-07 — Compatibility wording conflates code and deployment
 
@@ -2458,9 +2458,9 @@ Installation/package migration from v1.0.1: replace one module with four
 
 This preserves the valid SemVer claim without understating deployment work.
 
-\---
+---
 
-# 18\. Prioritized remediation plan
+# 18. Prioritized remediation plan
 
 ## Release Gate 1 — Correct SDI frame identity
 
@@ -2539,9 +2539,9 @@ This preserves the valid SemVer claim without understating deployment work.
 5. Add golden tests and idempotence tests.
 6. Run tooling checks in CI.
 
-\---
+---
 
-# 19\. Recommended v1.1.1 scope
+# 19. Recommended v1.1.1 scope
 
 A focused v1.1.1 should prioritize correctness and release assurance rather than new UI features.
 
@@ -2586,9 +2586,9 @@ To keep the patch reviewable, do not combine the corrective release with:
 * COM add-in architecture;
 * unrelated demo-framework redesign.
 
-\---
+---
 
-# 20\. Release-readiness assessment
+# 20. Release-readiness assessment
 
 ## Suitable now
 
@@ -2602,7 +2602,7 @@ The component is suitable for:
 * single-active-window workflows;
 * per-window Headings, Workbook Tabs, and Gridlines control;
 * snapshot restore where title-bar cross-window identity is not relied upon;
-* governed callers that use `\_WithResult` APIs and maintain an accessible recovery macro.
+* governed callers that use `_WithResult` APIs and maintain an accessible recovery macro.
 
 ## Required operating controls
 
@@ -2614,7 +2614,7 @@ For production use of v1.1.0:
 4. run all four documented runners in a clean Excel session;
 5. verify no mandatory snapshot cases were skipped;
 6. test with the actual workbook-window count and Office bitness;
-7. keep `UI\_ShowExcelUI` independently accessible;
+7. keep `UI_ShowExcelUI` independently accessible;
 8. clear snapshots at the intended lifecycle point;
 9. avoid relying on title-bar snapshot identity across active-window changes;
 10. characterize Ribbon behavior in the target Office environment;
@@ -2640,9 +2640,9 @@ cryptographically source-bound demo binary
 
 The release is usable and thoughtfully engineered, but one cross-window correctness issue and several evidence/governance gaps prevent a stronger certification.
 
-\---
+---
 
-# 21\. Final verdict
+# 21. Final verdict
 
 VBA Excel UI v1.1.0 demonstrates a level of engineering discipline rarely seen in small pure-VBA repositories:
 
@@ -2663,12 +2663,12 @@ The release's central remaining weakness is an architectural mismatch between mo
 
 The repository itself is polished but not yet self-enforcing. Its documentation, templates, and release narrative are stronger than its automated validation, release provenance, and status synchronization.
 
-> \*\*Final overall score: 8.0 / 10\*\*  
-> \*\*Production-code quality: 8.3 / 10\*\*  
-> \*\*Repository quality: 7.6 / 10\*\*  
-> \*\*Classification: strong professional VBA component requiring one material SDI correctness fix and a targeted upgrade from manual process controls to executable release assurance.\*\*
+> **Final overall score: 8.0 / 10**  
+> **Production-code quality: 8.3 / 10**  
+> **Repository quality: 7.6 / 10**  
+> **Classification: strong professional VBA component requiring one material SDI correctness fix and a targeted upgrade from manual process controls to executable release assurance.**
 
-\---
+---
 
 # Appendix A — Representative assurance inventory
 
@@ -2692,16 +2692,16 @@ The repository itself is polished but not yet self-enforcing. Its documentation,
 |Formal PR review submissions|none visible|
 |Open issues at review time|0|
 
-\---
+---
 
 # Appendix B — Suggested GitHub issues
 
 1. `Bind title-bar snapshot state to the captured SDI Window/HWND`
 2. `Store title-bar owned-bit baselines per HWND`
 3. `Characterize and document Ribbon visibility across SDI workbook windows`
-4. `Make UI\_RuntimeAddFailure non-raising inside error paths`
+4. `Make UI_RuntimeAddFailure non-raising inside error paths`
 5. `Retry or roll back title-bar frame refresh after SetWindowPos failure`
-6. `Make Test\_EXCEL\_UI\_RunAll execute the snapshot-identity pack`
+6. `Make Test_EXCEL_UI_RunAll execute the snapshot-identity pack`
 7. `Fail release validation when mandatory test cases are skipped`
 8. `Treat test-harness cleanup failure as a failed run`
 9. `Retain exact Window identities in test cleanup`
@@ -2715,7 +2715,7 @@ The repository itself is polished but not yet self-enforcing. Its documentation,
 17. `Separate caller-code compatibility from installation migration wording`
 18. `Optimize or externalize large repository media assets`
 
-\---
+---
 
 # Appendix C — Evidence confidence
 
@@ -2735,7 +2735,7 @@ The repository itself is polished but not yet self-enforcing. Its documentation,
 |Branch-protection configuration|Not independently verified|
 |Performance impact|Low concern; no formal benchmark performed|
 
-\---
+---
 
 # Appendix D — Review limitations
 

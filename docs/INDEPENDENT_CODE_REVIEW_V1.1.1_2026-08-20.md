@@ -1,16 +1,16 @@
 # Independent Code and Repository Review — VBA Excel UI v1.1.1
 
-> \*\*Repository:\*\* \[`danielep71/VBA-EXCEL\_UI`](https://github.com/danielep71/VBA-EXCEL\_UI)  
-> \*\*Release reviewed:\*\* \[`v1.1.1`](https://github.com/danielep71/VBA-EXCEL\_UI/releases/tag/v1.1.1)  
-> \*\*Tag / merge commit reviewed:\*\* \[`b4df9be28a19ccc4ffc76df1a2cadfa2423b31e1`](https://github.com/danielep71/VBA-EXCEL\_UI/commit/b4df9be28a19ccc4ffc76df1a2cadfa2423b31e1)  
-> \*\*Exact tree reviewed:\*\* `90e3d5fdff7007b44bce69704ef3757b3e5b3484`  
-> \*\*Comparison baseline:\*\* `v1.1.0`  
-> \*\*Review date:\*\* 2026-08-20   
-> \*\*Suggested repository path:\*\* `docs/INDEPENDENT\_CODE\_REVIEW\_V1.1.1\_2026-08-20.md`
+> **Repository:** [`danielep71/VBA-EXCEL_UI`](https://github.com/danielep71/VBA-EXCEL_UI)  
+> **Release reviewed:** [`v1.1.1`](https://github.com/danielep71/VBA-EXCEL_UI/releases/tag/v1.1.1)  
+> **Tag / merge commit reviewed:** [`b4df9be28a19ccc4ffc76df1a2cadfa2423b31e1`](https://github.com/danielep71/VBA-EXCEL_UI/commit/b4df9be28a19ccc4ffc76df1a2cadfa2423b31e1)  
+> **Exact tree reviewed:** `90e3d5fdff7007b44bce69704ef3757b3e5b3484`  
+> **Comparison baseline:** `v1.1.0`  
+> **Review date:** 2026-08-20   
+> **Suggested repository path:** `docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md`
 
-\---
+---
 
-## 1\. Executive assessment
+## 1. Executive assessment
 
 ### Overall repository score: **8.5 / 10**
 
@@ -42,13 +42,13 @@
 
 The central `v1.1.0` title-bar defect has been corrected in the intended direction. Snapshot restore no longer reads `Application.Hwnd` at restore time and silently applies the captured title-bar state to whichever workbook happens to be active. The snapshot now retains the captured handle and the associated Excel `Window`, validates them before writing, and uses the explicit-handle title-bar path.
 
-The release also closes the most important transactional weakness in the title-bar subsystem. A successful `GWL\_STYLE` write followed by a failed `SetWindowPos(... SWP\_FRAMECHANGED)` is now recorded as outstanding refresh debt and retried before a later no-op decision can report success.
+The release also closes the most important transactional weakness in the title-bar subsystem. A successful `GWL_STYLE` write followed by a failed `SetWindowPos(... SWP_FRAMECHANGED)` is now recorded as outstanding refresh debt and retried before a later no-op decision can report success.
 
 The release is nevertheless **not free of material correctness and certification defects**.
 
 The most important remaining production defect is already measured and recorded by the repository itself:
 
-> \*\*Ribbon snapshot restoration is still not window-identity-safe. A Ribbon value captured from workbook window A is restored to whichever window is active, potentially window B, while A remains unrestored and the operation reports success.\*\*
+> **Ribbon snapshot restoration is still not window-identity-safe. A Ribbon value captured from workbook window A is restored to whichever window is active, potentially window B, while A remains unrestored and the operation reports success.**
 
 This is not merely an undocumented uncertainty. The repository's own SDI probe reproduced it, and open issue `#23` correctly labels it **P1**. The README now discloses it, which is a significant governance improvement, but documentation does not make the behavior correct. A caller using the snapshot API in a multi-window session can still receive a silent wrong-target result.
 
@@ -70,11 +70,11 @@ Repository quality has improved sharply but is held back by three visible contra
 
 ### Independent verdict
 
-> \*\*`v1.1.1` is a strong corrective release with a mature core architecture and much better assurance infrastructure. It is suitable for controlled single-window use and for multi-window use that does not rely on Ribbon snapshot restoration. It should not yet be described as fully window-identity-safe across the complete managed UI surface, and its release-certification runner needs a corrective pass before it can be treated as authoritative automation.\*\*
+> **`v1.1.1` is a strong corrective release with a mature core architecture and much better assurance infrastructure. It is suitable for controlled single-window use and for multi-window use that does not rely on Ribbon snapshot restoration. It should not yet be described as fully window-identity-safe across the complete managed UI surface, and its release-certification runner needs a corrective pass before it can be treated as authoritative automation.**
 
-\---
+---
 
-## 2\. What materially improved from v1.1.0
+## 2. What materially improved from v1.1.0
 
 The score improvement from **8.0** to **8.5** is justified by real engineering changes rather than documentation volume.
 
@@ -86,8 +86,8 @@ The score improvement from **8.0** to **8.5** is justified by real engineering c
 |Failure-list growth could raise inside an error handler|**Corrected**|Count remains authoritative; append is guarded and truncation is surfaced where possible|
 |Ribbon scope under SDI unmeasured|**Measured**|Active-window-only model established on one host|
 |Ribbon snapshot identity behavior unknown|**Confirmed defect; not fixed**|Open P1 issue `#23`|
-|`Test\_EXCEL\_UI\_RunAll` could be partial without an unambiguous verdict|**Partially corrected**|New release-certification runner, but runner contains defects discussed below|
-|No hosted static gate|**Corrected**|`tools/check\_repo.py` and GitHub Actions workflow added|
+|`Test_EXCEL_UI_RunAll` could be partial without an unambiguous verdict|**Partially corrected**|New release-certification runner, but runner contains defects discussed below|
+|No hosted static gate|**Corrected**|`tools/check_repo.py` and GitHub Actions workflow added|
 |No versioned public-surface inventory|**Partially corrected**|Name-level manifest added; signatures and enum values remain unguarded|
 |README retained pre-release state|**Corrected**|Stable release state, current architecture and known limitations documented|
 |Demo did not exercise `v1.1.0` features|**Open**|Explicitly deferred to `v1.2.0` as issue `#22`|
@@ -96,9 +96,9 @@ The score improvement from **8.0** to **8.5** is justified by real engineering c
 
 The important point is that the design has converged. The remaining work does not require abandoning the four-module architecture. It requires completing the SDI contract, hardening identity and evidence handling, and removing documentation duplication that is already drifting.
 
-\---
+---
 
-# 3\. Review scope and methodology
+# 3. Review scope and methodology
 
 ## 3.1 Exact source basis
 
@@ -116,26 +116,26 @@ The reviewed scope included:
 
 ### Production VBA
 
-* `src/M\_EXCEL\_UI.bas`
-* `src/M\_EXCEL\_UI\_RUNTIME.bas`
-* `src/M\_EXCEL\_UI\_SNAPSHOT.bas`
-* `src/M\_EXCEL\_UI\_TITLEBAR.bas`
+* `src/M_EXCEL_UI.bas`
+* `src/M_EXCEL_UI_RUNTIME.bas`
+* `src/M_EXCEL_UI_SNAPSHOT.bas`
+* `src/M_EXCEL_UI_TITLEBAR.bas`
 
 ### Regression and release certification
 
-* `test/M\_EXCEL\_UI\_REGRESSION\_TESTS.bas`
+* `test/M_EXCEL_UI_REGRESSION_TESTS.bas`
 
 ### Demo source
 
-* `demo/M\_EXCEL\_UI\_DEMO.bas`
-* `demo/M\_DEMO\_BUILDER.bas`
+* `demo/M_EXCEL_UI_DEMO.bas`
+* `demo/M_DEMO_BUILDER.bas`
 
 ### Repository automation
 
 * `.github/workflows/static-checks.yml`
-* `tools/check\_repo.py`
+* `tools/check_repo.py`
 * `tools/reformat.py`
-* `tools/public\_api\_manifest.txt`
+* `tools/public_api_manifest.txt`
 
 ### Documentation and governance
 
@@ -144,9 +144,9 @@ The reviewed scope included:
 * `CHANGELOG.md`
 * `CONTRIBUTING.md`
 * `SECURITY.md`
-* `CODE\_OF\_CONDUCT.md`
+* `CODE_OF_CONDUCT.md`
 * `.github` issue and pull-request templates
-* `docs/RIBBON\_SDI\_BEHAVIOR.md`
+* `docs/RIBBON_SDI_BEHAVIOR.md`
 * the prior independent `v1.1.0` review
 * the public GitHub Wiki home page
 * release pull request `#24`, its review threads and workflow state
@@ -158,7 +158,7 @@ Desktop Microsoft Excel was not available in the review environment. The reviewe
 
 * import the modules into the Visual Basic Editor;
 * execute `Debug -> Compile VBAProject`;
-* run `Test\_EXCEL\_UI\_RunReleaseCertification` independently;
+* run `Test_EXCEL_UI_RunReleaseCertification` independently;
 * reproduce the Ribbon or title-bar SDI tests interactively;
 * execute 32-bit Office paths;
 * inspect the binary demo workbook directly.
@@ -167,7 +167,7 @@ The review distinguishes among:
 
 * **source-confirmed behavior**, established from the committed control flow;
 * **repository-reported Excel evidence**, particularly the certification block in `CHANGELOG.md`;
-* **host measurements committed by the project**, particularly `docs/RIBBON\_SDI\_BEHAVIOR.md`;
+* **host measurements committed by the project**, particularly `docs/RIBBON_SDI_BEHAVIOR.md`;
 * **review-process evidence**, including unresolved pull-request threads;
 * **operational state not independently verified**, including branch protection and a behavioral test run on the exact tag outside the repository's recorded evidence.
 
@@ -180,9 +180,9 @@ The review uses two stable platform facts:
 
 No conclusion depends on unpublished or proprietary behavior.
 
-\---
+---
 
-# 4\. Hard repository metrics
+# 4. Hard repository metrics
 
 ## 4.1 Source scale
 
@@ -203,7 +203,7 @@ The project is no longer a small utility module. Its production code is roughly 
 |Supported facade enums|2|
 |Supported facade callable members|10|
 |**Supported caller-facing facade total**|**12**|
-|Project-public members listed in `tools/public\_api\_manifest.txt`|**38**|
+|Project-public members listed in `tools/public_api_manifest.txt`|**38**|
 |Public regression / certification / characterization entry points|at least 7|
 |Mandatory release-certification units|3|
 
@@ -246,9 +246,9 @@ RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
 
 This is meaningful evidence, but it is one host, one bitness and one Office build. The generated JSON does not carry a release tag, commit SHA or source hash.
 
-\---
+---
 
-# 5\. Scoring methodology
+# 5. Scoring methodology
 
 A score of 10 requires:
 
@@ -294,42 +294,42 @@ Rounded overall score:
 |7.0-7.9|Good foundation with significant correctness or assurance gaps|
 |Below 7.0|Major architectural, correctness or governance deficiencies|
 
-\---
+---
 
-# 6\. Component scores
+# 6. Component scores
 
 |Component|Score|Assessment|
 |-|-:|-|
-|`M\_EXCEL\_UI`|**8.8**|Stable facade and backward-compatible targeting; source header still states obsolete scope and version metadata|
-|`M\_EXCEL\_UI\_RUNTIME`|**9.0**|Strong non-raising diagnostic redesign; truncation and quiet-scope edge contracts remain imperfect|
-|`M\_EXCEL\_UI\_SNAPSHOT`|**9.0**|Title-bar capture/restore is materially safer; Ribbon remains a confirmed wrong-target path|
-|`M\_EXCEL\_UI\_TITLEBAR`|**8.6**|Excellent explicit-target and refresh-debt design; numeric-handle registry is vulnerable to handle reuse|
-|`M\_EXCEL\_UI\_REGRESSION\_TESTS`|**8.1**|Ambitious certification and SDI coverage; certification has several correctness and cleanup-verification defects|
+|`M_EXCEL_UI`|**8.8**|Stable facade and backward-compatible targeting; source header still states obsolete scope and version metadata|
+|`M_EXCEL_UI_RUNTIME`|**9.0**|Strong non-raising diagnostic redesign; truncation and quiet-scope edge contracts remain imperfect|
+|`M_EXCEL_UI_SNAPSHOT`|**9.0**|Title-bar capture/restore is materially safer; Ribbon remains a confirmed wrong-target path|
+|`M_EXCEL_UI_TITLEBAR`|**8.6**|Excellent explicit-target and refresh-debt design; numeric-handle registry is vulnerable to handle reuse|
+|`M_EXCEL_UI_REGRESSION_TESTS`|**8.1**|Ambitious certification and SDI coverage; certification has several correctness and cleanup-verification defects|
 |Demo source and release asset|**6.5**|Attractive foundation, but current feature journeys are absent, presets are recorded as broken, and error diagnostics retain an old defect|
-|`tools/check\_repo.py`|**8.0**|Valuable hosted gate; parser and API-contract coverage are narrower than its release-safety claims|
+|`tools/check_repo.py`|**8.0**|Valuable hosted gate; parser and API-contract coverage are narrower than its release-safety claims|
 |`tools/reformat.py`|**7.8**|Idempotent check/write modes are useful; label rewriting is not token-aware and can alter string data|
 |Root documentation|**8.8**|Candid, technically rich and substantially updated; a few internal contradictions and stale source headers remain|
 |Public GitHub Wiki|**4.5**|Materially obsolete and unsafe as installation guidance for the current release|
 |Repository governance|**7.8**|Strong templates and issue backlog; release merged with two unresolved P2 review threads|
 
-\---
+---
 
-# 7\. Architectural review
+# 7. Architectural review
 
 ## 7.1 Current dependency model
 
 ```text
-M\_EXCEL\_UI
-├── M\_EXCEL\_UI\_RUNTIME
-├── M\_EXCEL\_UI\_TITLEBAR
-└── M\_EXCEL\_UI\_SNAPSHOT
-    ├── M\_EXCEL\_UI\_RUNTIME
-    └── M\_EXCEL\_UI\_TITLEBAR
+M_EXCEL_UI
+├── M_EXCEL_UI_RUNTIME
+├── M_EXCEL_UI_TITLEBAR
+└── M_EXCEL_UI_SNAPSHOT
+    ├── M_EXCEL_UI_RUNTIME
+    └── M_EXCEL_UI_TITLEBAR
 ```
 
 The graph remains acyclic.
 
-### `M\_EXCEL\_UI`
+### `M_EXCEL_UI`
 
 Owns:
 
@@ -340,7 +340,7 @@ Owns:
 * application and window apply orchestration;
 * compatibility wrappers.
 
-### `M\_EXCEL\_UI\_RUNTIME`
+### `M_EXCEL_UI_RUNTIME`
 
 Owns:
 
@@ -350,7 +350,7 @@ Owns:
 * Ribbon reads and writes;
 * redraw suppression.
 
-### `M\_EXCEL\_UI\_SNAPSHOT`
+### `M_EXCEL_UI_SNAPSHOT`
 
 Owns:
 
@@ -360,7 +360,7 @@ Owns:
 * title-bar captured handle, window and label;
 * capture and restoration sequencing.
 
-### `M\_EXCEL\_UI\_TITLEBAR`
+### `M_EXCEL_UI_TITLEBAR`
 
 Owns:
 
@@ -375,7 +375,7 @@ Owns:
 
 ### One public facade
 
-Caller code remains concentrated on the established `UI\_...` surface. The corrective release does not expose a second competing object model.
+Caller code remains concentrated on the established `UI_...` surface. The corrective release does not expose a second competing object model.
 
 ### Exact mutable-state ownership
 
@@ -390,11 +390,11 @@ The title-bar subsystem now has read and write paths that accept a supplied `hWn
 Only the five declared frame bits are changed:
 
 ```text
-WS\_CAPTION
-WS\_SYSMENU
-WS\_THICKFRAME
-WS\_MINIMIZEBOX
-WS\_MAXIMIZEBOX
+WS_CAPTION
+WS_SYSMENU
+WS_THICKFRAME
+WS_MINIMIZEBOX
+WS_MAXIMIZEBOX
 ```
 
 Unrelated current style bits are preserved.
@@ -436,11 +436,11 @@ Compaction based on `IsWindow` is insufficient once a value has been reused, bec
 
 No architectural rewrite is recommended. The existing decomposition should be retained. The remaining identity problem is local to the frame registry and can be corrected without changing the caller-facing API.
 
-\---
+---
 
-# 8\. Production-code review
+# 8. Production-code review
 
-## 8.1 `M\_EXCEL\_UI` — **8.8 / 10**
+## 8.1 `M_EXCEL_UI` — **8.8 / 10**
 
 ### Strengths
 
@@ -451,7 +451,7 @@ No architectural rewrite is recommended. The existing decomposition should be re
 * no-op writes are suppressed where reads are available;
 * structured and fire-and-forget entry points share one worker;
 * legacy parameter order is preserved;
-* `UI\_ShowExcelUI` remains separate from snapshot restoration.
+* `UI_ShowExcelUI` remains separate from snapshot restoration.
 
 ### No executable regression in v1.1.1
 
@@ -482,7 +482,7 @@ This does not change execution, but it places obsolete architecture text at the 
 
 ### Public-wrapper scope asymmetry
 
-`UI\_HideExcelUI` and `UI\_ShowExcelUI`:
+`UI_HideExcelUI` and `UI_ShowExcelUI`:
 
 * apply Headings, Workbook Tabs and Gridlines to all current Excel windows by default;
 * apply Ribbon and Title Bar only to the active window;
@@ -490,9 +490,9 @@ This does not change execution, but it places obsolete architecture text at the 
 
 The behavior is now documented, but the wrapper names continue to sound more globally uniform than the operations actually are. This should be addressed in the `v1.2.0` scope design rather than through a breaking patch.
 
-\---
+---
 
-## 8.2 `M\_EXCEL\_UI\_RUNTIME` — **9.0 / 10**
+## 8.2 `M_EXCEL_UI_RUNTIME` — **9.0 / 10**
 
 ### Failure accumulation redesign
 
@@ -519,7 +519,7 @@ The changelog correctly tells callers to treat `FailureCount` as authoritative. 
 
 ### Quiet-update scope remains optimistic
 
-`UI\_RuntimeBeginQuietUpdate` runs under `On Error Resume Next` and sets `QuietModeChanged = True` immediately after requesting `Application.ScreenUpdating = False`. It does not verify that the assignment succeeded.
+`UI_RuntimeBeginQuietUpdate` runs under `On Error Resume Next` and sets `QuietModeChanged = True` immediately after requesting `Application.ScreenUpdating = False`. It does not verify that the assignment succeeded.
 
 The practical risk is low, but the declared contract — “True only when this scope actually changed the setting” — is stronger than the implementation.
 
@@ -536,20 +536,20 @@ under the same narrow protected scope.
 
 The generic property and Ribbon setters treat a non-raising write as success. Excel's object model usually raises when a write is refused, but a readback would distinguish “call returned” from “requested state achieved.” This remains a P3 hardening item.
 
-\---
+---
 
-## 8.3 `M\_EXCEL\_UI\_SNAPSHOT` — **9.0 / 10**
+## 8.3 `M_EXCEL_UI_SNAPSHOT` — **9.0 / 10**
 
 ### Title-bar identity correction
 
 The snapshot now retains:
 
 ```text
-m\_SnapshotTitleBarHwnd
-m\_SnapshotTitleBarWindow
-m\_SnapshotTitleBarLabel
-m\_SnapshotTitleBarVisible
-m\_SnapshotTitleBarKnown
+m_SnapshotTitleBarHwnd
+m_SnapshotTitleBarWindow
+m_SnapshotTitleBarLabel
+m_SnapshotTitleBarVisible
+m_SnapshotTitleBarKnown
 ```
 
 Capture resolves the active frame once and reads through that retained handle. Restore refuses to fall back to whichever window is active.
@@ -595,11 +595,11 @@ This is the most important remaining production defect.
 
 ### Resource lifetime
 
-The additional retained title-bar `Window` reference increases the importance of `UI\_ClearExcelUIStateSnapshot`. The repository documents this clearly. Restore intentionally retains the snapshot for replay; it is not a release operation.
+The additional retained title-bar `Window` reference increases the importance of `UI_ClearExcelUIStateSnapshot`. The repository documents this clearly. Restore intentionally retains the snapshot for replay; it is not a release operation.
 
-\---
+---
 
-## 8.4 `M\_EXCEL\_UI\_TITLEBAR` — **8.6 / 10**
+## 8.4 `M_EXCEL_UI_TITLEBAR` — **8.6 / 10**
 
 ### Explicit-target API
 
@@ -647,9 +647,9 @@ This is excellent state-machine design.
 Registry lookup scans for numeric equality and returns a slot before compaction:
 
 ```vb
-For Slot = 1 To m\_FrameStateCount
-    If m\_FrameStates(Slot).Hwnd = TargetHwnd Then
-        UI\_FrameStateIndexForHwnd = Slot
+For Slot = 1 To m_FrameStateCount
+    If m_FrameStates(Slot).Hwnd = TargetHwnd Then
+        UI_FrameStateIndexForHwnd = Slot
         Exit Function
     End If
 Next Slot
@@ -685,7 +685,7 @@ The code clears and reads the thread last-error through declared WinAPI function
 
 After a style write and frame refresh, the code does not re-read the style. A final readback of the owned mask would provide stronger evidence that the requested state was achieved.
 
-\---
+---
 
 ## 8.5 Demo source — **6.5 / 10**
 
@@ -696,7 +696,7 @@ The demo remains the weakest code area.
 The source and published workbook do not expose:
 
 * `UIWindowTargetScope` selection;
-* structured `\*\_WithResult` diagnostics;
+* structured `*_WithResult` diagnostics;
 * rendered failure lists;
 * snapshot capture -> mutate -> restore -> clear lifecycle;
 * multi-window SDI behavior;
@@ -709,7 +709,7 @@ Open issue `#22` records that the preset controls do not function. The README ca
 
 ### Demo error diagnostics retain an old production defect
 
-`Demo\_GetRuntimeErrorText` executes:
+`Demo_GetRuntimeErrorText` executes:
 
 ```vb
 On Error Resume Next
@@ -738,11 +738,11 @@ On Error Resume Next
 
 ### Distribution asset
 
-The latest published demo remains `EXCEL\_UI\_DEMO\_v1.1.0.xlsm`. It is not a `v1.1.1` artifact, does not demonstrate the corrected title-bar behavior, and has no published checksum in the current release documentation.
+The latest published demo remains `EXCEL_UI_DEMO_v1.1.0.xlsm`. It is not a `v1.1.1` artifact, does not demonstrate the corrected title-bar behavior, and has no published checksum in the current release documentation.
 
-\---
+---
 
-# 9\. Public API and compatibility review
+# 9. Public API and compatibility review
 
 ## 9.1 Supported facade
 
@@ -758,16 +758,16 @@ UIWindowTargetScope
 ### Callables
 
 ```text
-UI\_SetExcelUI
-UI\_SetExcelUI\_WithResult
-UI\_HideExcelUI
-UI\_ShowExcelUI
-UI\_CaptureExcelUIState
-UI\_CaptureExcelUIState\_WithResult
-UI\_ResetExcelUIToSnapshot
-UI\_ResetExcelUIToSnapshot\_WithResult
-UI\_HasExcelUIStateSnapshot
-UI\_ClearExcelUIStateSnapshot
+UI_SetExcelUI
+UI_SetExcelUI_WithResult
+UI_HideExcelUI
+UI_ShowExcelUI
+UI_CaptureExcelUIState
+UI_CaptureExcelUIState_WithResult
+UI_ResetExcelUIToSnapshot
+UI_ResetExcelUIToSnapshot_WithResult
+UI_HasExcelUIStateSnapshot
+UI_ClearExcelUIStateSnapshot
 ```
 
 No supported name, parameter position, type, default or enum value was changed in `v1.1.1`.
@@ -782,7 +782,7 @@ The README now explains this well:
 
 ## 9.3 API manifest is name-level only
 
-`tools/public\_api\_manifest.txt` records:
+`tools/public_api_manifest.txt` records:
 
 ```text
 module
@@ -808,11 +808,11 @@ A breaking change such as moving `FailureCount`, changing a default target scope
 Use two files:
 
 ```text
-tools/supported\_api\_manifest.txt
-  full normalized declarations for M\_EXCEL\_UI
+tools/supported_api_manifest.txt
+  full normalized declarations for M_EXCEL_UI
   enum members and values
 
-tools/project\_public\_surface\_manifest.txt
+tools/project_public_surface_manifest.txt
   name-level inventory of internal project-visible seams
 ```
 
@@ -838,9 +838,9 @@ A future release should decide whether Ribbon and Title Bar:
 
 The API should not silently activate workbooks unless the caller opts into that observable behavior.
 
-\---
+---
 
-# 10\. Regression and release-certification review
+# 10. Regression and release-certification review
 
 ## 10.1 Strengths
 
@@ -865,7 +865,7 @@ The dedicated certification runner improves the assurance model by:
 * emitting JSON and text evidence;
 * raising when the verdict is not PASS/COMPLETE.
 
-This is a major improvement over `Test\_EXCEL\_UI\_RunAll` as a release signal.
+This is a major improvement over `Test_EXCEL_UI_RunAll` as a release signal.
 
 ## 10.2 P2: `ScreenUpdating` cleanup is compared with `True`, not the baseline
 
@@ -899,13 +899,13 @@ The release's recorded certification began with the ordinary `True` baseline, so
 The handler is structurally:
 
 ```vb
-Err\_Handler:
-    m\_CertActive = False
-    TST\_Log PROC, "FAIL", Err.Description
+Err_Handler:
+    m_CertActive = False
+    TST_Log PROC, "FAIL", Err.Description
     Err.Raise Err.Number, Err.Source, Err.Description
 ```
 
-`TST\_Log` begins with `On Error Resume Next`. VBA clears the global `Err` properties when an `On Error` statement executes. The original error is therefore no longer available after the logging call.
+`TST_Log` begins with `On Error Resume Next`. VBA clears the global `Err` properties when an `On Error` statement executes. The original error is therefore no longer available after the logging call.
 
 Consequences:
 
@@ -920,8 +920,8 @@ FailNumber = Err.Number
 FailSource = Err.Source
 FailDescription = Err.Description
 
-m\_CertActive = False
-TST\_Log PROC, "FAIL", FailDescription
+m_CertActive = False
+TST_Log PROC, "FAIL", FailDescription
 Err.Raise FailNumber, FailSource, FailDescription
 ```
 
@@ -983,7 +983,7 @@ A real release certificate should capture a full managed-state baseline before t
 
 ## 10.6 Certification record arrays are themselves fail-soft without integrity checks
 
-`TST\_CertRecordUnit` and `TST\_CertRecordSkip` increment counters and resize parallel arrays under `On Error Resume Next`. A memory or array failure can leave:
+`TST_CertRecordUnit` and `TST_CertRecordSkip` increment counters and resize parallel arrays under `On Error Resume Next`. A memory or array failure can leave:
 
 * a count incremented;
 * only some arrays resized;
@@ -1035,9 +1035,9 @@ VBA7
 
 The package claims 32-bit and 64-bit Office support. The 32-bit path is source-reviewed and conditionally declared, but not evidenced by the current release certificate.
 
-\---
+---
 
-# 11\. Dedicated repository-quality assessment
+# 11. Dedicated repository-quality assessment
 
 ## Repository-quality score: **8.0 / 10**
 
@@ -1085,8 +1085,8 @@ The public Wiki home page was last edited on 2026-04-21 and describes an archite
 It currently tells users, among other things, that:
 
 ```text
-/src/M\_EXCEL\_UI.bas
-/demo/EXCEL\_UI\_DEMO.xlsm
+/src/M_EXCEL_UI.bas
+/demo/EXCEL_UI_DEMO.xlsm
 ```
 
 represent the typical repository structure.
@@ -1094,7 +1094,7 @@ represent the typical repository structure.
 It instructs “Core only” users to import only:
 
 ```text
-M\_EXCEL\_UI.bas
+M_EXCEL_UI.bas
 ```
 
 That installation is invalid for the current four-module package and will not compile.
@@ -1172,15 +1172,15 @@ The PR was merged approximately seconds after those comments appeared. The revie
 
 ## 11.7 Static checker limitations — **8.0 / 10**
 
-`tools/check\_repo.py` is a valuable addition, but several checks are weaker than their labels imply.
+`tools/check_repo.py` is a valuable addition, but several checks are weaker than their labels imply.
 
 ### Jump targets are module-scoped, not procedure-scoped
 
-Labels are collected for the entire module. A procedure missing its own `Safe\_Exit:` can pass because another procedure defines the same label elsewhere in the module.
+Labels are collected for the entire module. A procedure missing its own `Safe_Exit:` can pass because another procedure defines the same label elsewhere in the module.
 
 ### Conditional-compilation tracking is not nested
 
-`check\_ptrsafe` uses one Boolean. An inner `#Else` for `#If Win64` turns off the outer VBA7 state, so several VBA7 Win32 declarations and declarations after the inner branch are not actually checked.
+`check_ptrsafe` uses one Boolean. An inner `#Else` for `#If Win64` turns off the outer VBA7 state, so several VBA7 Win32 declarations and declarations after the inner branch are not actually checked.
 
 ### Procedure end kinds are not matched
 
@@ -1230,11 +1230,11 @@ The README, images, topics and focused problem statement are good. External adop
 0 forks
 ```
 
-That is not a code-quality defect, but it means there is little independent field evidence across Excel builds, add-in combinations and enterprise policies. A reliable current demo and Discussions/Q\&A channel would improve adoption and issue discovery.
+That is not a code-quality defect, but it means there is little independent field evidence across Excel builds, add-in combinations and enterprise policies. A reliable current demo and Discussions/Q&A channel would improve adoption and issue discovery.
 
-\---
+---
 
-# 12\. Security and platform assessment
+# 12. Security and platform assessment
 
 No high-severity security vulnerability was identified in the production source.
 
@@ -1266,9 +1266,9 @@ Recommended supply-chain improvements:
 * pin GitHub Actions by full commit SHA;
 * consider signing the VBA project or publishing a signing/deployment guide for enterprise consumers.
 
-\---
+---
 
-# 13\. Findings summary
+# 13. Findings summary
 
 |ID|Severity|Area|Finding|
 |-|-|-|-|
@@ -1293,9 +1293,9 @@ Recommended supply-chain improvements:
 |ICR-UI-111-P3-09|**P3**|Platform assurance|Only one x64 Office build is behaviorally certified|
 |ICR-UI-111-P3-10|**P3**|Maintainability|Test and title-bar modules are becoming difficult to review as single files|
 
-\---
+---
 
-# 14\. Detailed material findings
+# 14. Detailed material findings
 
 ## ICR-UI-111-P1-01 — Ribbon snapshot restoration is not window-identity-safe
 
@@ -1349,7 +1349,7 @@ ActivateCapturedWindow       opt-in, write, restore prior focus
 
 Document event firing and reentrancy implications.
 
-\---
+---
 
 ## ICR-UI-111-P2-01 — Recycled native handles can retrieve stale frame state
 
@@ -1384,7 +1384,7 @@ Extend each registry slot with an identity corroborator and validate it on looku
 
 Add a deterministic injection seam that simulates a recycled handle/identity mismatch, because real handle reuse is not reliably producible on demand.
 
-\---
+---
 
 ## ICR-UI-111-P2-02 — Certification rejects a valid `ScreenUpdating = False` baseline
 
@@ -1415,7 +1415,7 @@ ScreenUpdating = False
 
 Both must restore the exact entry value and produce the same PASS/COMPLETE verdict when all other conditions pass.
 
-\---
+---
 
 ## ICR-UI-111-P2-03 — Certification clears the original error before rethrowing it
 
@@ -1425,7 +1425,7 @@ Both must restore the exact entry value and produce the same PASS/COMPLETE verdi
 
 ### Root cause
 
-`TST\_Log` uses `On Error Resume Next`, which clears `Err`. The handler reads `Err` again after logging.
+`TST_Log` uses `On Error Resume Next`, which clears `Err`. The handler reads `Err` again after logging.
 
 ### Correction
 
@@ -1449,7 +1449,7 @@ Assert exact propagation for:
 * incomplete verdict;
 * cleanup failure.
 
-\---
+---
 
 ## ICR-UI-111-P2-04 — Certification cleanup is incomplete
 
@@ -1465,13 +1465,13 @@ Assert exact propagation for:
 * full per-window property baseline;
 * title-bar achieved state;
 * Ribbon state where safely addressable;
-* cleanup failures emitted by `TST\_RestoreState`.
+* cleanup failures emitted by `TST_RestoreState`.
 
 ### Correction
 
 Create a certification-specific full-state snapshot independent of the component's own snapshot, keyed by retained test `Window` objects. Cleanup must return a structured result rather than suppressing every error.
 
-\---
+---
 
 ## ICR-UI-111-P2-05 — Public API manifest does not protect the actual compatibility contract
 
@@ -1497,7 +1497,7 @@ enum members and values unchanged
 
 Parse multi-line declarations into a normalized signature and include enum members/values. Add unit tests for the checker itself.
 
-\---
+---
 
 ## ICR-UI-111-P2-06 — Public Wiki is unsafe for current users
 
@@ -1508,23 +1508,23 @@ Parse multi-line declarations into a normalized signature and include enum membe
 ### Current unsafe instruction
 
 ```text
-Import M\_EXCEL\_UI.bas only
+Import M_EXCEL_UI.bas only
 ```
 
 ### Actual requirement
 
 ```text
-M\_EXCEL\_UI\_RUNTIME
-M\_EXCEL\_UI\_TITLEBAR
-M\_EXCEL\_UI\_SNAPSHOT
-M\_EXCEL\_UI
+M_EXCEL_UI_RUNTIME
+M_EXCEL_UI_TITLEBAR
+M_EXCEL_UI_SNAPSHOT
+M_EXCEL_UI
 ```
 
 ### Correction
 
 Disable the Wiki immediately or replace its home page with a short pointer to versioned `README.md` and `INSTALLATION.md`. Re-enable only if synchronization is automated.
 
-\---
+---
 
 ## ICR-UI-111-P2-07 — Demo is not a trustworthy current adoption surface
 
@@ -1540,12 +1540,12 @@ Disable the Wiki immediately or replace its home page with a short pointer to ve
 * add snapshot-clear action;
 * demonstrate multi-window behavior;
 * disclose and demonstrate Ribbon active-window semantics;
-* fix `Demo\_GetRuntimeErrorText`;
+* fix `Demo_GetRuntimeErrorText`;
 * audit every `OnAction` string;
 * build from exact tag;
 * publish checksum.
 
-\---
+---
 
 ## ICR-UI-111-P2-08 — Certification evidence is not bound to source
 
@@ -1568,7 +1568,7 @@ Minimum manual alternative:
 * include it in the workbook or injected certification bridge;
 * attach JSON, text and fingerprints to the release.
 
-\---
+---
 
 ## ICR-UI-111-P2-09 — Review findings were not allowed to gate release
 
@@ -1584,11 +1584,11 @@ Both unresolved comments describe defects that remain in the tag. Static checks 
 
 Make review-thread resolution a release requirement. A release PR should not be merged until the review provider has completed and the latest commit has been reviewed.
 
-\---
+---
 
-# 15\. Static tooling review
+# 15. Static tooling review
 
-## 15.1 `tools/check\_repo.py`
+## 15.1 `tools/check_repo.py`
 
 The checker is worth retaining and extending. Recommended next checks:
 
@@ -1618,7 +1618,7 @@ The new modes are good:
 legacy explicit source/destination mode
 ```
 
-The remaining safety defect is in `rename\_labels`. It applies regex substitutions to whole lines, including:
+The remaining safety defect is in `rename_labels`. It applies regex substitutions to whole lines, including:
 
 * comments;
 * string literals;
@@ -1647,9 +1647,9 @@ Apply label-reference replacement only in the code portion.
 
 Add idempotence and preservation fixtures for strings and comments.
 
-\---
+---
 
-# 16\. Prioritized remediation plan
+# 16. Prioritized remediation plan
 
 ## Release Gate A — Remove silent Ribbon misapplication
 
@@ -1708,9 +1708,9 @@ Add idempotence and preservation fixtures for strings and comments.
 5. immutable action pins;
 6. required review-thread resolution.
 
-\---
+---
 
-# 17\. Release-readiness assessment
+# 17. Release-readiness assessment
 
 ## Suitable now
 
@@ -1719,7 +1719,7 @@ Add idempotence and preservation fixtures for strings and comments.
 * single-workbook application-style workbooks;
 * controlled demonstrations using source examples rather than the old binary demo;
 * multi-window use where Ribbon snapshot restoration is not relied upon;
-* projects that keep `UI\_ShowExcelUI` readily accessible;
+* projects that keep `UI_ShowExcelUI` readily accessible;
 * projects that clear snapshots during shutdown;
 * Windows x64 Excel environments similar to the certified host;
 * source-pinned internal deployment with local compile and certification.
@@ -1748,9 +1748,9 @@ Do not treat the current release-certification JSON as proof of exact-source exe
 
 Do not direct users to the current Wiki for installation.
 
-\---
+---
 
-# 18\. Final verdict
+# 18. Final verdict
 
 `v1.1.1` is a materially better release than `v1.1.0`.
 
@@ -1771,10 +1771,10 @@ The component's architecture is now mature. The remaining weaknesses are concent
 
 The decisive limitation is that the snapshot is only partly identity-safe: title-bar and ordinary window properties are now protected, but Ribbon remains a measured silent wrong-target operation. The new release certificate improves assurance dramatically, but several defects prevent it from being accepted as an authoritative gate without correction.
 
-> \*\*Final score: 8.5 / 10\*\*  
-> \*\*Classification: strong professional VBA UI component with a mature architecture, one known P1 multi-window snapshot defect, several targeted certification defects, and repository documentation/release-governance cleanup still required.\*\*
+> **Final score: 8.5 / 10**  
+> **Classification: strong professional VBA UI component with a mature architecture, one known P1 multi-window snapshot defect, several targeted certification defects, and repository documentation/release-governance cleanup still required.**
 
-\---
+---
 
 # Appendix A — Recommended GitHub issues
 
@@ -1787,14 +1787,14 @@ The decisive limitation is that the snapshot is only partly identity-safe: title
 7. **P2 — Replace name-only supported API manifest with full signatures and enum values**
 8. **P2 — Disable or regenerate the stale GitHub Wiki**
 9. **P2 — Rebuild the demo and fix runtime diagnostics**
-10. **P3 — Add regression fixtures for tools/check\_repo.py**
+10. **P3 — Add regression fixtures for tools/check_repo.py**
 11. **P3 — Make reformat.py token-aware**
 12. **P3 — Move WinAPI last-error reads to Err.LastDllError**
 13. **P3 — Add achieved-state readback to property, Ribbon and title-bar writes**
 14. **P3 — Pin GitHub Actions by commit SHA and add tag triggers**
 15. **P3 — Add x86 and second-build certification evidence**
 
-\---
+---
 
 # Appendix B — Recommended score-to-10 roadmap
 
@@ -1822,7 +1822,7 @@ The decisive limitation is that the snapshot is only partly identity-safe: title
 * provide deterministic current demo and behavioral smoke evidence;
 * maintain zero known silent wrong-target paths.
 
-\---
+---
 
 # Appendix C — Evidence confidence
 
@@ -1845,26 +1845,26 @@ The decisive limitation is that the snapshot is only partly identity-safe: title
 |Branch-protection enforcement|Not independently verified|
 |Release-asset contents|Not independently inspected|
 
-\---
+---
 
 # Appendix D — Source files that should be changed first
 
 ```text
-src/M\_EXCEL\_UI\_SNAPSHOT.bas
+src/M_EXCEL_UI_SNAPSHOT.bas
     capture Ribbon Window identity
     refuse unsafe wrong-window restore
 
-src/M\_EXCEL\_UI\_TITLEBAR.bas
+src/M_EXCEL_UI_TITLEBAR.bas
     corroborate registry handle identity
 
-test/M\_EXCEL\_UI\_REGRESSION\_TESTS.bas
+test/M_EXCEL_UI_REGRESSION_TESTS.bas
     ScreenUpdating baseline
     preserve Err before logging
     verify Application.Windows.Count
     verify complete state cleanup
     source-bound evidence fields
 
-tools/check\_repo.py
+tools/check_repo.py
     full signature / enum gate
     procedure-scoped labels
     nested directives
@@ -1874,7 +1874,7 @@ tools/check\_repo.py
 tools/reformat.py
     token-aware label rewriting
 
-demo/M\_EXCEL\_UI\_DEMO.bas
+demo/M_EXCEL_UI_DEMO.bas
     fix Err capture
     expose current features
     fix presets

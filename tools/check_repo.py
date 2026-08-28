@@ -15,6 +15,7 @@ Exit status is 0 when every check passed, 1 otherwise.
 """
 
 import fnmatch
+import fnmatch
 import os
 import re
 import subprocess
@@ -756,6 +757,159 @@ def check_workflow_policy_selftest():
 
 
 # --------------------------------------------------------------------------
+# Characters a Markdown renderer treats as escapable. A backslash before any of
+# them is markup, not text.
+ESCAPABLE = r"[\\`*_{}\[\]()#+\-.!|<>&\"'~=:;,/$%^?@]"
+
+ESCAPE_RE = re.compile(r"\\(" + ESCAPABLE + ")")
+
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+
+INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
+
+
+def strip_inline_code(line):
+    """Blank out inline code spans, preserving length so columns stay true."""
+    return INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line)
+
+
+def escape_findings(rel, text):
+    """Report Markdown punctuation escaped outside code.
+
+    A WYSIWYG editor escapes every character it thinks is markup, and both
+    independent review archives arrived with several hundred of them: headings
+    read `## 1\. Executive assessment`, module names read `M\_EXCEL\_UI`, and a
+    horizontal rule read `\---`. The documents rendered as literal backslashes
+    and nobody noticed for two releases.
+
+    The check is fence-aware, and deliberately does not look inside fenced
+    blocks or inline code. A backslash there is data — a Windows path, a regular
+    expression — and flagging it would make the gate wrong about correct
+    documents. That is not a hole in practice: an editor that escapes a fence
+    escapes the prose around it too, which is what this rule sees. It detects
+    the editor, not every symptom.
+    """
+    findings = []
+    fence = None
+
+    for n, line in enumerate(text.split("\n"), 1):
+        m = FENCE_RE.match(line)
+        if m:
+            token = m.group(1)
+            if fence is None:
+                fence = token[0] * 3
+            elif line.lstrip().startswith(fence):
+                fence = None
+            continue
+
+        if fence is not None:
+            continue
+
+        found = ESCAPE_RE.findall(strip_inline_code(line))
+        if found:
+            findings.append(
+                f"{rel}:{n}: {len(found)} escaped Markdown character(s) "
+                f"({''.join(sorted(set(found)))}) outside code; this is what a "
+                f"WYSIWYG editor leaves behind, and it renders as a literal "
+                f"backslash"
+            )
+
+    return findings
+
+
+def check_markdown_escapes():
+    """Fail on escaped Markdown punctuation in any tracked document."""
+    tracked = git_tracked_files()
+    if tracked is None:
+        return
+
+    for rel in sorted(r for r in tracked if r.endswith(".md")):
+        for finding in escape_findings(rel, read(rel).decode("utf-8")):
+            fail("markdown-escapes", finding)
+
+
+ESCAPE_SELFTEST_CASES = [
+    ("clean prose passes", "# Heading\n\nSome text with M_EXCEL_UI in it.\n", 0),
+    ("an escaped heading is reported", "## 1\\. Executive assessment\n", 1),
+    ("an escaped underscore is reported", "The M\\_EXCEL\\_UI module.\n", 1),
+    ("an escaped rule is reported", "\\---\n", 1),
+    ("a backslash inside a fenced block is data",
+     "```text\nC:\\Users\\dpenza\\file.txt\n```\n", 0),
+    ("an escapable character inside a fenced block is data",
+     "```python\nre.compile(r\"\\.txt$\")\n```\n", 0),
+    ("a tilde fence is honoured too",
+     "~~~text\nA\\_B\n~~~\n", 0),
+    ("an unclosed fence does not swallow the rest of the file",
+     "```text\ncode\n```\n\nThen M\\_EXCEL\\_UI in prose.\n", 1),
+    ("a backslash inside an inline code span is data",
+     "Commit messages go in `%TEMP%\\commit-msg.txt` for encoding reasons.\n", 0),
+    ("an escapable character inside an inline code span is data",
+     "The pattern `\\.md$` matches documents.\n", 0),
+    ("an escape beside an inline code span is still reported",
+     "The `code` and the M\\_EXCEL\\_UI module.\n", 1),
+    ("several escapes on one line are one finding",
+     "\\*\\*Repository:\\*\\* M\\_EXCEL\\_UI\n", 1),
+]
+
+
+def check_markdown_escape_selftest():
+    """Run the escape rules against their own fixtures.
+
+    Fence handling is the part that can silently invert: a rule that treated
+    the whole file as fenced would report nothing and look healthy.
+    """
+    for label, text, expected in ESCAPE_SELFTEST_CASES:
+        found = escape_findings("fixture.md", text)
+        if len(found) != expected:
+            fail("markdown-escape-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
+
+
+# The v1.1.2 independent review is private and must not reach this repository,
+# its branches, its wiki or its release assets. The public archives are named
+# for the release they reviewed, so the pattern that admits them is the same
+# pattern that would admit the private one; naming it explicitly is what makes
+# the boundary a gate rather than a habit.
+PRIVATE_PATTERNS = [
+    ("*INDEPENDENT_CODE_REVIEW_V1.1.2*", "the v1.1.2 independent review is private"),
+    ("*INDEPENDENT_CODE_REVIEW_V1.2*", "unreleased independent reviews are private"),
+    ("*_PRIVATE.*", "documents marked private are not published here"),
+    ("*_CONFIDENTIAL.*", "documents marked confidential are not published here"),
+]
+
+
+def check_private_review_denylist():
+    """Fail when a private document is tracked or present in the tree.
+
+    Both are checked. The index catches it after a commit; the working tree
+    catches it before one, which is the only moment the mistake is cheap.
+    """
+    tracked = git_tracked_files()
+    if tracked is None:
+        return
+
+    present = set()
+    for root, dirs, names in os.walk(REPO):
+        dirs[:] = [x for x in dirs if x != ".git"]
+        for name in names:
+            present.add(os.path.relpath(os.path.join(root, name), REPO)
+                        .replace(os.sep, "/"))
+
+    for pattern, why in PRIVATE_PATTERNS:
+        for rel in sorted(tracked):
+            if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(
+                    os.path.basename(rel), pattern):
+                fail("private-review", f"{rel} is tracked, but {why}")
+
+        for rel in sorted(present - set(tracked)):
+            if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(
+                    os.path.basename(rel), pattern):
+                fail("private-review",
+                     f"{rel} is present in the working tree, but {why}; "
+                     f"move it outside the repository before committing")
+
+
 def check_release_state():
     """Documentation must not describe a release that has not happened.
 
@@ -988,6 +1142,9 @@ CHECKS = [
     ("release state self-test", check_release_state_selftest),
     ("repository hygiene", check_repository_hygiene),
     ("markdown links", check_markdown_links),
+    ("markdown escapes", check_markdown_escapes),
+    ("markdown escape self-test", check_markdown_escape_selftest),
+    ("private review denylist", check_private_review_denylist),
     ("house-style formatter", check_formatter),
     ("formatter self-test", check_formatter_selftest),
 ]

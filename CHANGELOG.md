@@ -73,7 +73,7 @@ measured against that baseline.
 | Regression and certification fixes | Not yet implemented |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | Twenty checks; the release branch passes |
+| Static validation | Twenty-three checks; the release branch passes |
 | Wiki | Tracks v1.1.2; badge consistency now checked on push and weekly |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
@@ -207,6 +207,26 @@ measured against that baseline.
   fixtures, not the wiki: `tools/check_repo.py` never touches the network, so a
   machine without wiki access still gets a meaningful gate, and the policy
   cannot rot between the rare occasions the workflow reports something.
+- Added a fence-aware escaped-Markdown check as a twenty-first gate check,
+  landed together with the archive repair so the documents are corrected under
+  the rule that prevents it recurring. It ignores fenced blocks and inline code
+  spans, where a backslash is data rather than markup — a Windows path or a
+  regular expression — because a check that is wrong about correct documents
+  gets disabled. An editor that escapes a fence escapes the prose around it too,
+  so the rule detects the editor rather than every symptom.
+- Added twelve fixtures for the escape rules, run as a twenty-second check:
+  clean prose, an escaped heading, underscore and horizontal rule, backslashes
+  and escapable characters inside fenced blocks and inline code spans, a tilde
+  fence, a fence that closes correctly, an escape beside a code span, and
+  several escapes on one line. Fence handling is the part that can silently
+  invert — a rule treating the whole file as fenced would report nothing and
+  look healthy.
+- Added an explicit private-document denylist as a twenty-third check. The
+  v1.1.2 independent review is private, and the public archives are named for
+  the release they reviewed, so the pattern admitting them is the pattern that
+  would admit the private one. The denylist is checked against both the Git
+  index and the working tree: the index catches the file after a commit, the
+  working tree before one, which is the only moment the mistake is cheap.
 - Added a push trigger on `v*` tags to **.github/workflows/static-checks.yml**.
   A tag is the artefact people install from, and until now nothing ran against
   one: `v1.1.1` and `v1.1.2` were published from commits carrying no automated
@@ -308,6 +328,15 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- Repaired both independent review archives in `docs/`, which carried 669
+  backslash escapes between them from having been edited in a WYSIWYG editor.
+  Headings read `1\. Executive assessment`, module names read `M\_EXCEL\_UI`, and
+  a horizontal rule read `\---`; the documents had rendered as literal
+  backslashes since v1.1.0. Every backslash in both files preceded an escapable
+  Markdown character and none was meaningful, so the repair removes escapes and
+  changes nothing else: line, heading, fence and table-row counts are identical
+  before and after, and each repaired file equals the original with backslashes
+  deleted.
 - Fixed the static gate exiting successfully when one of its own checks raised.
   The traceback went to standard error, `sys.exit(main())` never ran, and the
   process returned zero, so a continuous-integration step reading only the
@@ -354,6 +383,10 @@ measured against that baseline.
   window is now written down in order: bump `VERSION`, watch the gate go red,
   re-badge the wiki, and do all of it before the release freeze, because
   `VERSION` is tracked and wiki edits are not.
+- Documented that Markdown is edited as text and never in a WYSIWYG editor, with
+  what the residue looks like and why the check ignores fenced blocks. Documented
+  the private v1.1.2 review boundary: cite `ICR-UI-112-*` finding identifiers,
+  never quote or attach the document.
 - Separated three promises in **README.md**, **CONTRIBUTING.md** and the
   pull-request template that were previously blurred together. External
   compatibility applies to the `[supported]` facade. A `[project-public]` change
@@ -433,6 +466,9 @@ RESULT: PASS
   release state self-test
   repository hygiene
   markdown links
+  markdown escapes
+  markdown escape self-test
+  private review denylist
   house-style formatter
   formatter self-test
 ~~~
