@@ -57,6 +57,33 @@ REQUIRED_FILES = ALL_MODULES + [
 
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?$")
 
+
+def version_findings(raw):
+    """Return every problem with the contents of the root VERSION file."""
+    findings = []
+
+    if raw != raw.rstrip("\n") + "\n":
+        findings.append(
+            "VERSION must hold one line ending in a single newline")
+
+    if not VERSION_RE.match(raw.strip()):
+        findings.append(
+            f"VERSION does not hold a release number: {raw.strip()!r}")
+
+    return findings
+
+
+VERSION_SELFTEST_CASES = [
+    ("a plain release number passes", "1.1.2\n", 0),
+    ("a pre-release suffix passes", "1.2.0-rc.1\n", 0),
+    ("a missing trailing newline is rejected", "1.1.2", 1),
+    ("a doubled trailing newline is rejected", "1.1.2\n\n", 1),
+    ("a leading v is rejected", "v1.1.2\n", 1),
+    ("a two-part version is rejected", "1.1\n", 1),
+    ("an empty file is rejected", "", 2),
+    ("prose is rejected", "the next release\n", 1),
+]
+
 HOUSE_LABELS = {"Safe_Exit", "Fail_Num", "Err_Handler", "Clean_Exit", "Clean_Fail"}
 
 PROC_RE = re.compile(r"^(Public|Private|Friend)\s+(Sub|Function|Property\s+\w+)\s+(\w+)")
@@ -125,7 +152,10 @@ def read_lines(path):
 # --------------------------------------------------------------------------
 def check_required_files():
     for rel in REQUIRED_FILES:
-        if not os.path.exists(os.path.join(REPO, rel)):
+        path = os.path.join(REPO, rel)
+        if os.path.isdir(path):
+            fail("required-files", f"{rel} is a directory, not a file")
+        elif not os.path.isfile(path):
             fail("required-files", f"missing {rel}")
 
 
@@ -408,6 +438,20 @@ def check_supported_api_declaration():
         for added in sorted(supported - baseline):
             note("supported-api-declaration",
                  f"new in the facade since {baseline_version}: {added}")
+
+
+def check_release_state_selftest():
+    """Run the VERSION rules against their own fixtures.
+
+    Two other checks derive from this file, so a rule that quietly accepted
+    anything would weaken them without ever reporting a thing.
+    """
+    for label, raw, expected in VERSION_SELFTEST_CASES:
+        found = version_findings(raw)
+        if len(found) != expected:
+            fail("release-state-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
 
 
 def check_wiki_badge_selftest():
@@ -734,15 +778,17 @@ def check_release_state():
     # The root VERSION file is the single version this repository states. Module
     # headers and the wiki badges both derive from it, so a malformed value
     # silently weakens two other checks rather than announcing itself.
-    version = read("VERSION").decode("utf-8")
+    #
+    # Read it defensively. required-files already reports a missing VERSION one
+    # check earlier, and reading it unconditionally here turned that finding
+    # into an unhandled exception that killed the run before any finding was
+    # printed.
+    path = os.path.join(REPO, "VERSION")
+    if not os.path.isfile(path):
+        return
 
-    if version != version.rstrip("\n") + "\n":
-        fail("release-state",
-             "VERSION must hold one line ending in a single newline")
-
-    if not VERSION_RE.match(version.strip()):
-        fail("release-state",
-             f"VERSION does not hold a release number: {version.strip()!r}")
+    for finding in version_findings(read("VERSION").decode("utf-8")):
+        fail("release-state", finding)
 
 
 # --------------------------------------------------------------------------
@@ -939,6 +985,7 @@ CHECKS = [
     ("workflow policy self-test", check_workflow_policy_selftest),
     ("wiki badge self-test", check_wiki_badge_selftest),
     ("release state", check_release_state),
+    ("release state self-test", check_release_state_selftest),
     ("repository hygiene", check_repository_hygiene),
     ("markdown links", check_markdown_links),
     ("house-style formatter", check_formatter),
@@ -951,7 +998,16 @@ def main():
 
     for label, fn in CHECKS:
         before = len(failures)
-        fn()
+
+        # A check that raises used to escape main() entirely: the traceback
+        # went to stderr, sys.exit(main()) never ran, and the process exited 0.
+        # A continuous-integration step reading only the status code would call
+        # that a pass. A crash is a finding.
+        try:
+            fn()
+        except Exception as exc:                              # noqa: BLE001
+            fail(label, f"the check itself raised {type(exc).__name__}: {exc}")
+
         added = len(failures) - before
         print(f"  {'FAIL' if added else 'ok  '}  {label}"
               + (f"  ({added})" if added else ""))

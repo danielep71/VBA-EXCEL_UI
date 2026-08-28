@@ -73,7 +73,7 @@ measured against that baseline.
 | Regression and certification fixes | Not yet implemented |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | Nineteen checks; the release branch passes |
+| Static validation | Twenty checks; the release branch passes |
 | Wiki | Tracks v1.1.2; badge consistency now checked on push and weekly |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
@@ -181,6 +181,11 @@ measured against that baseline.
   nothing — without the timer, drift introduced in the wiki editor stays
   invisible until the next commit lands here, which is the window the pre-1.1.2
   drift lived in.
+- Added fixtures for the `VERSION` rules, run as a twentieth check: a plain
+  release number, a pre-release suffix, a missing or doubled trailing newline, a
+  leading `v`, a two-part version, an empty file and prose. Two other checks
+  derive from that file, so a rule that quietly accepted anything would weaken
+  them without ever reporting a thing.
 - Added the badge rules to the static gate as a nineteenth check. It runs the
   fixtures, not the wiki: `tools/check_repo.py` never touches the network, so a
   machine without wiki access still gets a meaningful gate, and the policy
@@ -278,6 +283,18 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- Fixed the static gate exiting successfully when one of its own checks raised.
+  The traceback went to standard error, `sys.exit(main())` never ran, and the
+  process returned zero, so a continuous-integration step reading only the
+  status code would have reported a crashed gate as a pass. A check that raises
+  is now recorded as a finding naming the check and the exception.
+- Fixed the release-state check reading `VERSION` unconditionally. When the file
+  was absent — which `required-files` had already reported one check earlier —
+  the read raised and killed the run before any finding was printed, so the gate
+  said less about a missing file than it would have said about a malformed one.
+- Fixed `required-files` accepting a directory in place of a file. Creating
+  `VERSION/` rather than `VERSION` satisfied the existence test and then failed
+  everywhere downstream with a less obvious message.
 - Fixed the public API gate detecting only the appearance or disappearance of a
   member. Recording module, kind and name left every compatibility-breaking
   change to an existing member invisible: a reordered parameter, a `ByVal`
@@ -380,6 +397,7 @@ RESULT: PASS
   workflow policy self-test
   wiki badge self-test
   release state
+  release state self-test
   repository hygiene
   markdown links
   house-style formatter
