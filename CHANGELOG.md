@@ -269,6 +269,24 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- Removed both independent review archives from `docs/`. From this release the
+  repository does not carry independent review documents: they are internal
+  working material, they drive the issue set, and the issue set is the public
+  record. The denylist added for the v1.1.2 review now covers the whole family
+  rather than named files, because naming individual documents would readmit
+  the next review by the simple fact of it having a new name.
+
+  This withdraws them; it does not unpublish them. Both remain reachable at the
+  `v1.1.1` and `v1.1.2` tags and in this branch's history, and rewriting that
+  would invalidate published tag SHAs — including the exact tree hashes the
+  reviews cite as what they reviewed. The changelog entries describing what
+  those releases did are left as written, because they are accurate.
+
+  One consequence is worth stating plainly. The `ICR-UI-*` and `ICR-UI-111-*`
+  identifiers cited in the production modules, the regression module and this
+  changelog no longer resolve to anything public. Publishing the disposition
+  table those identifiers resolve against is now a requirement of #48 rather
+  than a tidy-up.
 - Pinned both Actions in **.github/workflows/static-checks.yml** to immutable
   commit SHAs: `actions/checkout` to `11d5960a…` and `actions/setup-python` to
   `a26af69b…`, each with the release it resolves to written beside it. A

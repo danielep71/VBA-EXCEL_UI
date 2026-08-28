@@ -866,14 +866,19 @@ def check_markdown_escape_selftest():
                  + (f" | {found}" if found else ""))
 
 
-# The v1.1.2 independent review is private and must not reach this repository,
-# its branches, its wiki or its release assets. The public archives are named
-# for the release they reviewed, so the pattern that admits them is the same
-# pattern that would admit the private one; naming it explicitly is what makes
-# the boundary a gate rather than a habit.
+# Independent reviews are internal working material and are not carried by this
+# repository from v1.1.3 onward. The pattern is deliberately the whole family
+# rather than the two archives that were withdrawn: naming individual files
+# would readmit the next review by the simple fact of it having a new name.
+#
+# This does not unpublish anything. Both withdrawn archives remain reachable at
+# the v1.1.1 and v1.1.2 tags and in this branch's own history, and rewriting
+# that would invalidate published tag SHAs — including the tree hashes the
+# reviews themselves cite as what they reviewed. The rule is about what the
+# project carries forward, not a claim about what was never public.
 PRIVATE_PATTERNS = [
-    ("*INDEPENDENT_CODE_REVIEW_V1.1.2*", "the v1.1.2 independent review is private"),
-    ("*INDEPENDENT_CODE_REVIEW_V1.2*", "unreleased independent reviews are private"),
+    ("*INDEPENDENT_CODE_REVIEW*", "independent reviews are internal and are not "
+                                  "carried by this repository from v1.1.3 onward"),
     ("*_PRIVATE.*", "documents marked private are not published here"),
     ("*_CONFIDENTIAL.*", "documents marked confidential are not published here"),
 ]

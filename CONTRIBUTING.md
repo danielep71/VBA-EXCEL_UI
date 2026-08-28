@@ -396,20 +396,31 @@ expression — and flagging it would make the gate wrong about correct documents
 An editor that escapes a fence escapes the prose around it too, so the rule
 detects the editor rather than every symptom.
 
-## 🔒 The private v1.1.2 review
+## 🔒 Independent reviews are internal
 
-The v1.1.2 independent review is private. It must not appear in this repository,
-in any branch, in the wiki, or among release assets. The public v1.1.0 and v1.1.1
-archives are named for the release they reviewed, so the naming pattern that
-admits them is the pattern that would admit the private one; `check_repo.py`
-carries an explicit denylist so the boundary is a gate rather than a habit.
+From v1.1.3 onward this repository does not carry independent review documents.
+They are internal working material: they drive the issue set, and the issue set
+is the public record. `check_repo.py` denies any path matching
+`*INDEPENDENT_CODE_REVIEW*`, in the Git index and in the working tree both — the
+index catches the file after a commit, the working tree before one, which is the
+only moment the mistake is cheap to undo.
 
-The denylist is checked against both the Git index and the working tree. The
-index catches the file after a commit; the working tree catches it before one,
-which is the only moment the mistake is cheap to undo.
+The pattern covers the whole family rather than the documents withdrawn in
+v1.1.3, because naming individual files would readmit the next review by the
+simple fact of it having a new name.
 
-Public issue bodies stay self-contained and cite `ICR-UI-112-*` identifiers.
-Cite a finding identifier; never quote or attach the document.
+This is a rule about what the project carries forward, not a claim that the
+withdrawn documents were never public. The v1.1.0 and v1.1.1 archives shipped in
+the `v1.1.1` and `v1.1.2` tags and remain reachable there and in this branch's
+history. Rewriting that would invalidate published tag SHAs, including the exact
+tree hashes the reviews themselves cite as what they reviewed.
+
+Cite a finding by its identifier — `ICR-UI-*` for the v1.1.0 review,
+`ICR-UI-111-*` for v1.1.1, `ICR-UI-112-*` for v1.1.2. Never quote or attach the
+document. Issue bodies must be self-contained, because from v1.1.3 the
+identifier is the only public handle a reader has, and
+[#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) publishes the
+disposition table those identifiers resolve against.
 
 ## 🔗 Updating a pinned Action
 

@@ -644,7 +644,6 @@ VBA-EXCEL_UI/
 │  ├─ M_DEMO_BUILDER.bas
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ docs/
-│  ├─ INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md
 │  └─ RIBBON_SDI_BEHAVIOR.md
 ├─ src/
 │  ├─ M_EXCEL_UI.bas
@@ -674,8 +673,6 @@ The source repository intentionally contains no versioned demo `.xlsm`. Release 
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [SECURITY.md](SECURITY.md) | Security reporting and safe-use boundaries |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
-| [docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md](docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md) | Independent review of the `v1.1.0` tag, and the source of the `1.1.1` issue set |
-| [docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md](docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md) | Independent review of the `v1.1.1` tag, and the source of the current corrective issue set |
 | [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |
 | [GitHub Releases](https://github.com/danielep71/VBA-EXCEL_UI/releases) | Tested binary demo workbooks and release notes |
 
@@ -721,9 +718,9 @@ No third-party DLL, COM component, package manager, or non-standard VBA referenc
 
 ### v1.1.2 — correctness release
 
-Addresses the findings of an independent review of `v1.1.1`, recorded in
-[docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md](docs/INDEPENDENT_CODE_REVIEW_V1.1.1_2026-08-20.md),
-together with three defects found while correcting them. The public API is
+Addresses the findings of an independent review of `v1.1.1`, cited by their
+`ICR-UI-111-*` identifiers, together with three defects found while correcting
+them. The public API is
 unchanged: no procedure, enum or parameter was added, removed or renamed, and no
 existing call site requires modification.
 
@@ -746,8 +743,8 @@ it had not done:
 
 ### v1.1.1 — corrective release
 
-Addresses the findings of an independent review of `v1.1.0`, recorded in
-[docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md](docs/INDEPENDENT_CODE_REVIEW_V1.1.0_2026-08-19.md).
+Addresses the findings of an independent review of `v1.1.0`, cited by their
+`ICR-UI-*` identifiers.
 The public API is unchanged: no procedure, enum or parameter was added, removed
 or renamed, and no existing call site requires modification.
 
