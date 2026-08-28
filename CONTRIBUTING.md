@@ -301,6 +301,28 @@ means. The baseline is rebased only at a release, with
 
 The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
 
+## 🧾 Three SHAs, three different claims
+
+A release involves three commits, and evidence attached to one of them says
+nothing about the others. Naming which is meant is not pedantry: the v1.1.1 and
+v1.1.2 tags were published from commits carrying no automated evidence at all,
+and the only way to notice that is to keep the three apart.
+
+| SHA | What it is | What evidence on it proves |
+|---|---|---|
+| **PR head** | The last commit on `release/v1.1.3` before merge | The reviewed tree passed the static gate and the bot reviewed *this* tree. It does not prove anything about `main`. |
+| **Merge SHA** | The merge commit created on `main` | `main` contains the reviewed tree. The merge itself is a new commit whose tree can differ from the PR head if anything was resolved during merge. |
+| **Tag SHA** | What `v1.1.3` points at | The artefact people install from. It should equal the merge SHA, and until the tag trigger existed nothing checked that it had ever been built. |
+
+Each has a distinct owner. The static gate runs on the PR head and, since the
+`v*` trigger, on the tag SHA as well. Binding a certification run to a specific
+tree and its hashes belongs to
+[#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46). Proving the tag was
+created from the reviewed merge commit belongs to
+[#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49). Do not present
+evidence gathered on one as evidence for another; a green check on the PR head
+is not a certified tag.
+
 ## 🔗 Updating a pinned Action
 
 Every `uses:` reference in `.github/workflows/` is pinned to a full 40-character

@@ -169,15 +169,28 @@ measured against that baseline.
   repository text only.
 - Added a workflow pin policy to **tools/check_repo.py**. Every `uses:`
   reference in a tracked workflow must name a full 40-character commit SHA and
-  carry a trailing comment naming the release that SHA is. Repository-local
-  actions are exempt; nothing else is. The gate workflow must additionally
-  carry the `v*` tag trigger.
-- Added fixtures for the pin policy covering a compliant workflow, a
+  carry a trailing comment naming the exact release that SHA is, as
+  `# v4.4.0`. A series such as `# v4` is rejected: it names the mutable
+  pointer the pin exists to escape. Whitespace before the colon and quoted
+  references are read rather than skipped, since YAML permits both and either
+  would otherwise hide an unpinned reference. Repository-local actions are
+  exempt; nothing else is.
+- Added a structural check that the gate workflow is triggered by `on.push.tags`
+  containing `v*`. Searching the file for a `tags:` block matched one under
+  `pull_request`, or under any other key, and reported a workflow as
+  tag-triggered when no tag push would ever start it.
+- Added fourteen fixtures for the pin policy: a compliant workflow, a
   repository-local action, a moving version tag, a branch reference, a
-  truncated SHA, a full SHA with no version comment, a full SHA with a
-  non-version comment, and a missing tag trigger. The policy is one regular
-  expression away from accepting everything, and the only symptom would be a
-  green gate.
+  truncated SHA, a full SHA with no version comment, one with a non-version
+  comment, one commented `# v4` and one commented `# v4.4`, a quoted
+  reference, a reference written `uses :` with a space before the colon, a
+  missing tag trigger, a tag trigger under `pull_request`, and a `tags:` key
+  outside the `on` block entirely. The policy is one regular expression away
+  from accepting everything, and the only symptom would be a green gate.
+- Added an explicit account of the three SHAs a release involves — pull-request
+  head, merge commit and tag — to **CONTRIBUTING.md**, with what evidence on
+  each does and does not prove and which issue owns binding them together.
+  Evidence gathered on one was previously presented as evidence for another.
 - Added a root **.editorconfig** aligned with the established
   **.gitattributes** policy. It defines four-space VBA and Python indentation,
   two-space structured-data indentation, LF for cross-platform repository text,

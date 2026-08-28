@@ -428,16 +428,88 @@ def check_public_api_selftest():
 
 
 # --------------------------------------------------------------------------
-USES_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*(?P<ref>[^\s#]+)\s*(?P<rest>.*)$")
+# YAML permits whitespace before the colon, so `uses : x` is the same mapping
+# as `uses: x`. Matching only the tight form let an unpinned reference through.
+USES_RE = re.compile(
+    r"^\s*(?:-\s*)?uses\s*:\s*(?P<ref>[^\s#]+)\s*(?P<rest>.*)$")
 
 PINNED_RE = re.compile(r"^[\w.\-]+/[\w.\-]+(?:/[^@]+)?@(?P<sha>[0-9a-f]+)$")
 
-AUDIT_COMMENT_RE = re.compile(r"^#\s*v[0-9][0-9A-Za-z.\-+]*\s*$")
+# An exact release, not a series. `# v4` names the same mutable pointer the
+# pin exists to escape, so it documents nothing a reviewer can check.
+AUDIT_COMMENT_RE = re.compile(
+    r"^#\s*v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?\s*$")
 
-TAG_TRIGGER_RE = re.compile(
-    r"^\s*tags:\s*$\n(?:\s*#.*\n)*\s*-\s*['\"]?v\*['\"]?\s*$", re.M)
+ON_KEY_RE = re.compile(r"""^(?:on|'on'|"on"|True)\s*:\s*$""")
 
 GATE_WORKFLOW = ".github/workflows/static-checks.yml"
+
+
+def yaml_block_lines(text):
+    """Return [(indent, content)] for lines that carry YAML structure."""
+    out = []
+    for raw in text.split("\n"):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        out.append((len(raw) - len(raw.lstrip(" ")), raw.strip()))
+    return out
+
+
+def child_block(lines, start):
+    """Return the lines nested under lines[start], and the index after them."""
+    parent_indent = lines[start][0]
+    end = start + 1
+    while end < len(lines) and lines[end][0] > parent_indent:
+        end += 1
+    return lines[start + 1:end], end
+
+
+def find_key(lines, name):
+    """Return the index of a mapping key at the block's own indentation."""
+    if not lines:
+        return None
+    indent = lines[0][0]
+    pattern = re.compile(rf"""^(?:{name}|'{name}'|"{name}")\s*:""")
+    for i, (ind, content) in enumerate(lines):
+        if ind == indent and pattern.match(content):
+            return i
+    return None
+
+
+def has_push_tag_trigger(text):
+    """Return True only when on.push.tags contains the v* pattern.
+
+    Searching the file for a tags: block matched one under pull_request, or
+    under any other key, and reported a workflow as tag-triggered when no tag
+    push would ever start it. The association has to be structural.
+    """
+    lines = yaml_block_lines(text)
+
+    on_at = next((i for i, (ind, content) in enumerate(lines)
+                  if ind == 0 and ON_KEY_RE.match(content)), None)
+    if on_at is None:
+        return False
+
+    on_block, _ = child_block(lines, on_at)
+
+    push_at = find_key(on_block, "push")
+    if push_at is None:
+        return False
+
+    push_block, _ = child_block(on_block, push_at)
+
+    tags_at = find_key(push_block, "tags")
+    if tags_at is None:
+        return False
+
+    tags_block, _ = child_block(push_block, tags_at)
+
+    for _, content in tags_block:
+        if not content.startswith("-"):
+            continue
+        if content[1:].strip().strip("\"'") == "v*":
+            return True
+    return False
 
 
 def workflow_findings(rel, text, require_tag_trigger=False):
@@ -486,12 +558,13 @@ def workflow_findings(rel, text, require_tag_trigger=False):
 
         if not AUDIT_COMMENT_RE.match(rest):
             findings.append(
-                f"{rel}:{n}: {ref} carries no audited-version comment; write "
-                f"the release it resolves to, as '# v1.2.3', so the pin can be "
-                f"reviewed without resolving it by hand"
+                f"{rel}:{n}: {ref} carries no exact audited-version comment; "
+                f"write the release it resolves to, as '# v1.2.3', so the pin "
+                f"can be reviewed without resolving it by hand. A series such "
+                f"as '# v4' names the mutable pointer the pin exists to escape"
             )
 
-    if require_tag_trigger and not TAG_TRIGGER_RE.search(text):
+    if require_tag_trigger and not has_push_tag_trigger(text):
         findings.append(
             f"{rel}: no push trigger on tags 'v*'; a tag is the artefact "
             f"people install from, and nothing would run against it"
@@ -569,6 +642,30 @@ WORKFLOW_SELFTEST_CASES = [
     ("a missing tag trigger is rejected",
      WORKFLOW_HEAD.replace("    tags:\n      - 'v*'\n", "")
      + "      - uses: actions/checkout@" + "1" * 40 + " # v4.4.0\n",
+     1),
+    ("a tag trigger under pull_request does not satisfy on.push",
+     WORKFLOW_HEAD.replace("    tags:\n      - 'v*'\n", "")
+     .replace("on:\n", "on:\n  pull_request:\n    tags:\n      - 'v*'\n")
+     + "      - uses: actions/checkout@" + "1" * 40 + " # v4.4.0\n",
+     1),
+    ("a tags key outside the on block does not satisfy on.push",
+     WORKFLOW_HEAD.replace("    tags:\n      - 'v*'\n", "")
+     + "      - uses: actions/checkout@" + "1" * 40 + " # v4.4.0\n"
+     + "        with:\n          tags:\n            - 'v*'\n",
+     1),
+    ("whitespace before the colon does not hide a moving tag",
+     WORKFLOW_HEAD + "      - uses : actions/checkout@v4\n",
+     1),
+    ("a quoted reference is read, not skipped",
+     WORKFLOW_HEAD + '      - uses: "actions/checkout@v4"\n',
+     1),
+    ("a version series is not an audited version",
+     WORKFLOW_HEAD
+     + "      - uses: actions/checkout@" + "1" * 40 + " # v4\n",
+     1),
+    ("a major.minor comment is not an audited version",
+     WORKFLOW_HEAD
+     + "      - uses: actions/checkout@" + "1" * 40 + " # v4.4\n",
      1),
 ]
 
