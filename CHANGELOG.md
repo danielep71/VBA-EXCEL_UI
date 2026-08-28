@@ -73,7 +73,8 @@ measured against that baseline.
 | Regression and certification fixes | Not yet implemented |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | Eighteen checks; the release branch passes |
+| Static validation | Nineteen checks; the release branch passes |
+| Wiki | Tracks v1.1.2; badge consistency now checked on push and weekly |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
@@ -161,6 +162,29 @@ measured against that baseline.
   coverage it does not have. A model that silently normalized a `ByRef` flip away would
   keep the gate green through exactly the change it exists to catch, and no VBA
   test can see that.
+- Added a root **VERSION** file as the single release number this repository
+  states. Module headers and the wiki track badges both derive from it, so it
+  moves once per release rather than in several places independently. It starts
+  at `1.1.2`, which is what the live wiki tracks; issue #36 moves it with the
+  module headers.
+- Added **tools/wiki_badges.py**, which asserts that every wiki content page
+  carries a `wiki_tracks-vX.Y.Z` badge, that every badge agrees, and that they
+  agree with `VERSION`. Reserved navigation pages are exempt by an explicit
+  list rather than a leading-underscore pattern, which would silently exempt
+  any future page someone named that way.
+- Added **.github/workflows/wiki-badges.yml**, which clones the wiki read-only
+  and runs that check. The wiki is a separate Git-backed repository with no
+  Actions surface of its own, so it cannot check itself. The clone is
+  unauthenticated: the wiki is public, and supplying no token means the job
+  cannot write to it. The workflow runs on a schedule as well as on push,
+  because a wiki edit does not touch this repository and therefore starts
+  nothing — without the timer, drift introduced in the wiki editor stays
+  invisible until the next commit lands here, which is the window the pre-1.1.2
+  drift lived in.
+- Added the badge rules to the static gate as a nineteenth check. It runs the
+  fixtures, not the wiki: `tools/check_repo.py` never touches the network, so a
+  machine without wiki access still gets a meaningful gate, and the policy
+  cannot rot between the rare occasions the workflow reports something.
 - Added a push trigger on `v*` tags to **.github/workflows/static-checks.yml**.
   A tag is the artefact people install from, and until now nothing ran against
   one: `v1.1.1` and `v1.1.2` were published from commits carrying no automated
@@ -211,6 +235,12 @@ measured against that baseline.
   `sync-label-colors.yml` workflow already followed the convention; it is now a
   rule rather than a habit, which is what makes #53's workflow subject to it
   before it is written.
+- Changed each arm-structure fixture in **tools/vba_api.py** to name the member
+  under test and compare only its records. Comparing whole manifests let an
+  unrelated declaration in another arm carry the difference, which is how the
+  three-arm case passed against an implementation that ignored preceding arms
+  entirely. A case whose named member is absent from either fixture now fails
+  too, since comparing two empty sets proves nothing either.
 - Changed **tools/public_api_manifest.txt** to record the complete normalized
   declaration of each public member rather than module, kind and name. The
   member count is unchanged at thirty-eight, so nothing was added or dropped in
@@ -348,6 +378,7 @@ RESULT: PASS
   supported API declaration
   workflow pin policy
   workflow policy self-test
+  wiki badge self-test
   release state
   repository hygiene
   markdown links

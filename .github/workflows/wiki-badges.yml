@@ -1,0 +1,68 @@
+# ==========================================================================
+# Wiki track-badge consistency
+# ==========================================================================
+#
+# The wiki is a separate Git-backed repository. It has no Actions surface of
+# its own, so it cannot check itself, and nothing gated it: before v1.1.2 it
+# had drifted a full release behind and the only signal was a reader noticing.
+#
+# This workflow lives here because this is where automation can run, and
+# because the version the wiki is supposed to track is stated here — in the
+# root VERSION file — rather than in the wiki. Deriving the expected value from
+# the wiki would make the check circular: every page agreeing on a stale
+# release would pass.
+#
+# The clone is read-only and unauthenticated. The wiki is public, so no token
+# is needed, and not supplying one means this job cannot write to the wiki even
+# if something here were wrong.
+#
+# The schedule matters as much as the push trigger. A wiki edit does not touch
+# this repository and therefore starts nothing; without a timer, drift
+# introduced directly in the wiki editor stays invisible until the next commit
+# lands here, which is exactly the window the v1.1.2 drift lived in.
+#
+# This job does not gate a merge. It makes a silent failure loud.
+
+name: Wiki badges
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'VERSION'
+      - 'tools/wiki_badges.py'
+      - '.github/workflows/wiki-badges.yml'
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  badges:
+    name: Wiki track badges
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Clone the wiki read-only
+        run: |
+          git clone --depth 1 \
+            https://github.com/${{ github.repository }}.wiki.git \
+            "${RUNNER_TEMP}/wiki"
+
+      - name: Verify the badge rules against their own fixtures
+        run: python3 tools/wiki_badges.py --selftest
+
+      - name: Check the wiki against VERSION
+        run: python3 tools/wiki_badges.py "${RUNNER_TEMP}/wiki"

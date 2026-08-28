@@ -65,6 +65,7 @@ VBA-EXCEL_UI/
 ├─ tools/
 │  ├─ reformat.py                house-style formatter
 │  ├─ vba_api.py                 public-declaration contract model
+│  ├─ wiki_badges.py             wiki track-badge consistency
 │  ├─ check_repo.py              the static gate CI runs
 │  └─ public_api_manifest.txt    declaration contract and release baseline
 ├─ docs/
@@ -300,6 +301,35 @@ means. The baseline is rebased only at a release, with
 `tools/vba_api.py --rebase-baseline vX.Y.Z`.
 
 The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
+
+## 📚 The wiki and the VERSION file
+
+The root `VERSION` file is the single release number this repository states.
+Module headers and the wiki track badges both derive from it, and it moves once
+per release rather than in several places independently.
+
+The wiki is a separate Git-backed repository with no Actions surface of its own,
+so it cannot check itself. `.github/workflows/wiki-badges.yml` clones it
+read-only and runs `tools/wiki_badges.py`, which asserts that every content page
+carries a `wiki_tracks-vX.Y.Z` badge, that every badge agrees, and that they
+agree with `VERSION`. Reserved navigation pages — `_Sidebar.md` and friends —
+are exempt by an explicit list rather than by a leading-underscore pattern,
+which would silently exempt any future page named that way.
+
+Two things about that arrangement are deliberate. The expected version comes
+from this repository and not from the wiki, because deriving it from the first
+page read would make the check circular: fourteen pages agreeing on a stale
+release would pass. And the workflow runs on a schedule as well as on push,
+because a wiki edit does not touch this repository and therefore starts nothing
+— without the timer, drift introduced in the wiki editor stays invisible until
+the next commit lands here.
+
+`tools/check_repo.py` never touches the network. It runs the badge rules against
+their own fixtures so the policy cannot rot, and leaves the clone to the
+workflow.
+
+The wiki gates no merge. It makes a silent failure loud, which is the failure
+that let the wiki fall a full release behind before v1.1.2.
 
 ## 🧾 Three SHAs, three different claims
 
