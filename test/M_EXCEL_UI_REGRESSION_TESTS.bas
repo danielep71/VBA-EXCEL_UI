@@ -9280,6 +9280,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
         TST_AssertRefusal _
             ExpectedNumber:=TEST_CERT_ERR_BASE + 21, _
             ExpectedSource:="Test_EXCEL_UI_RunCertificationSelfTest", _
+            ExpectedDescription:= _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before running this destructive test", _
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
@@ -9327,6 +9330,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
         TST_AssertRefusal _
             ExpectedNumber:=TEST_RIBBON_ERR_BASE + 1, _
             ExpectedSource:="Test_EXCEL_UI_RunRibbonSdiProbe", _
+            ExpectedDescription:= _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before probing", _
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
@@ -9372,6 +9378,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
         TST_AssertRefusal _
             ExpectedNumber:=TEST_SNAPSHOT_ID_ERR_BASE + 1, _
             ExpectedSource:="Test_EXCEL_UI_RunSnapshotIdentity", _
+            ExpectedDescription:= _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before running this destructive test", _
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
@@ -9419,6 +9428,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
         TST_AssertRefusal _
             ExpectedNumber:=TEST_TITLEBAR_SDI_ERR_BASE + 1, _
             ExpectedSource:="Test_EXCEL_UI_RunTitleBarSdiIdentity", _
+            ExpectedDescription:= _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before running this destructive test", _
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
@@ -9452,6 +9464,7 @@ End Sub
 Private Sub TST_AssertRefusal( _
     ByVal ExpectedNumber As Long, _
     ByVal ExpectedSource As String, _
+    ByVal ExpectedDescription As String, _
     ByVal ActualNumber As Long, _
     ByVal ActualSource As String, _
     ByVal ActualDescription As String, _
@@ -9468,7 +9481,12 @@ Private Sub TST_AssertRefusal( _
 '   Asserting only that something was raised would pass against a runner that
 '   refused for the wrong reason, or that failed later for an unrelated one.
 '   The number identifies the guard, the source identifies which runner raised
-'   it, and a non-empty description is what a caller actually reads.
+'   it, and the description is what a caller actually reads.
+'
+'   The description is compared exactly rather than merely for being non-empty.
+'   A length test passes against any text at all, including another runner's
+'   message or an unrelated failure that reached the same handler, which is
+'   most of what this case exists to distinguish.
 '
 ' INPUTS
 '   ExpectedNumber
@@ -9476,6 +9494,9 @@ Private Sub TST_AssertRefusal( _
 '
 '   ExpectedSource
 '     Procedure name the guard raises with
+'
+'   ExpectedDescription
+'     Exact text the guard raises with
 '
 '   ActualNumber / ActualSource / ActualDescription
 '     Values captured from Err immediately after the invocation
@@ -9523,9 +9544,10 @@ Private Sub TST_AssertRefusal( _
             (ActualSource = ExpectedSource), _
             AssertionName & ".Source"
 
-    'An empty description would leave a caller nothing to act on
+    'Compared exactly. A length test would pass against any text at all,
+    'including another runner's message.
         TST_AssertTrue _
-            (Len(ActualDescription) > 0), _
+            (ActualDescription = ExpectedDescription), _
             AssertionName & ".Description"
 
 End Sub
