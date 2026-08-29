@@ -317,24 +317,23 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
     Dim FailSource          As String          'Captured failure source
     Dim FailDescription     As String          'Captured failure description
 
+    Dim CreatedSnapshot     As Boolean         'TRUE once this run owns one
+
     Const PROC As String = "Test_EXCEL_UI_RunCertificationSelfTest"
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' VALIDATE PRECONDITIONS
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
-        TST_Log PROC, "START", _
-            "Validating that a certification failure reaches the caller"
-
-'------------------------------------------------------------------------------
-' ESTABLISH A REJECTED PRECONDITION
-'------------------------------------------------------------------------------
-    'Refuse to destroy a snapshot the caller is relying on. Capturing here
-    'replaces any existing snapshot outright, and the cleanup below would then
-    'discard the replacement, so a caller who already held one would lose it
-    'with nothing said. Every other destructive runner in this module refuses
-    'the same way.
+    'Refuse to destroy a snapshot the caller is relying on. Capturing below
+    'replaces any existing snapshot outright, and the cleanup discards what it
+    'captured, so a caller who already held one would lose it with nothing said.
+    '
+    'This runs before the handler is armed, deliberately. Armed first, the
+    'refusal travelled Err_Handler, resumed at Safe_Exit, and the unconditional
+    'clear there deleted the very snapshot being refused - the caller received
+    'the refusal and lost the state anyway. Raising here propagates the number,
+    'source and description to the caller untouched, and nothing has been
+    'acquired yet that would need releasing.
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 21, _
@@ -343,13 +342,31 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
                 "restore it before running this destructive test"
         End If
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        CreatedSnapshot = False
+
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a certification failure reaches the caller"
+
+'------------------------------------------------------------------------------
+' ESTABLISH A REJECTED PRECONDITION
+'------------------------------------------------------------------------------
     'Certification refuses to start when an explicit snapshot exists. That
     'refusal is raised after the handler is armed, so it travels the path under
     'test.
         UI_CaptureExcelUIState
         TST_WaitUI TEST_WAIT_SECONDS
 
-        If Not UI_HasExcelUIStateSnapshot Then
+    'Ownership is taken from an observed post-capture state, not from the call
+    'having returned. A capture that silently left no snapshot must not make
+    'this run believe it owns one.
+        CreatedSnapshot = UI_HasExcelUIStateSnapshot
+
+        If Not CreatedSnapshot Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 20, _
                 PROC, _
@@ -397,9 +414,13 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
 Safe_Exit:
-    'Release the snapshot this case created
+    'Release only a snapshot this run created. A caller-owned snapshot reaches
+    'this label whenever an early failure resumes here, and clearing it would
+    'destroy state this runner never owned.
         On Error Resume Next
-            UI_ClearExcelUIStateSnapshot
+            If CreatedSnapshot Then
+                UI_ClearExcelUIStateSnapshot
+            End If
         On Error GoTo 0
 
     'Raise the captured failure after cleanup when needed
@@ -1685,21 +1706,18 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
     Dim FailSource          As String          'Captured failure source
     Dim FailDescription     As String          'Captured failure description
 
+    Dim CreatedSnapshot     As Boolean         'TRUE once this run owns one
+
     Const PROC As String = "Test_EXCEL_UI_RunRibbonSdiProbe"
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
-        TST_RibbonProbeReset
-
-        TST_Log PROC, "START", "Ribbon SDI characterization started"
 
 '------------------------------------------------------------------------------
 ' VALIDATE PRECONDITIONS
 '------------------------------------------------------------------------------
-    'The probe captures and restores a snapshot, so it cannot share the slot
+    'The probe captures and restores a snapshot, so it cannot share the slot.
+    '
+    'Refused before the handler is armed. Armed first, this refusal travelled
+    'Err_Handler, resumed at Safe_Exit, and the unconditional clear there
+    'deleted the caller snapshot it had just refused to disturb.
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_RIBBON_ERR_BASE + 1, _
@@ -1707,6 +1725,17 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
                 "an explicit EXCEL_UI snapshot already exists; clear or " & _
                 "restore it before probing"
         End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        CreatedSnapshot = False
+
+        On Error GoTo Err_Handler
+
+        TST_RibbonProbeReset
+
+        TST_Log PROC, "START", "Ribbon SDI characterization started"
 
         Set AnchorWindow = ActiveWindow
 
@@ -1789,6 +1818,10 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
         TST_WaitUI TEST_WAIT_SECONDS
 
         UI_CaptureExcelUIState
+
+    'Ownership follows an observed snapshot, not a returned call. A capture
+    'that silently left none must not make this run believe it owns one.
+        CreatedSnapshot = UI_HasExcelUIStateSnapshot
         TST_WaitUI TEST_WAIT_SECONDS
 
         UI_SetExcelUI Ribbon:=UI_Hide
@@ -1841,9 +1874,14 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
 Safe_Exit:
-    'Leave the host as it was found, whatever the observations were
+    'Leave the host as it was found, whatever the observations were. Only a
+    'snapshot this run created is released; a caller-owned one reaches this
+    'label whenever an early failure resumes here.
         On Error Resume Next
-            UI_ClearExcelUIStateSnapshot
+            If CreatedSnapshot Then
+                UI_ClearExcelUIStateSnapshot
+            End If
+
             TST_SafeCloseWorkbook BookC
             TST_SafeCloseWorkbook BookB
 
@@ -2307,21 +2345,32 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
     Dim FailSource          As String
     Dim FailDescription     As String
 
+    Dim CreatedSnapshot     As Boolean         'TRUE once this run owns one
+
     Const PROC As String = "Test_EXCEL_UI_RunSnapshotIdentity"
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' VALIDATE PRECONDITIONS
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
-        TST_Log PROC, "START", "Identity-safe structured snapshot test started"
-
+    'Refused before the handler is armed. Armed first, this refusal travelled
+    'Err_Handler, resumed at Safe_Exit, and the unconditional clear there
+    'deleted the caller snapshot it had just refused to disturb. This is a
+    'certification unit, so that reached the release path.
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_SNAPSHOT_ID_ERR_BASE + 1, _
                 PROC, _
                 "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
         End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        CreatedSnapshot = False
+
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", "Identity-safe structured snapshot test started"
 
         Set AnchorWindow = ActiveWindow
 
@@ -2394,6 +2443,11 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
         OK = UI_CaptureExcelUIState_WithResult( _
             FailureCount:=FailureCount, _
             FailureList:=FailureList)
+
+    'Ownership follows an observed snapshot rather than the returned flag. A
+    'capture reporting success that left nothing behind must not make this run
+    'believe it owns one, and the assertion below can fail before Safe_Exit.
+        CreatedSnapshot = UI_HasExcelUIStateSnapshot
 
         TST_AssertResultSuccess _
             Succeeded:=OK, _
@@ -2468,7 +2522,10 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 Safe_Exit:
         On Error Resume Next
 
-        UI_ClearExcelUIStateSnapshot
+    'Only a snapshot this run created is released
+        If CreatedSnapshot Then
+            UI_ClearExcelUIStateSnapshot
+        End If
 
         TST_SafeCloseWindow ReplacementWindow
         TST_SafeCloseWindow CapturedWindow
@@ -2574,17 +2631,21 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
-        TST_Log PROC, "START", "SDI title-bar identity test started"
-
-    'Refuse to destroy a snapshot the caller is relying on
+    'Refuse to destroy a snapshot the caller is relying on, before the handler
+    'is armed. Armed first, this refusal travelled Err_Handler, resumed at
+    'Safe_Exit, and the clear there deleted the caller snapshot it had just
+    'refused to disturb. This is a certification unit, so that reached the
+    'release path.
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 1, _
                 PROC, _
                 "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
         End If
+
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", "SDI title-bar identity test started"
 
     'Hold the window to return to, so the run leaves the host as it found it
         Set AnchorWindow = ActiveWindow
@@ -2617,10 +2678,11 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
 Safe_Exit:
-    'Leave no snapshot behind, and leave the frame visible
+    'Leave the frame visible. No snapshot is cleared here: this runner never
+    'captures one. Its two child cases create and release their own, so an
+    'outer clear could only ever have destroyed a caller-owned snapshot that
+    'reached this label through an early failure.
         On Error Resume Next
-            UI_ClearExcelUIStateSnapshot
-
             If Not AnchorWindow Is Nothing Then
                 AnchorWindow.Activate
             End If
