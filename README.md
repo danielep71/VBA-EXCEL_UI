@@ -497,9 +497,15 @@ On point 3, confirmed means read back. The quiet-update scope reads
 `ScreenUpdating` on entry, writes only when it was enabled, then reads it again
 and claims ownership only if that second read reports suppression. A write the
 host refuses or silently ignores leaves the component owning nothing, so the
-matching exit writes nothing. If the readback itself fails, ownership is
-refused and no rollback is attempted — a speculative rollback would be another
-unverified write, and the host is left as found.
+matching exit writes nothing.
+
+A failed readback is different, and worth stating plainly. The write has already
+happened by then, so redraw may well be suppressed — but the component cannot
+prove it caused that, so it owns nothing and the matching exit restores nothing.
+The host can therefore be left suppressed. No rollback is attempted, because a
+rollback would be a second write this scope could not verify either, and that is
+the behavior being removed. Detecting such a leftover at the end of a run
+belongs to certification.
 
 The `WithResult` APIs return:
 

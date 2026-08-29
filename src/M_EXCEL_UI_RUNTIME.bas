@@ -919,10 +919,15 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
 '   observation from here: the readback still reports True. They are not
 '   distinguished, and the seam models them as one fault kind.
 '
-'   No rollback is attempted when the readback fails. That would be a second
-'   unverified write, which is the thing this procedure exists to stop doing.
-'   The host is left as found, ownership is refused, and detecting a resulting
-'   mismatch at the end of a run belongs to certification.
+'   A failed readback is not a quiet outcome. The write has already happened,
+'   so redraw may well be suppressed - but that cannot be proved from here, so
+'   ownership is refused and the matching End restores nothing. The host can
+'   therefore be left suppressed with nothing owning it.
+'
+'   No rollback is attempted even so. A rollback would be a second write this
+'   scope could not verify either, which is the behavior being removed.
+'   Detecting a leftover of this kind at the end of a run belongs to
+'   certification.
 '
 ' UPDATED
 '   2026-08-29
