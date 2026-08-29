@@ -489,8 +489,17 @@ The component deliberately uses best-effort processing:
 
 1. a failure is recorded or logged;
 2. later unrelated operations are still attempted;
-3. `ScreenUpdating` is restored where the component changed it;
+3. `ScreenUpdating` is restored only where the component **confirmed** it
+   changed it;
 4. fire-and-forget APIs do not raise ordinary element-level failures.
+
+On point 3, confirmed means read back. The quiet-update scope reads
+`ScreenUpdating` on entry, writes only when it was enabled, then reads it again
+and claims ownership only if that second read reports suppression. A write the
+host refuses or silently ignores leaves the component owning nothing, so the
+matching exit writes nothing. If the readback itself fails, ownership is
+refused and no rollback is attempted — a speculative rollback would be another
+unverified write, and the host is left as found.
 
 The `WithResult` APIs return:
 

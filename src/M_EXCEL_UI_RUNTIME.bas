@@ -123,6 +123,29 @@ Option Private Module
 'to exhaust memory on demand.
 Private m_InjectFailureListGrowthFailure As Boolean
 
+'Regression seam for the quiet-update scope. The failures it stands in for are
+'host refusals, which cannot be provoked on demand, so the ownership rule they
+'exercise would otherwise be unreachable. Kinds are private on purpose: the
+'seam takes a Long rather than exposing an enumeration, so the project-public
+'surface gains one procedure and no type.
+'
+'   0  no fault
+'   1  the entry read fails
+'   2  the write is ineffective - refused or silently ignored, which are
+'      indistinguishable from inside this procedure
+'   3  the readback fails, after a real write has already happened
+'Raised only by the seam, to stand in for a host refusal. The number is never
+'seen by a caller: both raises happen inside On Error Resume Next and are
+'consumed by the same procedure.
+Private Const UI_ERR_INJECTED_QUIET_FAULT As Long = vbObjectError + 5400
+
+Private Const QUIET_FAULT_NONE      As Long = 0
+Private Const QUIET_FAULT_ENTRY     As Long = 1
+Private Const QUIET_FAULT_WRITE     As Long = 2
+Private Const QUIET_FAULT_READBACK  As Long = 3
+
+Private m_InjectQuietUpdateFault    As Long
+
 
 Public Sub UI_RuntimeHandleFailure( _
     ByVal ProcName As String, _
@@ -766,6 +789,74 @@ Public Sub UI_InternalInjectFailureListGrowthFailure( _
 End Sub
 
 
+Public Sub UI_InternalInjectQuietUpdateFault( _
+    ByVal FaultKind As Long)
+'
+'==============================================================================
+' UI_InternalInjectQuietUpdateFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a one-shot fault for the next quiet-update scope entry.
+'
+' WHY THIS EXISTS
+'   UI_RuntimeBeginQuietUpdate claims ownership only of a suppression it has
+'   confirmed. The paths that refuse ownership are host refusals - an
+'   unreadable entry state, a write the host declines or ignores, an unreadable
+'   readback - and none can be provoked on demand. Without a seam the rule is
+'   untestable, and an untested ownership rule is the defect this replaced.
+'
+' INPUTS
+'   FaultKind
+'     0  no fault
+'     1  the entry read fails
+'     2  the write is ineffective, covering both a refused write and one the
+'        host silently ignores; the two are indistinguishable from inside the
+'        scope and are deliberately not separated
+'     3  the readback fails, after a real write has already happened
+'
+'     Values are plain Longs rather than an enumeration so that this seam adds
+'     one procedure to the project-public surface and no type. The mapping is
+'     mirrored by private constants in this module and in the regression
+'     module; neither is exported.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Records the fault for the next scope entry to consume.
+'   - The armed value is consumed whether or not it fires, so a test that
+'     forgets to disarm cannot fault every later scope in the session.
+'   - An unrecognised value is stored and behaves as no fault.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     prevents exposure to external VBA projects, so this is project-public
+'     surface and not part of the supported facade.
+'   - Production code must never call it.
+'
+' UPDATED
+'   2026-08-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' SET SEAM
+'------------------------------------------------------------------------------
+    'Record the armed state for the next scope entry to consume
+        m_InjectQuietUpdateFault = FaultKind
+
+End Sub
+
+
 Public Sub UI_RuntimeBeginQuietUpdate( _
     ByRef OldScreenUpdating As Boolean, _
     ByRef QuietModeChanged As Boolean)
@@ -774,32 +865,44 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
 ' UI_RuntimeBeginQuietUpdate
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Enters a best-effort Application.ScreenUpdating suppression scope.
+'   Enters a best-effort Application.ScreenUpdating suppression scope, claiming
+'   ownership only of a suppression it has confirmed.
 '
 ' WHY THIS EXISTS
 '   Applying several UI elements in sequence causes visible flicker. Suppressing
 '   redraw for the duration of the pass removes most of it. Suppression must be
-'   recorded rather than assumed, because a caller may already have disabled
-'   ScreenUpdating and would not expect this module to re-enable it.
+'   proved rather than assumed, because the matching End writes a value back on
+'   the strength of the ownership flag, and a caller who had already disabled
+'   redraw would not expect this module to re-enable it.
+'
+'   The flag previously recorded an attempt. Under On Error Resume Next a write
+'   the host refused or ignored left no trace, so the scope claimed a
+'   transition it had never made and End restored over state it did not own.
 '
 ' INPUTS
 '   OldScreenUpdating
-'     ByRef. Receives the ScreenUpdating value observed on entry.
+'     ByRef. Receives the ScreenUpdating value observed on entry. Set to True
+'     before the read, so a failed read leaves a defined value rather than
+'     whatever the caller happened to pass in. It is not used for restoration
+'     in that case, because ownership is not claimed either.
 '
 '   QuietModeChanged
-'     ByRef. Receives True only when this scope actually changed the setting.
+'     ByRef. True only when a readback confirmed suppression that this scope
+'     caused.
 '
 ' RETURNS
 '   None.
 '
 ' BEHAVIOR
-'   - Captures the current ScreenUpdating value.
-'   - Disables redraw only when it was enabled.
-'   - Records whether the change was made, so the matching End can be exact.
+'   entry read fails                 no ownership, Changed False
+'   entry already False              no write, no ownership, Changed False
+'   write attempted, readback False  ownership confirmed, Changed True
+'   write attempted, readback True   no ownership, Changed False
+'   readback fails                   no ownership, Changed False
 '
 ' ERROR POLICY
-'   - Suppresses errors locally.
-'   - Leaves QuietModeChanged False when the host refuses the change.
+'   - Suppresses errors locally and never raises.
+'   - Every failure leaves QuietModeChanged False.
 '
 ' DEPENDENCIES
 '   None.
@@ -812,31 +915,111 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
 '   ScreenUpdating suppression cannot fully eliminate Ribbon or non-client
 '   frame repaint; those surfaces are redrawn by the host.
 '
+'   A write that fails and a write the host silently ignores are the same
+'   observation from here: the readback still reports True. They are not
+'   distinguished, and the seam models them as one fault kind.
+'
+'   No rollback is attempted when the readback fails. That would be a second
+'   unverified write, which is the thing this procedure exists to stop doing.
+'   The host is left as found, ownership is refused, and detecting a resulting
+'   mismatch at the end of a run belongs to certification.
+'
 ' UPDATED
-'   2026-08-18
+'   2026-08-29
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim EntryValue          As Boolean         'ScreenUpdating seen on entry
+    Dim ReadNumber          As Long            'Error from the entry read
+    Dim BackValue           As Boolean         'ScreenUpdating seen after write
+    Dim BackNumber          As Long            'Error from the readback
+    Dim Fault               As Long            'Armed regression fault, if any
+
+'------------------------------------------------------------------------------
 ' INITIALIZE
+'------------------------------------------------------------------------------
+    'Deterministic before anything can fail. A ByRef output left untouched
+    'carries the caller's incoming value, which is not an observation.
+        OldScreenUpdating = True
+        QuietModeChanged = False
+
+    'One-shot: consumed here whether or not it fires, so a test that forgets to
+    'disarm cannot fault every later scope in the session
+        Fault = m_InjectQuietUpdateFault
+        m_InjectQuietUpdateFault = QUIET_FAULT_NONE
+
+'------------------------------------------------------------------------------
+' READ ENTRY STATE
 '------------------------------------------------------------------------------
     'Never let a host refusal escape this scope
         On Error Resume Next
 
-'------------------------------------------------------------------------------
-' ENTER QUIET SCOPE
-'------------------------------------------------------------------------------
-    'Capture the value observed on entry
-        OldScreenUpdating = Application.ScreenUpdating
+            Err.Clear
 
-    'Assume no change until one is actually made
-        QuietModeChanged = False
+            If Fault = QUIET_FAULT_ENTRY Then
+                Err.Raise UI_ERR_INJECTED_QUIET_FAULT
+            Else
+                EntryValue = Application.ScreenUpdating
+            End If
 
-    'Suppress redraw only when it was enabled, and record that we did so
-        If OldScreenUpdating Then
-            Application.ScreenUpdating = False
-            QuietModeChanged = True
+            ReadNumber = Err.Number
+            Err.Clear
+
+        On Error GoTo 0
+
+    'An unreadable entry state cannot be restored to, so nothing is owned
+        If ReadNumber <> 0 Then
+            Exit Sub
         End If
+
+        OldScreenUpdating = EntryValue
+
+'------------------------------------------------------------------------------
+' SUPPRESS REDRAW
+'------------------------------------------------------------------------------
+    'Already suppressed by someone else. Writing would change nothing and
+    'claiming it would make End restore over a caller's setting.
+        If Not EntryValue Then
+            Exit Sub
+        End If
+
+        On Error Resume Next
+
+            Err.Clear
+
+            If Fault <> QUIET_FAULT_WRITE Then
+                Application.ScreenUpdating = False
+            End If
+
+            Err.Clear
+
+'------------------------------------------------------------------------------
+' CONFIRM OWNERSHIP
+'------------------------------------------------------------------------------
+    'The write is not evidence. Only the readback is.
+            If Fault = QUIET_FAULT_READBACK Then
+                Err.Raise UI_ERR_INJECTED_QUIET_FAULT
+            Else
+                BackValue = Application.ScreenUpdating
+            End If
+
+            BackNumber = Err.Number
+            Err.Clear
+
+        On Error GoTo 0
+
+        If BackNumber <> 0 Then
+            Exit Sub
+        End If
+
+        If BackValue Then
+            Exit Sub
+        End If
+
+        QuietModeChanged = True
 
 End Sub
 

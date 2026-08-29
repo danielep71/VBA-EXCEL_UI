@@ -66,7 +66,7 @@ measured against that baseline.
 
 | Area | Current state |
 |---|---|
-| Production VBA | Unchanged from v1.1.2 |
+| Production VBA | `M_EXCEL_UI_RUNTIME` quiet-scope ownership corrected; the other three modules unchanged from v1.1.2 |
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
 | Runtime correctness fixes | Not yet implemented |
@@ -80,6 +80,28 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added `UI_InternalInjectQuietUpdateFault` to **M_EXCEL_UI_RUNTIME**, a
+  one-shot regression seam arming a failed entry read, an ineffective write or a
+  failed readback for the next quiet-scope entry. The branches it reaches are
+  host refusals that cannot be provoked on demand, and an ownership rule that
+  cannot be tested is the defect it replaced. It follows the existing
+  `UI_InternalInjectFailureListGrowthFailure` convention: public for
+  same-project access only, kept off the external facade by
+  `Option Private Module`, and never called by production code. Fault kinds are
+  private `Long` constants mirrored in both modules, so the seam adds one
+  procedure and no type.
+
+  This is a `[project-public]` manifest change and **not** a supported API
+  change. `[supported]` remains byte-identical at twelve members and identical
+  to `[baseline v1.1.2]`; `[project-public]` gains exactly one line and loses
+  none.
+- Added a six-branch quiet-scope regression case covering the ordinary path, an
+  already-suppressed caller, a failed entry read, an ineffective write, a failed
+  readback and the seam being one-shot. Each branch asserts the ownership flag,
+  the reported entry value where it is meaningful, and the host value left after
+  the matching exit. Every branch restores `ScreenUpdating` itself rather than
+  trusting the scope under test, which would pass for the wrong reason on
+  exactly the branches that matter.
 - Added **tools/vba_api.py**, a canonical model of every public VBA declaration
   in `src/`. It parses each `Public` member into one normalized line carrying
   visibility, kind, name, ordered parameters with their names, `ByVal`/`ByRef`
@@ -356,6 +378,28 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- Fixed the quiet-update scope recording an attempted change as an achieved
+  one. `UI_RuntimeBeginQuietUpdate` set its ownership flag immediately after
+  writing `Application.ScreenUpdating = False`, under `On Error Resume Next`, so
+  a write the host refused or silently ignored left no trace and the scope
+  claimed a transition it had never made. `UI_RuntimeEndQuietUpdate` then wrote
+  a value back on the strength of that flag — over a caller's own setting. The
+  procedure header had promised the opposite behavior since v1.1.0; the
+  statements never enforced it.
+
+  Ownership now follows a readback. The scope reads `ScreenUpdating` on entry,
+  writes only when it was enabled, reads it again, and claims ownership only
+  when that second read reports suppression. A failed entry read, an ineffective
+  write or a failed readback all leave the flag `False`, and the matching exit
+  therefore writes nothing. No rollback is attempted after a failed readback:
+  that would be a second unverified write, and detecting the resulting host
+  mismatch at the end of a run belongs to certification
+  ([#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26)).
+
+  Both `ByRef` outputs are now set before anything fallible runs.
+  `OldScreenUpdating` was previously left untouched when the entry read failed,
+  so it carried whatever the caller happened to pass in — which the code then
+  read as "already suppressed".
 - Repaired both independent review archives in `docs/`, which carried 669
   backslash escapes between them from having been edited in a WYSIWYG editor.
   Headings read `1\. Executive assessment`, module names read `M\_EXCEL\_UI`, and

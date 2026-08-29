@@ -122,6 +122,11 @@ Option Private Module
     Private Const TEST_RIBBON_ERR_BASE As Long = vbObjectError + 5200  'Base custom error for the Ribbon probe
     Private Const TEST_OWNERSHIP_ERR_BASE As Long = vbObjectError + 5300  'Base custom error for the snapshot-ownership case
 
+    Private Const TEST_QUIET_FAULT_NONE As Long = 0  'Quiet scope: no fault
+    Private Const TEST_QUIET_FAULT_ENTRY As Long = 1  'Quiet scope: entry read fails
+    Private Const TEST_QUIET_FAULT_WRITE As Long = 2  'Quiet scope: write ineffective
+    Private Const TEST_QUIET_FAULT_READBACK As Long = 3  'Quiet scope: readback fails
+
     Private Const TEST_FAULT_NONE As Long = 0  'No post-capture fault armed
     Private Const TEST_FAULT_ASSERTION As Long = 1  'Fail an assertion after capture
     Private Const TEST_FAULT_UNEXPECTED As Long = 2  'Raise an unexpected error after capture
@@ -3281,6 +3286,10 @@ Private Sub TST_RunRegressionPack( _
                 TST_Case_DestructiveRunnersPreserveCallerSnapshot
 
         End If
+
+    'Quiet-scope ownership captures no snapshot, so it runs whether or not the
+    'caller already held one
+        TST_Case_QuietScopeOwnershipIsVerified
 
 '------------------------------------------------------------------------------
 ' RUN OPTIONAL TITLE-BAR / WRAPPER CASES
@@ -9542,6 +9551,220 @@ Private Sub TST_AssertSnapshotWindowState( _
                 CStr(ExpectedGridlines) & "; actual=" & _
                 CStr(TargetWindow.DisplayGridlines)
         End If
+
+End Sub
+
+
+Private Sub TST_Case_QuietScopeOwnershipIsVerified()
+
+'
+'==============================================================================
+' TST_Case_QuietScopeOwnershipIsVerified
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that the quiet-update scope claims ownership only of a suppression
+'   it confirmed, and restores only what it owns.
+'
+' WHY THIS EXISTS
+'   The scope used to set its ownership flag immediately after attempting the
+'   write. Under On Error Resume Next a refused or ignored write left no trace,
+'   so the flag recorded an attempt and the matching End wrote a value back for
+'   a transition that never happened - over a caller's own setting.
+'
+'   Every branch that must refuse ownership is a host refusal, so each is
+'   reached through the one-shot seam in M_EXCEL_UI_RUNTIME. The two branches
+'   that need no seam - the ordinary path and an already-suppressed caller -
+'   are exercised directly, because they are the ones a change to this logic
+'   would break first.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   Six branches. Each asserts the ownership flag, the reported entry value
+'   where it is meaningful, and the host value left behind after End.
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Restores ScreenUpdating itself; the scope is not trusted to
+'
+' DEPENDENCIES
+'   - UI_InternalInjectQuietUpdateFault
+'   - UI_RuntimeBeginQuietUpdate
+'   - UI_RuntimeEndQuietUpdate
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' NOTES
+'   ScreenUpdating is restored explicitly after every branch rather than by the
+'   scope under test. A test that relied on the code it is testing to clean up
+'   would pass for the wrong reason on exactly the branches that matter.
+'
+' UPDATED
+'   2026-08-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OldValue            As Boolean         'Entry value the scope reports
+    Dim Changed             As Boolean         'Ownership the scope claims
+
+    Const PROC As String = "TST_Case_QuietScopeOwnershipIsVerified"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating that quiet-scope ownership follows a confirmed readback"
+
+        UI_InternalInjectQuietUpdateFault TEST_QUIET_FAULT_NONE
+        Application.ScreenUpdating = True
+
+'------------------------------------------------------------------------------
+' BRANCH 1 - ORDINARY PATH OWNS THE TRANSITION
+'------------------------------------------------------------------------------
+        OldValue = False
+        Changed = False
+
+        UI_RuntimeBeginQuietUpdate OldValue, Changed
+
+        TST_AssertBooleanEquals True, OldValue, PROC & ".Ordinary.EntryValue"
+        TST_AssertBooleanEquals True, Changed, PROC & ".Ordinary.Owned"
+        TST_AssertApplicationProperty _
+            False, "ScreenUpdating", PROC & ".Ordinary.Suppressed"
+
+        UI_RuntimeEndQuietUpdate OldValue, Changed
+
+        TST_AssertApplicationProperty _
+            True, "ScreenUpdating", PROC & ".Ordinary.Restored"
+
+'------------------------------------------------------------------------------
+' BRANCH 2 - AN ALREADY-SUPPRESSED CALLER IS NOT OWNED
+'------------------------------------------------------------------------------
+        Application.ScreenUpdating = False
+
+        OldValue = True
+        Changed = True
+
+        UI_RuntimeBeginQuietUpdate OldValue, Changed
+
+        TST_AssertBooleanEquals False, OldValue, PROC & ".AlreadyOff.EntryValue"
+        TST_AssertBooleanEquals False, Changed, PROC & ".AlreadyOff.NotOwned"
+
+        UI_RuntimeEndQuietUpdate OldValue, Changed
+
+    'End must not re-enable a caller's suppression
+        TST_AssertApplicationProperty _
+            False, "ScreenUpdating", PROC & ".AlreadyOff.Untouched"
+
+        Application.ScreenUpdating = True
+
+'------------------------------------------------------------------------------
+' BRANCH 3 - A FAILED ENTRY READ OWNS NOTHING
+'------------------------------------------------------------------------------
+        UI_InternalInjectQuietUpdateFault TEST_QUIET_FAULT_ENTRY
+
+        OldValue = False
+        Changed = True
+
+        UI_RuntimeBeginQuietUpdate OldValue, Changed
+
+    'The entry value is defined but not an observation, so only its
+    'determinism is asserted
+        TST_AssertBooleanEquals True, OldValue, PROC & ".EntryFails.Deterministic"
+        TST_AssertBooleanEquals False, Changed, PROC & ".EntryFails.NotOwned"
+        TST_AssertApplicationProperty _
+            True, "ScreenUpdating", PROC & ".EntryFails.HostUntouched"
+
+        UI_RuntimeEndQuietUpdate OldValue, Changed
+
+        TST_AssertApplicationProperty _
+            True, "ScreenUpdating", PROC & ".EntryFails.NoRestore"
+
+'------------------------------------------------------------------------------
+' BRANCH 4 - AN INEFFECTIVE WRITE OWNS NOTHING
+'------------------------------------------------------------------------------
+        UI_InternalInjectQuietUpdateFault TEST_QUIET_FAULT_WRITE
+
+        OldValue = False
+        Changed = True
+
+        UI_RuntimeBeginQuietUpdate OldValue, Changed
+
+        TST_AssertBooleanEquals True, OldValue, PROC & ".WriteIgnored.EntryValue"
+        TST_AssertBooleanEquals False, Changed, PROC & ".WriteIgnored.NotOwned"
+
+    'The readback reported the host still enabled, which is what refused
+    'ownership; the host really is still enabled
+        TST_AssertApplicationProperty _
+            True, "ScreenUpdating", PROC & ".WriteIgnored.HostUnchanged"
+
+        UI_RuntimeEndQuietUpdate OldValue, Changed
+
+        TST_AssertApplicationProperty _
+            True, "ScreenUpdating", PROC & ".WriteIgnored.NoRestore"
+
+'------------------------------------------------------------------------------
+' BRANCH 5 - A FAILED READBACK OWNS NOTHING, AND NOTHING IS ROLLED BACK
+'------------------------------------------------------------------------------
+    'Here the write really happens and only verification fails. The host is
+    'therefore left suppressed, deliberately: rolling back would be a second
+    'unverified write. This case records that outcome rather than hiding it,
+    'and restores the baseline itself afterwards.
+        UI_InternalInjectQuietUpdateFault TEST_QUIET_FAULT_READBACK
+
+        OldValue = False
+        Changed = True
+
+        UI_RuntimeBeginQuietUpdate OldValue, Changed
+
+        TST_AssertBooleanEquals True, OldValue, PROC & ".ReadbackFails.EntryValue"
+        TST_AssertBooleanEquals False, Changed, PROC & ".ReadbackFails.NotOwned"
+
+    'The documented consequence: suppressed, unowned, not rolled back
+        TST_AssertApplicationProperty _
+            False, "ScreenUpdating", PROC & ".ReadbackFails.LeftSuppressed"
+
+        UI_RuntimeEndQuietUpdate OldValue, Changed
+
+        TST_AssertApplicationProperty _
+            False, "ScreenUpdating", PROC & ".ReadbackFails.NoRestore"
+
+    'The scope did not own it, so this case restores the baseline
+        Application.ScreenUpdating = True
+
+'------------------------------------------------------------------------------
+' BRANCH 6 - THE SEAM IS ONE-SHOT
+'------------------------------------------------------------------------------
+    'Armed once, consumed once. A fault that survived would break every later
+    'scope in the session, and the symptom would look like this defect.
+        UI_InternalInjectQuietUpdateFault TEST_QUIET_FAULT_WRITE
+
+        OldValue = False
+        Changed = False
+        UI_RuntimeBeginQuietUpdate OldValue, Changed
+        UI_RuntimeEndQuietUpdate OldValue, Changed
+
+        OldValue = False
+        Changed = False
+
+        UI_RuntimeBeginQuietUpdate OldValue, Changed
+
+        TST_AssertBooleanEquals True, Changed, PROC & ".OneShot.SecondScopeOwns"
+
+        UI_RuntimeEndQuietUpdate OldValue, Changed
+
+        TST_AssertApplicationProperty _
+            True, "ScreenUpdating", PROC & ".OneShot.Restored"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Quiet-scope ownership followed the readback on every branch"
 
 End Sub
 
