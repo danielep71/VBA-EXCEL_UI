@@ -120,6 +120,7 @@ Option Private Module
     Private Const TEST_TITLEBAR_SDI_ERR_BASE As Long = vbObjectError + 5000  'Base custom error for title-bar SDI tests
     Private Const TEST_CERT_ERR_BASE  As Long = vbObjectError + 5100  'Base custom error for certification
     Private Const TEST_RIBBON_ERR_BASE As Long = vbObjectError + 5200  'Base custom error for the Ribbon probe
+    Private Const TEST_OWNERSHIP_ERR_BASE As Long = vbObjectError + 5300  'Base custom error for the snapshot-ownership case
     Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
@@ -2899,6 +2900,9 @@ Private Sub TST_RunRegressionPack( _
 
             'Run the compatibility-wrapper reset-without-snapshot no-op case
                 TST_Case_ResetWithoutSnapshot_NoOp IncludeTitleBarTests
+
+            'Run the destructive-runner snapshot-ownership case
+                TST_Case_DestructiveRunnersPreserveCallerSnapshot
 
         End If
 
@@ -9162,6 +9166,367 @@ Private Sub TST_AssertSnapshotWindowState( _
                 CStr(ExpectedGridlines) & "; actual=" & _
                 CStr(TargetWindow.DisplayGridlines)
         End If
+
+End Sub
+
+
+Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
+
+'
+'==============================================================================
+' TST_Case_DestructiveRunnersPreserveCallerSnapshot
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that every destructive public runner refuses a caller-owned snapshot
+'   and leaves it intact and restorable.
+'
+' WHY THIS EXISTS
+'   All four runners raised their refusal after arming a local error handler.
+'   The handler captured it, resumed at Safe_Exit, and the unconditional clear
+'   there deleted the snapshot the refusal existed to protect. The caller
+'   received the error and lost the state anyway, and nothing asserted
+'   otherwise. Two of the four are certification units, so this was on the
+'   release path.
+'
+'   A test that only checked UI_HasExcelUIStateSnapshot would be too weak: the
+'   flag can survive while the captured content does not. Each block therefore
+'   mutates the host and restores from the preserved snapshot, and asserts the
+'   original state came back.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   Four independent blocks, one per runner. Each establishes a distinguishable
+'   state, captures it, invokes the runner, asserts the exact refusal, proves
+'   the snapshot survived by restoring through it, and clears before the next
+'   block starts.
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Leaves no snapshot behind on the success path
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - UI_CaptureExcelUIState
+'   - UI_ClearExcelUIStateSnapshot
+'   - UI_ResetExcelUIToSnapshot
+'   - UI_HasExcelUIStateSnapshot
+'   - TST_AssertRefusal
+'   - TST_AssertSnapshotAvailability
+'   - TST_AssertApplicationProperty
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' NOTES
+'   The blocks are independent on purpose. Sharing one snapshot across all four
+'   would mean the first failure invalidated the evidence for the other three,
+'   and the point of the case is to know which runners are safe.
+'
+'   The refusal is the entire interaction. Every guard now precedes handler
+'   arming and initialization, so no runner reaches workbook or window
+'   creation, Ribbon manipulation, logging or certification-counter reset. The
+'   only host mutation here is this case's own capture, mutate and restore.
+'
+' UPDATED
+'   2026-08-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RaisedNumber        As Long            'Error number reaching this case
+    Dim RaisedSource        As String          'Error source reaching this case
+    Dim RaisedDescription   As String          'Error text reaching this case
+
+    Const PROC As String = _
+        "TST_Case_DestructiveRunnersPreserveCallerSnapshot"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating that destructive runners preserve a caller snapshot"
+
+    'The pack reaches this case only when no explicit snapshot pre-existed, but
+    'assert it rather than assume it: every block below depends on owning the
+    'slot outright.
+        TST_AssertSnapshotAvailability False, PROC & ".NoSnapshotOnEntry"
+
+'------------------------------------------------------------------------------
+' BLOCK 1 - Test_EXCEL_UI_RunCertificationSelfTest
+'------------------------------------------------------------------------------
+        UI_SetExcelUI StatusBar:=UI_Hide, FormulaBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_CaptureExcelUIState
+        TST_AssertSnapshotAvailability True, PROC & ".SelfTest.Captured"
+
+    'Capture immediately, before anything else can clear Err
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunCertificationSelfTest
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo 0
+
+        TST_AssertRefusal _
+            ExpectedNumber:=TEST_CERT_ERR_BASE + 21, _
+            ExpectedSource:="Test_EXCEL_UI_RunCertificationSelfTest", _
+            ActualNumber:=RaisedNumber, _
+            ActualSource:=RaisedSource, _
+            ActualDescription:=RaisedDescription, _
+            AssertionName:=PROC & ".SelfTest.Refusal"
+
+        TST_AssertSnapshotAvailability True, PROC & ".SelfTest.Survived"
+
+    'The flag can survive while the captured content does not, so restore
+    'through it and assert the original state came back
+        UI_SetExcelUI StatusBar:=UI_Show, FormulaBar:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_ResetExcelUIToSnapshot
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertApplicationProperty _
+            False, "DisplayStatusBar", PROC & ".SelfTest.StatusBarRestored"
+        TST_AssertApplicationProperty _
+            True, "DisplayFormulaBar", PROC & ".SelfTest.FormulaBarRestored"
+
+        UI_ClearExcelUIStateSnapshot
+        TST_AssertSnapshotAvailability False, PROC & ".SelfTest.Cleared"
+
+'------------------------------------------------------------------------------
+' BLOCK 2 - Test_EXCEL_UI_RunRibbonSdiProbe
+'------------------------------------------------------------------------------
+        UI_SetExcelUI StatusBar:=UI_Show, FormulaBar:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_CaptureExcelUIState
+        TST_AssertSnapshotAvailability True, PROC & ".RibbonProbe.Captured"
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunRibbonSdiProbe
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo 0
+
+        TST_AssertRefusal _
+            ExpectedNumber:=TEST_RIBBON_ERR_BASE + 1, _
+            ExpectedSource:="Test_EXCEL_UI_RunRibbonSdiProbe", _
+            ActualNumber:=RaisedNumber, _
+            ActualSource:=RaisedSource, _
+            ActualDescription:=RaisedDescription, _
+            AssertionName:=PROC & ".RibbonProbe.Refusal"
+
+        TST_AssertSnapshotAvailability True, PROC & ".RibbonProbe.Survived"
+
+        UI_SetExcelUI StatusBar:=UI_Hide, FormulaBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_ResetExcelUIToSnapshot
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertApplicationProperty _
+            True, "DisplayStatusBar", PROC & ".RibbonProbe.StatusBarRestored"
+        TST_AssertApplicationProperty _
+            False, "DisplayFormulaBar", PROC & ".RibbonProbe.FormulaBarRestored"
+
+        UI_ClearExcelUIStateSnapshot
+        TST_AssertSnapshotAvailability False, PROC & ".RibbonProbe.Cleared"
+
+'------------------------------------------------------------------------------
+' BLOCK 3 - Test_EXCEL_UI_RunSnapshotIdentity
+'------------------------------------------------------------------------------
+        UI_SetExcelUI StatusBar:=UI_Hide, FormulaBar:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_CaptureExcelUIState
+        TST_AssertSnapshotAvailability True, PROC & ".SnapshotIdentity.Captured"
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunSnapshotIdentity
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo 0
+
+        TST_AssertRefusal _
+            ExpectedNumber:=TEST_SNAPSHOT_ID_ERR_BASE + 1, _
+            ExpectedSource:="Test_EXCEL_UI_RunSnapshotIdentity", _
+            ActualNumber:=RaisedNumber, _
+            ActualSource:=RaisedSource, _
+            ActualDescription:=RaisedDescription, _
+            AssertionName:=PROC & ".SnapshotIdentity.Refusal"
+
+        TST_AssertSnapshotAvailability True, PROC & ".SnapshotIdentity.Survived"
+
+        UI_SetExcelUI StatusBar:=UI_Show, FormulaBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_ResetExcelUIToSnapshot
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertApplicationProperty _
+            False, "DisplayStatusBar", _
+            PROC & ".SnapshotIdentity.StatusBarRestored"
+        TST_AssertApplicationProperty _
+            False, "DisplayFormulaBar", _
+            PROC & ".SnapshotIdentity.FormulaBarRestored"
+
+        UI_ClearExcelUIStateSnapshot
+        TST_AssertSnapshotAvailability False, PROC & ".SnapshotIdentity.Cleared"
+
+'------------------------------------------------------------------------------
+' BLOCK 4 - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'------------------------------------------------------------------------------
+        UI_SetExcelUI StatusBar:=UI_Show, FormulaBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_CaptureExcelUIState
+        TST_AssertSnapshotAvailability True, PROC & ".TitleBarSdi.Captured"
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunTitleBarSdiIdentity
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo 0
+
+        TST_AssertRefusal _
+            ExpectedNumber:=TEST_TITLEBAR_SDI_ERR_BASE + 1, _
+            ExpectedSource:="Test_EXCEL_UI_RunTitleBarSdiIdentity", _
+            ActualNumber:=RaisedNumber, _
+            ActualSource:=RaisedSource, _
+            ActualDescription:=RaisedDescription, _
+            AssertionName:=PROC & ".TitleBarSdi.Refusal"
+
+        TST_AssertSnapshotAvailability True, PROC & ".TitleBarSdi.Survived"
+
+        UI_SetExcelUI StatusBar:=UI_Hide, FormulaBar:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_ResetExcelUIToSnapshot
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertApplicationProperty _
+            True, "DisplayStatusBar", PROC & ".TitleBarSdi.StatusBarRestored"
+        TST_AssertApplicationProperty _
+            True, "DisplayFormulaBar", PROC & ".TitleBarSdi.FormulaBarRestored"
+
+        UI_ClearExcelUIStateSnapshot
+        TST_AssertSnapshotAvailability False, PROC & ".TitleBarSdi.Cleared"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "All four destructive runners refused and preserved the snapshot"
+
+End Sub
+
+
+Private Sub TST_AssertRefusal( _
+    ByVal ExpectedNumber As Long, _
+    ByVal ExpectedSource As String, _
+    ByVal ActualNumber As Long, _
+    ByVal ActualSource As String, _
+    ByVal ActualDescription As String, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+' TST_AssertRefusal
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert that a destructive runner refused with the exact error it promises.
+'
+' WHY THIS EXISTS
+'   Asserting only that something was raised would pass against a runner that
+'   refused for the wrong reason, or that failed later for an unrelated one.
+'   The number identifies the guard, the source identifies which runner raised
+'   it, and a non-empty description is what a caller actually reads.
+'
+' INPUTS
+'   ExpectedNumber
+'     Error number the guard promises
+'
+'   ExpectedSource
+'     Procedure name the guard raises with
+'
+'   ActualNumber / ActualSource / ActualDescription
+'     Values captured from Err immediately after the invocation
+'
+'   AssertionName
+'     Diagnostic prefix for the three assertions
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'
+' NOTES
+'   The actuals are logged before being asserted, because a failing assertion
+'   raises with the assertion name only and the observed values would otherwise
+'   be lost.
+'
+' CALLED FROM
+'   - TST_Case_DestructiveRunnersPreserveCallerSnapshot
+'
+' UPDATED
+'   2026-08-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' LOG WHAT WAS OBSERVED
+'------------------------------------------------------------------------------
+        TST_Log "TST_AssertRefusal", "OBSERVED", _
+            AssertionName & " raised " & CStr(ActualNumber) & _
+            " | Source: " & ActualSource & _
+            " | " & ActualDescription
+
+'------------------------------------------------------------------------------
+' ASSERT THE REFUSAL
+'------------------------------------------------------------------------------
+    'The number identifies which guard fired
+        TST_AssertTrue _
+            (ActualNumber = ExpectedNumber), _
+            AssertionName & ".Number"
+
+    'The source identifies which runner refused
+        TST_AssertTrue _
+            (ActualSource = ExpectedSource), _
+            AssertionName & ".Source"
+
+    'An empty description would leave a caller nothing to act on
+        TST_AssertTrue _
+            (Len(ActualDescription) > 0), _
+            AssertionName & ".Description"
 
 End Sub
 
