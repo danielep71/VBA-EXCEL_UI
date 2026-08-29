@@ -121,6 +121,10 @@ Option Private Module
     Private Const TEST_CERT_ERR_BASE  As Long = vbObjectError + 5100  'Base custom error for certification
     Private Const TEST_RIBBON_ERR_BASE As Long = vbObjectError + 5200  'Base custom error for the Ribbon probe
     Private Const TEST_OWNERSHIP_ERR_BASE As Long = vbObjectError + 5300  'Base custom error for the snapshot-ownership case
+
+    Private Const TEST_FAULT_NONE As Long = 0  'No post-capture fault armed
+    Private Const TEST_FAULT_ASSERTION As Long = 1  'Fail an assertion after capture
+    Private Const TEST_FAULT_UNEXPECTED As Long = 2  'Raise an unexpected error after capture
     Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
@@ -240,9 +244,94 @@ Private m_CertSkipDetail()              As String
 
 'Ribbon characterization observations, accumulated during a probe run. Rows are
 'plain text for reading and JSON for comparison between hosts.
+'Post-capture fault injection, consumed by the first runner that reaches its
+'injection point. One-shot on purpose: a flag that stayed set would fault every
+'later runner in the same session, and the cleanup being proved here is exactly
+'what would be running while the operator wondered why.
+'
+'Only TST_InjectPostCapture sets it, and only the cleanup runner calls that.
+'The seam exists because ownership cleanup after a post-capture failure cannot
+'be reached any other way: the failures it must survive are ones the runners
+'are built not to have.
+Private m_InjectFault                   As Long
+
 Private m_RibbonRowCount                As Long
 Private m_RibbonRowsText                As String
 Private m_RibbonRowsJson                As String
+
+
+Private Sub TST_InjectPostCapture(ByVal FaultKind As Long)
+
+'
+'==============================================================================
+' TST_InjectPostCapture
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arm a one-shot post-capture fault for the next runner that reaches its
+'   injection point.
+'
+' WHY THIS EXISTS
+'   A runner that owns a snapshot must release it when something fails between
+'   capture and completion. Those failures are the ones the runner is written
+'   not to have, so the path is unreachable without injecting one, and an
+'   unreachable cleanup path is where the original defect lived.
+'
+' INPUTS
+'   FaultKind
+'     TEST_FAULT_NONE, TEST_FAULT_ASSERTION or TEST_FAULT_UNEXPECTED
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   - Cannot raise
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunOwnershipCleanupChecks
+'
+' UPDATED
+'   2026-08-29
+'==============================================================================
+'
+
+        m_InjectFault = FaultKind
+
+End Sub
+
+
+Private Function TST_TakePostCaptureFault() As Long
+
+'
+'==============================================================================
+' TST_TakePostCaptureFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Return the armed fault and disarm it in the same step.
+'
+' WHY THIS EXISTS
+'   Reading and clearing separately would leave the flag set on any path that
+'   read it and then failed, and every caller reads it immediately before
+'   failing on purpose.
+'
+' RETURNS
+'   The armed fault kind, or TEST_FAULT_NONE
+'
+' ERROR POLICY
+'   - Cannot raise
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunCertificationSelfTest
+'   - Test_EXCEL_UI_RunSnapshotIdentity
+'
+' UPDATED
+'   2026-08-29
+'==============================================================================
+'
+
+        TST_TakePostCaptureFault = m_InjectFault
+        m_InjectFault = TEST_FAULT_NONE
+
+End Function
 
 
 Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
@@ -374,6 +463,25 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
                 "unable to establish a snapshot; the precondition under test " & _
                 "cannot be triggered"
         End If
+
+    'Post-capture fault injection. Nothing arms this during an ordinary run, so
+    'the ordinary run is unchanged. Armed, it exercises the one path that
+    'cannot otherwise be reached: a failure between owning a snapshot and
+    'releasing it.
+        Select Case TST_TakePostCaptureFault()
+
+            Case TEST_FAULT_ASSERTION
+                TST_AssertTrue _
+                    ActualValue:=False, _
+                    AssertionName:=PROC & ".InjectedAssertion"
+
+            Case TEST_FAULT_UNEXPECTED
+                Err.Raise _
+                    TEST_OWNERSHIP_ERR_BASE + 1, _
+                    PROC & ".InjectedUnexpected", _
+                    "injected unexpected post-capture failure"
+
+        End Select
 
 '------------------------------------------------------------------------------
 ' INVOKE AND CAPTURE
@@ -1636,6 +1744,255 @@ Err_Handler:
 End Function
 
 
+Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
+
+'
+'==============================================================================
+' Test_EXCEL_UI_RunOwnershipCleanupChecks
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a runner which creates its own snapshot releases it on every
+'   exit, and that a failure survives that cleanup unchanged.
+'
+' WHY THIS EXISTS
+'   The refusal-path case proves a caller-owned snapshot is never touched. It
+'   says nothing about the other half of the same ownership rule: that a
+'   runner-owned snapshot is always released. Those paths run when something
+'   fails between capture and completion, which is precisely what the runners
+'   are written not to do, so they are unreachable without injecting a failure.
+'   An unreachable cleanup path is where the original defect lived.
+'
+'   Cleanup must also not swallow the failure that triggered it. Safe_Exit runs
+'   under On Error Resume Next, so a cleanup step that raised would leave the
+'   caller with a cleared Err and no idea anything went wrong.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   A  no injection            - normal return, no error, snapshot released
+'   B  injected assertion      - assertion error preserved, snapshot released
+'   C  injected unexpected     - injected error preserved, snapshot released
+'   D  identity post-capture   - assertion preserved, snapshot and the
+'                                temporary window both released
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Disarms any injection it armed before returning
+'
+' DEPENDENCIES
+'   - TST_InjectPostCapture
+'   - Test_EXCEL_UI_RunCertificationSelfTest
+'   - Test_EXCEL_UI_RunSnapshotIdentity
+'
+' CALLED FROM
+'   - Invoked directly
+'
+' NOTES
+'   Deliberately not registered in TST_RunRegressionPack. The self-test calls
+'   certification, and while a certification run is active that call meets the
+'   re-entrancy guard instead of the snapshot precondition this exercises, so
+'   inside the pack these cases would assert the wrong refusal.
+'
+'   Run it with no explicit snapshot held.
+'
+' UPDATED
+'   2026-08-29
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RaisedNumber        As Long            'Error number reaching this run
+    Dim RaisedSource        As String          'Error source reaching this run
+    Dim RaisedDescription   As String          'Error text reaching this run
+    Dim WindowsBefore       As Long            'Window count before case D
+    Dim WindowsAfter        As Long            'Window count after case D
+
+    Const PROC As String = "Test_EXCEL_UI_RunOwnershipCleanupChecks"
+
+'------------------------------------------------------------------------------
+' VALIDATE PRECONDITIONS
+'------------------------------------------------------------------------------
+    'Every case below reasons about the snapshot slot being empty afterwards,
+    'which says nothing unless it was empty to begin with
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_OWNERSHIP_ERR_BASE + 10, _
+                PROC, _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before running these checks"
+        End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_InjectPostCapture TEST_FAULT_NONE
+
+        TST_Log PROC, "START", _
+            "Validating runner-owned snapshot cleanup on every exit"
+
+'------------------------------------------------------------------------------
+' CASE A - NORMAL SUCCESS RELEASES THE SNAPSHOT
+'------------------------------------------------------------------------------
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunCertificationSelfTest
+
+            RaisedNumber = Err.Number
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+        TST_AssertTrue _
+            (RaisedNumber = 0), _
+            PROC & ".SelfTestSuccess.NoError"
+
+        TST_AssertSnapshotAvailability False, _
+            PROC & ".SelfTestSuccess.SnapshotReleased"
+
+'------------------------------------------------------------------------------
+' CASE B - AN ASSERTION AFTER CAPTURE STILL RELEASES THE SNAPSHOT
+'------------------------------------------------------------------------------
+        TST_InjectPostCapture TEST_FAULT_ASSERTION
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunCertificationSelfTest
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+        TST_AssertRefusal _
+            ExpectedNumber:=TEST_SNAPSHOT_ID_ERR_BASE + 20, _
+            ExpectedSource:= _
+                "Test_EXCEL_UI_RunCertificationSelfTest.InjectedAssertion", _
+            ExpectedDescription:="expected TRUE but received FALSE", _
+            ActualNumber:=RaisedNumber, _
+            ActualSource:=RaisedSource, _
+            ActualDescription:=RaisedDescription, _
+            AssertionName:=PROC & ".SelfTestAssertion.Preserved"
+
+        TST_AssertSnapshotAvailability False, _
+            PROC & ".SelfTestAssertion.SnapshotReleased"
+
+'------------------------------------------------------------------------------
+' CASE C - AN UNEXPECTED ERROR AFTER CAPTURE STILL RELEASES THE SNAPSHOT
+'------------------------------------------------------------------------------
+        TST_InjectPostCapture TEST_FAULT_UNEXPECTED
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunCertificationSelfTest
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+        TST_AssertRefusal _
+            ExpectedNumber:=TEST_OWNERSHIP_ERR_BASE + 1, _
+            ExpectedSource:= _
+                "Test_EXCEL_UI_RunCertificationSelfTest.InjectedUnexpected", _
+            ExpectedDescription:="injected unexpected post-capture failure", _
+            ActualNumber:=RaisedNumber, _
+            ActualSource:=RaisedSource, _
+            ActualDescription:=RaisedDescription, _
+            AssertionName:=PROC & ".SelfTestUnexpected.Preserved"
+
+        TST_AssertSnapshotAvailability False, _
+            PROC & ".SelfTestUnexpected.SnapshotReleased"
+
+'------------------------------------------------------------------------------
+' CASE D - THE IDENTITY RUNNER RELEASES SNAPSHOT AND WINDOWS ALIKE
+'------------------------------------------------------------------------------
+    'This runner sets ownership between the capture and an assertion on its
+    'structured result, a window the self-test does not have. It also creates a
+    'replacement window, so cleanup has more than the snapshot to release.
+        WindowsBefore = ThisWorkbook.Windows.Count
+
+        TST_InjectPostCapture TEST_FAULT_ASSERTION
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunSnapshotIdentity
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+        TST_AssertRefusal _
+            ExpectedNumber:=TEST_SNAPSHOT_ID_ERR_BASE + 20, _
+            ExpectedSource:= _
+                "Test_EXCEL_UI_RunSnapshotIdentity.InjectedAssertion", _
+            ExpectedDescription:="expected TRUE but received FALSE", _
+            ActualNumber:=RaisedNumber, _
+            ActualSource:=RaisedSource, _
+            ActualDescription:=RaisedDescription, _
+            AssertionName:=PROC & ".IdentityAssertion.Preserved"
+
+        TST_AssertSnapshotAvailability False, _
+            PROC & ".IdentityAssertion.SnapshotReleased"
+
+        WindowsAfter = ThisWorkbook.Windows.Count
+
+        TST_AssertTrue _
+            (WindowsAfter = WindowsBefore), _
+            PROC & ".IdentityAssertion.WindowsReleased"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Runner-owned snapshots were released on every exit and every " & _
+            "failure survived cleanup"
+
+Safe_Exit:
+    'Disarm whatever this run armed. A fault left armed would fire inside an
+    'unrelated runner later in the same session.
+        On Error Resume Next
+            TST_InjectPostCapture TEST_FAULT_NONE
+        On Error GoTo 0
+
+        Exit Sub
+
+Err_Handler:
+    'Capture before anything else touches Err
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+
+        TST_Log PROC, "FAIL", _
+            "Error " & CStr(RaisedNumber) & _
+            " | Source: " & RaisedSource & _
+            " | " & RaisedDescription
+
+        On Error Resume Next
+            TST_InjectPostCapture TEST_FAULT_NONE
+        On Error GoTo 0
+
+        Err.Raise RaisedNumber, RaisedSource, RaisedDescription
+
+End Sub
+
+
 Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
 
 '
@@ -2449,6 +2806,25 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
     'capture reporting success that left nothing behind must not make this run
     'believe it owns one, and the assertion below can fail before Safe_Exit.
         CreatedSnapshot = UI_HasExcelUIStateSnapshot
+
+    'Post-capture fault injection. The window between owning a snapshot and the
+    'assertion below is genuinely fallible - a capture can report success and
+    'leave a partial state - and it is the window the ownership flag exists to
+    'cover.
+        Select Case TST_TakePostCaptureFault()
+
+            Case TEST_FAULT_ASSERTION
+                TST_AssertTrue _
+                    ActualValue:=False, _
+                    AssertionName:=PROC & ".InjectedAssertion"
+
+            Case TEST_FAULT_UNEXPECTED
+                Err.Raise _
+                    TEST_OWNERSHIP_ERR_BASE + 1, _
+                    PROC & ".InjectedUnexpected", _
+                    "injected unexpected post-capture failure"
+
+        End Select
 
         TST_AssertResultSuccess _
             Succeeded:=OK, _
