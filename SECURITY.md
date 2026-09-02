@@ -415,7 +415,7 @@ Use a public issue for ordinary defects such as:
 - performance is suboptimal but bounded;
 - a regression or certification case is missing.
 
-Known corrective work is tracked publicly, including:
+Known or recently corrected work is tracked publicly, including:
 
 - Ribbon wrong-target restoration
   ([#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23));
@@ -425,7 +425,8 @@ Known corrective work is tracked publicly, including:
   ([#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32));
 - captionless title-bar show false success
   ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6));
-- certification self-test snapshot ownership
+- certification self-test snapshot ownership, corrected on the v1.1.3 release
+  branch but still present in the v1.1.2 tag
   ([#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43)).
 
 If a defect can be intentionally driven across a concrete confidentiality,
@@ -474,6 +475,8 @@ package undisclosed executable content
 ~~~text
 tools/check_repo.py
 tools/reformat.py
+tools/vba_api.py
+tools/wiki_badges.py
 tools/public_api_manifest.txt
 ~~~
 
@@ -482,10 +485,12 @@ scope.
 
 ### In scope — repository automation
 
-Current workflow:
+Current workflows:
 
 ~~~text
 .github/workflows/static-checks.yml
+.github/workflows/sync-label-colors.yml
+.github/workflows/wiki-badges.yml
 ~~~
 
 Future Windows/Excel execution workflows, self-hosted runner configuration,
@@ -831,6 +836,10 @@ For the current v1.1.2 baseline:
 - the certification self-test can destroy a caller-owned snapshot
   ([#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43)).
 
+The v1.1.3 release branch has corrected the self-test ownership defect (#43)
+and quiet-update ownership defect (#26). Neither correction is a released
+security support claim until the branch is reviewed, certified and tagged.
+
 Release-assurance work also remains open for cleanup proof, mandatory case
 inventory, exact-source evidence, complete public-API contract gating,
 documentation closure, and exact-head review/certification.
@@ -1142,13 +1151,15 @@ Do not tell users to disable Mark-of-the-Web or Protected View globally.
 
 ## 🔑 Repository automation and runner security
 
-The repository currently contains one software-quality workflow:
+The repository currently contains three workflows:
 
 ~~~text
 .github/workflows/static-checks.yml
+.github/workflows/sync-label-colors.yml
+.github/workflows/wiki-badges.yml
 ~~~
 
-It:
+The static workflow:
 
 - runs on a GitHub-hosted Ubuntu runner;
 - checks exported source as text;
@@ -1158,6 +1169,16 @@ It:
 - does not require repository secrets;
 - does not execute Excel or VBA;
 - does not package or publish a release workbook.
+
+The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
+file. It clones the public Wiki without credentials, runs on a weekly schedule
+and on relevant repository changes, and cannot write to the Wiki.
+
+The label-color workflow is the only current workflow with write permission. It
+has `issues: write` solely to apply the repository's fixed label-color map, runs
+manually or when its own workflow file changes, and neither reads nor publishes
+release artifacts. Its broader permission must not be copied into static or
+Wiki jobs.
 
 This is intentionally a low-privilege automation surface.
 
@@ -1175,8 +1196,11 @@ PtrSafe declarations
 duplicate procedures
 public API manifest
 release-state markers
+workflow pin and tag-trigger policy
 tracked-file hygiene
 Markdown links
+Markdown escape and private-review exclusion policy
+Wiki-badge rule fixtures
 house-style formatter state
 ~~~
 
@@ -1209,9 +1233,12 @@ Changes to automation should preserve:
 - separation of testing from signing and publishing;
 - sanitized logs and artifacts.
 
-The current workflow references official GitHub actions by major-version tags.
-Moving to immutable full-SHA action pinning can strengthen supply-chain control.
-Do not claim immutable pinning until it is implemented.
+Every third-party Action reference is pinned to a full 40-character commit SHA
+with a trailing release-version comment. `tools/check_repo.py` enforces the pin
+shape across every tracked workflow, and the static workflow also runs on `v*`
+tag pushes so the tagged SHA receives its own repository check. A pin still
+requires human verification against the upstream release when it is updated;
+immutability does not prove that the selected upstream commit is trustworthy.
 
 ---
 

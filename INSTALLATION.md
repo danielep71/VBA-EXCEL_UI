@@ -527,23 +527,25 @@ snapshot restoration or release certification in a safety-critical workflow.
 
 ### Runtime correctness
 
-| Area | Current boundary | Tracking |
+| Area | v1.1.2 boundary | v1.1.3 branch state |
 |---|---|---|
-| Ribbon restore | Ribbon state is tied to active-window commands. A changed active window can make restore target the wrong window instead of failing closed. | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
-| Title-bar identity | Snapshot restore does not yet pair the retained Excel Window identity with its native hWnd strongly enough for every SDI recreation case. | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) |
-| Recycled hWnd | A recycled native handle can collide with a stored same-style title-bar registry entry. | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) |
-| Captionless baseline | Showing a title bar from a non-zero captionless baseline can report success without actually restoring the caption. | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) |
-| Self-test ownership | The certification self-test must not destroy a snapshot owned by its caller. | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) |
+| Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Open: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
+| Title-bar identity | Snapshot restore does not pair the retained Excel Window identity with its native hWnd strongly enough for every SDI recreation case. | Open: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) |
+| Recycled hWnd | A recycled native handle can collide with a stored same-style title-bar registry entry. | Reopened: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) |
+| Captionless baseline | Showing a title bar from a non-zero captionless baseline can report success without restoring the caption. | Open: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) |
+| Self-test ownership | The tagged self-test can clear a snapshot it has just refused because the caller owns it. | Corrected on the release branch: [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) |
+| Quiet-update ownership | A suppressed or ignored write can be recorded as an achieved transition. | Corrected on the release branch: [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) |
 
-Until these defects are fixed and certified:
+Until the relevant corrections are released and certified:
 
 - keep UI_ShowExcelUI available as the emergency recovery path;
 - do not treat a successful structured result as stronger than the known
   limits of the deployed version;
 - exercise active-window changes, closed/recreated windows, and title-bar
   recovery in a disposable Excel session;
-- do not run snapshot-mutating self-tests while application code owns the
-  shared snapshot.
+- on v1.1.2, do not run a destructive self-test while application code owns the
+  shared snapshot; the repaired release-branch runners refuse before mutation
+  and have regression coverage for caller-owned snapshot preservation.
 
 ### Assurance and release evidence
 
@@ -557,7 +559,8 @@ The v1.1.3 release work includes:
   ([#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42));
 - exact-source certification evidence
   ([#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46));
-- a full public-API contract gate
+- a full public-API contract gate, implemented on the branch and still awaiting
+  the final release-diff evidence
   ([#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47));
 - accurate release closure documentation
   ([#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48));

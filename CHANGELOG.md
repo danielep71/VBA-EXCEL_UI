@@ -51,10 +51,12 @@ failures, strengthen snapshot ownership, and make cleanup, mandatory-case,
 public-API, exact-source, documentation and exact-head evidence genuine release
 gates.
 
-Work completed so far is limited to repository hygiene, contributor governance,
-installation guidance, security boundaries, reporting templates and the public
-API contract gate. No production VBA module, regression module, demo module,
-public API, or runtime behavior has changed in this Unreleased section yet.
+Work completed so far includes the Wave 1 repository and contract gates plus two
+Wave 2 corrections: destructive test runners now preserve caller-owned
+snapshots, and the quiet-update scope claims only a suppression confirmed by
+readback. `M_EXCEL_UI_RUNTIME` and the regression module have therefore changed;
+the other three production modules and both demo modules remain byte-identical
+to v1.1.2. The supported public facade remains unchanged.
 
 The API contract gate was implemented first and deliberately. It records the
 shipped v1.1.2 declarations while the production tree is still byte-identical to
@@ -69,8 +71,9 @@ measured against that baseline.
 | Production VBA | `M_EXCEL_UI_RUNTIME` quiet-scope ownership corrected; the other three modules unchanged from v1.1.2 |
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
-| Runtime correctness fixes | Not yet implemented |
-| Regression and certification fixes | Not yet implemented |
+| Runtime correctness fixes | #26 complete; remaining title-bar and Ribbon defects open |
+| Regression and certification fixes | #43 complete; remaining certification gates open |
+| Regression VBA | Caller-owned snapshot refusal and ownership-failure coverage added |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
 | Static validation | Twenty-four checks; the release branch passes |
@@ -378,6 +381,14 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- Fixed four public destructive runners clearing a snapshot they had just
+  refused because it belonged to the caller. Their precondition checks now run
+  before the error handler is armed, and cleanup clears only a snapshot the
+  runner actually created. A pack-dispatched regression case exercises all four
+  refusal numbers, sources and descriptions and verifies four independent
+  capture-mutate-restore lifecycles. Mutation runs against the v1.1.2 runner
+  shapes fail on the caller-owned snapshot survival assertion
+  ([#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43)).
 - Fixed the quiet-update scope recording an attempted change as an achieved
   one. `UI_RuntimeBeginQuietUpdate` set its ownership flag immediately after
   writing `Application.ScreenUpdating = False`, under `On Error Resume Next`, so
@@ -507,6 +518,17 @@ measured against that baseline.
   source state being presented as certification of the final PR head.
 - Kept confidential, credential-bearing, client and other private material out
   of issue, pull-request, certification and release-artifact guidance.
+- Added **docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md** as the executable
+  milestone plan. It records dependencies, exact-head release steps, closure
+  discipline, private-review boundaries and a dated snapshot of every open
+  v1.1.3 issue body.
+- Corrected current documentation that still described reopened or completed
+  work incorrectly: the README no longer calls v1.1.2 title-bar identity or
+  first-allocation diagnostics complete; INSTALLATION and SECURITY distinguish
+  tagged v1.1.2 defects from #43/#26 corrections already on the release branch;
+  the security workflow inventory now includes the Wiki gate and immutable
+  Action pins; and the Ribbon SDI note routes fail-closed restore to #23 and
+  activation behavior to #44.
 
 ### 🔐 Security
 
@@ -622,17 +644,17 @@ This is **static validation**, not release certification:
 |---|---|
 | Existing VBA calls affected | None so far |
 | Public API changed | No |
-| Production modules changed | No |
-| Runtime behavior changed | No |
-| Workbook migration required for this batch | No |
+| Production modules changed | Yes — `M_EXCEL_UI_RUNTIME` only so far |
+| Runtime behavior changed | Yes — quiet-update ownership is now readback-confirmed |
+| Workbook migration required for this batch | Replace all four production modules together; no caller-code edit |
 | Developer tooling behavior changed | Yes — repository hygiene evaluates the Git index, and the public API gate now protects full declarations |
 | Intended release type | Patch |
 
-The future v1.1.3 runtime corrections can change defective behavior while
+The remaining v1.1.3 runtime corrections can change defective behavior while
 remaining backward-compatible. Their final compatibility assessment belongs to
 the commits that implement and certify them, not to this documentation batch.
 
-### ⚠️ Open release blockers
+### ⚠️ Release-blocker status
 
 The historical v1.1.2 entry below records what that release claimed and the
 evidence available when it was published. It is not rewritten retroactively.
@@ -647,7 +669,7 @@ practical closure status of any item that has since been reopened.
 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | Pair Excel Window and native hWnd identity defensibly | Open |
 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened |
 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Open |
-| [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | Preserve a caller-owned snapshot during certification self-test | Reopened |
+| [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | Preserve caller-owned snapshots across all destructive-runner refusals | Closed; implementation, regression and mutation evidence verified |
 
 #### Certification and release assurance
 

@@ -69,9 +69,12 @@ VBA-EXCEL_UI/
 │  ├─ check_repo.py              the static gate CI runs
 │  └─ public_api_manifest.txt    declaration contract and release baseline
 ├─ docs/
-│  └─ …                          measurements and reviews
+│  └─ …                          measurements and release plans
 ├─ .github/workflows/
-│  └─ static-checks.yml
+│  ├─ static-checks.yml
+│  ├─ sync-label-colors.yml
+│  └─ wiki-badges.yml
+├─ VERSION
 ├─ INSTALLATION.md
 ├─ README.md
 └─ …
@@ -545,7 +548,7 @@ Production entry points are fail-soft unless the public contract explicitly says
 |---|---|
 | Continue after unrelated element-level failures | One unreachable window must not cost the caller the other seven elements |
 | Never silently discard a failure | A caller acting on a false success is worse off than one told nothing happened |
-| Always restore `ScreenUpdating` | Leaving it suppressed makes Excel look frozen long after the call returned |
+| Restore only a suppression this component confirmed it made | Writing a guessed baseline can overwrite caller state; certification must detect any final mismatch |
 | No unsolicited `MsgBox` | A library that blocks on a modal dialog cannot be automated |
 | Keep `On Error Resume Next` scopes narrow | A wide scope swallows the error you did not anticipate, which is the one that matters |
 | Preserve insertion order in diagnostics | Order is the only clue to which failure caused the others |
