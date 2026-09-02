@@ -285,7 +285,7 @@ The following appendix was generated from the live GitHub issue bodies on
 executable even while issue metadata continues to evolve. GitHub remains the
 live authority.
 
-+### #6 — ICR-UI-112-P2-03 — Show can adopt a non-zero captionless baseline and report success
+### #6 — ICR-UI-112-P2-03 — Show can adopt a non-zero captionless baseline and report success
 
 **Labels:** `bug`, `P2`, `titlebar`, `tests`  
 **Milestone:** `v1.1.3 — correctness & hardening`  

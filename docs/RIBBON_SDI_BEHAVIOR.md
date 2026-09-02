@@ -1,8 +1,12 @@
 # Ribbon behaviour under the Single Document Interface
 
 > **Status:** measured on one host. Model determined: **active-window only.**
-> **Issue:** [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21) —
-> `ICR-UI-P2-01`, Ribbon scope under SDI is unspecified and unverified.
+> **Characterization:** [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21)
+> (`ICR-UI-P2-01`) is complete.
+> **Corrective work:** fail-closed restore is tracked by
+> [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) for v1.1.3;
+> automatic activation remains
+> [#44](https://github.com/danielep71/VBA-EXCEL_UI/issues/44) for v1.2.0.
 > **Produced by:** `Test_EXCEL_UI_RunRibbonSdiProbe`
 > in `test/M_EXCEL_UI_REGRESSION_TESTS.bas`.
 
@@ -10,8 +14,10 @@
 
 ## 1. Why this document exists
 
-`README.md` states the Ribbon's scope as **Excel application**, which a reader
-will reasonably take to mean *one state shared by every workbook window*.
+Before this measurement, `README.md` stated the Ribbon's scope as **Excel
+application**, which a reader could reasonably take to mean *one state shared
+by every workbook window*. The README now records the measured active-window
+scope.
 
 Modern Excel uses the Single Document Interface: each workbook window is its own
 top-level window with its own Ribbon UI. Nothing in the component verifies that
@@ -25,14 +31,16 @@ Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")   no window argument
 Application.ExecuteExcel4Macro("Show.TOOLBAR(""Ribbon"",…)")  no window argument
 ```
 
-So the documented scope is currently an **assumption**. This document replaces it
-with a measurement.
+The old documented scope was therefore an **assumption**. This document replaced
+it with a measurement and remains the evidence behind the current contract.
 
-The same problem shape was already found and fixed for the title bar
+The same problem shape was already found for the title bar
 (`ICR-UI-P1-01`, #14): one Boolean describing a per-window resource, restored
-through whichever window happened to be active. Whether the Ribbon shares that
-defect, is genuinely application-wide, or is something in between is exactly what
-the probe answers.
+through whichever window happened to be active. That correction moved title-bar
+restore to a retained `Window`; #45 now owns the remaining native Window/hWnd
+pairing proof. Whether the Ribbon shared the active-window defect, was genuinely
+application-wide, or was something in between is exactly what this probe
+answered.
 
 ---
 
@@ -189,22 +197,24 @@ window**, writing, and restoring focus. That is a visible side effect which can
 fire `Workbook_WindowActivate` handlers in caller code, and it does not belong
 in a corrective patch release.
 
-### Decided for `1.1.1`
+### Characterization completed for `1.1.1`
 
 - [x] Model determined and recorded above.
-- [ ] `README.md` states the measured active-window scope and names the build
-      tested, instead of claiming application scope (tracked on #19).
+- [x] `README.md` states the measured active-window scope instead of claiming
+      application scope.
+
+### Required for `1.1.3`
+
 - [ ] The snapshot **reports** the Ribbon as unrestorable when the captured
       window is not active, rather than applying the captured value to whichever
-      window is. This mirrors the decision taken for the title bar: refusing to
-      write is correct when the target cannot be reached, and a silent wrong
-      write is the worst available outcome. No window is activated, so there is
-      no new side effect.
+      window is. This fail-closed correction is #23. It activates no window and
+      therefore introduces no new focus or event side effect.
 
 ### Deferred to `1.2.0`
 
-- [ ] Restore the Ribbon to its captured window by activating it, writing, and
-      restoring focus — with an opt-out, because the activation is observable.
+- [ ] Under #44, restore the Ribbon to its captured window by activating it,
+      writing, and restoring focus — with an opt-out, because the activation is
+      observable.
 - [ ] Decide and document whether `UI_SetExcelUI(Ribbon:=…)` should apply to
       every window or only the active one, which is a public-contract question
       the `UIWindowTargetScope` enum already raises for other elements.
