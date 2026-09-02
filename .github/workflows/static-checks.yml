@@ -2,9 +2,9 @@ name: Static checks
 
 # Why this exists
 #
-# Until now no commit in this repository has ever carried a status check, and
-# release validation existed only as prose in CHANGELOG.md. A tag could be, and
-# was, published from a SHA with no automated evidence attached to it at all.
+# Before this workflow was introduced, no commit in this repository carried a
+# status check and release validation existed only as prose in CHANGELOG.md. A
+# tag could be, and was, published from a SHA with no automated evidence.
 #
 # What this workflow can and cannot do is worth stating plainly. A hosted runner
 # has no Excel, so it cannot execute a single line of VBA. It therefore covers
@@ -16,17 +16,18 @@ name: Static checks
 # The division is the point: this catches the mechanical mistakes cheaply and
 # on every push, so that manual certification time is spent on behaviour.
 #
-# The tag trigger exists because a tag is the artefact people install from, and
-# until now nothing ran against one. A release could be, and was, published
-# from a SHA carrying no evidence. actions/checkout resolves a tag to its exact
-# commit, and every check here reads repository text only, so the same job is
-# correct on a tag without knowing it is running on one.
+# The tag trigger exists because a tag is the artefact people install from.
+# Before that trigger was added, nothing ran against a tag and a release could
+# be, and was, published from a SHA carrying no evidence. actions/checkout
+# resolves a tag to its exact commit, and every check here reads repository
+# state only, so the same job is correct on a tag without knowing it is running
+# on one.
 #
 # Actions are pinned by full commit SHA rather than by a version tag. A tag is
-# mutable: v4 moved to a different commit as recently as this pin, and an
-# upstream account compromise would otherwise reach this repository silently.
-# The trailing comment names the release that SHA was, so a reader can audit
-# the pin without resolving it by hand. tools/check_repo.py enforces both.
+# mutable: v4 has moved between commits, and an upstream account compromise
+# would otherwise reach this repository silently. The trailing comment names
+# the release that SHA was, so a reader can audit the pin without resolving it
+# by hand. tools/check_repo.py enforces both.
 
 on:
   pull_request:

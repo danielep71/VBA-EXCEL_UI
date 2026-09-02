@@ -3,9 +3,9 @@
 Wiki track-badge consistency check for VBA-EXCEL_UI.
 
 Before v1.1.2 the wiki had drifted a full release behind and nothing signalled
-it. Every page now carries a `wiki_tracks-vX.Y.Z` badge, but a convention held
-up by memory is not a gate: a page added without a badge, or a sync that updates
-thirteen pages of fourteen, reproduces the original failure while looking
+it. Every content page now carries a `wiki_tracks-vX.Y.Z` badge, but a convention
+held up by memory is not a gate: a page added without a badge, or a sync that
+updates every page but one, reproduces the original failure while looking
 correct.
 
 This tool reads a wiki working copy from disk and asserts three things:
@@ -119,8 +119,8 @@ def inventory(wiki_path):
     """Return the ordered page inventory as (name, badge-or-status) pairs.
 
     A passing run that records nothing is not evidence. The inventory names
-    every page and what it claimed, so a later reader can tell a wiki of
-    fourteen agreeing pages from a wiki of one.
+    every page and what it claimed, so a later reader can distinguish a complete
+    multi-page wiki from an incomplete clone containing only one page.
     """
     rows = []
     for name in sorted(os.listdir(wiki_path)):
@@ -196,10 +196,9 @@ def check_wiki(wiki_path, expected):
                 )
             continue
 
-        # Exactly one, not merely one distinct value. Two identical badges are
-        # a page edited twice, and the second edit is the one nobody reviewed:
-        # the next release moves one of them and the page then contradicts
-        # itself with no change to this rule.
+        # Exactly one, not merely one distinct value. Duplicate identical badges
+        # are ambiguous update targets: a later release can change one and leave
+        # the other behind, making the page contradict itself.
         if len(badges) > 1:
             distinct = sorted(set(badges))
             detail = (f"the same badge twice" if len(distinct) == 1

@@ -2,9 +2,10 @@
 """
 Static release gate for VBA-EXCEL_UI.
 
-Everything here can be decided from the repository text alone, without Excel.
-That is the whole design constraint: a hosted runner has no Office, so the gate
-covers what is checkable there and deliberately does not pretend to replace
+Everything here can be decided from the repository checkout and Git index,
+without Excel or network access. That is the whole design constraint: a hosted
+runner has no Office, so the gate covers what is checkable there and
+deliberately does not pretend to replace
 Test_EXCEL_UI_RunReleaseCertification, which is the behavioural gate.
 
 Each check is independent and reports every finding it has rather than stopping
@@ -324,7 +325,7 @@ def check_public_api():
     disappearing and nothing else, so a reordered parameter, a ByVal turned
     ByRef, a changed default or a renumbered enum could break every caller
     while this check stayed green. The manifest now carries the whole
-    normalised declaration, and any difference at all is a finding.
+    normalised declaration, and any contract difference is a finding.
 
     The two sections are diffed separately so the report says which promise
     was broken: a [supported] change is a Semantic Versioning event for
@@ -460,9 +461,8 @@ def check_wiki_badge_selftest():
     The wiki itself is not reachable from here — check_repo.py reads the tree
     and never the network, so a machine without wiki access still gets a
     meaningful gate. The wiki-badges workflow does the clone. What can be
-    checked offline is that the rules themselves still hold, which is what
-    stops the badge policy rotting between the rare occasions the workflow
-    reports something.
+    checked offline is that the rules themselves still hold, which stops the
+    badge policy rotting between the independent workflow's runs.
     """
     sys.path.insert(0, os.path.join(REPO, "tools"))
     try:
@@ -585,15 +585,15 @@ def has_push_tag_trigger(text):
 def workflow_findings(rel, text, require_tag_trigger=False):
     """Return every pin-policy violation in one workflow file.
 
-    A version tag is a mutable pointer. actions/checkout@v4 moved to a
-    different commit as recently as the pin this check was written against, so
-    a workflow referencing it runs whatever the upstream account publishes next
-    — including whatever an attacker publishes after compromising it. Only a
-    full commit SHA is immutable.
+    A version tag is a mutable pointer: actions/checkout@v4 has moved between
+    commits, so a workflow referencing it runs whatever the upstream account
+    publishes next — including whatever an attacker publishes after
+    compromising it. Only a full commit SHA is immutable.
 
     The trailing version comment is required because a bare 40-hex string is
     unauditable in review: nobody can tell v4.4.0 from an arbitrary commit by
-    reading it. The comment states the claim; resolving the tag checks it.
+    reading it. The comment states the claim so a reviewer can resolve and
+    verify it independently.
     """
     findings = []
 
@@ -744,8 +744,8 @@ def check_workflow_policy_selftest():
     """Run the pin policy against its own fixtures.
 
     The policy is one regular expression away from accepting everything, and
-    the only symptom would be a green gate. #53 will add a second workflow that
-    inherits this rule, so it has to be a rule rather than a habit.
+    the only symptom would be a green gate. Every tracked workflow inherits
+    this rule, so immutable pins have to be enforced rather than remembered.
     """
     for label, text, expected in WORKFLOW_SELFTEST_CASES:
         found = workflow_findings("fixture.yml", text, require_tag_trigger=True)
@@ -784,9 +784,8 @@ def escape_findings(rel, text):
     The check is fence-aware, and deliberately does not look inside fenced
     blocks or inline code. A backslash there is data — a Windows path, a regular
     expression — and flagging it would make the gate wrong about correct
-    documents. That is not a hole in practice: an editor that escapes a fence
-    escapes the prose around it too, which is what this rule sees. It detects
-    the editor, not every symptom.
+    documents. This is a deliberate boundary: the rule detects characteristic
+    escaping in prose, not every possible backslash a WYSIWYG editor can emit.
     """
     findings = []
     fence = None                      # (character, opening length)
@@ -871,7 +870,7 @@ ESCAPE_SELFTEST_CASES = [
      "```python\nre.compile(r\"\\.txt$\")\n```\n", 0),
     ("a tilde fence is honoured too",
      "~~~text\nA\\_B\n~~~\n", 0),
-    ("an unclosed fence does not swallow the rest of the file",
+    ("a closed fence does not swallow the prose that follows",
      "```text\ncode\n```\n\nThen M\\_EXCEL\\_UI in prose.\n", 1),
     ("a backslash inside an inline code span is data",
      "Commit messages go in `%TEMP%\\commit-msg.txt` for encoding reasons.\n", 0),
@@ -1022,7 +1021,7 @@ def check_private_review_denylist_selftest():
 
 
 def check_release_state():
-    """Documentation must not describe a release that has not happened.
+    """Reject known stale release markers and a malformed root VERSION.
 
     This is the check that would have caught the tagged README still carrying a
     Release Candidate badge and an unchecked release checklist.
@@ -1040,9 +1039,10 @@ def check_release_state():
     if "_Nothing yet._" in changelog:
         fail("release-state", "CHANGELOG.md contains an unfilled placeholder section")
 
-    # The root VERSION file is the single version this repository states. Module
-    # headers and the wiki badges both derive from it, so a malformed value
-    # silently weakens two other checks rather than announcing itself.
+    # The root VERSION file is the repository's release authority and the wiki
+    # badge check derives its expected value from it. Module-header alignment is
+    # separate release work; this check must not imply those stamps already
+    # derive from VERSION. A malformed value must fail here explicitly.
     #
     # Read it defensively. required-files already reports a missing VERSION one
     # check earlier, and reading it unconditionally here turned that finding

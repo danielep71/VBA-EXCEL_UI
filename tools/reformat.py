@@ -2,7 +2,9 @@
 """
 House-style reformatter for VBA .bas modules.
 
-Applies only mechanical, provably behaviour-neutral transformations:
+Applies a bounded set of mechanical formatting transformations. They are
+intended to be behaviour-neutral, and the named lexical rules below are
+exercised by ``--selftest``:
 
   1. Option statements hoisted above the module header block, flush left,
      and the now-empty MODULE SETTINGS banner removed.
@@ -11,13 +13,14 @@ Applies only mechanical, provably behaviour-neutral transformations:
   3. Error-handling labels renamed to the house convention.
   4. In-procedure section banners renamed to the house vocabulary.
   5. Procedure-level Dim/Const declarations aligned on the 20/19 grid.
-  6. Return types moved onto their own continuation line.
-  7. Trailing whitespace stripped, rules normalised to 79 columns, CRLF.
+  6. Trailing whitespace stripped, excess blank lines collapsed, rules
+     normalised to 79 columns, and line endings normalised to CRLF.
 
-Every transformation is line-local. None of them may alter a string literal: a
-literal is data the module evaluates at run time, so rewriting one changes
-behaviour rather than layout. Two rules follow, and --selftest enforces both
-rather than leaving them to the reader:
+The pipeline includes module-wide operations such as Option hoisting; it is not
+line-local. No transformation may alter text inside a string literal: a literal
+is data the module evaluates at run time, so rewriting one changes behaviour
+rather than layout. Two rules follow, and ``--selftest`` enforces both rather
+than leaving them to the reader:
 
   * text inside a literal is never substituted, so a label name quoted in a
     diagnostic survives a label rename;
@@ -27,6 +30,11 @@ rather than leaving them to the reader:
 VBA escapes a quote by doubling it, which the literal scanner handles by
 toggling: the pair closes the literal and reopens it, which leaves the state
 correct at every position outside the pair.
+
+These fixtures cover ordinary literals, doubled quotes and apostrophes inside
+literals. They are evidence for those named cases, not proof over every VBA
+lexical construct. Issue #52 tracks the wider lexical coverage and explicit
+behaviour-neutrality proof.
 """
 
 import re
@@ -378,8 +386,9 @@ def check(paths):
     """Report which files are not already in the formatter's normal form.
 
     Exit status is the point: this is what makes a formatter gate possible.
-    The formatter is idempotent, so a file that differs from its own formatted
-    output has drifted and can be corrected mechanically.
+    Normal form is required to be idempotent, and the self-test verifies that
+    property for every named fixture. A file that differs from its formatted
+    output has drifted from the normal form this tool currently defines.
     """
     failed = []
     for path in paths:

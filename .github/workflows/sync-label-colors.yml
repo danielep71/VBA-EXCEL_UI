@@ -1,5 +1,12 @@
 name: Sync issue label colors
 
+# This workflow is the executable label-colour policy. It updates only the
+# colour of each existing label named below; it does not create or delete
+# labels, or change titles, descriptions, assignments or milestones. The
+# issues: write permission is required by GitHub's update-label endpoint and
+# is deliberately confined to this one job. Automatic runs occur only when
+# this policy file changes; workflow_dispatch supports an explicit re-sync.
+
 on:
   workflow_dispatch:
   push:
