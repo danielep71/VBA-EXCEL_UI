@@ -3,7 +3,7 @@ name: "✨ Feature request"
 about: "Propose a backward-compatible UI, targeting, recovery, diagnostics, demo, or assurance capability"
 title: "[Feature] "
 labels: "enhancement"
-assignees: ""
+assignees: "danielep71"
 ---
 
 <!--

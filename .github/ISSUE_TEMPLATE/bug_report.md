@@ -3,7 +3,7 @@ name: "🐞 Bug report"
 about: "Report incorrect UI behavior, restoration, recovery, compatibility, or diagnostics"
 title: "[Bug] "
 labels: "bug"
-assignees: ""
+assignees: "danielep71"
 ---
 
 <!--
@@ -284,8 +284,9 @@ both without inferring that no failure occurred.
 A defect that leaves Excel difficult to recover is higher priority than a
 bounded cosmetic defect.
 
-Do not run a snapshot-mutating self-test while application code owns the shared
-snapshot slot.
+Do not run a destructive runner while application code owns the shared snapshot
+slot unless the exact source is known to refuse before mutation. The v1.1.2
+tagged runners do not all preserve caller-owned state.
 
 ---
 
