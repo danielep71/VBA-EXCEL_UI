@@ -522,6 +522,26 @@ measured against that baseline.
   milestone plan. It records dependencies, exact-head release steps, closure
   discipline, private-review boundaries and a dated snapshot of every open
   v1.1.3 issue body.
+- Realigned the issue templates with current policy, so intake reflects the
+  snapshot-precondition and ownership rules the destructive runners now
+  enforce rather than the behavior they had at v1.1.2.
+- Corrected commentary in **tools/check_repo.py**, **tools/reformat.py** and
+  **tools/wiki_badges.py** that overstated what each tool proves. The gate is
+  now described as deciding from the checkout and the Git index rather than
+  from repository text alone; the formatter no longer claims every
+  transformation is line-local, since Option hoisting is module-wide, nor that
+  its fixtures prove behavior-neutrality across every VBA construct — #52 owns
+  that; and the badge checker no longer counts pages it cannot know. One
+  fixture label was corrected from describing an unclosed fence to describing a
+  closed one, which is what it actually tests. No executable statement changed:
+  comparing the abstract syntax trees with docstrings and string values
+  normalized shows all three unchanged.
+- Corrected commentary in both workflows. The static-checks header no longer
+  says nothing has *ever* carried a status check, which stopped being true when
+  that workflow landed, and no longer dates the `actions/checkout@v4` pointer
+  move relative to the current pin. The label-colour workflow now states its
+  own scope: it updates the colour of existing labels only, creates and deletes
+  nothing, and its `issues: write` permission is confined to that one job.
 - Corrected current documentation that still described reopened or completed
   work incorrectly: the README no longer calls v1.1.2 title-bar identity or
   first-allocation diagnostics complete; INSTALLATION and SECURITY distinguish
@@ -583,7 +603,8 @@ RESULT: PASS
   formatter self-test
 ~~~
 
-The formatter and API-contract self-tests pass alongside it:
+Each policy that could silently accept everything carries its own fixtures, and
+all three pass alongside the gate:
 
 ~~~text
 python3 tools/reformat.py --selftest
@@ -591,6 +612,9 @@ ok   self-test: 9 formatting rules hold
 
 python3 tools/vba_api.py --selftest
 ok   self-test: 40 API-contract rules hold
+
+python3 tools/wiki_badges.py --selftest
+ok   self-test: 14 wiki-badge rules hold
 ~~~
 
 The API contract gate was additionally exercised by mutation rather than by
@@ -637,6 +661,37 @@ This is **static validation**, not release certification:
 - no v1.1.3 runtime certification has been performed;
 - no claim is made for Win32 or Office 32-bit runtime execution;
 - final evidence must be regenerated against the exact reviewed release head.
+
+#### Excel runtime evidence
+
+Static checks cannot exercise either Wave 2 correction: both concern host
+refusals. Both were run on Excel 16.0 x64, and each was checked against
+deliberately broken variants rather than only against itself.
+
+`Test_EXCEL_UI_RunAll` passes with the caller-owned snapshot case and the
+quiet-scope case dispatched by the pack, and with the pre-existing
+`TST_Case_ScreenUpdatingPreserved` unregressed.
+`Test_EXCEL_UI_RunOwnershipCleanupChecks` passes standalone. It is not
+registered in the pack, because inside a certification run the self-test's
+inner call meets the re-entrancy guard rather than the snapshot precondition it
+needs.
+
+Seven throwaway variants were run and none was committed. Four reverted one
+destructive runner each to its v1.1.2 shape: every one failed at that runner's
+own snapshot-survival assertion with no earlier failure, so each block is
+independently sensitive rather than one failure masking three. One discarded
+the ownership flag after the self-test's establishment guard and failed on the
+leaked snapshot. Two targeted the quiet scope: restoring the v1.1.2 procedure
+failed on the entry-read branch, and removing only the readback check failed on
+the ineffective-write branch.
+
+That last variant is the one that matters. The seam still fires and the
+entry-read branch still passes, so its failure isolates the ownership
+verification itself rather than the presence of the seam.
+
+This is runtime evidence for two corrections, not a release certification. No
+v1.1.3 certification has been run, and none of it was produced against a frozen
+head.
 
 ### 🔗 Compatibility
 
