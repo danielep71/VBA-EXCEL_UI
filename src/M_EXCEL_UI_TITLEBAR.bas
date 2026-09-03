@@ -314,6 +314,257 @@ Private m_FrameStateCount               As Long
 'way to make Windows fail on demand.
 Private m_InjectFrameRefreshFailure     As Boolean
 
+'Regression seam for the active-frame pair. The mismatch it stands in for is an
+'SDI activation transition observed mid-call, which cannot be provoked on
+'demand, so the fail-closed branch would otherwise never execute. Kinds are
+'private: the seam takes a Long rather than exporting an enumeration.
+'
+'   0  no fault
+'   1  the sampled Application.hWnd disagrees with the resolved Window.hWnd
+Private Const FRAME_PAIR_FAULT_NONE     As Long = 0
+Private Const FRAME_PAIR_FAULT_MISMATCH As Long = 1
+
+Private m_InjectFramePairFault          As Long
+
+
+#If VBA7 Then
+Public Function UI_TryGetActiveFramePair( _
+    ByRef WindowOut As Object, _
+    ByRef HwndOut As LongPtr, _
+    ByRef FailMsg As String) _
+    As Boolean
+#Else
+Public Function UI_TryGetActiveFramePair( _
+    ByRef WindowOut As Object, _
+    ByRef HwndOut As Long, _
+    ByRef FailMsg As String) _
+    As Boolean
+#End If
+'
+'==============================================================================
+' UI_TryGetActiveFramePair
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolve the active Excel Window together with the native handle read from
+'   that same object, and refuse the pair when the host does not agree it is
+'   the active frame.
+'
+' WHY THIS EXISTS
+'   Two callers need this pair and were each resolving it themselves:
+'   UI_TryGetActiveTitleBarHwnd here, and the title-bar capture in
+'   M_EXCEL_UI_SNAPSHOT. One of them wanted the handle, the other wanted the
+'   Window as well, so the snapshot could not reuse the handle-only helper and
+'   duplicated the logic instead. A rule expressed twice is a rule that will
+'   diverge.
+'
+'   Reading Window.hWnd from the Window that was just resolved makes the pair
+'   internally consistent. It does not make it current. During an SDI
+'   activation transition Application.ActiveWindow can return a Window that is
+'   no longer the active native frame, and nothing in the pair itself reveals
+'   that. A fire-and-forget title-bar write would then modify the previously
+'   active window, and a snapshot would capture that frame and later restore it
+'   reporting success.
+'
+' INPUTS
+'   WindowOut
+'     ByRef. Receives the resolved Excel Window, or Nothing on failure.
+'
+'   HwndOut
+'     ByRef. Receives the handle read from that same Window, or zero.
+'
+'   FailMsg
+'     ByRef. Receives the reason on failure, or an empty string.
+'
+' RETURNS
+'   TRUE only when a live frame was resolved and the host agreed it is active.
+'
+' BEHAVIOR
+'   no active Window            FALSE, Nothing, zero
+'   sampled handle disagrees    FALSE, Nothing, zero - fail closed
+'   frame is not alive          FALSE, Nothing, zero
+'   otherwise                   TRUE with the paired Window and handle
+'
+' ERROR POLICY
+'   - Never raises. An unexpected runtime error is reported through FailMsg.
+'
+' DEPENDENCIES
+'   - UI_InternalIsTitleBarFrameAlive
+'
+' CALLED FROM
+'   - UI_TryGetActiveTitleBarHwnd
+'   - M_EXCEL_UI_SNAPSHOT
+'
+' NOTES
+'   The comparison narrows the race; it does not close it. Both values can move
+'   during a transition, so no sampling order makes the pair provably current.
+'   What it buys is that a disagreement becomes visible instead of being acted
+'   on, which is the difference between failing and silently changing the wrong
+'   window.
+'
+'   No retry is attempted. A retry would be a second unverified observation,
+'   and the caller is better served by a refusal it can report than by a pair
+'   that happened to agree on the second look.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ActiveTargetWindow  As Object          'Window the handle is read from
+
+#If VBA7 Then
+    Dim SampledHwnd         As LongPtr         'Application-level active handle
+#Else
+    Dim SampledHwnd         As Long            'Application-level active handle
+#End If
+
+    Dim Fault               As Long            'Armed regression fault, if any
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Assume failure until a live, agreed pair has been resolved
+        UI_TryGetActiveFramePair = False
+
+        Set WindowOut = Nothing
+        HwndOut = 0
+        FailMsg = vbNullString
+
+    'One-shot: consumed here whether or not it fires, so a test that forgets to
+    'disarm cannot fault every later resolution in the session
+        Fault = m_InjectFramePairFault
+        m_InjectFramePairFault = FRAME_PAIR_FAULT_NONE
+
+'------------------------------------------------------------------------------
+' RESOLVE THE PAIR
+'------------------------------------------------------------------------------
+    'Resolve one Excel Window first, then read the native handle from that same
+    'object, so the two describe each other rather than being collected
+    'independently
+        Set ActiveTargetWindow = Application.ActiveWindow
+
+        If ActiveTargetWindow Is Nothing Then
+            FailMsg = "no active Excel Window is available"
+            GoTo Safe_Exit
+        End If
+
+        HwndOut = ActiveTargetWindow.hWnd
+
+'------------------------------------------------------------------------------
+' AGREE WITH THE HOST
+'------------------------------------------------------------------------------
+    'An internally consistent pair can still be stale. Sample the
+    'application-level active handle and refuse when the two disagree.
+        SampledHwnd = Application.hWnd
+
+        If Fault = FRAME_PAIR_FAULT_MISMATCH Then
+            SampledHwnd = HwndOut + 1
+        End If
+
+        If SampledHwnd <> HwndOut Then
+            HwndOut = 0
+            FailMsg = "the active Excel Window is not the active native frame"
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE THE FRAME
+'------------------------------------------------------------------------------
+    'Reject a handle that is absent or no longer refers to a window
+        If Not UI_InternalIsTitleBarFrameAlive(HwndOut) Then
+            HwndOut = 0
+            FailMsg = "invalid Excel window handle"
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+        Set WindowOut = ActiveTargetWindow
+        UI_TryGetActiveFramePair = True
+
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+Err_Handler:
+    'Report the unexpected runtime error as the failure reason
+        Set WindowOut = Nothing
+        HwndOut = 0
+        FailMsg = UI_TitleBarBuildRuntimeErrorText
+        Resume Safe_Exit
+
+End Function
+
+
+Public Sub UI_InternalInjectFramePairFault( _
+    ByVal FaultKind As Long)
+'
+'==============================================================================
+' UI_InternalInjectFramePairFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arm a one-shot fault for the next active-frame pair resolution.
+'
+' WHY THIS EXISTS
+'   UI_TryGetActiveFramePair refuses a pair the host does not agree is active.
+'   That branch is reached only during an SDI activation transition observed
+'   mid-call, which cannot be provoked on demand, so without a seam the
+'   fail-closed path would never execute. An untested fail-closed path is the
+'   defect this pairing exists to prevent.
+'
+' INPUTS
+'   FaultKind
+'     0  no fault
+'     1  force the sampled application handle to disagree with the resolved
+'        Window handle
+'
+'     Values are plain Longs so this seam adds one procedure and no type. The
+'     mapping is mirrored by private constants here and in the regression
+'     module; neither is exported.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Records the fault for the next resolution to consume.
+'   - The armed value is consumed whether or not it fires, so a test that
+'     forgets to disarm cannot fault every later resolution in the session.
+'   - An unrecognised value is stored and behaves as no fault.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     keeps it off the external facade, so this is project-public surface.
+'   - Production code must never call it.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' SET SEAM
+'------------------------------------------------------------------------------
+    'Record the armed state for the next resolution to consume
+        m_InjectFramePairFault = FaultKind
+
+End Sub
+
 
 #If VBA7 Then
 Public Function UI_TryGetActiveTitleBarHwnd( _
@@ -384,66 +635,18 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 '
 
 '------------------------------------------------------------------------------
-' DECLARE
+' DELEGATE
 '------------------------------------------------------------------------------
-    Dim ActiveTargetWindow  As Object          'Window paired with HwndOut
+    Dim ResolvedWindow      As Object          'Discarded; this caller wants the handle
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+    'One implementation of the identity rule lives in UI_TryGetActiveFramePair.
+    'This wrapper exists because two of its three callers want only the handle,
+    'and keeping its signature unchanged meant no caller had to move.
+        UI_TryGetActiveTitleBarHwnd = _
+            UI_TryGetActiveFramePair(ResolvedWindow, HwndOut, FailMsg)
 
-    'Assume failure until a live handle has been resolved
-        UI_TryGetActiveTitleBarHwnd = False
-
-    'Initialize the output and the failure message buffer
-        HwndOut = 0
-        FailMsg = vbNullString
-
-'------------------------------------------------------------------------------
-' RESOLVE HANDLE
-'------------------------------------------------------------------------------
-    'Resolve one Excel Window first, then read the native handle from that same
-    'object. Application.hWnd is process/active-state data and cannot prove the
-    'Window/hWnd pair under SDI.
-        Set ActiveTargetWindow = Application.ActiveWindow
-
-        If ActiveTargetWindow Is Nothing Then
-            FailMsg = "no active Excel Window is available"
-            GoTo Safe_Exit
-        End If
-
-        HwndOut = ActiveTargetWindow.hWnd
-
-'------------------------------------------------------------------------------
-' VALIDATE HANDLE
-'------------------------------------------------------------------------------
-    'Reject a handle that is absent or no longer refers to a window
-        If Not UI_InternalIsTitleBarFrameAlive(HwndOut) Then
-            HwndOut = 0
-            FailMsg = "invalid Excel window handle"
-            GoTo Safe_Exit
-        End If
-
-    'Report success
-        UI_TryGetActiveTitleBarHwnd = True
-
-'------------------------------------------------------------------------------
-' RETURN SUCCESS
-'------------------------------------------------------------------------------
-Safe_Exit:
-    'Exit before the error-handler block
-        Exit Function
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-Err_Handler:
-    'Report the unexpected runtime error as the failure reason
-        HwndOut = 0
-        FailMsg = UI_TitleBarBuildRuntimeErrorText
-        Resume Safe_Exit
+    'Release the Window this caller did not ask for
+        Set ResolvedWindow = Nothing
 
 End Function
 

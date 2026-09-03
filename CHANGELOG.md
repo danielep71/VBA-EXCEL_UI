@@ -142,6 +142,13 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added `UI_TryGetActiveFramePair` and `UI_InternalInjectFramePairFault` to
+  **M_EXCEL_UI_TITLEBAR**, and a four-branch regression case registered in both
+  the regression pack and the title-bar pack. The refusal branch is reached
+  only through the seam, because an SDI activation transition observed mid-call
+  cannot be provoked on demand; without it the fail-closed path would ship
+  never having executed. Two `[project-public]` manifest lines; `[supported]`
+  is unchanged and identical to `[baseline v1.1.2]`.
 - Added a standardized installation and maintainer release documentation set,
   covering deployment, certification, provenance, recovery and
   post-publication controls, in **INSTALLATION.md** and the new
@@ -381,6 +388,13 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- Moved the active-frame identity rule into one place. `M_EXCEL_UI_SNAPSHOT`
+  resolved, paired and liveness-checked the frame itself because the existing
+  helper returned a handle and the snapshot also needs the `Window`. Both now
+  call `UI_TryGetActiveFramePair`, and `UI_TryGetActiveTitleBarHwnd` delegates
+  to it with its signature unchanged, so no caller moved and no manifest line
+  changed. The snapshot's private resolver became unreachable and is deleted
+  rather than left as dead surface.
 - Removed both independent review archives from `docs/`. From this release the
   repository does not carry independent review documents: they are internal
   working material, they drive the issue set, and the issue set is the public
@@ -458,6 +472,22 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- Fixed the active title-bar frame being trusted without the host agreeing it
+  is active. Resolving `Window.hWnd` from the `Window` that
+  `Application.ActiveWindow` just returned makes the pair internally
+  consistent, but not current: during an SDI activation transition the resolved
+  `Window` can already be the previously active frame. A fire-and-forget
+  title-bar write would then modify the wrong window, and the snapshot capture
+  would take that frame and later restore it reporting success.
+
+  The pair is now sampled against `Application.hWnd` and refused when the two
+  disagree. This narrows the race rather than closing it — both values can move
+  during a transition, so no sampling order makes the pair provably current —
+  and the header says so. What it buys is that a disagreement becomes visible
+  instead of being acted on. No retry is attempted, for the same reason the
+  quiet scope attempts no rollback: a retry is a second unverified observation.
+  Reported by the Codex reviewer on
+  [#63](https://github.com/danielep71/VBA-EXCEL_UI/pull/63).
 - **Title-bar Window/hWnd identity is now paired and retained**
   ([#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45),
   [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32)). Active capture

@@ -248,8 +248,7 @@ Public Function UI_SnapshotCaptureCore( _
 '   - UI_RuntimeTryGetRibbonVisible
 '   - UI_RuntimeTryGetBooleanProperty
 '   - UI_RuntimeBuildErrorText
-'   - UI_SnapshotTryGetActiveWindow
-'   - UI_TryGetActiveTitleBarHwnd
+'   - UI_TryGetActiveFramePair
 '   - UI_TryGetTitleBarVisibleForHwnd
 '
 ' CALLED FROM
@@ -355,35 +354,27 @@ Public Function UI_SnapshotCaptureCore( _
     'Resolve the Excel Window first and obtain hWnd from that same object. This
     'forms one atomic identity pair under SDI; Application.hWnd and a separately
     'resolved ActiveWindow can describe different windows during activation.
-        Set m_SnapshotTitleBarWindow = UI_SnapshotTryGetActiveWindow()
+        If Not UI_TryGetActiveFramePair( _
+            m_SnapshotTitleBarWindow, m_SnapshotTitleBarHwnd, Msg) Then
 
-        If m_SnapshotTitleBarWindow Is Nothing Then
-
-            Msg = "no active Excel Window is available for title-bar capture"
+            Set m_SnapshotTitleBarWindow = Nothing
+            m_SnapshotTitleBarHwnd = 0
 
             UI_RuntimeHandleFailure _
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "TitleBar", Msg
         Else
 
-            'Read the native handle from the retained Window itself.
-                m_SnapshotTitleBarHwnd = m_SnapshotTitleBarWindow.hWnd
-
+            'The pair is resolved, agreed with the host and proven live by the
+            'title-bar module, so nothing is re-checked here.
                 m_SnapshotTitleBarLabel = _
                     UI_RuntimeBuildWindowLabel(m_SnapshotTitleBarWindow)
 
-            'Read only when the paired handle is a live frame.
-                If UI_InternalIsTitleBarFrameAlive( _
-                    m_SnapshotTitleBarHwnd) Then
-
-                    m_SnapshotTitleBarKnown = _
-                        UI_TryGetTitleBarVisibleForHwnd( _
-                            TargetHwnd:=m_SnapshotTitleBarHwnd, _
-                            IsVisible:=m_SnapshotTitleBarVisible, _
-                            FailMsg:=Msg)
-                Else
-                    Msg = "active Excel Window returned an invalid hWnd"
-                End If
+                m_SnapshotTitleBarKnown = _
+                    UI_TryGetTitleBarVisibleForHwnd( _
+                        TargetHwnd:=m_SnapshotTitleBarHwnd, _
+                        IsVisible:=m_SnapshotTitleBarVisible, _
+                        FailMsg:=Msg)
 
                 If Not m_SnapshotTitleBarKnown Then
                     UI_RuntimeHandleFailure _
@@ -968,74 +959,6 @@ Public Sub UI_SnapshotClear()
         Erase m_SnapshotGridlinesVisible
 
 End Sub
-
-
-Private Function UI_SnapshotTryGetActiveWindow() _
-    As Object
-'
-'==============================================================================
-' UI_SnapshotTryGetActiveWindow
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Returns the Excel Window Excel currently reports as active, or Nothing.
-'
-' WHY THIS EXISTS
-'   Application.ActiveWindow raises rather than returning Nothing in some host
-'   states, notably when no workbook window is open. The title-bar capture path
-'   must record that absence as an unavailable frame rather than fall back to a
-'   numeric handle with no generation identity.
-'
-'   Isolating the read keeps that decision in one place and keeps the capture
-'   core free of a second error boundary.
-'
-' RETURNS
-'   Object
-'     The active Excel Window, or Nothing when the host exposes none.
-'
-' BEHAVIOR
-'   - Suppresses any error raised by the read and reports Nothing instead.
-'
-' ERROR POLICY
-'   - Does not raise.
-'
-' DEPENDENCIES
-'   None.
-'
-' CALLED FROM
-'   - UI_SnapshotCaptureCore
-'
-' NOTES
-'   The returned Window is the authoritative identity and exposes the hWnd that
-'   must be paired with it for title-bar capture and restoration.
-'
-' UPDATED
-'   2026-09-03 - Made the Window the required hWnd identity source.
-'   2026-08-19
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'A missing active window is an expected host state, not an error
-        On Error Resume Next
-
-    'Assume none until the read succeeds
-        Set UI_SnapshotTryGetActiveWindow = Nothing
-
-'------------------------------------------------------------------------------
-' READ ACTIVE WINDOW
-'------------------------------------------------------------------------------
-    'Take whatever the host reports; a raised error leaves the result Nothing
-        Set UI_SnapshotTryGetActiveWindow = Application.ActiveWindow
-
-    'Discard any error the read produced, so nothing propagates to the caller
-        If Err.Number <> 0 Then
-            Err.Clear
-            Set UI_SnapshotTryGetActiveWindow = Nothing
-        End If
-
-End Function
 
 
 Private Function UI_SnapshotTryResolveTitleBarFrame( _

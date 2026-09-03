@@ -81,11 +81,13 @@ M_EXCEL_UI_TITLEBAR	Function	UI_InternalIsFrameRefreshPending(ByVal TargetHwnd A
 M_EXCEL_UI_TITLEBAR	Function	UI_InternalIsTitleBarFrameAlive(ByVal TargetHwnd As LongPtr) As Boolean	Not (VBA7)#1 | VBA7#0
 M_EXCEL_UI_TITLEBAR	Function	UI_InternalMergeTitleBarStyleBits(ByVal CurrentStyle As LongPtr, ByVal OwnedStyleBits As LongPtr) As LongPtr	Not (VBA7)#1 | VBA7#0
 M_EXCEL_UI_TITLEBAR	Function	UI_InternalSimulateFrameHandleReuse(ByVal OriginalHwnd As LongPtr, ByVal ReplacementHwnd As LongPtr, ByVal ReplacementOwnedBits As LongPtr) As Boolean	Not (VBA7)#1 | VBA7#0
+M_EXCEL_UI_TITLEBAR	Function	UI_TryGetActiveFramePair(ByRef WindowOut As Object, ByRef HwndOut As LongPtr, ByRef FailMsg As String) As Boolean	Not (VBA7)#1 | VBA7#0
 M_EXCEL_UI_TITLEBAR	Function	UI_TryGetActiveTitleBarHwnd(ByRef HwndOut As LongPtr, ByRef FailMsg As String) As Boolean	Not (VBA7)#1 | VBA7#0
 M_EXCEL_UI_TITLEBAR	Function	UI_TryGetTitleBarVisible(ByRef IsVisible As Boolean, ByRef FailMsg As String) As Boolean
 M_EXCEL_UI_TITLEBAR	Function	UI_TryGetTitleBarVisibleForHwnd(ByVal TargetHwnd As LongPtr, ByRef IsVisible As Boolean, ByRef FailMsg As String) As Boolean	Not (VBA7)#1 | VBA7#0
 M_EXCEL_UI_TITLEBAR	Function	UI_TrySetTitleBarVisibleForHwndIfNeeded(ByVal TargetHwnd As LongPtr, ByVal IsVisible As Boolean, ByRef FailMsg As String) As Boolean	Not (VBA7)#1 | VBA7#0
 M_EXCEL_UI_TITLEBAR	Function	UI_TrySetTitleBarVisibleIfNeeded(ByVal IsVisible As Boolean, ByRef FailMsg As String) As Boolean
+M_EXCEL_UI_TITLEBAR	Sub	UI_InternalInjectFramePairFault(ByVal FaultKind As Long)
 M_EXCEL_UI_TITLEBAR	Sub	UI_InternalInjectFrameRefreshFailure(ByVal FailNextRefresh As Boolean)
 M_EXCEL_UI_TITLEBAR	Sub	UI_InternalResetTitleBarBaseline()
 

@@ -122,6 +122,9 @@ Option Private Module
     Private Const TEST_RIBBON_ERR_BASE As Long = vbObjectError + 5200  'Base custom error for the Ribbon probe
     Private Const TEST_OWNERSHIP_ERR_BASE As Long = vbObjectError + 5300  'Base custom error for the snapshot-ownership case
 
+    Private Const TEST_PAIR_FAULT_NONE As Long = 0  'Frame pair: no fault
+    Private Const TEST_PAIR_FAULT_MISMATCH As Long = 1  'Frame pair: sampled handle disagrees
+
     Private Const TEST_QUIET_FAULT_NONE As Long = 0  'Quiet scope: no fault
     Private Const TEST_QUIET_FAULT_ENTRY As Long = 1  'Quiet scope: entry read fails
     Private Const TEST_QUIET_FAULT_WRITE As Long = 2  'Quiet scope: write ineffective
@@ -3316,6 +3319,7 @@ Private Sub TST_RunRegressionPack( _
             TST_Case_TitleBarFrameRefreshDebtRetried
             TST_Case_TitleBarStaleFrameEntryNotReused
             TST_Case_TitleBarSameStyleHandleReuse
+            TST_Case_ActiveFramePairRefusesMismatch
         End If
 
 '------------------------------------------------------------------------------
@@ -3487,6 +3491,9 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 
     'Verify equal-zero and equal-nonzero handle reuse with object identity
         TST_Case_TitleBarSameStyleHandleReuse
+
+    'Verify that a disagreed active-frame pair is refused by both callers
+        TST_Case_ActiveFramePairRefusesMismatch
 
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
@@ -9865,6 +9872,170 @@ Private Sub TST_AssertSnapshotWindowState( _
                 CStr(ExpectedGridlines) & "; actual=" & _
                 CStr(TargetWindow.DisplayGridlines)
         End If
+
+End Sub
+
+
+Private Sub TST_Case_ActiveFramePairRefusesMismatch()
+
+'
+'==============================================================================
+' TST_Case_ActiveFramePairRefusesMismatch
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that the active-frame pair is refused when the host does not agree
+'   the resolved Window is the active native frame, and that the refusal
+'   reaches both callers.
+'
+' WHY THIS EXISTS
+'   Resolving Window.hWnd from the Window just returned by
+'   Application.ActiveWindow makes the pair internally consistent. It does not
+'   make it current: during an SDI activation transition the resolved Window
+'   can already be the previously active frame. A fire-and-forget title-bar
+'   write would then modify the wrong window, and a snapshot would capture that
+'   frame and later restore it reporting success.
+'
+'   The disagreement cannot be provoked on demand, so the fail-closed branch is
+'   reached through the one-shot seam in M_EXCEL_UI_TITLEBAR. Without it the
+'   branch would ship having never executed, which is the shape of the defect
+'   this pairing exists to prevent.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   1  no fault              the pair resolves, Window and handle both set
+'   2  fault armed           refused, Window Nothing, handle zero, exact text
+'   3  seam is one-shot      the next resolution succeeds again
+'   4  refusal delegates     the handle-only wrapper reports the same failure
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Disarms the seam before returning
+'
+' DEPENDENCIES
+'   - UI_InternalInjectFramePairFault
+'   - UI_TryGetActiveFramePair
+'   - UI_TryGetActiveTitleBarHwnd
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'   - TST_RunTitleBarOnlyPack
+'
+' NOTES
+'   The snapshot capture path is not asserted separately here. It reaches the
+'   same helper through the same call, so a separate assertion would restate
+'   this one rather than test anything further; what it would add is coverage
+'   of the snapshot's own failure reporting, which belongs with its structured
+'   result cases.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ResolvedWindow      As Object          'Window the helper reports
+
+#If VBA7 Then
+    Dim ResolvedHwnd        As LongPtr         'Handle the helper reports
+#Else
+    Dim ResolvedHwnd        As Long            'Handle the helper reports
+#End If
+
+    Dim FailMsg             As String          'Failure text the helper reports
+    Dim OK                  As Boolean         'Helper verdict
+
+    Const PROC As String = "TST_Case_ActiveFramePairRefusesMismatch"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating that a disagreed active-frame pair is refused"
+
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
+
+'------------------------------------------------------------------------------
+' BRANCH 1 - AN AGREED PAIR RESOLVES
+'------------------------------------------------------------------------------
+        Set ResolvedWindow = Nothing
+        ResolvedHwnd = 0
+        FailMsg = vbNullString
+
+        OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".Agreed.Resolved"
+        TST_AssertBooleanEquals _
+            False, (ResolvedWindow Is Nothing), PROC & ".Agreed.WindowSet"
+        TST_AssertBooleanEquals _
+            False, (ResolvedHwnd = 0), PROC & ".Agreed.HandleSet"
+        TST_AssertBooleanEquals _
+            True, (Len(FailMsg) = 0), PROC & ".Agreed.NoFailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 2 - A DISAGREED PAIR IS REFUSED, AND NOTHING IS RETURNED
+'------------------------------------------------------------------------------
+    'Returning a handle alongside a refusal would invite a caller to use it
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_MISMATCH
+
+        Set ResolvedWindow = Application.ActiveWindow
+        ResolvedHwnd = 1
+        FailMsg = vbNullString
+
+        OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
+
+        TST_AssertBooleanEquals False, OK, PROC & ".Disagreed.Refused"
+        TST_AssertBooleanEquals _
+            True, (ResolvedWindow Is Nothing), PROC & ".Disagreed.WindowCleared"
+        TST_AssertBooleanEquals _
+            True, (ResolvedHwnd = 0), PROC & ".Disagreed.HandleCleared"
+        TST_AssertBooleanEquals _
+            True, _
+            (FailMsg = "the active Excel Window is not the active native frame"), _
+            PROC & ".Disagreed.FailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 3 - THE SEAM IS ONE-SHOT
+'------------------------------------------------------------------------------
+    'A fault that survived would refuse every later resolution in the session,
+    'and the symptom would look like the defect rather than like the test
+        Set ResolvedWindow = Nothing
+        ResolvedHwnd = 0
+        FailMsg = vbNullString
+
+        OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".OneShot.SecondResolves"
+
+'------------------------------------------------------------------------------
+' BRANCH 4 - THE HANDLE-ONLY WRAPPER REPORTS THE SAME REFUSAL
+'------------------------------------------------------------------------------
+    'The wrapper delegates, so a refusal must reach its callers unchanged
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_MISMATCH
+
+        ResolvedHwnd = 1
+        FailMsg = vbNullString
+
+        OK = UI_TryGetActiveTitleBarHwnd(ResolvedHwnd, FailMsg)
+
+        TST_AssertBooleanEquals False, OK, PROC & ".Delegated.Refused"
+        TST_AssertBooleanEquals _
+            True, (ResolvedHwnd = 0), PROC & ".Delegated.HandleCleared"
+        TST_AssertBooleanEquals _
+            True, _
+            (FailMsg = "the active Excel Window is not the active native frame"), _
+            PROC & ".Delegated.FailureText"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
+
+        TST_Log PROC, "PASS", _
+            "A disagreed active-frame pair was refused by both callers"
 
 End Sub
 
