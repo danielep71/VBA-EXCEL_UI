@@ -2,42 +2,29 @@
 # VBA-EXCEL_UI .gitignore
 #------------------------------------------------------------------------------
 # PURPOSE
-#   Keep the repository source-first, reviewable, and safe to clone.
-#
-#   Ignore local, temporary, generated, sensitive, and release-binary files
-#   while preserving the exported VBA source, demo builders, regression tests,
-#   repository tooling, documentation, workflows, and screenshots that define
-#   the project.
+#   Keep the repository source-first, reviewable, reproducible, and safe to
+#   clone. Ignore workstation state, generated output, secrets, caches, and
+#   unintended Office packages while preserving authoritative source and
+#   repository evidence.
 #
 # REPOSITORY POLICY
-#   - Exported VBA source is version-controlled.
-#   - Demo workbook SOURCE is version-controlled.
-#   - Generated .xlsm / .xlam and other Excel binaries are NOT source files.
-#   - Tested binaries and certification evidence are distributed through the
-#     GitHub Release process, not committed from a workstation.
-#   - Editor state, logs, caches, build output, local secrets, Office lock files,
-#     and OS metadata do not belong in Git.
-#   - tools/check_repo.py validates the tracked-file set against the blocked
-#     artifact patterns below. Ignored local release files remain permissible.
+#   - Exported runtime, demo, regression, and Python tooling source are version-controlled.
+#   - Generated demo workbooks are distributed as GitHub Release assets.
+#   - Local release-certification output is not repository evidence.
+#   - Documentation, workflows, manifests, and UI images remain version-controlled.
 #
 # SAFETY RULE
-#   Do not add broad rules that can hide:
-#
-#       *.bas  *.cls  *.frm  *.frx  *.py  *.xml  *.md  *.txt
-#       src/   demo/  test/  tools/  docs/  images/  .github/
-#
-#   Those paths contain authoritative source or repository evidence.
+#   Never add broad rules for exported VBA source, documentation, repository
+#   automation, or evidence directories. Exceptions for intentional Office
+#   packages must use exact rooted paths.
 #==============================================================================
 
 
 #------------------------------------------------------------------------------
 # MICROSOFT OFFICE TEMPORARY / LOCK / RECOVERY FILES
 #------------------------------------------------------------------------------
-# Office creates owner and lock files beside open workbooks and documents.
-# The general ~$* rule covers the Excel, Word and PowerPoint variants.
-#------------------------------------------------------------------------------
-
 ~$*
+.~lock.*#
 *.laccdb
 *.ldb
 
@@ -49,21 +36,13 @@
 *.asd
 *.wbk
 
-# LibreOffice / OpenOffice lock files produced during cross-tool inspection.
-.~lock.*#
-
 
 #------------------------------------------------------------------------------
-# GENERATED EXCEL / OFFICE BINARIES
+# GENERATED OFFICE PACKAGES
 #------------------------------------------------------------------------------
-# The repository tracks the source used to build the component and demo.
-# Generated Office packages belong in GitHub Releases, not in source control.
-#
-# These rules are global. A workbook saved at the repository root, under test/,
-# or in an unexpected folder must remain untracked just as one under demo/.
-#------------------------------------------------------------------------------
-
-# Excel workbooks, templates, add-ins and legacy/binary formats
+# Office packages are generated or release artifacts by default. These global
+# rules prevent an accidental workbook saved anywhere in the tree from becoming
+# source. Re-include an intentional package only by its exact rooted path.
 *.xls
 *.xlsx
 *.xlsm
@@ -76,7 +55,6 @@
 *.xll
 *.xlw
 
-# Adjacent macro-enabled or database Office formats that are not project source
 *.docm
 *.dotm
 *.pptm
@@ -89,63 +67,57 @@
 *.mde
 *.ade
 
-# If a binary fixture ever genuinely belongs in source control, re-include it
-# by EXPLICIT path so that the exception is visible in code review, and update
-# tools/check_repo.py in the same commit.
-#
-# Example:
-# !test/fixtures/known-good-example.xlsm
+# If a binary fixture becomes authoritative, add one exact rooted exception:
+# !/test/fixtures/known-good-example.xlsm
 
 
 #------------------------------------------------------------------------------
-# RELEASE-ASSET / LOCAL BUILD STAGING
+# RELEASE / BUILD STAGING
 #------------------------------------------------------------------------------
-# Generated binaries, hashes, manifests, or evidence being prepared for a
-# GitHub Release may be staged locally under these directories.
-#------------------------------------------------------------------------------
-
-release-assets/
-dist/
-build/
-out/
-output/
-outputs/
+# Root anchoring prevents a generated-directory name from hiding an
+# authoritative nested source or evidence directory.
+/release-assets/
+/build/
+/out/
+/output/
+/outputs/
+/dist/
 
 
 #------------------------------------------------------------------------------
-# REGRESSION / CERTIFICATION / LOCAL TEST OUTPUT
+# LOCAL TEST / CERTIFICATION OUTPUT
 #------------------------------------------------------------------------------
-# The committed regression harness is source:
-#
-#   test/M_EXCEL_UI_REGRESSION_TESTS.bas
-#
-# Local output produced while investigating, certifying, or automating tests is
-# not source. Final evidence is attached through the release process.
-#------------------------------------------------------------------------------
+/test-output/
+/test-results/
+/coverage/
+/htmlcov/
 
-test-output/
-test-results/
-coverage/
 .coverage
+.coverage.*
+coverage.xml
+
+.pytest_cache/
+.hypothesis/
 .tox/
+.nox/
 
-EXCEL_UI_certification_*.json
-EXCEL_UI_certification_*.txt
+# Repository-specific local run evidence. Root anchoring keeps similarly named
+# fixtures or publishable evidence in nested directories visible.
+/EXCEL_UI_certification_*.json
+/EXCEL_UI_certification_*.txt
 
 
 #------------------------------------------------------------------------------
-# LOCAL TEMPORARY WORKING DIRECTORIES
+# LOCAL TEMPORARY DIRECTORIES
 #------------------------------------------------------------------------------
-
-temp/
-tmp/
-.cache/
+/temp/
+/tmp/
+/.cache/
 
 
 #------------------------------------------------------------------------------
 # WINDOWS FILE-SYSTEM / SHELL METADATA
 #------------------------------------------------------------------------------
-
 Thumbs.db
 ehthumbs.db
 ehthumbs_vista.db
@@ -154,17 +126,13 @@ $RECYCLE.BIN/
 System Volume Information/
 *.stackdump
 
-# Windows reserved-name artifact occasionally created by redirection mistakes.
+# Reserved-name artifact occasionally created by shell redirection mistakes.
 nul
 
 
 #------------------------------------------------------------------------------
-# MACOS / NETWORK / UNIX FILE-SYSTEM METADATA
+# MACOS / NETWORK / UNIX METADATA
 #------------------------------------------------------------------------------
-# Excel for Windows is the production target, but the repository may be
-# inspected from macOS, WSL, containers, NAS shares, or CI runners.
-#------------------------------------------------------------------------------
-
 .DS_Store
 .AppleDouble
 .LSOverride
@@ -180,29 +148,28 @@ Icon?
 
 
 #------------------------------------------------------------------------------
-# EDITOR / IDE / AI-ASSISTANT LOCAL STATE
+# EDITOR / IDE / LOCAL ASSISTANT STATE
 #------------------------------------------------------------------------------
-# Deliberate project-wide configuration can be added later by explicit
-# exception. Personal workspace state remains local.
-#------------------------------------------------------------------------------
-
+# Project-wide configuration belongs in the repository; personal workspaces do
+# not. Re-include a specific shared editor file explicitly if one is introduced.
 .vscode/
 .idea/
 .vs/
 .history/
+.fleet/
 
 *.code-workspace
 *.suo
 *.user
+*.userosscache
+*.sln.docstates
 *.swp
 *.swo
 *~
 
-# Notepad++ backup/session artifacts
 *.nppBackup
 session.xml
 
-# Local assistant/editor state
 .claude/
 .cursor/
 .aider*
@@ -212,30 +179,23 @@ session.xml
 #------------------------------------------------------------------------------
 # MERGE / PATCH / CONFLICT ARTIFACTS
 #------------------------------------------------------------------------------
-# Exported VBA modules are large enough that .orig and .rej files can resemble
-# legitimate importable source. Conflict debris must never enter the index.
-#------------------------------------------------------------------------------
-
 *.orig
 *.rej
 *.patch.tmp
 
 
 #------------------------------------------------------------------------------
-# LOGS / CRASH DUMPS / DIAGNOSTIC DEBRIS
+# LOGS / CRASH DUMPS
 #------------------------------------------------------------------------------
-
 *.log
 *.dmp
 *.dump
 
 
 #------------------------------------------------------------------------------
-# LOCAL ENVIRONMENT / SECRET MATERIAL
+# LOCAL ENVIRONMENT / SECRET / SIGNING MATERIAL
 #------------------------------------------------------------------------------
-# Keep a deliberately sanitized example environment file trackable.
-#------------------------------------------------------------------------------
-
+# Sanitized examples remain trackable.
 .env
 .env.*
 !.env.example
@@ -248,17 +208,18 @@ session.xml
 
 
 #------------------------------------------------------------------------------
-# PYTHON / SCRIPTING CACHE AND LOCAL ENVIRONMENTS
+# PYTHON CACHE / LOCAL ENVIRONMENTS
 #------------------------------------------------------------------------------
-# Repository tooling is version-controlled under tools/. Interpreter caches,
-# test caches, notebooks, and local virtual environments are not.
-#------------------------------------------------------------------------------
-
+# Source, manifests, lock files, and requirements remain trackable.
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
-.pytest_cache/
+.eggs/
+pip-wheel-metadata/
+
 .mypy_cache/
+.pyright/
 .ruff_cache/
 .ipynb_checkpoints/
 
@@ -269,54 +230,32 @@ venv/
 #------------------------------------------------------------------------------
 # NODE / JAVASCRIPT LOCAL DEPENDENCIES
 #------------------------------------------------------------------------------
-# Future documentation or repository-quality tooling may use Node. Source and
-# package manifests remain trackable; installed dependencies do not.
-#------------------------------------------------------------------------------
-
+# Package manifests and lock files remain trackable. Only installed dependencies,
+# machine caches, and diagnostic logs are ignored.
 node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/install-state.gz
+.yarn/build-state.yml
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 
 #------------------------------------------------------------------------------
-# KEEP THESE AUTHORITATIVE REPOSITORY ASSETS TRACKABLE
+# AUTHORITATIVE CONTENT THAT MUST REMAIN TRACKABLE
 #------------------------------------------------------------------------------
-# These comments are intentional guardrails for future maintenance.
+# These are documentation guardrails, not negation rules:
+#   src/*.bas, demo/*.bas, test/*.bas
+#   tools/*.py, tools/public_api_manifest.txt
+#   docs/**, README.md, CHANGELOG.md
+#   images/**, .github/**
+#   .editorconfig, .gitattributes, .gitignore
 #
-# Production VBA source:
-#   src/M_EXCEL_UI.bas
-#   src/M_EXCEL_UI_RUNTIME.bas
-#   src/M_EXCEL_UI_SNAPSHOT.bas
-#   src/M_EXCEL_UI_TITLEBAR.bas
-#
-# Demo source:
-#   demo/M_EXCEL_UI_DEMO.bas
-#   demo/M_DEMO_BUILDER.bas
-#
-# Regression source:
-#   test/M_EXCEL_UI_REGRESSION_TESTS.bas
-#
-# Repository tooling:
-#   tools/check_repo.py
-#   tools/reformat.py
-#   tools/public_api_manifest.txt
-#
-# Documentation / governance:
-#   README.md
-#   CHANGELOG.md
-#   INSTALLATION.md
-#   CONTRIBUTING.md
-#   SECURITY.md
-#   CODE_OF_CONDUCT.md
-#   LICENSE
-#   docs/**
-#
-# Repository configuration / automation:
-#   .gitignore
-#   .gitattributes
-#   .github/**
-#
-# Visual documentation:
-#   images/**
-#
-# Do not add broad ignore rules for source extensions or source directories.
-# Generated Office binaries are GitHub Release assets, not repository source.
+# Do not ignore exported VBA extensions or authoritative source, documentation,
+# benchmark, evidence, asset, or .github directories.
 #==============================================================================
