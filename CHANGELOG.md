@@ -97,6 +97,11 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
+### Added
+
+- Added a root `VERSION` marker at `1.1.2`, aligned with the latest published
+  release and the existing source-version contract.
+
 ### Changed
 
 - Standardized changelog governance and added an explicit Unreleased staging
