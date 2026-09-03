@@ -1,295 +1,190 @@
 # VBA-EXCEL_UI v1.1.3 — Implementation Sequence and Release Gates
 
-**Repository:** `danielep71/VBA-EXCEL_UI`  
-**Released baseline:** `v1.1.2`  
-**Baseline commit:** `bdfdde4de9ed9607589aa30df3c9440eb9725de2`  
-**Target milestone:** `v1.1.3 — correctness & hardening`  
-**Planning basis:** `02de0abcb7cea610f102834749a4d638111c98f3`  
-**Status date:** 2026-08-30
+**Repository:** `danielep71/VBA-EXCEL_UI`
+**Released baseline:** `v1.1.2`
+**Baseline commit:** `bdfdde4de9ed9607589aa30df3c9440eb9725de2`
+**Target milestone:** `v1.1.3 — correctness & hardening`
+**Planning basis:** `3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`
+**Status date:** 2026-09-03
 
-This document is the execution plan for v1.1.3. The issue bodies remain the
-acceptance-contract authority. This plan defines order, dependencies, release
-gates and closure discipline; it does not replace issue-level evidence.
+This is the authoritative execution sequence for v1.1.3. GitHub issue bodies
+remain the acceptance-contract authority. This document records ordering,
+dependencies, closure discipline, and a point-in-time copy of every open issue
+body without relying on predicted issue numbers or withdrawn review archives.
 
-## 1. Scope and release boundary
+## 1. Release boundary and live state
 
-v1.1.3 is a corrective release. It addresses runtime correctness, snapshot and
-window identity, regression-harness safety, certification completeness, static
-analysis and exact-source release evidence without changing the supported
-caller-facing facade.
+v1.1.3 is a corrective release. It may change internal production, test,
+documentation and release-engineering behavior, but it must not change the
+12-member supported caller-facing facade. #44 (opt-in Ribbon activation) and
+#22 (rebuilt demo behavior) remain in v1.2.0.
 
-The following behavioral features are explicitly outside v1.1.3:
+At this planning basis:
 
-- #44 — opt-in Ribbon restoration that activates the captured window;
-- #22 — rebuilt demo and corrected checkbox-driven `Show Selected UI` behavior.
+- `release/v1.1.3` points to PR #63 merge `3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`.
+- Static checks #113 passed 24/24 on that exact merge head.
+- The API manifest has 42 live declarations: 12 `[supported]` and 30
+  `[project-public]`, plus the frozen 12-entry v1.1.2 facade baseline.
+- The milestone contains **25 open and 4 closed issues**.
+- Root `VERSION` remains `1.1.2`.
+- Governed Wiki revision `f65531a40134d81b0156dbb522a78917ed39da21`
+  still tracks v1.1.2.
+- The independent-review archives remain withdrawn. #48 owns their mandatory
+  public replacement crosswalk.
 
-Both remain assigned to `v1.2.0 — Ribbon & demo modernization`. The v1.1.3
-Ribbon repair must fail closed on the wrong active window; it must not activate
-a window, change focus or introduce the v1.2.0 policy.
+## 2. Completed work and closure audit
 
-The independent review that informed the backlog is private. It must not be
-committed, linked, quoted, uploaded to the Wiki or attached to a release. Public
-issues are self-contained and retain stable finding identifiers. #48 owns the
-public finding crosswalk and release errata without republishing the review.
+| Issue | Checklist | Audit result | Comment disposition |
+|---|---:|---|---|
+| #26 | 13/13 | Correctly closed; quiet ownership requires successful read/write/readback. | Premature closure was superseded; final closure at `02de0ab` is coherent. #35 owns final residue detection. |
+| #29 | 12/12 | Correctly closed; Markdown escape/hygiene gate landed. | Closure comment binds the Wave 1 evidence. |
+| #40 | 11/11 | Correctly closed; archives were repaired and then prospectively withdrawn. | Comments preserve both phases and hand the public crosswalk to #48. |
+| #43 | 21/21 | Correctly closed; caller snapshots survive destructive-runner refusal. | Historical premature closure comments are superseded; final closure at `32baef3` is supported. |
 
-## 2. Verified live state at the planning basis
+No closed issue was reopened.
 
-- `main` and tag `v1.1.2` point to
-  `bdfdde4de9ed9607589aa30df3c9440eb9725de2`.
-- `release/v1.1.3` was 33 commits ahead and 0 behind `main` at planning-basis
-  head `02de0abcb7cea610f102834749a4d638111c98f3`.
-- The v1.1.3 milestone contained 21 open and 4 closed issues. Its denominator
-  is dynamic: new P1/P2 findings from the required audits join v1.1.3.
-- All 23 repository-wide open issues were assigned to `danielep71`; #22 and #44
-  are the two v1.2.0 issues.
-- `demo/` remained byte-identical to v1.1.2. `src/`, `test/` and `tools/` had
-  intentionally diverged through the completed #26, #43 and Wave 1 work.
-- The current supported facade remained 12 declarations. The project-public
-  surface was 27 declarations after the intentional #26 test seam; #47 tracks
-  that internal surface separately from the Semantic Versioning contract.
-- Repository checks passed 24/24 at `02de0ab`; the API self-test reported 40
-  rules and the offline Wiki-badge self-test reported 14 rules.
-- The last path-triggered Wiki workflow was run #3 at `7f91557`. This is
-  expected because no later commit changed root `VERSION`, the Wiki checker or
-  its workflow.
+## 3. PR #63 disposition: merged is not closed
 
-## 3. Progress already completed
+PR #63 merged core work for #45, #32 and #6, but none is closure-complete:
 
-### Wave 1 — code complete
+- **#45:** object/native pairing and mismatch refusal are implemented. Public
+  no-write evidence and module/Wiki wording remain.
+- **#32:** slots retain an Excel `Window`, but the seam changes numeric hWnd;
+  it does not prove reuse of the same hWnd by a different owner generation.
+- **#6:** `HasBaseline`, fallback and readback exist, but `WS_CAPTION` is
+  composite and merged code still uses any-bit tests. The rule must be
+  `(style And WS_CAPTION) = WS_CAPTION`. Its control hangs under #66.
 
-Wave 1 established the release guardrails before the first `.bas` change:
+The PR review record now matches this: active-handle mismatch is resolved with
+evidence; composite-mask and true same-hWnd findings remain open.
 
-- #47 captured complete supported and project-public declarations before any
-  production, test or demo module edit;
-- #37 added the `v*` tag trigger, immutable full-SHA Action pins and a
-  fixture-backed policy gate;
-- #40 and #29 landed as one policy unit: archive withdrawal/repair and the
-  Markdown escape/hygiene gate. Landing #29 alone would have made the branch
-  red until #40 repaired the governed files;
-- the private-review filename/content boundary became a case-insensitive,
-  fixture-backed repository check;
-- #53 added root `VERSION`, the offline Wiki-badge checker and the read-only
-  Wiki workflow.
-
-#29 and #40 are closed. #37, #47 and #53 remain open because their final
-tag/source/Wiki criteria are release-time evidence, not missing Wave 1 code.
-
-### Wave 2 — partially complete
-
-- #43 is closed. Four public destructive runners now refuse a caller-owned
-  snapshot before arming their handlers and clear a snapshot only when they
-  created it. The refusal-path regression is dispatched by the main pack and
-  mutation evidence proves it fails against the v1.1.2 behavior.
-- #26 is closed. Quiet-scope ownership is claimed only after a successful
-  entry read, write and readback. Final host restoration remains best effort
-  and is independently checked by #35.
-- #38 remains the next Wave 2 implementation item.
-
-## 4. Dependency map
+## 4. Revised dependency map and waves
 
 ```mermaid
 flowchart TD
-    A["Wave 1 guardrails<br/>code complete"]
-    B["Harness safety<br/>#43 ✓, #26 ✓, #38"]
-    C["Window identity<br/>#23 + #45"]
-    D["Title-bar engine<br/>#27 → #32 → #6"]
-    E["Static/audit track<br/>#52 → #31 → #30"]
-    F["Records/inventory<br/>#50 → #42"]
-    G["Certification semantics<br/>#35 → #28"]
-    H["Evidence and release<br/>#46 → #49"]
-    I["Docs/version/final hosts<br/>#48 + #36 + #51"]
-
+    A["Guardrails<br/>#29 #40 closed"]
+    B["Ownership<br/>#26 #43 closed; #38"]
+    C["Behavior finish<br/>#23 #45 #32 #6 #66 #27"]
+    D["Static/hygiene<br/>#67 #52 #31 #69 #30"]
+    E["Records<br/>#50 → #42"]
+    F["Host proof<br/>#35 → #28"]
+    G["Public record<br/>#48 #36 #53 #51 #68"]
+    H["Evidence/release<br/>#46 → #49"]
     A --> B
     B --> C
-    C --> D
-    A --> E
-    A --> F
-    E -. dispatch proof .-> F
-    D --> G
+    C --> E
+    D --> E
+    C --> F
+    E --> F
     F --> G
+    D --> G
     G --> H
-    H --> I
-    E --> I
 ```
 
-The static-analysis track and certification-record track may proceed in
-parallel. #31 has one deliberate closure dependency on #42: unresolved-call and
-dispatch analysis is the cheaper static prevention for a manifest member that
-exists in source but is never dispatched.
-
-## 5. Recommended implementation sequence
-
-| Wave | Status | Issues | Rationale and exit condition |
+| Wave | Status | Issues | Exit condition |
 |---|---|---|---|
-| 1 | Code complete | #47, #37, #40 + #29, #53 foundation | Preserve the shipped API before `.bas` edits; make Action pins, tag CI, private-review exclusion, Markdown hygiene and Wiki versioning mechanical gates. #37/#47/#53 remain open for final evidence. |
-| 2 | In progress | #43 ✓, #26 ✓, **#38 next** | Make all public destructive runners ownership-safe, make quiet scope claim only verified transitions, then document and test first-allocation diagnostic degradation. |
-| 3 | Pending | **#23 + #45**, #27, #32, #6 | #23 is the only P1. It follows Wave 2 because a harness that destroys caller snapshots cannot safely certify the Ribbon identity repair. Build one retained `Window`/current `Window.hWnd` identity foundation, then error capture, registry generation identity and caption-visible show/readback semantics. |
-| 4A | Pending | #52 → #31 → #30 | Extract/extend lexical analysis, catch unresolved calls and undeclared locals, then audit every procedure in both demo modules. Do not rebuild the demo or import v1.2.0 behavior. |
-| 4B | Pending | #50 → #42 | Make certification record storage atomic before adding the versioned expected/observed case inventory. #43 is complete, so the repaired self-test must be admitted exactly once. |
-| 5 | Pending | #35 → #28 | Build a certification-owned full-host baseline and cleanup proof, then strict write/settle/read/compare outcomes for all managed surfaces. |
-| 6 | Pending | #46 → #49 | Bind evidence to exact Git identities and source hashes, then enforce review/certification readiness on the final exact head. |
-| 7 | Pending | #48 + #36 + #51 decision | Complete errata/crosswalk, root and module version updates, Wiki review and host-availability/support decisions before the freeze. Any required support narrowing happens here, not after certification. |
-| 8 | Pending | exact-head certification and release | Freeze, certify, review the Validation commit, merge with tree equality, tag, verify tag CI and close release-deferred issues manually. |
+| 1 | Foundation complete | #47, #37, #40 + #29, #53 foundation | API baseline, pins/tag trigger, archive boundary, Markdown and Wiki gates implemented; release evidence remains. |
+| 2 | Core complete; #38 remains | #43 ✓, #26 ✓, #38 | Finish diagnostic-allocation degradation. |
+| 3A | Merged, not closed | #45, #32, #6 | PR #63 core exists; remaining proof defects stay open. |
+| 3B | Next behavior | #23, #45, #32, #6, #66, #27, #67 | Lead with P1 Ribbon refusal; fix caption mask, true same-hWnd proof and bounded restoration; finish #45/#27. |
+| 4 | Static/audit/hygiene | #52 → #31, #69, #30 | Stabilize analysis and line endings, then audit demo modules. |
+| 5 | Record integrity | #50 → #42 | Atomic records, then exact mandatory inventory; PR #63 cases enter only after #66. |
+| 6 | Host proof | #35 → #28 | Detect #26 residue and all final mismatches, then achieved-state verification. |
+| 7 | Public traceability/version | #48, #36, #53, #51, #68 | Crosswalk, host decision, README hierarchy, Wiki-first version transition, green gate before freeze. |
+| 8 | Exact-source certification | #46 and final host matrix | Freeze one source head and bind every result to exact identities/hashes. |
+| 9 | Readiness/tag proof | #49, then release-deferred closures | Merge with tree equality, tag verified merge, require tag CI, then close. |
 
-## 6. Defect-track decisions
+The earlier plan assumed `#45 → #32 → #6` would all land later. PR #63 merged
+their core code but left exact proof work. Waves 4–9 therefore depend on issue
+closure conditions, not mere merge status: #42 waits for #66, #35/#28 observe
+the final behavior, #48 distinguishes merged from closed, Wave 7 finishes Wiki
+claims, and certification starts only after source/test changes stop.
 
-### #23 and #45 — one identity foundation
+## 5. Issue-number discipline
 
-#23 is the P1 release blocker. Ribbon state must retain enough owning-window
-identity to refuse restoration when a different Excel window is active. #45
-must pair a retained Excel `Window` object with its current `Window.hWnd` and
-prove the pair is stable around the native read. The implementation may share a
-PR with separate commits and acceptance matrices.
+Issues and PRs share one sequence; PRs #54–#65 consumed that range.
 
-Wrong-target behavior is fail-closed. No activation, focus change or event-
-producing behavior is permitted in v1.1.3.
+1. Never reserve, predict or publish a placeholder issue/PR number.
+2. Create the issue or PR first.
+3. Record the number GitHub actually assigns.
+4. Update dependencies and this plan afterward.
 
-### #45 before #32 before #6
+The current additions are actual issues #66–#69. No predicted-number placeholder
+remains in milestone bodies/comments.
 
-- #45 establishes the retained object/current-hWnd proof.
-- #32 uses the same proof to reject a recycled handle even when owned style
-  bits happen to coincide.
-- #6 then distinguishes “no baseline captured” from “captured captionless
-  baseline” using the existing `HasBaseline` field and requires `WS_CAPTION`
-  readback before reporting show success.
+## 6. Critical contract clarifications
 
-### #27 before registry/title-bar surgery
+### #35 owns #26's unowned final residue
 
-Every failing WinAPI call must capture `Err.LastDllError` immediately, before a
-subsequent VBA or API call can overwrite it. The seam and regressions must prove
-that the reported native error belongs to the call that failed.
+If the quiet write succeeds but verification readback fails,
+`QuietModeChanged = False`; End scope does not restore, and
+`ScreenUpdating` may remain `False` and unowned. #35 must fail that final
+baseline mismatch before test-owned recovery.
 
-## 7. Static-analysis and demo-audit track
+### #48 is a hard public dependency
 
-#52 provides the shared lexical foundation and behavior-neutral formatter
-idempotence. #31 then adds structural analysis for unresolved calls, malformed
-fixtures and undeclared locals—the concrete gap exposed when `Option Explicit`
-would have rejected a module that `check_repo.py` accepted.
+After #40 withdrew the archives, unversioned `ICR-UI-*` and
+`ICR-UI-111-*` citations in production modules, tests and changelog resolve to
+no public source. #48 must publish a unique self-contained mapping for every
+unversioned, 111-series and 112-series occurrence.
 
-#30 is an audit, not a promise that the denominator remains 21. Findings are
-routed as follows:
+### #53's two-repository transition
 
-- P1/P2 correctness findings join v1.1.3 and block release;
-- lower-priority demo redesign or modernization findings move to v1.2.0;
-- #22 remains the single rebuilt-demo feature and must not be implemented here.
+Root `VERSION = 1.1.3` makes the Wiki gate expect
+`wiki_tracks-v1.1.3`. Wave 7 must:
 
-## 8. Certification architecture
+1. update/review all governed Wiki badges first;
+2. record that Wiki SHA;
+3. commit root `VERSION`, module headers and governed repository docs at 1.1.3;
+4. rerun the Wiki gate against the resulting repository head and recorded Wiki SHA;
+5. require green before freeze.
 
-### #50 before #42
+No release evidence is valid during the short cross-repository gap.
 
-Unit, case, skip and cleanup records must use one atomic representation. #50
-must prevent divergent parallel buffers under allocation failure before #42
-adds the mandatory-case manifest.
+## 7. Newly owned gaps
 
-### #42 inventory contract
+- #67 — narrowly ignored scratch location for disposable mutants/controls.
+- #68 — exactly one README H1 with anchors/navigation preserved.
+- #69 — restore Windows-native CRLF overrides and fixture-backed policy.
 
-One versioned manifest defines the required units and stable case identifiers.
-Certification compares the exact expected and observed sets and fails on
-missing, duplicate, unexpected or result-less cases. The repaired
-`Test_EXCEL_UI_RunCertificationSelfTest` is now eligible and must appear exactly
-once.
+## 8. Exact-source release procedure
 
-### #35 before #28
+1. Finish Wave 3B behavior and host-safe controls.
+2. Finish static/hygiene/demo audit; file findings under actual assigned numbers.
+3. Complete atomic records and mandatory inventory.
+4. Complete final-baseline and achieved-state certification.
+5. Publish #48 crosswalk and make #51 host decision.
+6. Update Wiki first, then repository version metadata; require green before freeze.
+7. Freeze one head and record commit/tree identities.
+8. Run static/API/formatter/Wiki gates on that head.
+9. Run the supported Windows/Excel matrix and bind evidence under #46.
+10. Settle human and automated review; write Validation only after source is quiet.
+11. Reconfirm reviewed/certified tree equals the release-merge tree.
+12. Merge, tag the verified merge, require tag-SHA CI, then close deferred issues.
 
-#35 creates a certification-owned observation layer independent of the
-production snapshot slot and proves complete restoration of application,
-window, title-bar, Ribbon and quiet-update state. #28 then uses the same readers
-for operation-level `write → settle → read → compare` evidence.
+## 9. Closure discipline
 
-Production setters remain best effort. Certification, not the fire-and-forget
-API, owns the stronger achieved-state guarantee.
+- Checkboxes represent verified evidence, not intent.
+- “Merged” is not “closed” where docs, controls or release evidence remain.
+- Do not use `Closes #...` for issues with Wiki/runtime/exact-head/tag work.
+- Any `.bas` change, even a comment/header edit, invalidates source certification.
+- Historical comments remain visible; stale claims are explicitly superseded.
+- GitHub bodies are live authority; refresh this appendix after material changes.
 
-## 9. Wiki version semantics
+## Appendix A — Live open milestone issues
 
-`wiki_tracks-vX.Y.Z` means that a page documents and has been reviewed against
-the vX.Y.Z release-candidate contract. It does not assert that the tag already
-exists.
+Generated from GitHub after the 2026-09-03 audit. Bodies are verbatim.
 
-The expected value is derived only from root `VERSION`; it is not hard-coded in
-a workflow, inferred from the first Wiki page or read from a stale module
-header. The checker remains offline. The workflow alone clones the Wiki
-read-only and records its exact commit.
 
-In Wave 7, root `VERSION`, governed module headers and all Wiki badges move to
-1.1.3 before the freeze. Because the repository and Wiki are separate Git
-repositories, a short failed interval during that coordinated transition is
-acceptable; the settled pair must pass before release readiness.
-
-## 10. Documentation and traceability
-
-#48 must publish a self-contained public disposition table without exposing the
-private review. It must map the retired `ICR-UI-111-*` identifiers still cited
-in source, tests or changelog history to their current issue and current
-`ICR-UI-112-*` identifier. In particular, it must make explicit that:
-
-- `ICR-UI-111-P3-08` maps to #37 / `ICR-UI-112-P3-07`;
-- #51 / `ICR-UI-112-P3-08` is the x86/second-build finding and not the old CI
-  supply-chain finding.
-
-Historical release entries and tags are not rewritten. Corrections are labeled
-as v1.1.3 errata/addenda. #43 is now a completed v1.1.3 correction; #6 and #32
-remain open incomplete v1.1.2 closure paths.
-
-## 11. Exact-head release procedure
-
-1. **Finish all source, test, tool and documentation work.** Resolve #51 host
-   availability and any support-claim narrowing in Wave 7. Complete #36, #48
-   and the final Wiki update before the freeze.
-2. **Freeze one release-candidate head.** Record commit and tree IDs. Any later
-   `.bas`, test or tool change resets source-bound certification readiness.
-3. **Run static gates on that exact head.** Require all repository checks, API
-   comparison, formatter checks, Wiki-badge result and manifest checks.
-4. **Run the runtime matrix.** Produce source-bound certification for the
-   supported Windows/Excel builds already decided in Wave 7.
-5. **Let human and automated PR review settle on the final source head.** Resolve
-   every substantive thread and finding before declaring review quiet.
-6. **Write the Validation block last.** It is added only after review is quiet,
-   as a `.md`-only commit that records exact run URLs, Git identities, source
-   hashes, Wiki SHA, host matrix and limitations. Writing it earlier recreates
-   the repeated-certification loop experienced in v1.1.2.
-7. **Ask the Codex bot to review the Validation-block commit.** This pass is
-   specifically over the final `.md`-only evidence commit. A block-claim defect
-   is corrected in place. A newly raised source/test/tool defect means step 5
-   was closed too early and requires repair, refreeze and recertification; it is
-   not treated as a routine Validation edit.
-8. **Reconfirm readiness and tree identity.** The reviewed/certified tree must
-   equal the release-PR merge tree. Required status checks and Wiki evidence
-   must be current, readable and tied to the recorded SHAs.
-9. **Merge using Create a merge commit, then tag the verified merge commit.**
-   Confirm the tag commit/tree relationship and the `v1.1.3` changelog/version.
-10. **Verify tag-triggered CI.** #37 cannot close until the exact tag SHA has a
-    successful pinned workflow run linked with the release evidence.
-11. **Close release-deferred issues manually.** #37, #46, #48, #49 and #51
-    deliberately have no automatic `Closes` trailer; close them only after the
-    tag/evidence criteria pass. Confirm the final milestone denominator and
-    that every release blocker is closed.
-
-## 12. Branch and closure discipline
-
-- Use feature branches targeting `release/v1.1.3`; the final PR is
-  `release/v1.1.3 → main`.
-- A closed issue is not evidence by itself. Verify implementation, regression,
-  documentation, CI and release evidence against the final exact source.
-- Do not use `Closes #...` when Wiki work, runtime certification, exact-head
-  review, tag evidence or manual release steps remain outstanding.
-- Any `.bas` change, including a comment-only module-header edit, invalidates
-  prior source-bound certification. This is why #36 precedes the freeze.
-- The main ruleset should enforce—not merely document—the #49 control: require
-  conversation resolution, require approval of the most recent reviewable push
-  and set an appropriate non-zero approving-review count for the release PR.
-
-## Appendix A — Live open issues in milestone v1.1.3
-
-The following appendix was generated from the live GitHub issue bodies on
-2026-08-30. Titles, labels and bodies are reproduced so this plan remains
-executable even while issue metadata continues to evolve. GitHub remains the
-live authority.
 
 ### #6 — ICR-UI-112-P2-03 — Show can adopt a non-zero captionless baseline and report success
 
-**Labels:** `bug`, `P2`, `titlebar`, `tests`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `bug`, `P2`, `titlebar`, `tests`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 3/12
+**Issue comments reviewed:** 4
 
 <details>
 <summary>Full issue body</summary>
@@ -339,7 +234,7 @@ visible title bar:
 
 ```text
 HasBaseline = True
-(RestoreBits And WS_CAPTION) <> 0
+(RestoreBits And WS_CAPTION) = WS_CAPTION
 ```
 
 `HasBaseline = False` requires recovery fallback. A known baseline whose owned
@@ -349,15 +244,25 @@ non-zero.
 When no trustworthy visible baseline exists, `UI_ShowExcelUI` should merge the
 safe full owned frame into the current style while preserving every unrelated
 bit. After every show path—including the no-op path—the worker must read back the
-live style and verify `WS_CAPTION` before returning success.
+live style and verify the complete composite mask with
+`(style And WS_CAPTION) = WS_CAPTION` before returning success.
+
+## Current implementation status — merged, not closure-complete
+
+PR #63 merged the `HasBaseline` discriminator, fallback merge, and post-operation
+readback at `3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`. Final review found that the
+merged checks still use an any-bit test for composite `WS_CAPTION`; that is not
+equivalent to requiring the complete caption mask. The negative mutation control
+also hangs instead of failing and is tracked by #66. This issue therefore remains
+open until both the complete-mask correction and bounded control evidence land.
 
 ## Acceptance criteria
 
-- [ ] The show path consults `HasBaseline` and does not infer baseline existence
+- [x] The show path consults `HasBaseline` and does not infer baseline existence
       from `RestoreBits <> 0`.
 - [ ] The show path treats any baseline lacking `WS_CAPTION` as unavailable,
       whether it is zero or non-zero.
-- [ ] The recovery fallback restores a visible owned frame without changing
+- [x] The recovery fallback restores a visible owned frame without changing
       unrelated style bits.
 - [ ] A successful show is confirmed by a post-operation style readback with
       `WS_CAPTION` set.
@@ -377,7 +282,7 @@ live style and verify `WS_CAPTION` before returning success.
 - [ ] The title bar is restored to its entry state on every test exit path.
 - [ ] README, Wiki, changelog and procedure headers describe the broader
       visibility rule, not only the zero-baseline case.
-- [ ] No supported public API change.
+- [x] No supported public API change.
 
 ## Historical note
 
@@ -388,15 +293,21 @@ condition—`RestoreBits = 0`—was narrower than the actual visibility contract
 - #32 — frame-registry generation identity
 
 
-</details>
+## Codex review traceability
 
----
+The live non-zero captionless false-success path was identified in [PR #41](https://github.com/danielep71/VBA-EXCEL_UI/pull/41#discussion_r3829133333). Final review of PR #63 also found that the merged implementation accepts a partial composite `WS_CAPTION` mask. Both review threads remain open until the complete-mask regression, bounded negative control under #66, and post-operation readback pass against the exact v1.1.3 source.
+
+
+</details>
 
 ### #23 — ICR-UI-112-P1-01 — Ribbon snapshot restore must fail closed on the wrong active window
 
-**Labels:** `bug`, `P1`, `sdi`, `snapshots`, `tests`, `ribbon`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `bug`, `P1`, `sdi`, `snapshots`, `tests`, `ribbon`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/12
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -462,7 +373,7 @@ reporting is therefore correct; silently redirecting is not.
 - suppressing or replaying `Workbook_WindowActivate` events;
 - changing `UIWindowTargetScope` semantics for the Ribbon.
 
-Those belong in the separate v1.2.0 activation-policy issue.
+Those belong in #44, the v1.2.0 activation-policy issue.
 
 - `docs/RIBBON_SDI_BEHAVIOR.md`
 - #21 — SDI characterization
@@ -470,13 +381,14 @@ Those belong in the separate v1.2.0 activation-policy issue.
 
 </details>
 
----
-
 ### #27 — ICR-UI-112-P3-05 — Capture WinAPI failure detail immediately through Err.LastDllError
 
-**Labels:** `P3`, `titlebar`, `tests`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `titlebar`, `tests`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/13
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -545,13 +457,14 @@ removed in favor of immediate `Err.LastDllError` capture.
 
 </details>
 
----
-
 ### #28 — ICR-UI-112-P3-06 — Certification must verify achieved UI state after writes
 
-**Labels:** `P3`, `tests`, `release-engineering`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `tests`, `release-engineering`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/15
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -598,7 +511,8 @@ readback confirms the requested state.
 - [ ] Headings, Workbook Tabs and Gridlines are verified for every supported
       `UIWindowTargetScope`, including non-target windows remaining unchanged.
 - [ ] Title-bar hide and show are read back from the exact object/native frame
-      identity established by #45; a successful show requires `WS_CAPTION`.
+      identity established by #45; a successful show requires the complete composite mask
+      `(style And WS_CAPTION) = WS_CAPTION`.
 - [ ] Ribbon verification is performed only against the identified active
       owning window; inability to address or read it is `not-verifiable`, never
       a silent pass.
@@ -630,13 +544,14 @@ readback confirms the requested state.
 
 </details>
 
----
-
 ### #30 — Complete a procedure-level defect audit of both demo source modules
 
-**Labels:** `P3`, `demo`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `demo`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/15
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -735,13 +650,14 @@ binary `.xlsm`. Those require opening the workbook and belong to #22.
 
 </details>
 
----
-
 ### #31 — ICR-UI-112-P3-02 — Harden static VBA analysis with unresolved-call detection and malformed fixtures
 
-**Labels:** `P3`, `ci`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `ci`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/22
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -851,13 +767,14 @@ scanner should now be consumed rather than treated as a blocker.
 
 </details>
 
----
-
 ### #32 — ICR-UI-112-P2-02 — Frame registry can accept a recycled hWnd when owned style bits coincide
 
-**Labels:** `bug`, `P2`, `titlebar`, `sdi`, `tests`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `bug`, `P2`, `titlebar`, `sdi`, `tests`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 9/12
+**Issue comments reviewed:** 5
 
 <details>
 <summary>Full issue body</summary>
@@ -911,29 +828,40 @@ another defensible generation identity. The active-window wrappers can resolve
 If a call cannot prove the object/handle pair, it must discard the slot or fail
 closed rather than applying its stored state.
 
+## Current implementation status — merged, proof incomplete
+
+PR #63 merged retained-window generation identity and refusal paths at
+`3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`. The review control is not yet a
+true recycled-handle proof: it changes the stored numeric hWnd as well as the
+owner, so ordinary numeric mismatch can make it pass. The required seam must
+preserve the same numeric hWnd while changing the represented owner generation;
+only then can it prove that equal style bits and equal handle value do not
+transfer persistent state.
+
 ## Acceptance criteria
 
-- [ ] A frame-state slot retains a generation/object identity in addition to the
+- [x] A frame-state slot retains a generation/object identity in addition to the
       numeric hWnd and style values.
-- [ ] The active-window path resolves the Excel `Window` and obtains the native
+- [x] The active-window path resolves the Excel `Window` and obtains the native
       handle from that same object where available.
-- [ ] Explicit-target callers supply or otherwise prove the corresponding Excel
+- [x] Explicit-target callers supply or otherwise prove the corresponding Excel
       `Window`; a handle-only persistent slot is not treated as identity-safe.
-- [ ] Lookup requires the retained object's current `Window.hWnd` to match the
+- [x] Lookup requires the retained object's current `Window.hWnd` to match the
       slot hWnd after pointer-width normalization.
-- [ ] `LastWrittenBits` remains at most a state-consistency check, not identity
+- [x] `LastWrittenBits` remains at most a state-consistency check, not identity
       proof.
-- [ ] A disproved or unverifiable slot is discarded without transferring
+- [x] A disproved or unverifiable slot is discarded without transferring
       `OwnedStyleBits`, `ComponentHidden` or `RefreshPending`.
-- [ ] Regression coverage includes a recycled-handle simulation with equal zero
-      bits and a second case with equal non-zero bits.
+- [ ] Regression coverage preserves the same numeric hWnd while changing the
+      represented owner generation, with equal-zero and equal-nonzero owned-bit
+      cases.
 - [ ] The tests fail if any baseline, ownership flag or refresh debt crosses to
       the replacement generation.
-- [ ] Different-style contradiction behavior introduced in v1.1.2 remains
+- [x] Different-style contradiction behavior introduced in v1.1.2 remains
       covered.
-- [ ] Registry compaction releases retained object references for closed
+- [x] Registry compaction releases retained object references for closed
       windows.
-- [ ] No supported caller-facing API change.
+- [x] No supported caller-facing API change.
 - [ ] Module, README, Wiki and changelog wording says the v1.1.2 style proof was
       partial and that v1.1.3 adds generation identity.
 
@@ -949,15 +877,21 @@ same-style handle-reuse path.
 - Microsoft Excel `Window.hWnd` documentation
 
 
-</details>
+## Codex review traceability
 
----
+The same live defect was independently identified in [PR #24](https://github.com/danielep71/VBA-EXCEL_UI/pull/24#discussion_r3825280987) and [PR #41](https://github.com/danielep71/VBA-EXCEL_UI/pull/41#discussion_r3829034729). PR #63 supplied the production identity model, but its review thread remains open until a same-numeric-hWnd, changed-generation control proves the equal-zero and equal-nonzero cases against the exact v1.1.3 source.
+
+
+</details>
 
 ### #35 — ICR-UI-112-P2-05 — Certification cleanup does not prove full window and UI restoration
 
-**Labels:** `P2`, `tests`, `release-engineering`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P2`, `tests`, `release-engineering`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/17
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -978,7 +912,10 @@ A passing certification can coexist with:
 - Headings, Workbook Tabs or Gridlines left altered on any window;
 - a title bar left hidden or carrying the wrong owned frame bits;
 - a pending title-bar refresh debt or stale registry entry;
-- a failed best-effort cleanup operation suppressed by the harness.
+- a failed best-effort cleanup operation suppressed by the harness;
+- a quiet-update write that succeeded but whose verification readback failed,
+  leaving `ScreenUpdating = False` without verified ownership or End-scope
+  restoration (#26's explicit handoff).
 
 ## Required design
 
@@ -1030,6 +967,10 @@ At exit, compare every observable value and report every difference.
       matches.
 - [ ] Fault-injection cases cover a leaked window, altered application property,
       altered per-window property, title-bar mismatch and cleanup-helper failure.
+- [ ] A dedicated quiet-update case proves the #26 handoff: the write succeeds,
+      verification readback fails, `QuietModeChanged` remains `False`, End scope
+      performs no restore, the host may remain `ScreenUpdating = False`, and
+      final-baseline comparison reports the mismatch before test-owned recovery.
 - [ ] The baseline code shares no mutable state with the production snapshot
       subsystem.
 - [ ] README, Wiki and changelog define the exact scope of `cleanup=OK` without
@@ -1038,7 +979,8 @@ At exit, compare every observable value and report every difference.
 ## Relationship to other issues
 
 - #28 verifies **the achieved result of each write operation**.
-- This issue verifies **the complete host baseline after the suite finishes**.
+- This issue verifies **the complete host baseline after the suite finishes**,
+  including unowned residue from #26's failed-readback branch.
 - #42 verifies **which mandatory cases actually ran**.
 
 All three are required for a defensible release verdict.
@@ -1048,13 +990,14 @@ All three are required for a defensible release verdict.
 
 </details>
 
----
-
 ### #36 — ICR-UI-112-P3-01 — Remaining module headers and version metadata are inconsistent with v1.1.2
 
-**Labels:** `P3`, `ci`, `docs`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `ci`, `docs`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/17
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -1146,13 +1089,14 @@ and explicitly deferred `M_EXCEL_UI`, `M_EXCEL_UI_RUNTIME` and
 
 </details>
 
----
-
 ### #37 — ICR-UI-112-P3-07 — Release tag must receive SHA-pinned CI evidence
 
-**Labels:** `P3`, `release-engineering`, `ci`, `security`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `release-engineering`, `ci`, `security`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 10/12
+**Issue comments reviewed:** 2
 
 <details>
 <summary>Full issue body</summary>
@@ -1180,19 +1124,19 @@ release convention rather than enforced by the workflow.
 4. make the workflow check its own trigger/pin policy so it cannot silently
    regress.
 
-## Current verification status — implementation at `d89d68d`, reverified at `02de0ab`
+## Current verification status — implementation at `d89d68d`, reverified at PR #63 merge head
 
 The pin and tag-CI implementation was complete at Wave 1 closing commit
 [`d89d68d32143afbe799f57a500e49c071d0f095d`](https://github.com/danielep71/VBA-EXCEL_UI/commit/d89d68d32143afbe799f57a500e49c071d0f095d)
-and remains unchanged through current exact release-branch head
-[`02de0abcb7cea610f102834749a4d638111c98f3`](https://github.com/danielep71/VBA-EXCEL_UI/commit/02de0abcb7cea610f102834749a4d638111c98f3).
+and remains unchanged through the reviewed PR #63 merge head
+[`3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`](https://github.com/danielep71/VBA-EXCEL_UI/commit/3d8fcdcf38ee9c4166ec10bf63f23a106b033bac).
 
 - All third-party Actions remain pinned by full 40-character commit SHA with
   readable immutable-version comments.
 - `tools/check_repo.py` still enforces the pin and workflow policy through its
   fixture-backed checks.
 - [Static checks #72](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33212262912) passed on the Wave 1 closing head `d89d68d` with all 24 checks green.
-- [Static checks #78](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33268198377) reverified all 24 checks at exact current head `02de0ab`, including workflow pin policy and its self-test.
+- [Static checks #113](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33789535666) reverified all 24 checks at PR #63 merge head `3d8fcdcf`, including workflow pin policy and its self-test.
 - Ten of twelve criteria are verified. The successful run on the actual
   `v1.1.3` tag SHA and its release-evidence link remain intentionally
   release-deferred.
@@ -1246,13 +1190,14 @@ attributable.
 
 </details>
 
----
-
 ### #38 — ICR-UI-112-P3-04 — First failure-list allocation cannot record a truncation marker
 
-**Labels:** `P3`, `runtime`, `tests`, `docs`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `runtime`, `tests`, `docs`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/11
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -1321,13 +1266,14 @@ buffer without overloading this patch.
 
 </details>
 
----
-
 ### #42 — ICR-UI-112-P2-06 — Release certification must verify the exact mandatory case inventory
 
-**Labels:** `P2`, `tests`, `release-engineering`, `ci`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P2`, `tests`, `release-engineering`, `ci`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/15
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -1384,9 +1330,14 @@ evidence.
       registered dispatch entries.
 - [ ] Fixtures prove that deleting one registration, duplicating one dispatch and
       adding an unmanifested mandatory case each fail the gate.
-- [ ] `TST_Case_TitleBarFrameRefreshDebtRetried` and
-      `TST_Case_TitleBarStaleFrameEntryNotReused` are permanent fixtures in the
-      expected inventory.
+- [ ] The expected inventory permanently includes
+      `TST_Case_TitleBarFrameRefreshDebtRetried`,
+      `TST_Case_TitleBarStaleFrameEntryNotReused`,
+      `TST_Case_ActiveFramePairRefusesMismatch`,
+      `TST_Case_TitleBarSameStyleHandleReuse`, and
+      `TST_Case_TitleBarShowRejectsCaptionlessBaseline`.
+- [ ] #66 is closed first so the captionless-baseline case fails within a bound,
+      restores the host, and cannot hang the mandatory certification inventory.
 - [ ] A case cannot report PASS without having recorded START and one terminal
       status.
 - [ ] #43 completed the refusal-path preservation repair and regression at
@@ -1408,16 +1359,19 @@ original issue's “Not corrected here” section.
 - #18 — release-certification semantics
 - #31 — static unresolved-call and dispatch analysis
 - #43 — completed destructive self-test refusal-path prerequisite at `32baef384ee306082483ea5dcaf40abfe3224118`
+- #66 — bounded, host-safe negative control required before the PR #63 title-bar cases become mandatory release evidence
+
 
 </details>
 
----
-
 ### #45 — ICR-UI-112-P2-01 — Pair retained Excel Window identity with Window.hWnd before title-bar restore
 
-**Labels:** `bug`, `P2`, `titlebar`, `sdi`, `snapshots`, `tests`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `bug`, `P2`, `titlebar`, `sdi`, `snapshots`, `tests`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 8/10
+**Issue comments reviewed:** 3
 
 <details>
 <summary>Full issue body</summary>
@@ -1464,26 +1418,35 @@ At restore:
 A handle-only fallback is weaker than the stated identity-safe contract and must
 not silently restore a snapshot.
 
+## Current implementation status — merged, documentation/evidence remain
+
+PR #63 merged the object/native pairing and fail-closed restore logic at
+`3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`. The mismatch mutation control
+fails at `TST_Case_ActiveFramePairRefusesMismatch.Disagreed.Refused`. Closure
+still requires public-path evidence that every refusal leaves the active frame
+untouched and final module/Wiki wording; the live Wiki still contains the old
+claim that Excel exposes no handle on a `Window`.
+
 ## Acceptance criteria
 
-- [ ] Title-bar snapshot capture obtains the hWnd from the retained Excel
+- [x] Title-bar snapshot capture obtains the hWnd from the retained Excel
       `Window`, not only from `Application.hWnd`.
-- [ ] The captured object and handle are paired in one operation and stored
+- [x] The captured object and handle are paired in one operation and stored
       together.
-- [ ] On VBA7 x64, comparisons normalize `Window.hWnd` safely with `CLngPtr`;
+- [x] On VBA7 x64, comparisons normalize `Window.hWnd` safely with `CLngPtr`;
       x86 and legacy branches remain compile-correct.
-- [ ] Restore requires `retainedWindow.hWnd = capturedHwnd` after normalization.
-- [ ] A missing retained object, failed `Window.hWnd` read, zero handle, mismatch
+- [x] Restore requires `retainedWindow.hWnd = capturedHwnd` after normalization.
+- [x] A missing retained object, failed `Window.hWnd` read, zero handle, mismatch
       or dead native handle fails closed with ordered diagnostic text.
-- [ ] No state is written through a handle that cannot be paired with the
+- [x] No state is written through a handle that cannot be paired with the
       retained object.
-- [ ] Regression coverage includes active-window changes, closed captured
+- [x] Regression coverage includes active-window changes, closed captured
       windows, object/handle mismatch, close/reopen and both supported bitness
       branches where hosts are available.
 - [ ] Tests assert that the current active frame is untouched on every refusal.
 - [ ] Module and Wiki wording no longer claim that Excel exposes no handle on a
       `Window`.
-- [ ] The supported public facade remains unchanged.
+- [x] The supported public facade remains unchanged.
 
 ## Relationship to #32
 
@@ -1498,13 +1461,14 @@ reuse.
 
 </details>
 
----
-
 ### #46 — ICR-UI-112-P2-07 — Bind certification evidence to the exact tag, commit, tree and source hashes
 
-**Labels:** `P2`, `tests`, `release-engineering`, `ci`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P2`, `tests`, `release-engineering`, `ci`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/14
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -1593,13 +1557,14 @@ ref, and emit one source-bound manifest.
 
 </details>
 
----
-
 ### #47 — ICR-UI-112-P2-08 — Public API gate must protect full signatures, defaults and enum values
 
-**Labels:** `P2`, `release-engineering`, `ci`, `api`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P2`, `release-engineering`, `ci`, `api`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 11/12
+**Issue comments reviewed:** 3
 
 <details>
 <summary>Full issue body</summary>
@@ -1633,26 +1598,27 @@ Maintain two explicit contracts:
 
 Parse declarations into a canonical representation and diff them against a versioned manifest.
 
-## Current verification status — baseline captured at `d89d68d`, current head `02de0ab`
+## Current verification status — baseline captured at `d89d68d`, reverified at PR #63 merge head
 
 The API-contract implementation and frozen v1.1.2 facade were established at
 [`d89d68d32143afbe799f57a500e49c071d0f095d`](https://github.com/danielep71/VBA-EXCEL_UI/commit/d89d68d32143afbe799f57a500e49c071d0f095d),
-before any `.bas` edit. The gate remains active at exact current release-branch
-head [`02de0abcb7cea610f102834749a4d638111c98f3`](https://github.com/danielep71/VBA-EXCEL_UI/commit/02de0abcb7cea610f102834749a4d638111c98f3).
+before any `.bas` edit. The gate remains active at reviewed PR #63 merge head
+[`3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`](https://github.com/danielep71/VBA-EXCEL_UI/commit/3d8fcdcf38ee9c4166ec10bf63f23a106b033bac).
 
-- The current live contract contains 39 declarations: 12 `[supported]` and 27
-  `[project-public]`; a separate 12-entry `[baseline v1.1.2]` section freezes
-  the released facade. The additional project-public declaration is the
-  intentional #26 seam
-  `M_EXCEL_UI_RUNTIME Sub UI_InternalInjectQuietUpdateFault(ByVal FaultKind As Long)`;
-  it does not change the supported caller-facing facade.
+- The live contract at `3d8fcdcf` contains 42 declarations: 12 `[supported]` and
+  30 `[project-public]`; a separate 12-entry `[baseline v1.1.2]` section freezes
+  the released facade. Four post-baseline project-public additions are explicit
+  regression seams/helpers: #26's `UI_InternalInjectQuietUpdateFault`, plus
+  PR #63's `UI_InternalSimulateFrameHandleReuse`,
+  `UI_TryGetActiveFramePair`, and `UI_InternalInjectFramePairFault`. None
+  changes the supported caller-facing facade.
 - Conditional declarations record each arm's full effective predicate, and the
   named-member guard prevents an incidental declaration from satisfying a
   fixture.
 - `git diff v1.1.2..d89d68d -- src test demo` is empty, so the captured facade
   remains the shipped v1.1.2 source contract.
 - [Static checks #72](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33212262912) passed at the Wave 1 closing head.
-- [Static checks #78](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33268198377) reverified all 24 repository checks at exact current head `02de0ab`, including the public API manifest, 40-rule API self-test and supported-API declaration checks.
+- [Static checks #113](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33789535666) reverified all 24 repository checks at PR #63 merge head `3d8fcdcf`, including the public API manifest, 40-rule API self-test and supported-API declaration checks.
 - Eleven of twelve criteria are verified. Only the final exact
   `v1.1.2...v1.1.3` supported-facade comparison is release-deferred.
 - #47 remains a P2 release blocker until that comparison is complete.
@@ -1705,13 +1671,14 @@ head [`02de0abcb7cea610f102834749a4d638111c98f3`](https://github.com/danielep71/
 
 </details>
 
----
+### #48 — ICR-UI-112-P2-11 — Publish the mandatory public ICR crosswalk and correct v1.1.2 closure claims
 
-### #48 — ICR-UI-112-P2-11 — Correct v1.1.2 closure claims and document the actual v1.1.3 remediation
-
-**Labels:** `P2`, `release-engineering`, `docs`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P2`, `release-engineering`, `docs`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 1/17
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -1748,6 +1715,19 @@ self-contained v1.1.3 disposition table is therefore the mandatory public
 resolution layer, not optional archival tidying. Historical tags are not
 rewritten; traceability is repaired prospectively.
 
+## Release-blocking public traceability
+
+After #40 withdrew the review archives, this issue became the only supported
+resolution layer for identifiers already published in production modules,
+regression source, changelog history and documentation. `ICR-UI-*` and
+`ICR-UI-111-*` citations in the current tree presently resolve to no public
+source. The release cannot close while any published identifier is unmapped,
+ambiguous, or requires access to a withdrawn archive.
+
+PR #63 merged core work for #45, #32 and #6, but those issues remain open for
+final proof/corrections; #66 blocks #6's negative control. The crosswalk must
+report that distinction rather than equating merged implementation with closure.
+
 ## Required documentation treatment
 
 - preserve the v1.1.2 release entry and historical tag SHAs as evidence;
@@ -1755,13 +1735,15 @@ rewritten; traceability is repaired prospectively.
   tree, Wiki or release assets;
 - add a clearly labeled erratum or v1.1.3 note identifying the incomplete
   closure claims;
-- link the still-open remediation issues #6 and #32 and the completed #43 correction;
+- link the still-open remediation issues #6, #32 and #45, the #66 test blocker,
+  and the completed #43 correction;
 - remove present-tense claims that style equality “proves” window identity;
 - record the current live Wiki revision reviewed for v1.1.3 without depending
   on a review artifact;
-- publish one explicit crosswalk from every retired `ICR-UI-111-*` identifier
-  and every still-tracked `ICR-UI-*` citation to its current issue, current
-  `ICR-UI-112-*` identifier where one exists, and final disposition.
+- publish one explicit crosswalk covering every unversioned `ICR-UI-*`, retired
+  `ICR-UI-111-*`, and current `ICR-UI-112-*` occurrence in source, tests,
+  changelog and documentation, mapping it to the current issue and final
+  disposition.
 
 ## Wave 1 policy state — `d89d68d`
 
@@ -1794,9 +1776,10 @@ rewritten; traceability is repaired prospectively.
 - [ ] The table states explicitly that #51's `ICR-UI-112-P3-08` is the
       x86/second-build finding and is not the old
       `ICR-UI-111-P3-08` CI-supply-chain finding.
-- [ ] A repository scan inventories every `ICR-UI-111-*` and
-      `ICR-UI-112-*` occurrence and rejects an unmapped retired ID or one ID
-      mapped to two different findings.
+- [ ] A repository scan inventories every unversioned `ICR-UI-*`, retired
+      `ICR-UI-111-*`, and current `ICR-UI-112-*` occurrence across `src/`,
+      `test/`, `CHANGELOG.md` and governed documentation; it rejects every
+      unmapped or ambiguous identifier.
 - [ ] The v1.1.2 entry is not silently rewritten; any correction is labeled as
       an erratum/addendum with date and issue links.
 - [ ] README release/status text no longer says a recycled handle categorically
@@ -1821,20 +1804,22 @@ rewritten; traceability is repaired prospectively.
 - [ ] Static release-state checks fail on stale current-version claims where a
       deterministic rule can be expressed.
 
-- #6 and #32 — open incomplete v1.1.2 fixes
+- #6, #32 and #45 — core changes merged in PR #63 but closure proof/corrections remain open
+- #66 — bounded negative-control prerequisite for #6
 - #43 — completed v1.1.3 correction of the destructive refusal path at `32baef384ee306082483ea5dcaf40abfe3224118`
 - #40 — completed archive-family withdrawal and private-document boundary
 
 
 </details>
 
----
-
 ### #49 — ICR-UI-112-P2-12 — Release PR must be reviewed and certified on its final exact head
 
-**Labels:** `P2`, `release-engineering`, `ci`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P2`, `release-engineering`, `ci`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/19
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -1946,13 +1931,14 @@ directly, such as certified executable-tree identity and evidence freshness.
 
 </details>
 
----
-
 ### #50 — ICR-UI-112-P3-03 — Certification record buffers can diverge under allocation failure
 
-**Labels:** `bug`, `P3`, `tests`, `release-engineering`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `bug`, `P3`, `tests`, `release-engineering`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/13
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -2019,13 +2005,14 @@ failed allocation path.
 
 </details>
 
----
-
 ### #51 — ICR-UI-112-P3-08 — Add x86 and second-build runtime certification evidence
 
-**Labels:** `P3`, `tests`, `release-engineering`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `tests`, `release-engineering`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/14
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -2108,13 +2095,14 @@ avoidable documentation edit inside the freeze.
 
 </details>
 
----
-
 ### #52 — ICR-UI-112-P3-09 — Extend formatter lexical coverage and prove behavior-neutral idempotence
 
-**Labels:** `P3`, `ci`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `ci`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 0/15
+**Issue comments reviewed:** 0
 
 <details>
 <summary>Full issue body</summary>
@@ -2188,13 +2176,14 @@ Extend the shared lexical utility and formatter fixtures for:
 
 </details>
 
----
-
 ### #53 — ICR-UI-112-P3-11 — Wiki badge gate must bind the final v1.1.3 Wiki revision
 
-**Labels:** `P3`, `release-engineering`, `ci`, `docs`  
-**Milestone:** `v1.1.3 — correctness & hardening`  
+**State:** open
+**Labels:** `P3`, `release-engineering`, `ci`, `docs`
+**Milestone:** `v1.1.3 — correctness & hardening`
 **Assignee:** `danielep71`
+**Checklist:** 17/21
+**Issue comments reviewed:** 1
 
 <details>
 <summary>Full issue body</summary>
@@ -2235,14 +2224,16 @@ Add a tracked root `VERSION` data file containing exactly one normalized
   infer the value from a Wiki page or read a stale module header.
 - #36 makes the root file the canonical package-version source and verifies that
   every production, test and demo module `VERSION` header agrees with it.
-- In wave 7, before the exact-head freeze, update the root `VERSION` to
-  `1.1.3`, the reviewed module headers to `1.1.3` and all governed Wiki badges
-  to `wiki_tracks-v1.1.3`.
+- In wave 7, before the exact-head freeze, update every governed Wiki badge to
+  `wiki_tracks-v1.1.3` first and record that Wiki SHA. Then commit root
+  `VERSION = 1.1.3` together with the reviewed module/header documentation
+  transition.
 - Because the main repository and Wiki are distinct Git repositories, that
-  coordinated change cannot be atomic. A short failed run while one side has
-  moved and the other has not is expected; it must be rerun and pass after both
-  final SHAs are settled. There is no development-long red period and no
-  release-time checker/workflow edit.
+  coordinated change cannot be atomic. Committing `VERSION = 1.1.3` first
+  would deliberately turn the Wiki gate red, so the safe window makes the Wiki
+  revision ready first. No release evidence is valid during the short gap.
+  After both SHAs settle, rerun the Wiki gate against the new repository head
+  and recorded Wiki SHA; it must pass before the exact-head freeze.
 
 ## Fetch and offline boundary
 
@@ -2283,25 +2274,25 @@ The workflow should run on release-branch pull requests/pushes,
 invisible until the next release. #49's final readiness check must require a
 successful result for the exact Wiki SHA reviewed by #48.
 
-## Current verification status — logic at `7f91557`, reverified through `02de0ab`
+## Current verification status — logic at `7f91557`, reverified at PR #63 merge head
 
 The Wiki-gate logic last changed at `7f91557`, was unchanged at Wave 1 closing
 head [`d89d68d32143afbe799f57a500e49c071d0f095d`](https://github.com/danielep71/VBA-EXCEL_UI/commit/d89d68d32143afbe799f57a500e49c071d0f095d),
-and remains unchanged through exact current release-branch head
-[`02de0abcb7cea610f102834749a4d638111c98f3`](https://github.com/danielep71/VBA-EXCEL_UI/commit/02de0abcb7cea610f102834749a4d638111c98f3).
+and remains unchanged through reviewed PR #63 merge head
+[`3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`](https://github.com/danielep71/VBA-EXCEL_UI/commit/3d8fcdcf38ee9c4166ec10bf63f23a106b033bac).
 
 - [Wiki badges #3](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33192967677) passed the current logic and recorded expected track
   `v1.1.2`, Wiki revision
   `f65531a40134d81b0156dbb522a78917ed39da21` and the ordered fourteen-page
   inventory.
-- No later path-triggered Wiki run is expected through `02de0ab`: no commit after
+- No later path-triggered Wiki run is expected through `3d8fcdcf`: no commit after
   `7f91557` changed root `VERSION`, `tools/wiki_badges.py` or
   `.github/workflows/wiki-badges.yml`.
 - GitHub currently does not expose the manual **Run workflow** control because
   this new workflow is not yet present on default branch `main`; therefore no
   artificial exact-head dispatch was created.
 - [Static checks #72](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33212262912) passed on the Wave 1 closing head.
-- [Static checks #78](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33268198377) reverified all 24 repository checks at exact current head `02de0ab`, including the offline Wiki badge self-test (14 rules).
+- [Static checks #113](https://github.com/danielep71/VBA-EXCEL_UI/actions/runs/33789535666) reverified all 24 repository checks at PR #63 merge head `3d8fcdcf`, including the offline Wiki badge self-test (14 rules).
 - Seventeen of twenty-one criteria are verified. The remaining four are owned by
   #36/wave 7, #48 and #49.
 
@@ -2318,9 +2309,10 @@ and remains unchanged through exact current release-branch head
 - [x] The checker and contributor guidance define `wiki_tracks-` as
       release-candidate documentation-target semantics, not proof that the tag
       already exists or has shipped.
-- [ ] The v1.1.3 root version, module versions and Wiki badges are updated
-      together in wave 7 before the exact-head freeze; after the coordinated
-      two-repository transition the workflow is rerun and passes.
+- [ ] In wave 7, before the exact-head freeze, every governed Wiki badge is
+      updated to `wiki_tracks-v1.1.3` and its Wiki SHA is recorded first; root
+      `VERSION` and module/header documentation then move to `1.1.3`; the gate
+      is rerun against those final SHAs and passes before freeze.
 - [x] `tools/wiki_badges.py` performs no clone or other network access and can
       validate a caller-supplied local Wiki path offline.
 - [x] A dedicated workflow, not `tools/check_repo.py`, clones
@@ -2362,4 +2354,288 @@ and remains unchanged through exact current release-branch head
 
 </details>
 
----
+### #66 — Title-bar mutation control hangs instead of failing when #6 is reintroduced
+
+**State:** open
+**Labels:** `bug`, `P2`, `titlebar`, `tests`, `release-engineering`
+**Milestone:** `v1.1.3 — correctness & hardening`
+**Assignee:** `danielep71`
+**Checklist:** 0/7
+**Issue comments reviewed:** 0
+
+<details>
+<summary>Full issue body</summary>
+
+## 🔍 Summary
+
+`TST_Case_TitleBarShowRejectsCaptionlessBaseline` does not complete when the
+captionless-baseline defect it guards is present. It stops before reaching its
+own `Safe_Exit`, so the captured entry style is never restored and the host is
+left with a hidden title bar and no reachable dialog. Excel has to be ended
+from Task Manager.
+
+The case is dispatched by `Test_EXCEL_UI_RunReleaseCertification`. A regression
+of [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) would therefore
+hang the release gate rather than fail it.
+
+## 🎯 Expected and actual behavior
+
+**Expected**
+
+A case whose subject defect is present fails, restores the state it captured,
+and lets the pack report. A hidden title bar is restored on every exit,
+including an unexpected one.
+
+**Actual**
+
+The case emits its `START` line and then nothing. No `PASS`, no `FAIL`, no
+assertion dialog. `Safe_Exit` — which calls `TST_RestoreTitleBarStyle` with the
+captured entry style — is never reached, so the frame stays hidden.
+
+## 🔁 Reproduction
+
+Found while building a mutation control for #6 during
+[#63](https://github.com/danielep71/VBA-EXCEL_UI/pull/63), at
+`adc9271afcc1fe055c11d2b7ff8e7e7a364af730`.
+
+1. Take `src/M_EXCEL_UI_TITLEBAR.bas` and revert the captionless fallback
+   condition to its v1.1.2 form, so the baseline's value is consulted rather
+   than whether it was captured and whether it contains `WS_CAPTION`:
+
+```text
+   If Not m_FrameStates(Slot).HasBaseline _
+      Or (RestoreBits And WS_CAPTION) = 0 Then     ' current
+   If RestoreBits = 0 Then                          ' v1.1.2
+```
+
+2. Import that module and run `Test_EXCEL_UI_RunAll`.
+3. The log stops at
+   `TST_Case_TitleBarShowRejectsCaptionlessBaseline @ START`. The title bar is
+   hidden, Excel does not respond, and no dialog is reachable by `Alt`+`Tab`.
+4. Repeat with `Test_EXCEL_UI_RunTitleBarOnly`. Same result, reached sooner.
+
+Both attempts required ending Excel from Task Manager. The mutant module is
+throwaway and was never committed.
+
+## 🎚️ Affected area
+
+- `test/M_EXCEL_UI_REGRESSION_TESTS.bas` —
+  `TST_Case_TitleBarShowRejectsCaptionlessBaseline`
+- Possibly `src/M_EXCEL_UI_TITLEBAR.bas` —
+  `UI_TrySetTitleBarVisibleForHwndIfNeeded`, if the loop is there rather than
+  in the case
+- Release certification, which dispatches the case
+
+## ✅ Acceptance criteria
+
+- [ ] The hang is located. `Ctrl`+`Break` during a reproduction identifies the
+      line, and the issue records whether it is in the case or in the
+      production path it calls.
+- [ ] Whatever waits, waits with a bound. A wait that cannot end is reported as
+      a failure, not held.
+- [ ] The captured entry style is restored on every exit from the case,
+      including a hang that is broken into, and including a path that does not
+      reach `Safe_Exit`.
+- [ ] The case fails rather than hangs when the v1.1.2 condition is restored,
+      and the failing assertion is named in the issue.
+- [ ] A mutation control run is attached showing that failure, with the host
+      usable afterwards and no Excel restart required.
+- [ ] The same review is applied to the other title-bar cases that hide the
+      frame: any of them that cannot restore it on an unexpected exit is fixed
+      or recorded here.
+- [ ] `python3 tools/check_repo.py` passes and
+      `python3 tools/reformat.py --check` is clean.
+
+## 🧩 Design constraints
+
+- Restoration must not depend on `UI_ShowExcelUI` or any other path under test.
+  The case already uses `TST_RestoreTitleBarStyle` for this; the problem is
+  reaching it, not the mechanism.
+- Nothing on the restoration path may raise, and `Err` must not be read after a
+  call. Capture number, source and description into locals first.
+- A bound must not turn a real failure into a pass. A case that gives up
+  waiting reports the failure it was waiting on, not success.
+
+## ⚖️ Release impact
+
+Test surface, unless the hang proves to be in
+`UI_TrySetTitleBarVisibleForHwndIfNeeded`, in which case it is a production
+defect and this issue is re-scoped.
+
+No public API change either way.
+
+## 📚 Context
+
+This blocks [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6): its
+negative control cannot be obtained while the case hangs, so #6 cannot show
+that its regression detects the defect it corrects.
+
+The active-frame-pair control fails at
+`TST_Case_ActiveFramePairRefusesMismatch.Disagreed.Refused`. Final review found
+that #32's current seam changes the numeric hWnd and therefore is not yet proof
+of same-handle generation reuse; #32 remains open for a corrected equal-hWnd
+control. Neither result reduces this issue's requirement for a bounded,
+host-restoring #6 mutation control.
+
+Blocks #6 and must be repaired before #42 makes the PR #63 title-bar cases part
+of mandatory certification inventory.
+
+</details>
+
+### #67 — Keep mutation and control artifacts in one ignored scratch location
+
+**State:** open
+**Labels:** `P3`, `tests`, `release-engineering`
+**Milestone:** `v1.1.3 — correctness & hardening`
+**Assignee:** `danielep71`
+**Checklist:** 0/7
+**Issue comments reviewed:** 0
+
+<details>
+<summary>Full issue body</summary>
+
+## Summary
+
+The v1.1.3 work now relies on throwaway mutants and negative-control variants to prove that regression cases detect the defects they guard. Those files are intentionally not committed, but the current `.gitignore` has no dedicated location or narrowly scoped rule for them.
+
+A mutant or control copy created in the repository can therefore appear as an ordinary untracked VBA or evidence file and be committed accidentally. Broad filename rules such as `*mutant*` or `*control*` would be unsafe because they could also hide authoritative fixtures.
+
+## Required policy
+
+Use one explicit repository-root scratch location for disposable mutation/control artifacts and ignore that location only. Production source, regression fixtures and committed evidence must remain visible to Git.
+
+Document the location in the contributor and release-testing guidance so future controls are created there rather than beside `src/`, `test/` or repository evidence.
+
+## Acceptance criteria
+
+- [ ] The actual temporary artifacts used by the v1.1.3 mutation runs are inventoried by type and purpose without committing their contents.
+- [ ] One dedicated repository-root mutation/control scratch directory is selected and ignored.
+- [ ] No broad `*.bas`, `*mutant*`, `*control*` or evidence-directory rule can hide authoritative source or fixtures.
+- [ ] Contributor guidance directs throwaway mutation variants to the dedicated location.
+- [ ] Release guidance states that disposable controls are not release evidence and must not enter source archives or assets.
+- [ ] A repository-policy fixture proves that the scratch location is ignored while representative committed source and fixture paths remain trackable.
+- [ ] `python3 tools/check_repo.py`, `python3 tools/reformat.py --check` and `git diff --check` pass.
+
+## Scope
+
+Repository hygiene and test-evidence handling only. No production VBA or supported public API change.
+
+</details>
+
+### #68 — Use one H1 heading in README and preserve its navigation
+
+**State:** open
+**Labels:** `P3`, `docs`
+**Milestone:** `v1.1.3 — correctness & hardening`
+**Assignee:** `danielep71`
+**Checklist:** 0/8
+**Issue comments reviewed:** 0
+
+<details>
+<summary>Full issue body</summary>
+
+## Summary
+
+`README.md` currently contains seven level-one headings. The project title is the document title; Quick start, Public API, Target scopes, Architecture, Regression testing and Requirements are document sections rather than additional titles.
+
+Multiple H1 headings weaken the document outline for screen readers, generated navigation and repository-quality review even though the rendered prose remains readable.
+
+## Required correction
+
+Keep `# 🪟 VBA Excel UI` as the single H1 and demote the six section headings into a coherent hierarchy. Preserve stable section anchors and the existing table-of-contents destinations.
+
+## Acceptance criteria
+
+- [ ] `README.md` contains exactly one H1: the project title.
+- [ ] Quick start, Public API, Target scopes, Architecture, Regression testing and Requirements use the appropriate lower heading level.
+- [ ] Child headings are adjusted where needed so the hierarchy has no skipped or inverted levels.
+- [ ] Existing table-of-contents and intra-document links still resolve to the intended sections.
+- [ ] Badge links and externally referenced anchors remain valid.
+- [ ] The rendered README is reviewed for visual hierarchy and accessibility.
+- [ ] The Markdown gate, link checker and `python3 tools/check_repo.py` pass.
+- [ ] No technical claim or code example changes as part of the heading-only correction.
+
+## Scope
+
+Documentation structure only. No production, test, demo, workflow or public API change.
+
+</details>
+
+### #69 — Restore Windows-native CRLF overrides after the repository-policy merge
+
+**State:** open
+**Labels:** `P3`, `release-engineering`, `ci`
+**Milestone:** `v1.1.3 — correctness & hardening`
+**Assignee:** `danielep71`
+**Checklist:** 0/8
+**Issue comments reviewed:** 0
+
+<details>
+<summary>Full issue body</summary>
+
+## Summary
+
+The current `.editorconfig` and `.gitattributes` retain a catch-all LF policy,
+but the explicit CRLF overrides previously added for Windows-hosted scripts are
+absent. The `.gitattributes` commentary still says that explicit VBA and
+Windows-native rules follow, so the tracked policy and its explanation disagree.
+
+This can normalize `.bat`, `.cmd`, PowerShell, VBScript, registry and INI
+files to LF even though their native hosts and repository policy expect CRLF.
+The correction previously existed on the release branch and was lost during a
+later repository-policy merge.
+
+## Acceptance criteria
+
+- [ ] `.editorconfig` explicitly assigns CRLF to `.bat`, `.cmd`, `.ps1`,
+      `.psm1`, `.psd1`, `.vbs`, `.reg` and `.ini`.
+- [ ] `.gitattributes` carries matching `text eol=crlf` rules.
+- [ ] VBA module rules remain explicit and unchanged.
+- [ ] The catch-all LF rule continues to govern portable text formats.
+- [ ] A fixture-backed repository-policy check fails when a Windows-native
+      override is removed or shadowed.
+- [ ] Existing tracked files are inspected for unintended line-ending churn;
+      the correction does not rewrite unrelated files.
+- [ ] Contributor documentation states the portable-text versus Windows-native
+      split accurately.
+- [ ] `python3 tools/check_repo.py`, formatter checks and `git diff --check`
+      pass.
+
+## Release placement
+
+This is repository-policy hardening for v1.1.3. It can proceed with the static
+tooling wave and must be complete before release freeze.
+
+</details>
+
+## Appendix B — Closed milestone issue ledger
+
+Bodies remain on GitHub; this ledger records the audited closure state.
+
+### #26 — ICR-UI-P3-03 — Quiet-update scope must record only a verified ScreenUpdating transition
+
+- State: closed as completed
+- Checklist: 13/13
+- Labels: `bug`, `P3`, `runtime`, `tests`
+- Issue comments reviewed: 3
+
+### #29 — ICR-UI-112-P3-10 — Static gate does not detect rendered Markdown corruption
+
+- State: closed as completed
+- Checklist: 12/12
+- Labels: `P3`, `ci`, `docs`
+- Issue comments reviewed: 1
+
+### #40 — Withdraw independent-review archives and enforce the private-document boundary
+
+- State: closed as completed
+- Checklist: 11/11
+- Labels: `P3`, `docs`
+- Issue comments reviewed: 1
+
+### #43 — ICR-UI-112-P2-04 — Destructive runners clear caller snapshots on refusal
+
+- State: closed as completed
+- Checklist: 21/21
+- Labels: `bug`, `P2`, `snapshots`, `tests`, `release-engineering`
+- Issue comments reviewed: 3
