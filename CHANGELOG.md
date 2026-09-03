@@ -1,41 +1,112 @@
 <div align="center">
 
-# 📄 Changelog
+# 📜 Changelog
 
-**All notable changes to VBA Excel UI**
+### Release history for the Windows Excel UI controller
 
-[![Semantic Versioning](https://img.shields.io/badge/versioning-semver-6f42c1?style=flat-square)](https://semver.org/)
-[![Format](https://img.shields.io/badge/format-keep_a_changelog-0969da?style=flat-square)](https://keepachangelog.com/)
-[![Dates](https://img.shields.io/badge/dates-YYYY--MM--DD-217346?style=flat-square)](#)
+[![Format](https://img.shields.io/badge/Format-Keep_a_Changelog-0969da?style=flat-square)](https://keepachangelog.com/en/1.1.0/)
+[![Versioning](https://img.shields.io/badge/Versioning-SemVer-6f42c1?style=flat-square)](https://semver.org/spec/v2.0.0.html)
+[![Dates](https://img.shields.io/badge/Dates-YYYY--MM--DD-217346?style=flat-square)](#date-and-version-rules)
+[![Staging](https://img.shields.io/badge/Staging-Unreleased_first-d97706?style=flat-square)](#unreleased)
+[![Contributing](https://img.shields.io/badge/Changes-Contribution_guide-2ea44f?style=flat-square)](CONTRIBUTING.md)
+
+<br>
+
+**User-visible history · Explicit compatibility · Reproducible evidence · Immutable releases**
 
 </div>
 
 ---
 
-Versioning applies to the **public VBA API** — every `UI_…` procedure, enum and
-parameter in `M_EXCEL_UI`. Internal module boundaries are not covered by it, so
-a release that changes nothing public may still require all four `src/` modules
-to be replaced together.
+All notable changes to **VBA Excel UI** are documented here.
+
+This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and [Semantic Versioning](https://semver.org/spec/v2.0.0.html). It records
+released behavior and material unreleased changes; it is not a commit log, issue
+tracker, or substitute for release evidence.
+
+Versioning covers the supported `UI_*` API, enums, parameters, result contracts, state-ownership behavior, window identity, failure semantics, and supported host configurations. Internal modules may still need to be deployed together even when public signatures do not change.
+
+---
+
+## 🧭 Maintenance policy
+
+- Add material changes under **Unreleased** in the same pull request as the
+  behavior or documentation they describe.
+- Write from the user's perspective: describe the observable result, contract,
+  compatibility impact, and migration need.
+- Link the owning issue or pull request when it contains useful engineering
+  detail.
+- Keep entries concise; do not duplicate implementation notes already preserved
+  in source, issues, or technical documentation.
+- Record only validation actually performed. State skipped environments and
+  known limitations plainly.
+- Move Unreleased entries into a dated version section during release.
+- Do not edit a published release entry except to correct a demonstrable factual
+  or link error; annotate material corrections instead of rewriting history.
+- Never claim that a tag, binary, workbook, hash, test run, or environment was
+  certified unless the evidence binds it to the released source.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for change and evidence requirements and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
+<a id="date-and-version-rules"></a>
+
+### Date and version rules
+
+| Rule | Standard |
+|---|---|
+| Version | `MAJOR.MINOR.PATCH`, without the leading `v` in headings |
+| Release heading | `## [X.Y.Z] - YYYY-MM-DD` |
+| Date | Gregorian calendar date in ISO `YYYY-MM-DD` format |
+| Ordering | Unreleased first; released versions newest to oldest |
+| Comparison | Unreleased → latest tag; each release → preceding tag |
+| Patch | Backward-compatible correction or hardening |
+| Minor | Backward-compatible capability |
+| Major | Incompatible public-contract change |
+| Pre-release | State maturity and compatibility boundaries explicitly |
+
+A repository may remain below `1.0.0` while its supported surface is still
+forming. Pre-release status does not excuse undocumented breaking changes.
 
 <details>
-<summary><strong>Section legend</strong></summary>
+<summary><strong>Entry categories</strong></summary>
 
 <br>
 
-| Section | Contains |
+| Category | Use for |
 |---|---|
-| ➕ **Added** | New members, runners, tools or files |
-| 🔧 **Changed** | Behaviour or contract changes to something that already existed |
-| 🐛 **Fixed** | Defects, each citing its review finding and issue |
-| 📖 **Documentation** | Corrections and additions to prose, with no code effect |
-| ✅ **Validation** | The evidence a release was actually certified on |
-| 🔗 **Compatibility** | What upgrading requires, and what becomes newly observable |
-| ⚠️ **Known limitations** | What is deliberately not fixed, and where it is tracked |
+| **Added** | New supported capabilities, APIs, files, or tests |
+| **Changed** | Changes to existing behavior, contracts, tooling, or documentation |
+| **Deprecated** | Supported behavior scheduled for removal |
+| **Removed** | Removed capabilities or compatibility |
+| **Fixed** | Corrected defects |
+| **Security** | Safely disclosed security corrections |
+| **Documentation** | Material documentation-only changes |
+| **Validation** | Evidence actually produced |
+| **Compatibility** | Upgrade or migration effects |
+| **Known limitations** | Deliberate, unresolved boundaries |
 
-Release types follow semver: 🩹 **patch** corrects defects, ✨ **minor** adds
-backward-compatible capability, 💥 **major** may break callers.
+Use only the categories needed by a release.
 
 </details>
+
+---
+
+<a id="unreleased"></a>
+
+## [Unreleased]
+
+### Changed
+
+- Standardized changelog governance and added an explicit Unreleased staging
+  section without altering published release history.
+
+### Validation
+
+- Verified historical version ordering, comparison links, and policy links.
+
+---
 
 ## [1.1.2] - 2026-08-21
 

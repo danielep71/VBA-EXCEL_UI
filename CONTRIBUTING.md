@@ -49,7 +49,8 @@ never disclose sensitive details in a public issue or pull request.
 
 Before opening work:
 
-1. Read the README, this guide, the Code of Conduct, and the Security Policy.
+1. Read the README, this guide, the [Code of Conduct](CODE_OF_CONDUCT.md),
+   [Security Policy](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md).
 2. Search open and closed issues and pull requests for related work.
 3. Open an issue before a non-trivial feature, public-API change, dependency,
    architectural change, compatibility break, or broad refactor.
