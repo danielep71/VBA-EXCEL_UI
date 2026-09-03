@@ -1,42 +1,99 @@
 <div align="center">
 
-# 📄 Changelog
+# 📜 Changelog
 
-**All notable changes to VBA Excel UI**
+### Release history for the Windows Excel UI controller
 
-[![Semantic Versioning](https://img.shields.io/badge/versioning-semver-6f42c1?style=flat-square)](https://semver.org/)
-[![Format](https://img.shields.io/badge/format-keep_a_changelog-0969da?style=flat-square)](https://keepachangelog.com/)
-[![Dates](https://img.shields.io/badge/dates-YYYY--MM--DD-217346?style=flat-square)](#)
+[![Format](https://img.shields.io/badge/Format-Keep_a_Changelog-0969da?style=flat-square)](https://keepachangelog.com/en/1.1.0/)
+[![Versioning](https://img.shields.io/badge/Versioning-SemVer-6f42c1?style=flat-square)](https://semver.org/spec/v2.0.0.html)
+[![Dates](https://img.shields.io/badge/Dates-YYYY--MM--DD-217346?style=flat-square)](#date-and-version-rules)
+[![Staging](https://img.shields.io/badge/Staging-Unreleased_first-d97706?style=flat-square)](#unreleased)
+[![Contributing](https://img.shields.io/badge/Changes-Contribution_guide-2ea44f?style=flat-square)](CONTRIBUTING.md)
+
+<br>
+
+**User-visible history · Explicit compatibility · Reproducible evidence · Immutable releases**
 
 </div>
 
 ---
 
-Versioning applies to the **public VBA API** — every `UI_…` procedure, enum and
-parameter in `M_EXCEL_UI`. Internal module boundaries are not covered by it, so
-a release that changes nothing public may still require all four `src/` modules
-to be replaced together.
+All notable changes to **VBA Excel UI** are documented here.
+
+This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and [Semantic Versioning](https://semver.org/spec/v2.0.0.html). It records
+released behavior and material unreleased changes; it is not a commit log, issue
+tracker, or substitute for release evidence.
+
+Versioning covers the supported `UI_*` API, enums, parameters, result contracts, state-ownership behavior, window identity, failure semantics, and supported host configurations. Internal modules may still need to be deployed together even when public signatures do not change.
+
+---
+
+## 🧭 Maintenance policy
+
+- Add material changes under **Unreleased** in the same pull request as the
+  behavior or documentation they describe.
+- Write from the user's perspective: describe the observable result, contract,
+  compatibility impact, and migration need.
+- Link the owning issue or pull request when it contains useful engineering
+  detail.
+- Keep entries concise; do not duplicate implementation notes already preserved
+  in source, issues, or technical documentation.
+- Record only validation actually performed. State skipped environments and
+  known limitations plainly.
+- Move Unreleased entries into a dated version section during release.
+- Do not edit a published release entry except to correct a demonstrable factual
+  or link error; annotate material corrections instead of rewriting history.
+- Never claim that a tag, binary, workbook, hash, test run, or environment was
+  certified unless the evidence binds it to the released source.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for change and evidence requirements and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
+<a id="date-and-version-rules"></a>
+
+### Date and version rules
+
+| Rule | Standard |
+|---|---|
+| Version | `MAJOR.MINOR.PATCH`, without the leading `v` in headings |
+| Release heading | `## [X.Y.Z] - YYYY-MM-DD` |
+| Date | Gregorian calendar date in ISO `YYYY-MM-DD` format |
+| Ordering | Unreleased first; released versions newest to oldest |
+| Comparison | Unreleased → latest tag; each release → preceding tag |
+| Patch | Backward-compatible correction or hardening |
+| Minor | Backward-compatible capability |
+| Major | Incompatible public-contract change |
+| Pre-release | State maturity and compatibility boundaries explicitly |
+
+A repository may remain below `1.0.0` while its supported surface is still
+forming. Pre-release status does not excuse undocumented breaking changes.
 
 <details>
-<summary><strong>Section legend</strong></summary>
+<summary><strong>Entry categories</strong></summary>
 
 <br>
 
-| Section | Contains |
+| Category | Use for |
 |---|---|
-| ➕ **Added** | New members, runners, tools or files |
-| 🔧 **Changed** | Behaviour or contract changes to something that already existed |
-| 🐛 **Fixed** | Defects, citing the public issue and evidence where applicable |
-| 📖 **Documentation** | Corrections and additions to prose, with no code effect |
-| 🔐 **Security** | Trust boundaries, disclosure, secret handling or supply-chain controls |
-| ✅ **Validation** | The evidence a release was actually certified on |
-| 🔗 **Compatibility** | What upgrading requires, and what becomes newly observable |
-| ⚠️ **Known limitations** | What is deliberately not fixed, and where it is tracked |
+| **Added** | New supported capabilities, APIs, files, or tests |
+| **Changed** | Changes to existing behavior, contracts, tooling, or documentation |
+| **Deprecated** | Supported behavior scheduled for removal |
+| **Removed** | Removed capabilities or compatibility |
+| **Fixed** | Corrected defects |
+| **Security** | Safely disclosed security corrections |
+| **Documentation** | Material documentation-only changes |
+| **Validation** | Evidence actually produced |
+| **Compatibility** | Upgrade or migration effects |
+| **Known limitations** | Deliberate, unresolved boundaries |
 
-Release types follow semver: 🩹 **patch** corrects defects, ✨ **minor** adds
-backward-compatible capability, 💥 **major** may break callers.
+Use only the categories needed by a release.
 
 </details>
+
+---
+
+<a id="unreleased"></a>
 
 ## [Unreleased]
 
@@ -85,12 +142,24 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added a standardized installation and maintainer release documentation set,
+  covering deployment, certification, provenance, recovery and
+  post-publication controls, in **INSTALLATION.md** and the new
+  **RELEASING.md**.
+- Standardized the governance documents brought forward from `main`:
+  **CODE_OF_CONDUCT.md**, **SECURITY.md**, **INSTALLATION.md**,
+  **.gitignore**, **.editorconfig** and the pull-request review contract. The
+  release branch's enforced-policy sections were re-applied on top rather than
+  replaced: the pinned-Action procedure, the private-review boundary, the
+  Markdown-as-text rule, the wiki and `VERSION` relationship, the three-SHA
+  distinction, the required-validation commands, the `[supported]` versus
+  `[project-public]` compatibility split, and the concrete workflow inventory
+  in the security policy.
 - Added `UI_InternalSimulateFrameHandleReuse`, a same-project regression seam
   that changes a registry slot's numeric hWnd while retaining its original
   Excel Window identity. The two-pass regression uses it to prove that equal
   zero and equal non-zero owned-style bits cannot authenticate a recycled
   handle. This adds one `[project-public]` manifest line and no supported API.
-
 - Added `UI_InternalInjectQuietUpdateFault` to **M_EXCEL_UI_RUNTIME**, a
   one-shot regression seam arming a failed entry read, an ineffective write or a
   failed readback for the next quiet-scope entry. The branches it reaches are
@@ -543,6 +612,26 @@ measured against that baseline.
   milestone plan. It records dependencies, exact-head release steps, closure
   discipline, private-review boundaries and a dated snapshot of every open
   v1.1.3 issue body.
+- Realigned the issue templates with current policy, so intake reflects the
+  snapshot-precondition and ownership rules the destructive runners now
+  enforce rather than the behavior they had at v1.1.2.
+- Corrected commentary in **tools/check_repo.py**, **tools/reformat.py** and
+  **tools/wiki_badges.py** that overstated what each tool proves. The gate is
+  now described as deciding from the checkout and the Git index rather than
+  from repository text alone; the formatter no longer claims every
+  transformation is line-local, since Option hoisting is module-wide, nor that
+  its fixtures prove behavior-neutrality across every VBA construct — #52 owns
+  that; and the badge checker no longer counts pages it cannot know. One
+  fixture label was corrected from describing an unclosed fence to describing a
+  closed one, which is what it actually tests. No executable statement changed:
+  comparing the abstract syntax trees with docstrings and string values
+  normalized shows all three unchanged.
+- Corrected commentary in both workflows. The static-checks header no longer
+  says nothing has *ever* carried a status check, which stopped being true when
+  that workflow landed, and no longer dates the `actions/checkout@v4` pointer
+  move relative to the current pin. The label-colour workflow now states its
+  own scope: it updates the colour of existing labels only, creates and deletes
+  nothing, and its `issues: write` permission is confined to that one job.
 - Corrected current documentation that still described reopened or completed
   work incorrectly: the README no longer calls v1.1.2 title-bar identity or
   first-allocation diagnostics complete; INSTALLATION and SECURITY distinguish
@@ -604,7 +693,8 @@ RESULT: PASS
   formatter self-test
 ~~~
 
-The formatter and API-contract self-tests pass alongside it:
+Each policy that could silently accept everything carries its own fixtures, and
+all three pass alongside the gate:
 
 ~~~text
 python3 tools/reformat.py --selftest
@@ -612,6 +702,9 @@ ok   self-test: 9 formatting rules hold
 
 python3 tools/vba_api.py --selftest
 ok   self-test: 40 API-contract rules hold
+
+python3 tools/wiki_badges.py --selftest
+ok   self-test: 14 wiki-badge rules hold
 ~~~
 
 The API contract gate was additionally exercised by mutation rather than by
@@ -658,6 +751,37 @@ This is **static validation**, not release certification:
 - no v1.1.3 runtime certification has been performed;
 - no claim is made for Win32 or Office 32-bit runtime execution;
 - final evidence must be regenerated against the exact reviewed release head.
+
+#### Excel runtime evidence
+
+Static checks cannot exercise either Wave 2 correction: both concern host
+refusals. Both were run on Excel 16.0 x64, and each was checked against
+deliberately broken variants rather than only against itself.
+
+`Test_EXCEL_UI_RunAll` passes with the caller-owned snapshot case and the
+quiet-scope case dispatched by the pack, and with the pre-existing
+`TST_Case_ScreenUpdatingPreserved` unregressed.
+`Test_EXCEL_UI_RunOwnershipCleanupChecks` passes standalone. It is not
+registered in the pack, because inside a certification run the self-test's
+inner call meets the re-entrancy guard rather than the snapshot precondition it
+needs.
+
+Seven throwaway variants were run and none was committed. Four reverted one
+destructive runner each to its v1.1.2 shape: every one failed at that runner's
+own snapshot-survival assertion with no earlier failure, so each block is
+independently sensitive rather than one failure masking three. One discarded
+the ownership flag after the self-test's establishment guard and failed on the
+leaked snapshot. Two targeted the quiet scope: restoring the v1.1.2 procedure
+failed on the entry-read branch, and removing only the readback check failed on
+the ineffective-write branch.
+
+That last variant is the one that matters. The seam still fires and the
+entry-read branch still passes, so its failure isolates the ownership
+verification itself rather than the presence of the seam.
+
+This is runtime evidence for two corrections, not a release certification. No
+v1.1.3 certification has been run, and none of it was produced against a frozen
+head.
 
 ### 🔗 Compatibility
 

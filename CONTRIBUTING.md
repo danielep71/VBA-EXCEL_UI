@@ -1,311 +1,392 @@
 <div align="center">
 
-# 🤝 Contributing
+# 🤝 Contributing to VBA Excel UI
 
-**Thank you for improving VBA Excel UI**
+### Reviewable changes to a structured Windows Excel UI controller
 
-[![Conduct](https://img.shields.io/badge/read_first-code_of_conduct-6f42c1?style=flat-square)](CODE_OF_CONDUCT.md)
-[![Security](https://img.shields.io/badge/read_first-security_policy-d73a49?style=flat-square)](SECURITY.md)
-[![Checks](https://img.shields.io/badge/CI-static_gate-0969da?style=flat-square)](.github/workflows/static-checks.yml)
-[![Gate](https://img.shields.io/badge/release-certification_runner-217346?style=flat-square)](#-required-validation)
+[![Contributions](https://img.shields.io/badge/Contributions-Welcome-2ea44f?style=flat-square)](#ways-to-contribute)
+[![Conduct](https://img.shields.io/badge/Conduct-Required-6f42c1?style=flat-square)](CODE_OF_CONDUCT.md)
+[![Security](https://img.shields.io/badge/Security-Private_reporting-d73a49?style=flat-square)](SECURITY.md)
+[![Workflow](https://img.shields.io/badge/Workflow-Source--first-0969da?style=flat-square)](#source-first-vba)
+[![License](https://img.shields.io/badge/License-MIT-217346?style=flat-square)](LICENSE)
+
+<br>
+
+**Focused scope · Reviewable source · Reproducible evidence · Honest limitations**
+
+<br>
+
+[Start here](#start-here)
+&nbsp;·&nbsp;
+[Workflow](#development-workflow)
+&nbsp;·&nbsp;
+[VBA rules](#source-first-vba)
+&nbsp;·&nbsp;
+[Validation](#validation-and-evidence)
+&nbsp;·&nbsp;
+[Pull requests](#pull-requests)
 
 </div>
 
 ---
 
-## 🧭 Before you start
+Thank you for helping improve **VBA Excel UI**.
 
-Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [SECURITY.md](SECURITY.md).
-**Open an issue before non-trivial work** — scope agreed in advance is far
-cheaper than scope discovered in review.
+Contributions are welcome when they strengthen correctness, clarity,
+maintainability, compatibility, documentation, tests, or reproducibility. The
+standard is not simply that a change works once: another person must be able to
+review it, reproduce the evidence, and understand its operational boundaries.
 
-This project holds these above convenience, and a change that trades one away
-needs to say so explicitly:
-
-| Priority | Why it is non-negotiable |
-|---|---|
-| 🔒 **Public API compatibility** | Callers are workbooks in production. A rename is a breaking change no matter how much better the name is. |
-| 🆘 **Recoverable UI state** | A constrained shell that cannot be undone traps a user in an unusable Excel. |
-| 🎯 **Identity-safe restoration** | State applied to the wrong window silently is worse than state not applied at all. |
-| 📍 **Explicit state ownership** | Two modules holding the same mutable state means neither can be reasoned about. |
-| 🧾 **Deterministic diagnostics** | A failure that is not reported did not happen, as far as the caller is concerned. |
-| ⚙️ **32-bit and 64-bit parity** | A defect that only appears on the other bitness is invisible to the person who wrote it. |
-| 🧪 **Permanent regression coverage** | A fix without a test is a fix with a scheduled regression. |
-| 📖 **Readable exported source** | The `.bas` file is the review artifact; the VBE is not. |
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+Report suspected vulnerabilities privately under [SECURITY.md](SECURITY.md);
+never disclose sensitive details in a public issue or pull request.
 
 ---
 
-## ⚡ Quick reference
+<a id="start-here"></a>
 
-```text
-python3 tools/check_repo.py                        the gate CI runs
-python3 tools/reformat.py --write src/*.bas …      fix house-style drift
-python3 tools/reformat.py --selftest               check the formatter itself
-Test_EXCEL_UI_RunReleaseCertification              certify behaviour in Excel
-```
+## 🧭 Start here
 
-Static checks run on every pull request. They cannot execute VBA — a hosted
-runner has no Excel — so certification stays a manual step on a real host. The
-two are complementary, not alternatives.
+Before opening work:
 
-## 📁 Project layout
+1. Read the README, this guide, the [Code of Conduct](CODE_OF_CONDUCT.md),
+   [Security Policy](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md).
+2. Search open and closed issues and pull requests for related work.
+3. Open an issue before a non-trivial feature, public-API change, dependency,
+   architectural change, compatibility break, or broad refactor.
+4. Agree the observable contract and validation approach before implementation.
+5. Keep credentials, personal/client data, proprietary workbooks, and restricted
+   reference material out of the repository.
 
-```text
-VBA-EXCEL_UI/
-├─ src/
-│  ├─ M_EXCEL_UI.bas
-│  ├─ M_EXCEL_UI_RUNTIME.bas
-│  ├─ M_EXCEL_UI_SNAPSHOT.bas
-│  └─ M_EXCEL_UI_TITLEBAR.bas
-├─ demo/
-│  ├─ M_DEMO_BUILDER.bas
-│  └─ M_EXCEL_UI_DEMO.bas
-├─ test/
-│  └─ M_EXCEL_UI_REGRESSION_TESTS.bas
-├─ tools/
-│  ├─ reformat.py                house-style formatter
-│  ├─ vba_api.py                 public-declaration contract model
-│  ├─ wiki_badges.py             wiki track-badge consistency
-│  ├─ check_repo.py              the static gate CI runs
-│  └─ public_api_manifest.txt    declaration contract and release baseline
-├─ docs/
-│  └─ …                          measurements and release plans
-├─ .github/workflows/
-│  ├─ static-checks.yml
-│  ├─ sync-label-colors.yml
-│  └─ wiki-badges.yml
-├─ VERSION
-├─ INSTALLATION.md
-├─ README.md
-└─ …
-```
+Small documentation corrections and narrowly obvious fixes may go directly to a
+focused pull request.
 
 > [!IMPORTANT]
-> `tools/public_api_manifest.txt` records the complete normalised declaration of
-> every `Public` member in `src/` — parameter order and names, `ByVal`/`ByRef`,
-> types, `Optional` status, defaults, return types and enum values. Changing any
-> of them requires an intentional edit there, and CI fails otherwise. That
-> friction is the point: those are exactly the changes that break callers, and
-> they are invisible in a diff of several thousand lines.
->
-> The manifest has two sections, and they carry different promises. `[supported]`
-> is the caller-facing facade in `M_EXCEL_UI`, covered by Semantic Versioning: a
-> change there is a compatibility event for external callers. `[project-public]`
-> is the helpers and regression seams that are `Public` only so an
-> `Option Private Module` project can see them across its own modules; they are
-> tracked so a compile-breaking change is never silent, but no external
-> compatibility is claimed for them. Neither section is the deployment unit —
-> importing all four `src/` modules together is, and that is a separate promise
-> from external API compatibility.
+> UI restoration is an ownership problem. A stale snapshot or window handle must
+> never be treated as authority to overwrite unrelated current Excel state.
 
-## 🧱 Production module boundaries
+---
 
-### `M_EXCEL_UI`
+<a id="ways-to-contribute"></a>
 
-Owns:
+## 🌱 Ways to contribute
 
-- the supported public `UI_...` API;
-- `UIVisibility`;
-- general tri-state validation;
-- general application/window apply orchestration;
-- compatibility wrappers.
-
-It must remain the facade. Internal implementation details should not be moved into caller code.
-
-### `M_EXCEL_UI_RUNTIME`
-
-Owns shared low-level services used by the facade and snapshot engine:
-
-- ordered failure accumulation;
-- Immediate Window diagnostic formatting;
-- Ribbon reads and writes;
-- generic Boolean property reads and writes;
-- `ScreenUpdating` quiet-update scopes.
-
-It must not depend on another project module.
-
-### `M_EXCEL_UI_SNAPSHOT`
-
-Owns:
-
-- all mutable snapshot state;
-- retained Excel `Window` references;
-- capture and restoration orchestration;
-- identity resolution and missing-window diagnostics.
-
-It may depend on runtime and title-bar services. It must not duplicate snapshot state in the facade.
-
-### `M_EXCEL_UI_TITLEBAR`
-
-Owns:
-
-- Win32/Win64 declarations;
-- exact title-bar style-bit ownership;
-- handle-specific captured style state;
-- style merging and non-client frame refresh.
-
-It must not depend on another project module.
-
-## 🔗 Dependency rule
-
-The production dependency graph must remain acyclic:
-
-```text
-M_EXCEL_UI
-├── M_EXCEL_UI_RUNTIME
-├── M_EXCEL_UI_TITLEBAR
-└── M_EXCEL_UI_SNAPSHOT
-    ├── M_EXCEL_UI_RUNTIME
-    └── M_EXCEL_UI_TITLEBAR
-```
-
-Do not introduce:
-
-| ❌ Never | Because |
+| Contribution | Good first action |
 |---|---|
-| A callback from runtime or title-bar into the facade | It creates a cycle, and the two lower modules are deliberately usable without the facade |
-| A second copy of mutable snapshot or title-bar state | Two owners of one truth means neither can be reasoned about, and they will drift |
-| Generic utility modules with unrelated responsibilities | "Helpers" is not a responsibility; the module boundary stops meaning anything |
-| Public implementation details solely to simplify testing | Anything `Public` is surface that must be kept working |
+| 🐛 Reproducible defect | Open an issue with minimal inputs, expected behavior, observed behavior, and environment. |
+| ✨ Feature or API change | Open an issue describing users, contract, alternatives, compatibility, and validation. |
+| 🧪 Tests or reference evidence | Explain provenance, independence, precision, coverage, and expected failure detection. |
+| 📖 Documentation | Identify the affected behavior and keep examples executable and current. |
+| ⚙️ Repository/tooling | Explain developer impact, failure behavior, portability, and maintenance cost. |
+| 🔐 Security concern | Follow [SECURITY.md](SECURITY.md); do not open a public report. |
+| 💬 Usage question | Use the repository's supported discussion or issue channel without sensitive data. |
 
-> [!NOTE]
-> Test seams are the deliberate exception, and they earn it: a recovery path that
-> cannot be executed is indistinguishable from one that was never written. Each
-> seam is `Public` only for same-project access, kept out of the cross-project
-> namespace by `Option Private Module`, documented as unsupported, and has a
-> caller. A seam without a caller is dead surface — remove it.
+A proposal may be adapted, deferred, or declined when it is out of scope,
+duplicates an existing capability, weakens a contract, or creates maintenance
+cost disproportionate to its benefit.
 
-## 🌿 Branch workflow
+---
 
-Do not make routine development changes directly on `main`.
+## 📁 Repository model
 
-Use a branch appropriate to the agreed scope, for example:
+This is a **source-first Excel UI library**. The Git diff, not an opaque workbook, is
+the review artifact.
 
-```text
-fix/snapshot-window-identity
-test/titlebar-owned-bits
-docs/install-modules
-ci/static-release-gate
-feature/window-target-scope
-release/v<major>.<minor>.<patch>
-```
-
-| Prefix | For |
+| Location | Purpose |
 |---|---|
-| `fix/` | A defect with an issue |
-| `feature/` | Backward-compatible new capability |
-| `test/` | Regression coverage only |
-| `docs/` | Prose only, no code effect |
-| `ci/` | Workflow, gate or tooling |
-| `chore/` | Repository configuration and hygiene |
-| `release/` | Integration branch for a version |
+| `src/` | Authoritative production modules for UI, runtime, snapshots, and title-bar control |
+| `test/` | Regression and release-certification source |
+| `demo/` | Demo and reproducible host setup |
+| `tools/` | Repository/static validation |
+| `docs/` | Architecture, API, recovery, and release guidance |
 
-Confirm the current branch in GitHub Desktop before every commit.
+The README and current tree are authoritative if a listed optional directory is
+not present.
 
-> [!WARNING]
-> Editing files through the GitHub web interface while holding unpushed local
-> commits diverges the branch. If it happens, `git pull --rebase` replays your
-> work on top; setting `pull.rebase true` once avoids the prompt entirely.
+---
 
-## 🔁 Import, edit, compile, test, export
+<a id="development-workflow"></a>
 
-Recommended import order:
+## 🌿 Development workflow
 
-```text
-src/M_EXCEL_UI_RUNTIME.bas
-src/M_EXCEL_UI_TITLEBAR.bas
-src/M_EXCEL_UI_SNAPSHOT.bas
-src/M_EXCEL_UI.bas
-test/M_EXCEL_UI_REGRESSION_TESTS.bas
-demo/M_EXCEL_UI_DEMO.bas          when needed
-demo/M_DEMO_BUILDER.bas           when needed
-```
+1. Fork or clone the repository and start from the current `main`.
+2. Create a short, focused branch such as `fix/clear-description`,
+   `feat/clear-description`, `docs/clear-description`, or
+   `test/clear-description`.
+3. Reproduce the existing behavior before changing it.
+4. Define the intended contract, affected callers, compatibility impact, and
+   evidence plan.
+5. Make the smallest coherent source change; do not mix unrelated formatting,
+   refactoring, generated files, or cleanup.
+6. Compile and run the relevant static, regression, host, and manual checks.
+7. Re-export changed VBA components and review the complete text/binary diff.
+8. Update documentation and release notes required by the change.
+9. Push the branch and open a pull request with evidence and limitations.
 
-Workflow:
+Repository maintainers may use the repository's configured direct-push workflow
+where permitted. External contributions and reviewable portfolio changes should
+use branches and pull requests.
 
-1. Confirm the current branch.
-2. Import the required modules into a controlled workbook.
-3. Compile with `Debug → Compile VBAProject`.
-4. Run the narrowest focused runner.
-5. Run the complete applicable sequence.
-6. Perform manual recovery.
-7. Re-export each changed module over the matching repository path.
-8. Run the static gate locally: `python3 tools/check_repo.py`.
-9. Review the GitHub Desktop diff.
-10. Update documentation and version metadata.
-11. Commit and push.
-12. Open a pull request against the agreed base.
+### Commit discipline
 
-Step 8 is the same gate CI runs, so running it locally costs seconds and saves a
-round trip. If it reports house-style drift, the fix is mechanical:
+Write imperative, specific subjects, normally in this form:
 
 ```text
-python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas
+fix: preserve formulas during write-back
+feat: add explicit tail calculation
+test: cover cleanup after initialization failure
+docs: clarify supported Office environments
+chore: harden repository validation
 ```
 
-Re-import any module it rewrites before committing, so the repository and the
-VBE do not diverge.
+Keep commits reviewable. Reference the issue when one exists. Do not include
+secrets, private links, generated attribution boilerplate, or unverifiable test
+claims in commit messages.
 
-The formatter must never alter a string literal. A literal is data the module
-evaluates at run time, so rewriting one changes behaviour rather than layout,
-and the change is invisible in a diff that is expected to be whitespace. Any
-new transformation therefore uses `split_code_comment` to find where a comment
-begins, and `sub_outside_literals` to substitute only outside quoted text —
-matching an apostrophe or a keyword directly is what let padding be written
-into a literal and a quoted label name be renamed. `--selftest` holds the
-fixtures for both rules, and `check_repo.py` runs them.
+---
 
-Any change to a public declaration also requires an intentional edit to
-`tools/public_api_manifest.txt`. `tools/vba_api.py --write` regenerates it, and
-`--selftest` holds fixtures for every breaking class the gate claims to catch —
-parameter reorder and rename, `ByVal`/`ByRef`, type, `Optional`, default, return
-type and enum value — alongside formatting-only changes that must normalise
-identically. `check_repo.py` runs those fixtures too, so the model is verified
-on every push rather than only when someone suspects it.
+<a id="source-first-vba"></a>
 
-A member declared in several compilation arms is recorded once. Arms nest, so a
-`Win64` split inside a `VBA7` branch declares one member three times. Every arm
-must be either the widest declaration or that same declaration with the pointer
-types narrowed; arms that are simply identical satisfy that too, which is what a
-`Win64` split that changes no signature looks like. Anything else is a real
-disagreement between two compilations and is reported rather than normalised
-away.
+## 📦 Source-first VBA
 
-Two declarations are alternatives when they sit in different arms of the same
-directive, or in two blocks whose predicates are a condition and its negation —
-`#If VBA7` beside `#If Not VBA7` is one member. `#If VBA7` beside `#If Win64` is
-not: both hold on a 64-bit VBA7 host, so the member is declared twice and the
-compiler rejects it. The negation test is syntactic on purpose. Proving
-arbitrary predicates disjoint is not something this tool should attempt, so
-anything it cannot show complementary is reported for you to restructure or
-confirm.
+Exported source is authoritative.
 
-The arms themselves are recorded, in a fourth manifest field written as
-`<effective predicate>#<arm index>` and joined by `>` for nesting. Deleting the
-`#Else` arm of a VBA7 pair removes the member from every 32-bit build, and
-replacing that `#Else` with `#ElseIf Mac Then` narrows it to one platform —
-both while leaving the declaration byte-identical.
+- Use `Option Explicit`.
+- Preserve the repository's VBE export metadata, module names, encoding, and
+  line-ending policy.
+- Match `.bas`, `.cls`, and `.frm` filenames to their component identity.
+- Keep every required `.frm` / `.frx` pair together; treat `.frx` as binary.
+- Do not edit a binary form resource as text.
+- Do not use a workbook or add-in as the only record of a code change.
+- Do not commit Office lock files, recovery copies, local exports, test output,
+  or generated binaries unless the repository explicitly designates them as
+  source.
+- Qualify workbook, worksheet, range, and application references.
+- Avoid implicit active-workbook, active-sheet, selection, and default-member
+  dependencies.
+- Keep `On Error Resume Next` scopes narrow and intentional.
+- Preserve useful diagnostic context and clean up on success and failure.
+- Avoid new references, APIs, dependencies, or platform assumptions until their
+  support and deployment impact is agreed.
 
-The predicate recorded is the effective one, not the arm's own condition. An
-arm is reached only when every earlier arm of its block was not taken, so the
-`#ElseIf VBA7` arm of an `#If Win64` block records `Not (Win64) And VBA7`, and
-its trailing `#Else` records `Not (Win64) And Not (VBA7)`. Changing that
-leading `Win64` to `Mac` therefore changes which hosts reach the later arms,
-and the manifest says so. Recording `VBA7` and `Else` would not have: those
-name a position in the block rather than a condition on the host.
+### Public contracts and compatibility
 
-The manifest also carries a `[baseline vX.Y.Z]` section holding the
-`[supported]` facade as it stood at the last release. When the two differ,
-`CHANGELOG.md` must say so in its `Supported API contract` row and name the
-release type — patch, minor or major — or the gate fails. Regenerating the
-manifest is therefore not enough on its own to make a facade change pass, which
-is the point: the manifest records the change and the changelog declares what it
-means. The baseline is rebased only at a release, with
-`tools/vba_api.py --rebase-baseline vX.Y.Z`.
+Treat documented procedures, functions, classes, enums, parameters, defaults,
+return values, errors, side effects, workbook formats, and supported platforms
+as contracts.
 
-The demo workbook is not version-controlled. It is built from the exported demo modules and published as a GitHub Release asset, so changing an exported `.bas` file does not update any committed binary. Rebuild and validate the workbook separately when it is in release scope.
+A contract-changing contribution must:
 
-## 📚 The wiki and the VERSION file
+1. identify affected callers and migration needs;
+2. explain what changes and what remains unchanged;
+3. add or update regression coverage;
+4. update user-facing documentation and examples; and
+5. state whether the release impact is patch, minor, or major.
+
+Do not make an internal helper public merely to simplify a test. Use an explicit
+test seam where the project supports one.
+
+External compatibility is a promise about the `[supported]` facade in
+`M_EXCEL_UI`. It is not the same promise as the deployment rule that all four
+`src/` modules are replaced together: internal boundaries may move in a patch
+release without any caller-visible change, which is why a mixed-version project
+fails to compile even when the external API is untouched.
+
+Preserve the `[supported]` facade unless an explicitly approved breaking release
+requires otherwise:
+
+- public procedure and function names;
+- parameter order;
+- optional defaults;
+- enum values;
+- show/hide/leave-unchanged semantics;
+- fire-and-forget behavior;
+- ordered structured-result behavior;
+- application and window scope;
+- `UI_ShowExcelUI` as the emergency show-all operation.
+
+New backward-compatible parameters must normally be optional and trailing.
+
+### Excel state ownership
+
+Assume these surfaces belong to the caller or host unless the project explicitly
+owns them:
+
+```text
+Application.Calculation
+Application.EnableEvents
+Application.ScreenUpdating
+Application.DisplayAlerts
+Application.StatusBar
+active workbook / worksheet / selection
+window styles, shortcuts, timers, names, links, connections, and shapes
+```
+
+Capture state before changing it. Restore only state the component successfully
+changed and still owns. Cleanup must not conceal the original failure.
+
+---
+
+## 🧩 Project engineering contract
+
+| Area | Required behavior |
+|---|---|
+| **Module boundaries** | Preserve the UI, runtime, snapshot, and title-bar dependency direction. |
+| **Window identity** | Never restore per-window state by collection index; handle closed, recreated, and newly opened windows explicitly. |
+| **Snapshot lifecycle** | Document partial capture, failure ordering, reset behavior, and emergency recovery. |
+| **Title-bar ownership** | Restore only the style bits owned; handle `GetLastError`, valid zero returns, handle changes, and frame refresh. |
+| **Failure behavior** | Production entry points are fail-soft unless documented otherwise; never silently discard failures or leave screen updating suppressed. |
+| **Platform support** | Validate affected 32-bit and 64-bit declarations on a real Windows Excel host. |
+
+---
+
+<a id="validation-and-evidence"></a>
+
+## 🧪 Validation and evidence
+
+Validation must be proportional to risk and reproducible from the exact source
+under review.
+
+- Compile the complete VBA project.
+- Run `Test_EXCEL_UI_RunReleaseCertification` for production changes.
+- Exercise `UI_HideExcelUI` / `UI_ShowExcelUI` and capture / hide / reset flows.
+- Treat any `INCOMPLETE`, skipped unit, failed unit, or cleanup failure as not passing.
+- Run hosted static checks and record their result.
+- Record exact commit, Excel/Windows/Office bitness, multi-window scope, verdict, skips, and cleanup.
+
+Hosted CI can validate source and repository invariants but cannot certify VBA behavior inside Excel. Quote the real-host certification verdict in the pull request and state any environment not exercised.
+
+### Required validation
+
+For production code changes:
+
+```text
+Debug → Compile VBAProject
+Test_EXCEL_UI_RunReleaseCertification
+UI_HideExcelUI / UI_ShowExcelUI
+capture / hide / reset
+```
+
+Certification is the gate. Quote its verdict line in the pull request:
+
+```text
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+```
+
+A run reporting `INCOMPLETE`, any `skipped` count above zero, or
+`cleanup=FAILED` is not a pass, whatever the assertions that did execute
+reported. The narrower runners remain useful while iterating, but do not
+substitute for certification: `Test_EXCEL_UI_RunAll` executes no multi-window
+case and produces no machine-readable evidence.
+
+CI runs the static gate on every pull request. It cannot execute VBA — a hosted
+runner has no Excel — so certification remains a manual step on a real host, and
+the two are complementary rather than alternatives.
+
+Record only environments actually tested.
+
+### Evidence principles
+
+- Test the behavior, not only the implementation path.
+- Add a permanent regression for every corrected defect.
+- Include ordinary, boundary, invalid-input, error, and cleanup paths.
+- Use an independent source for expected numerical results.
+- State skips and unavailable environments explicitly; a skipped check is not a
+  pass.
+- Do not claim compatibility, accuracy, performance, or certification beyond
+  what was actually observed.
+- Treat cleanup failures and incomplete runs as failures.
+- Never generate expected values with the implementation under test.
+
+### Suggested evidence block
+
+```text
+Source
+------
+Commit / tag:
+Files or components changed:
+
+Environment
+-----------
+Excel:
+Office bitness:
+Operating system:
+Locale / date system:
+Deployment or host:
+
+Checks
+------
+Compile:
+Static checks:
+Focused tests:
+Full regression:
+Manual / UI / platform checks:
+Cleanup:
+
+Evidence
+--------
+Independent reference and version:
+Inputs / workload:
+Tolerance or acceptance rule:
+Expected:
+Observed:
+Worst discrepancy / dispersion:
+
+Limitations
+-----------
+Skipped or unverified:
+Follow-up:
+```
+
+Remove non-applicable fields, but do not omit a material limitation.
+
+---
+
+### Three SHAs, three different claims
+
+A release involves three commits, and evidence attached to one of them says
+nothing about the others. Naming which is meant is not pedantry: the v1.1.1 and
+v1.1.2 tags were published from commits carrying no automated evidence at all,
+and the only way to notice that is to keep the three apart.
+
+| SHA | What it is | What evidence on it proves |
+|---|---|---|
+| **PR head** | The last commit on `release/v1.1.3` before merge | The reviewed tree passed the static gate and the bot reviewed *this* tree. It does not prove anything about `main`. |
+| **Merge SHA** | The merge commit created on `main` | `main` contains the reviewed tree. The merge itself is a new commit whose tree can differ from the PR head if anything was resolved during merge. |
+| **Tag SHA** | What `v1.1.3` points at | The artefact people install from. It should equal the merge SHA, and until the tag trigger existed nothing checked that it had ever been built. |
+
+Each has a distinct owner. The static gate runs on the PR head and, since the
+`v*` trigger, on the tag SHA as well. Binding a certification run to a specific
+tree and its hashes belongs to
+[#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46). Proving the tag was
+created from the reviewed merge commit belongs to
+[#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49). Do not present
+evidence gathered on one as evidence for another; a green check on the PR head
+is not a certified tag.
+
+
+## 📖 Documentation and release notes
+
+Installation or packaging changes must keep [INSTALLATION.md](INSTALLATION.md) current. Release preparation must follow [RELEASING.md](RELEASING.md).
+
+Update the README, API and architecture material, recovery instructions, demo guidance, and the `[Unreleased]` section of `CHANGELOG.md` when behavior changes.
+
+Documentation must say:
+
+- what users can rely on;
+- inputs, outputs, defaults, side effects, and failure behavior;
+- supported and untested environments;
+- installation or migration steps;
+- numerical or platform assumptions; and
+- any known limitation introduced or exposed by the change.
+
+Do not edit a released version or tag merely to describe unreleased work. Release
+numbers, artifacts, hashes, and dates belong to the repository's release
+workflow.
+
+---
+
+### The wiki and the VERSION file
 
 The root `VERSION` file is the single release number this repository states.
 Module headers and the wiki track badges both derive from it, and it moves once
@@ -336,7 +417,7 @@ and an ordered inventory naming each page and the badge it carried. A passing ru
 that records nothing cannot be tied to anything later, and a wiki of fourteen
 agreeing pages would be indistinguishable from a wiki of one.
 
-### What the badge means, and when the two legitimately disagree
+#### What the badge means, and when the two legitimately disagree
 
 `wiki_tracks-v1.1.3` means *this page was written against the v1.1.3 contract*.
 It does not mean the tag exists. The badge is a release-candidate claim, and it
@@ -362,29 +443,7 @@ during it.
 The wiki gates no merge. It makes a silent failure loud, which is the failure
 that let the wiki fall a full release behind before v1.1.2.
 
-## 🧾 Three SHAs, three different claims
-
-A release involves three commits, and evidence attached to one of them says
-nothing about the others. Naming which is meant is not pedantry: the v1.1.1 and
-v1.1.2 tags were published from commits carrying no automated evidence at all,
-and the only way to notice that is to keep the three apart.
-
-| SHA | What it is | What evidence on it proves |
-|---|---|---|
-| **PR head** | The last commit on `release/v1.1.3` before merge | The reviewed tree passed the static gate and the bot reviewed *this* tree. It does not prove anything about `main`. |
-| **Merge SHA** | The merge commit created on `main` | `main` contains the reviewed tree. The merge itself is a new commit whose tree can differ from the PR head if anything was resolved during merge. |
-| **Tag SHA** | What `v1.1.3` points at | The artefact people install from. It should equal the merge SHA, and until the tag trigger existed nothing checked that it had ever been built. |
-
-Each has a distinct owner. The static gate runs on the PR head and, since the
-`v*` trigger, on the tag SHA as well. Binding a certification run to a specific
-tree and its hashes belongs to
-[#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46). Proving the tag was
-created from the reviewed merge commit belongs to
-[#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49). Do not present
-evidence gathered on one as evidence for another; a green check on the PR head
-is not a certified tag.
-
-## ✍️ Markdown is edited as text
+### Markdown is edited as text
 
 Never edit a Markdown file in a WYSIWYG editor. One escapes every character it
 believes is markup, and the result is a document that renders as literal
@@ -399,7 +458,26 @@ expression — and flagging it would make the gate wrong about correct documents
 An editor that escapes a fence escapes the prose around it too, so the rule
 detects the editor rather than every symptom.
 
-## 🔒 Independent reviews are internal
+
+## 🔐 Security, privacy, and provenance
+
+- Follow [SECURITY.md](SECURITY.md) for vulnerability reports.
+- Use synthetic, anonymized, or explicitly redistributable examples and data.
+- Remove names, email addresses, account identifiers, workbook properties,
+  document metadata, credentials, tokens, private URLs, and machine-specific
+  paths.
+- Verify the license and redistribution rights of copied code, formulas,
+  reference tables, images, and generated material.
+- Cite material algorithms and external reference data precisely enough for a
+  reviewer to verify them.
+- You remain responsible for the correctness, licensing, security, and
+  reviewability of tool-assisted contributions.
+
+---
+
+<a id="pull-requests"></a>
+
+### Independent reviews are internal
 
 From v1.1.3 onward this repository does not carry independent review documents.
 They are internal working material: they drive the issue set, and the issue set
@@ -425,7 +503,7 @@ identifier is the only public handle a reader has, and
 [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) publishes the
 disposition table those identifiers resolve against.
 
-## 🔗 Updating a pinned Action
+### Updating a pinned Action
 
 Every `uses:` reference in `.github/workflows/` is pinned to a full 40-character
 commit SHA with a trailing comment naming the release it is, and
@@ -460,191 +538,73 @@ To move a pin:
 A repository-local action — `uses: ./…` — is versioned by this repository's own
 history and is exempt. Nothing else is.
 
-## ✅ Required validation
-
-For production code changes:
-
-```text
-Debug → Compile VBAProject
-Test_EXCEL_UI_RunReleaseCertification
-UI_HideExcelUI / UI_ShowExcelUI
-capture / hide / reset
-```
-
-Certification is the gate. Quote its verdict line in the pull request:
-
-```text
-RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
-```
-
-A run reporting `INCOMPLETE`, any `skipped` count above zero, or
-`cleanup=FAILED` is not a pass, whatever the assertions that did execute
-reported. The narrower runners remain useful while iterating, but do not
-substitute for certification: `Test_EXCEL_UI_RunAll` executes no multi-window
-case and produces no machine-readable evidence.
-
-CI runs the static gate on every pull request. It cannot execute VBA — a hosted
-runner has no Excel — so certification remains a manual step on a real host, and
-the two are complementary rather than alternatives.
-
-Record only environments actually tested.
-
-## 🔒 Public API compatibility
-
-External compatibility is a promise about the `[supported]` facade in
-`M_EXCEL_UI`. It is not the same promise as the deployment rule that all four
-`src/` modules are replaced together: internal boundaries may move in a patch
-release without any caller-visible change, which is why a mixed-version project
-fails to compile even when the external API is untouched.
-
-Preserve the `[supported]` facade unless an explicitly approved breaking release
-requires otherwise:
-
-- public procedure and function names;
-- parameter order;
-- optional defaults;
-- enum values;
-- show/hide/leave-unchanged semantics;
-- fire-and-forget behavior;
-- ordered structured-result behavior;
-- application and window scope;
-- `UI_ShowExcelUI` as the emergency show-all operation.
-
-New backward-compatible parameters must normally be optional and trailing.
-
-## 📸 Snapshot changes
-
-Document and test:
-
-- captured state;
-- partial capture behavior;
-- Window identity strategy;
-- new, missing, closed, or recreated windows;
-- failure ordering;
-- behavior after VBA reset;
-- emergency recovery.
-
-Never restore per-window state by collection index.
-
-## 🪟 Title-bar changes
-
-Document and test:
-
-- exact style bits owned;
-- 32-bit and 64-bit declarations;
-- valid zero WinAPI returns;
-- `GetLastError` treatment;
-- `Application.Hwnd` changes;
-- frame refresh;
-- preservation of unrelated current style bits.
-
-Do not restore an entire stale `GWL_STYLE` value.
-
-## 🛡️ Error policy
-
-Production entry points are fail-soft unless the public contract explicitly says otherwise.
-
-| Rule | Rationale |
-|---|---|
-| Continue after unrelated element-level failures | One unreachable window must not cost the caller the other seven elements |
-| Never silently discard a failure | A caller acting on a false success is worse off than one told nothing happened |
-| Restore only a suppression this component confirmed it made | Writing a guessed baseline can overwrite caller state; certification must detect any final mismatch |
-| No unsolicited `MsgBox` | A library that blocks on a modal dialog cannot be automated |
-| Keep `On Error Resume Next` scopes narrow | A wide scope swallows the error you did not anticipate, which is the one that matters |
-| Preserve insertion order in diagnostics | Order is the only clue to which failure caused the others |
-
-> [!CAUTION]
-> Two rules protect a diagnostic from destroying the failure it describes. Both
-> have been violated in this repository, twice each, in code written by someone
-> who had just fixed the other instance.
->
-> **1. Anything reachable from an error handler must not be able to raise.**
-> A diagnostic that replaces the failure it was invoked to record is worse than
-> no diagnostic at all. Set the outputs that cannot fail before attempting
-> anything that can.
->
-> **2. Never read `Err` after calling anything, or after any `On Error`.**
-> Every form of `On Error` resets `Err`, and any procedure you call may contain
-> one. Capture what you need into locals first:
->
-> ```vb
-> ErrNumber = Err.Number
-> ErrDescription = Err.Description
-> ErrSource = Err.Source
-> ErrLine = Erl
-> ```
->
-> Then log, format and re-raise from the locals. Reading `Err` afterwards yields
-> zero and an empty string — and `Err.Raise 0` does not raise at all, so a
-> failure reported this way is not reported.
->
-> Passing `Err.Number` as a **call argument** is safe, because arguments are
-> evaluated before the call. That distinction is subtle enough to be worth
-> stating rather than leaving to be rediscovered.
-
-## ✒️ Source style
-
-Every module must use `Option Explicit`.
-
-Production and test modules should retain `Option Private Module` unless an approved API change requires otherwise.
-
-Use the established structured comment style with relevant sections such as:
-
-```text
-PURPOSE
-WHY THIS EXISTS
-INPUTS
-RETURNS
-BEHAVIOR
-ERROR POLICY
-DEPENDENCIES
-NOTES
-UPDATED
-```
-
-Prefer explicit procedure boundaries and cohesive modules over clever abstraction.
-
-## 🧹 Repository hygiene
-
-| Kind | Policy |
-|---|---|
-| Exported `.bas`, `.cls`, `.frm` | CRLF, pure ASCII |
-| Markdown and repository configuration | LF |
-| Workbooks, images, `.frx`, archives, PDFs | Binary, never line-merged |
-| Office lock files, backups, logs, credentials, client data | Never committed |
-| Formatting churn unrelated to the change | Never mixed into a functional commit |
-
-Line endings and binary handling are enforced by `.gitattributes`; exclusions by
-`.gitignore`; and both by `tools/check_repo.py`, which fails the build if a
-workbook binary or lock file is ever tracked. All three are meant to agree — if
-you find them disagreeing, that is a defect worth reporting.
-
-Binary workbooks are **release assets, not repository content**. Review any
-binary change separately from source.
 
 ## 🚀 Pull requests
 
-Keep a pull request focused on **one coherent concern**. A branch that fixes a
-defect and tidies formatting produces a diff in which neither can be reviewed.
+A pull request should answer:
 
 ```text
-[ ] Related issue linked
-[ ] Public behaviour and Semantic Versioning assessment stated
-[ ] Affected UI scope named
-[ ] State ownership unchanged, or the change justified
-[ ] Diagnostics and failure policy considered
-[ ] Validation environment recorded
-[ ] Certification verdict pasted
-[ ] Recovery evidence (UI_HideExcelUI / UI_ShowExcelUI)
-[ ] Documentation updated in the same pull request
-[ ] CHANGELOG.md entry added
-[ ] Binary demo impact assessed
+What problem does this solve?
+What observable contract changes?
+What remains compatible?
+How was it validated from this exact source?
+What evidence is independent?
+What remains unverified?
 ```
 
-> [!TIP]
-> Documentation belongs in the **same** pull request as the change it describes.
-> A follow-up documentation commit is a commit that does not get written.
+### Checklist
 
-A refactor is complete only when the public API still compiles and behaves
-identically under the regression harness. "It should be equivalent" is a
-hypothesis; the certification verdict is the test of it.
+```text
+[ ] Scope is focused and the related issue is linked
+[ ] Public API, compatibility, and release impact are assessed
+[ ] Exported VBA source and required binary companions are synchronized
+[ ] Relevant compile, static, regression, and manual checks are recorded
+[ ] Numerical/performance evidence is independent and reproducible where relevant
+[ ] Error, boundary, recovery, and cleanup paths are covered
+[ ] Caller-owned Excel state and platform/bitness concerns are addressed
+[ ] README, contracts, examples, and release notes are updated
+[ ] No confidential, restricted, generated, or accidental binary content is added
+[ ] Unverified environments and skipped checks are stated plainly
+[ ] Final diff contains no unrelated formatting or local artifacts
+```
+
+Reviews may request changes to scope, tests, contracts, compatibility,
+documentation, or evidence. Discussion must remain technical and respectful
+under the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+---
+
+## 🤝 Review and maintainer decisions
+
+Reviewers evaluate correctness, safety, maintainability, compatibility,
+evidence, documentation, and fit with the project's direction. Approval of an
+idea does not guarantee acceptance of every implementation detail.
+
+The maintainer may edit, squash, defer, or decline a contribution to protect the
+coherence and supportability of the project. Contributors will be credited
+through Git history and release notes where appropriate.
+
+---
+
+## 📄 Licensing
+
+By contributing, you agree that your contribution is licensed under the
+repository's [MIT License](LICENSE). You must have the right to submit every
+part of the contribution, including code, tests, data, images, and generated
+material.
+
+---
+
+## 👤 Maintainer
+
+Maintained by **Daniele Penza**.
+
+For ordinary contributions, use GitHub issues and pull requests. For sensitive
+security matters, use the private channel in [SECURITY.md](SECURITY.md).
+
+---
+
+### Contribution principle
+
+> Make the contract explicit, keep the diff focused, and leave evidence another
+> person can reproduce.
