@@ -368,8 +368,9 @@ No paid bug bounty is offered unless the maintainer states otherwise in writing.
 ## 📚 Related policies
 
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-- The repository README, contribution guidelines, license, release notes, and
-  project documentation where present
+- [Contributing Guidelines](CONTRIBUTING.md)
+- The repository README, license, release notes, and project documentation where
+  present
 - GitHub's platform security and acceptable-use policies
 
 Conduct complaints and vulnerability reports are different. Use the Code of
