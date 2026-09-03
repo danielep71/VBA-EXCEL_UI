@@ -1,413 +1,390 @@
-# 🔒 Security Policy
+<div align="center">
 
-<p align="left">
-  <img alt="Reporting" src="https://img.shields.io/badge/Reporting-Private-d97706">
-  <img alt="Scope" src="https://img.shields.io/badge/Scope-VBA_WinAPI_and_demo_artifacts-6f42c1">
-  <img alt="Stable release" src="https://img.shields.io/badge/Supported-Latest_tagged_release-217346">
-  <img alt="Development" src="https://img.shields.io/badge/Development-Best_effort-lightgrey">
-</p>
+# 🔒 VBA-EXCEL_UI Security Policy
 
-**VBA-EXCEL_UI** distributes plain-text VBA modules and a macro-enabled
-demonstration workbook.
+### Security, recovery, and trust boundaries for Excel and Windows UI state
 
-There is:
+[![Reporting](https://img.shields.io/badge/Reporting-Private-d97706?style=for-the-badge)](#reporting-a-vulnerability)
+[![Support](https://img.shields.io/badge/Support-Latest_release-217346?style=for-the-badge)](#supported-versions)
+[![Scope](https://img.shields.io/badge/Scope-Source_%7C_Releases_%7C_Automation-0969da?style=for-the-badge)](#security-scope)
+[![Disclosure](https://img.shields.io/badge/Disclosure-Coordinated-6f42c1?style=for-the-badge)](#coordinated-disclosure)
 
-- no installer;
-- no background service;
-- no package manager;
-- no third-party DLL shipped by the project;
-- no credential store;
-- no network service;
-- no automatic update mechanism.
+<br>
 
-The attack surface is limited, but it is not zero. The project uses:
+**Protect users · Minimize exposure · Preserve evidence · Coordinate disclosure**
 
-- VBA macros;
-- fixed Excel 4 macro commands for Ribbon control;
-- WinAPI calls for Excel main-window style management;
-- a binary `.xlsm` demo artifact;
-- process-wide Excel UI settings.
-
-Responsible disclosure therefore matters.
-
-> [!IMPORTANT]
-> Hiding Excel UI elements is a presentation and workflow feature. It is **not**
-> a security boundary, access-control mechanism, or substitute for workbook,
-> VBA-project, operating-system, or organizational security controls.
+</div>
 
 ---
+
+**VBA-EXCEL_UI** distributes plain-text VBA modules and macro-enabled demonstration artifacts that can change workbook-, window-, application-, Ribbon-, and Windows-native UI state.
+
+This policy explains which versions receive security attention, how to report a
+suspected vulnerability privately, what the project considers security-relevant,
+and which trust boundaries remain the responsibility of users and host
+organizations.
+
+> [!IMPORTANT]
+> A security policy does not make macros, workbooks, add-ins, source archives, or
+> release artifacts inherently trustworthy. Establish provenance and apply your
+> organization's security controls before enabling executable content.
+
+---
+
+<a id="security-model"></a>
+
+## 🧭 Security model
+
+The project assumes that:
+
+- Microsoft Excel, the operating system, and the VBA runtime are trusted;
+- the current user is authorized to open and run the workbook or add-in;
+- macros are enabled only through an approved trust mechanism;
+- project source or artifacts were obtained from an official channel; and
+- the host workbook and other code already trusted in the Excel process are not
+  malicious.
+
+These are trust boundaries, not guarantees. VBA projects running in the same
+Excel process are not isolated security sandboxes.
+
+Hiding Excel interface elements is a presentation and workflow feature. It is not access control, authorization, segregation of duties, or a substitute for workbook, VBA-project, operating-system, or organizational security controls.
+
+---
+
+<a id="supported-versions"></a>
 
 ## 📦 Supported versions
 
-| Version or branch | Support status |
+| Source state | Security support |
 |---|---|
-| Latest tagged release | ✅ Supported |
-| Current release branch before publication | ⚠️ Release-candidate testing only |
-| `main` | ⚠️ Best-effort development support |
-| Older tags | ❌ Normally unsupported unless the issue also affects the latest release |
-| Modified third-party copies | ❌ Unsupported |
+| **Latest tagged functional release** | ✅ Supported |
+| **Release candidate before publication** | ⚠️ Testing and best-effort remediation |
+| **main** | ⚠️ Development code; best effort |
+| **Older tagged releases** | ❌ Normally unsupported; upgrade first |
+| **Modified copies, unofficial forks, or mirrors** | ❌ Unsupported unless the issue reproduces in official supported source |
 
-Security fixes are normally prepared on a controlled branch and included in a
-new tagged release.
+If the project has not yet published a functional release, development code is
+pre-release and no production version is security-supported.
 
-When reporting an issue, identify the exact source state:
+Security fixes normally land on **main** and are included in a new tagged
+release. Older releases are not normally patched in place unless the maintainer
+states otherwise.
 
-- a release tag; or
-- the full Git commit SHA.
-
-Do not report only “latest,” because repository branches can change after the
-issue is observed.
+Reports must identify an exact release tag or full commit SHA. Descriptions such
+as “latest” or “yesterday's main” are insufficient because branches change.
 
 ---
+
+<a id="reporting-a-vulnerability"></a>
 
 ## 📣 Reporting a vulnerability
 
-**Do not open a public GitHub issue for a suspected security vulnerability.**
+Do **not** disclose a suspected vulnerability in a public issue, discussion,
+pull request, commit message, Wiki page, sample workbook, screenshot, or release
+thread.
 
-Use one of these private channels:
+Use either private channel:
 
-### 1. GitHub private vulnerability reporting
+1. On the repository **Security** page, select **Report a vulnerability** when
+   GitHub private vulnerability reporting is available.
+2. Otherwise email **danielep71@gmail.com** with the subject:
+   **Private security report — VBA-EXCEL_UI**.
 
-Where enabled:
+Include the smallest amount of information needed to reproduce and assess the
+issue:
 
-1. Open the repository’s **Security** tab.
-2. Select **Report a vulnerability**.
-3. Submit the report privately.
+| Evidence | Requested detail |
+|---|---|
+| 🧾 **Identity** | Repository, exact tag or full commit SHA, file, module, procedure, and artifact |
+| 🖥️ **Environment** | Excel version/build, Office bitness, Windows version, locale, and deployment model |
+| 🎯 **Impact** | Confidentiality, integrity, availability, code-execution, or supply-chain consequence |
+| 🔬 **Reproduction** | Minimal steps and proof using synthetic data |
+| 🧨 **Exploitability** | Preconditions, required trust, user interaction, affected scope, and persistence |
+| 🛡️ **Mitigation** | Workaround or containment already tested, if any |
+| 📎 **Evidence** | Sanitized logs, diagnostics, screenshots, hashes, or proof of concept |
+| 🪟 **UI context** | Workbook and window identity, active window, affected surface, handle/style state, and multi-window conditions |
+| 🔄 **Lifecycle** | Capture, apply, nested use, restore, emergency cleanup, process exit, and any residual state |
+| 🧩 **Command path** | Public procedure, Ribbon callback, fixed Excel macro command, WinAPI call, or other path involved |
 
-### 2. Email the maintainer
+Do not send real client, employer, counterparty, student, production, or personal
+workbooks. Remove credentials, tokens, personal data, internal paths,
+connections, external links, document metadata, hidden names, cached values,
+queries, and other unrelated content.
 
-```text
-danielep71@gmail.com
-```
-
-Use a clear subject such as:
-
-```text
-Private security report — VBA-EXCEL_UI
-```
-
-Include:
-
-- affected release tag or full commit SHA;
-- affected file, module, and procedure;
-- Excel product and version;
-- Office 32-bit or 64-bit;
-- Windows version;
-- workbook and Excel window state;
-- whether the official demo workbook was used;
-- minimal reproduction steps;
-- observed behavior;
-- expected behavior;
-- practical confidentiality, integrity, or availability impact;
-- whether exploitation requires a modified workbook or untrusted macro source;
-- any proposed mitigation;
-- whether public disclosure has already occurred.
-
-Do not attach workbooks containing:
-
-- confidential information;
-- client data;
-- credentials;
-- personal data;
-- proprietary VBA;
-- production connections or external links.
-
-Provide a sanitized minimal reproduction where possible.
+If a secret has been exposed, revoke or rotate it immediately before spending
+time perfecting the report.
 
 ---
 
-## 🎯 What qualifies as a security issue
+<a id="response-process"></a>
 
-Examples that should be reported privately include:
+## ⏱️ Response process
 
-### Code execution and trust boundary
+This project is maintained by one person. Response times are best-effort rather than a contractual SLA.
 
-- execution of unintended code caused by repository-supplied source or artifacts;
-- a repository-supplied workbook containing unexpected macros, links, connections,
-  or embedded content;
-- unsafe dynamic construction of macro commands;
-- introduction of arbitrary `Shell` execution or external executable invocation;
-- a path that allows untrusted input to select or construct WinAPI calls.
+The maintainer aims to:
 
-### Integrity
+| Stage | Target |
+|---|---|
+| **Acknowledgement** | Within 5 business days |
+| **Initial scope and severity assessment** | Within 10 business days after sufficient evidence is available |
+| **Progress update for an active investigation** | At least every 14 days |
+| **Remediation and disclosure** | Proportionate to severity, exploitability, affected users, and validation needs |
 
-- unintended modification of workbook data, VBA projects, files, or external
-  resources;
-- title-bar or window-style changes that corrupt the Excel host state beyond the
-  documented UI effect;
-- failure behavior that persistently damages the Excel user interface after
-  reasonable recovery attempts;
-- a crafted call that applies UI changes outside the documented Excel process or
-  scope.
+The process normally includes reproducing the issue, determining affected
+versions and artifacts, containing active risk, developing a fix, adding
+regression or fault-injection evidence, validating in the relevant Excel and
+Windows environment, and preparing a corrected release or advisory.
 
-### Confidentiality
+Targets may change when reproduction requires unavailable Office versions,
+hardware, long-running behavior, third-party coordination, or sanitized evidence
+from the reporter. Material delays will be communicated when practical.
 
-- disclosure of workbook, environment, file, or user information beyond the
-  documented result or diagnostic behavior;
-- diagnostics that expose sensitive data unexpectedly;
-- repository artifacts containing undisclosed personal, confidential, or
-  machine-specific information.
-
-### Availability
-
-- a crafted input or state that causes persistent Excel hangs, uncontrolled loops,
-  runaway resource consumption, or repeated crashes;
-- a recovery failure that prevents practical restoration of the Excel interface
-  and requires process termination;
-- a title-bar or Ribbon path that creates an exploitable denial of service beyond
-  an ordinary reproducible defect.
-
-### Supply-chain integrity
-
-- tampering with release artifacts;
-- mismatch between a tagged release and the documented source;
-- malicious content in a committed `.xlsm` artifact;
-- compromised links or instructions that direct users to untrusted downloads.
-
-When uncertain, report privately. The maintainer can reclassify the report safely.
+Reporter credit can be included in an advisory or release notes when requested.
+Anonymous credit is also acceptable.
 
 ---
 
-## 🐞 Ordinary bugs
+<a id="security-triage"></a>
 
-A serious defect is not automatically a security vulnerability.
+## 🎯 Security issue or ordinary defect?
 
-Use a public issue for problems such as:
+When uncertain, report privately. The maintainer can reclassify a report safely.
 
-- an element does not show or hide correctly;
-- a no-op write occurs unnecessarily;
-- the Ribbon state cannot be read on one Excel version;
-- the title bar renders incorrectly but does not create a concrete security or
-  availability impact;
-- the wrong failure count or message is returned;
-- a snapshot restores the wrong per-window state without a security consequence;
-- `ScreenUpdating` is restored incorrectly but Excel remains recoverable;
-- documentation is inaccurate;
-- a demo control is misaligned;
-- performance is suboptimal but bounded.
+Security reports include credible risks of:
 
-Public bug reports should still avoid confidential workbooks and personal data.
+- unintended code execution or crossing a documented trust boundary;
+- unauthorized reading, modification, deletion, or disclosure of data;
+- persistent or exploitable loss of availability;
+- credential, token, signing-key, runner, or automation compromise;
+- malicious, substituted, or misleading official release artifacts;
+- validation or provenance bypasses that can represent an unsafe artifact as
+  trusted; or
+- a correctness defect deliberately exploitable to defeat a security,
+  authorization, integrity, or control boundary.
+
+An incorrect result, compatibility problem, bounded performance regression,
+documentation error, or recoverable UI defect is normally an ordinary bug unless
+it creates a concrete security impact.
+
+### Severity guide
+
+| Severity | Typical impact |
+|---|---|
+| **Critical** | Unintended code execution, exposed release credentials, compromised official artifacts, or broad unauthorized data access |
+| **High** | Significant integrity/confidentiality loss, persistent host compromise, or practical supply-chain exploitation |
+| **Moderate** | Bounded availability or integrity impact requiring meaningful preconditions |
+| **Low** | Hardening weakness or limited impact without demonstrated exploitation |
+
+Severity considers impact, exploitability, required privileges, user
+interaction, affected versions, recoverability, and whether trusted malicious
+VBA is already required.
 
 ---
 
-## 🧭 Scope
+<a id="security-scope"></a>
+
+## 🛠️ Security scope
 
 ### In scope
 
-- `src/M_EXCEL_UI.bas`;
-- `src/M_EXCEL_UI_RUNTIME.bas`;
-- `src/M_EXCEL_UI_SNAPSHOT.bas`;
-- `src/M_EXCEL_UI_TITLEBAR.bas`;
-- `demo/M_EXCEL_UI_DEMO.bas`;
-- `demo/M_DEMO_BUILDER.bas`;
-- `test/M_EXCEL_UI_REGRESSION_TESTS.bas`;
-- the official demo workbook published as a release asset;
-- repository release archives and attached release artifacts;
-- fixed Excel 4 macro use for Ribbon management;
-- WinAPI declarations and window-style handling;
-- documented recovery and safe-use instructions;
-- behavior that violates the project’s stated integrity boundary.
+- official source and committed executable or macro-enabled artifacts;
+- official GitHub Release assets, archives, checksums, manifests, and provenance
+  claims;
+- repository-owned build, test, validation, packaging, and release tooling;
+- GitHub Actions workflows, permissions, dependencies, and project-managed
+  credentials;
+- documented runtime integrations and trust boundaries; and
+- security or integrity behavior introduced by this project's code.
+
+### Project-specific risk surfaces
+
+- **Trust-boundary confusion** — representing hidden UI as protection against users, macros, add-ins, automation, or file manipulation.
+- **Process-wide effects** — state changes that escape the documented workbook/window scope or cannot be recovered safely.
+- **Native window handling** — stale or recycled handles, incorrect pointer-width declarations, unsafe style masks, and failed rollback.
+- **Command construction** — changing fixed Ribbon or Excel macro commands into user-controlled executable text.
+- **Artifact integrity** — undisclosed macros, links, connections, payloads, or differences between source, tags, and demo workbooks.
+- **Availability** — persistent UI loss, hangs, loops, crashes, or recovery failures beyond an ordinary bounded defect.
 
 ### Out of scope
 
-- vulnerabilities in Microsoft Excel, Office, Windows, GitHub, or the VBA runtime;
-- organization-controlled macro-security configuration;
-- unrelated macros or add-ins in the host Excel process;
-- malicious workbooks not supplied by this repository;
-- user modifications to the source;
-- copies downloaded from unofficial mirrors;
-- unsupported historical snapshots;
-- social-engineering attacks unrelated to project content;
-- UI hiding treated as an access-control bypass;
-- ordinary bugs without a concrete security impact.
+- vulnerabilities in Microsoft Excel, Office, Windows, GitHub, Python, or the
+  VBA runtime themselves;
+- organization-controlled macro security, endpoint controls, access rights, or
+  deployment policy;
+- malicious VBA already trusted and running in the same Excel process;
+- unrelated workbooks, add-ins, dependencies, or infrastructure;
+- modified copies that do not reproduce the issue in official supported source;
+- unofficial mirrors, repackaged binaries, or unsupported historical snapshots;
+- lost or stolen user credentials not exposed by this project;
+- social engineering unrelated to official project content; and
+- ordinary defects without a concrete security impact.
 
-A vulnerability in Excel or Windows should be reported to the relevant vendor.
-
----
-
-## 🪟 Security considerations for UI and WinAPI behavior
-
-### UI hiding is not protection
-
-This library can hide interface elements, but it does not prevent:
-
-- keyboard shortcuts;
-- other macros;
-- add-ins;
-- the VBA Editor;
-- workbook file manipulation;
-- programmatic access through Excel automation;
-- a knowledgeable user from restoring interface elements.
-
-Do not use this project to enforce authorization or segregation of duties.
-
-### Process-wide effects
-
-Some managed properties are application-level and affect the current Excel
-process, not only one workbook.
-
-A host workbook should:
-
-- document this effect;
-- apply constrained UI only when appropriate;
-- provide a recovery path;
-- restore or show the managed UI before shutdown where practical.
-
-### WinAPI title-bar handling
-
-Window-style changes are sensitive because incorrect masks or handles can affect
-the Excel frame.
-
-Security-sensitive review is required for changes to:
-
-- `GetWindowLong` / `GetWindowLongPtr`;
-- `SetWindowLong` / `SetWindowLongPtr`;
-- `SetWindowPos`;
-- style masks;
-- `Application.Hwnd` tracking;
-- error handling around valid zero returns;
-- frame refresh flags.
-
-### Ribbon macro command
-
-The Ribbon path uses a fixed Excel 4 macro command.
-
-Do not change it to accept arbitrary user-controlled macro text. Any additional
-Excel 4 macro use requires explicit security review and documentation.
+Upstream vulnerabilities should be reported to the responsible vendor or
+platform.
 
 ---
 
-## ⏱️ Disclosure process
+<a id="data-and-secrets"></a>
 
-This is a solo-maintained open-source project, so response times are best effort.
+## 🔐 Data and secret handling
 
-The expected process is:
+Never commit, upload, log, or attach:
 
-1. The report is acknowledged.
-2. The affected source and environment are identified.
-3. The issue is reproduced where possible.
-4. Security impact and affected versions are assessed.
-5. A remediation and release strategy is agreed.
-6. A fix is developed on a private or controlled branch when necessary.
-7. Regression and recovery tests are added.
-8. A corrected tagged release is published.
-9. Public disclosure follows after users have had reasonable time to update.
+- passwords, personal access tokens, API keys, signing keys, certificates, or
+  connection strings;
+- client, employer, counterparty, student, employee, or personal data;
+- proprietary source, models, workbooks, market data, production extracts, or
+  licensed vendor content;
+- internal URLs, machine-specific paths, environment dumps, or unredacted
+  screenshots; or
+- proof-of-concept material beyond what is necessary to establish the issue.
 
-Please allow reasonable time for investigation and remediation before public
-disclosure.
+Use synthetic data and a minimal reproduction. Excel files can carry sensitive
+material outside visible cells, including document properties, defined names,
+hidden sheets, VBA, cached values, Power Query data, external links, and
+connections.
 
-Credit will be included in release notes when requested, unless anonymity is
-preferred.
-
----
-
-## 🧰 Safe-use guidance
-
-### Obtain and inspect source safely
-
-- Obtain source only from the official repository or a tagged release.
-- Record the release tag or commit SHA used.
-- Review plain-text `.bas` files before importing them.
-- Treat macro-enabled workbooks as executable content.
-- Review the official `.xlsm` demo before enabling macros.
-- Do not enable macros in a workbook obtained from an untrusted mirror.
-
-### Preserve macro security
-
-- Keep Excel macro security at the organization’s approved level.
-- Do not lower macro-security settings solely to use this project.
-- Prefer trusted locations, signed macros, or organizational deployment controls
-  where required by policy.
-- Do not instruct users to disable Protected View globally.
-- Do not bypass Mark-of-the-Web controls without verifying file provenance.
-
-### Compile and test
-
-After importing:
-
-```text
-VBA Editor → Debug → Compile VBAProject
-```
-
-Then run:
-
-```vb
-Test_EXCEL_UI_RunCore
-Test_EXCEL_UI_RunTitleBarOnly
-Test_EXCEL_UI_RunAll
-```
-
-Perform emergency recovery validation:
-
-```vb
-UI_HideExcelUI
-UI_ShowExcelUI
-```
-
-### Maintain a recovery path
-
-Host solutions should keep an accessible recovery procedure:
-
-```vb
-Public Sub RestoreManagedExcelUI()
-    UI_ShowExcelUI
-End Sub
-```
-
-Where appropriate, expose it through:
-
-- the VBA Editor;
-- a trusted custom Ribbon control;
-- the Quick Access Toolbar;
-- a documented startup or shutdown recovery path.
-
-### Protect sensitive information
-
-- Do not include client or personal data in issues.
-- Sanitize screenshots.
-- Remove external links and connections from demonstration workbooks.
-- Do not embed credentials in VBA.
-- Do not log sensitive workbook values in UI failure messages.
-
-### Windows downloaded-file blocking
-
-If Windows marks downloaded files as blocked:
-
-1. verify the official source and release;
-2. inspect the files;
-3. follow organizational policy;
-4. use **Properties → Unblock** only after provenance has been established.
+Repository secrets must be scoped to the smallest necessary workflow, protected
+from untrusted pull-request code, excluded from logs and artifacts, and rotated
+after suspected exposure.
 
 ---
 
-## 🔍 Verifying a release
+<a id="supply-chain"></a>
 
-For controlled use:
+## 📦 Supply-chain and release integrity
 
-1. download from the official repository release page;
-2. record the tag;
-3. inspect the release notes;
-4. review the `.bas` modules;
-5. compare repository content with the tag;
-6. scan the `.xlsm` artifact under organizational policy;
-7. compile the VBA project;
-8. run the regression harness;
-9. document the tested Excel and Windows environment.
+Trusted distribution is limited to the official repository and its GitHub
+Releases page.
 
-Checksums may be added to future releases. Until then, the Git tag and repository
-history are the primary source-integrity references.
+Maintainers should:
+
+- review executable and macro-enabled artifacts before publication;
+- pin third-party workflow actions to immutable commit SHAs;
+- grant workflows the minimum required permissions;
+- keep build, validation, signing, and publication responsibilities separated
+  where practical;
+- publish checksums, manifests, attestations, or signatures when the release
+  process supports them; and
+- document exactly what each piece of release evidence proves.
+
+A checksum proves file identity. It does not prove that the file is safe, that
+it was built from the stated source, or that it executed successfully in Excel.
+
+Source hashes, artifact hashes, source-to-artifact provenance, Excel execution
+evidence, and signing identity are distinct claims and must not be conflated.
 
 ---
+
+<a id="automation"></a>
+
+## 🤖 Repository automation and runners
+
+Workflow code and configuration are security-sensitive.
+
+- Do not expose secrets to pull requests from forks or other untrusted code.
+- Do not run untrusted contributions on a persistent self-hosted Excel/Windows
+  runner with repository, user, network, or signing credentials.
+- Use ephemeral or isolated runners where practical.
+- Clean workbooks, temporary files, Excel processes, credentials, and workspace
+  state between jobs.
+- Treat logs, screenshots, workbooks, test artifacts, and environment metadata
+  as potentially sensitive.
+- Review changes to workflow permissions, action pins, release jobs, dependency
+  acquisition, and artifact upload/download paths as security changes.
+
+Automation that writes repository content or publishes releases must have
+explicit, least-privilege authorization.
+
+---
+
+<a id="safe-use"></a>
+
+## ✅ Safe-use guidance
+
+Users should:
+
+- obtain source and demo artifacts only from the official repository or Releases page;
+- treat macro-enabled workbooks as executable content and inspect them before enabling macros;
+- preserve organization-approved macro security, Protected View, signing, and deployment controls;
+- document process-wide effects and keep a trusted emergency UI-restoration path;
+- test capture, nested use, restore, and cleanup in a controlled non-production workbook;
+- sanitize workbooks and screenshots before sharing them; and
+- review WinAPI, Excel macro-command, handle, workflow, and release-artifact changes as security-sensitive.
+
+No numerical, statistical, pricing, timing, or UI result from this project is by
+itself an authentication, authorization, access-control, cryptographic,
+financial-advice, or safety-critical mechanism.
+
+---
+
+<a id="coordinated-disclosure"></a>
+
+## 📣 Coordinated disclosure
+
+Avoid public disclosure while exploitability is being assessed, a fix is being
+prepared, affected users have not had reasonable time to update, an exposed
+secret remains valid, or a malicious artifact or runner remains reachable.
+
+The maintainer and reporter should agree a disclosure plan based on severity,
+active exploitation, remediation complexity, availability of a workaround, and
+the time needed to validate a corrected release.
+
+The maintainer may ask for a sanitized reproduction, additional environment
+detail, confirmation against a candidate fix, or a reasonable embargo. The
+reporter does not surrender ownership of their research.
+
+When remediation is available, the project may publish a GitHub Security
+Advisory, corrected release, release-note entry, mitigation guidance, and credit
+agreed with the reporter.
+
+---
+
+<a id="safe-harbor"></a>
+
+## 🛡️ Good-faith research and safe harbor
+
+Good-faith security research is welcome when it:
+
+- stays within this project's source, artifacts, and documented integrations;
+- avoids privacy violations, data destruction, service disruption, persistence,
+  social engineering, and access to data beyond what is necessary;
+- stops after establishing the minimum evidence required;
+- reports the issue privately and promptly; and
+- allows reasonable time for investigation and remediation.
+
+The project will not initiate or recommend legal action solely for research
+conducted in good faith and consistently with this policy. This statement does
+not authorize testing of third-party systems or bind Microsoft, GitHub, an
+employer, a client, or any other third party.
+
+No paid bug bounty is offered unless the maintainer states otherwise in writing.
+
+---
+
+<a id="related-policies"></a>
 
 ## 📚 Related policies
 
-- [Contributing Guidelines](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-- [MIT License](LICENSE)
-- [Project README](README.md)
+- The repository README, contribution guidelines, license, release notes, and
+  project documentation where present
+- GitHub's platform security and acceptable-use policies
+
+Conduct complaints and vulnerability reports are different. Use the Code of
+Conduct for participant behavior and this policy for software risk.
 
 ---
 
-## 👤 Maintainer
+<div align="center">
 
-Maintained by **Daniele Penza**.
+### Security principle
+
+**Trust deliberately · Run minimally · Protect secrets · Preserve evidence · Disclose responsibly**
+
+<br>
+
+Maintained by **Daniele Penza**
+
+</div>
