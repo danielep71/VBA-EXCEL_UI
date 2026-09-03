@@ -1,117 +1,78 @@
 #==============================================================================
-# .gitattributes
+# VBA-EXCEL_UI .gitattributes
 #------------------------------------------------------------------------------
 # PURPOSE
-#   Define deterministic line-ending, binary, merge, diff, and reporting
-#   behavior for a pure-VBA Excel component repository.
+#   Define deterministic Git behavior for exported UI source, Python repository tooling, documentation, and release assets.
 #
 # POLICY
-#   - Exported VBA source is CRLF in the working tree, matching the Windows VBE.
-#   - Documentation, configuration, and cross-platform scripts are LF.
-#   - Office packages, form binaries, archives, and media are never normalized
-#     and are never line-merged.
-#   - VBA source is reported to GitHub Linguist explicitly rather than by
-#     extension heuristics.
+#   - Exported VBA source is normalized in Git and checked out as CRLF.
+#   - Repository text and cross-platform tooling are checked out as LF.
+#   - Office packages, UserForm binaries, archives, and media remain binary.
+#   - Binary payloads never receive text normalization or line-based merges.
+#   - GitHub Linguist reports exported modules as VBA and treats visual assets
+#     as documentation rather than vendored code.
 #
 # PLACEMENT
-#   This file must live at the repository root. The [attr] macro definitions
-#   below are only honored in a top-level .gitattributes; they are ignored in
-#   subdirectory .gitattributes files.
+#   Keep this file at the repository root. Custom [attr] macros are honored only
+#   in a top-level attributes file.
 #
-# FIRST-TIME ADOPTION
-#   Adding or changing text/eol attributes does not rewrite already-committed
-#   blobs. After adding this file to an existing repository, run once:
+# ADOPTION / POLICY CHANGES
+#   Attribute changes do not rewrite existing blobs automatically. Inspect any
+#   normalization separately:
 #
+#       git add --renormalize --dry-run .
 #       git add --renormalize .
-#       git commit -m "chore: normalize line endings per .gitattributes"
+#       git diff --cached --check
 #
-#   Do that as its own commit so the one-time normalization diff never mixes
-#   with a functional change.
+#   Commit a required normalization as its own mechanical change.
 #
-# OPTIONAL LOCAL CONFIG
-#   The vba diff driver below is inert unless each clone defines it. To get
-#   procedure names in diff hunk headers, run once per clone:
+# VBA DIFF DRIVER
+#   The vba driver below is harmless without local configuration. For procedure
+#   names in diff hunk headers, configure each clone once:
 #
 #       git config diff.vba.xfuncname \
 #         "^([ \t]*(Public|Private|Friend)?[ \t]*(Static[ \t]+)?(Sub|Function|Property[ \t]+(Get|Let|Set))[ \t]+[A-Za-z_].*)$"
 #
-#   The outer capture group is load-bearing. Git renders capture group 1 when
-#   the pattern has one, so a regex that groups only the visibility keyword
-#   produces hunk headers reading "Public" instead of the signature. Wrapping
-#   the whole line makes group 1 the entire declaration:
-#
-#       @@ -6,7 +6,7 @@ Public Sub Alpha()
-#
-#   rather than:
-#
-#       @@ -6,7 +6,7 @@ Public
-#
-#   If the driver is not defined, Git silently falls back to default hunk
-#   headers. Nothing breaks; diffs are merely harder to read.
+#   The outer capture group is intentional: it returns the complete declaration
+#   rather than only a visibility keyword.
 #==============================================================================
 
 
 #------------------------------------------------------------------------------
-# MACRO DEFINITIONS
+# REUSABLE ATTRIBUTE POLICIES
 #------------------------------------------------------------------------------
-# Named policies, so the intent of each rule below is stated once.
-#   vba-source   Exported VBE text: CRLF working tree, VBA-aware diff, VBA stats
-#   vba-form-bin Form binary companion: opaque, unmergeable, hidden from diffs
-#   office-doc   Office package: opaque, unmergeable, excluded from stats
-#   opaque       Any other binary payload: opaque and unmergeable
 [attr]vba-source    text eol=crlf diff=vba linguist-language=VBA
-[attr]vba-form-bin  binary merge=binary linguist-generated=true
-[attr]office-doc    binary merge=binary linguist-detectable=false
+[attr]vba-form-bin  binary merge=binary linguist-generated
+[attr]office-doc    binary merge=binary -linguist-detectable
 [attr]opaque        binary merge=binary
 
 
 #------------------------------------------------------------------------------
-# DEFAULT TEXT DETECTION
+# DETERMINISTIC DEFAULT
 #------------------------------------------------------------------------------
-# Fallback for anything not classified below. Explicit rules always win.
-* text=auto
+# Normalize detected text to LF in the index and use LF in the working tree.
+# Explicit VBA and Windows-native rules below override the working-tree EOL.
+* text=auto eol=lf
 
 
 #------------------------------------------------------------------------------
 # EXPORTED VBA SOURCE
 #------------------------------------------------------------------------------
-# CRLF is required for predictable VBE import/export round-trips and prevents
-# a contributor's operating system from producing line-ending-only diffs.
-# .cls and .frm are ambiguous extensions to Linguist (LaTeX, Apex, VB6), so the
-# language is declared rather than inferred.
 *.bas   vba-source
 *.cls   vba-source
 *.frm   vba-source
-
-# Binary companion emitted alongside an exported UserForm. A textual merge of
-# this file corrupts the form; it must fail loudly instead.
 *.frx   vba-form-bin
 
 
 #------------------------------------------------------------------------------
-# WINDOWS SCRIPTS AND HOST-SENSITIVE TEXT
+# PYTHON TOOLING
 #------------------------------------------------------------------------------
-# These are consumed by Windows interpreters that can misbehave on LF input.
-*.bat   text eol=crlf
-*.cmd   text eol=crlf
-*.ps1   text eol=crlf
-*.psm1  text eol=crlf
-*.psd1  text eol=crlf
-*.vbs   text eol=crlf
-*.reg   text eol=crlf
-*.ini   text eol=crlf
-
-
-#------------------------------------------------------------------------------
-# CROSS-PLATFORM SCRIPTS AND TOOLING SOURCE
-#------------------------------------------------------------------------------
-*.sh    text eol=lf
 *.py    text eol=lf
 *.pyw   text eol=lf
 
 
 #------------------------------------------------------------------------------
-# DOCUMENTATION AND CONFIGURATION
+# DOCUMENTATION AND STRUCTURED CONFIGURATION
 #------------------------------------------------------------------------------
 *.md            text eol=lf
 *.txt           text eol=lf
@@ -125,19 +86,21 @@
 *.toml          text eol=lf
 *.cfg           text eol=lf
 *.svg           text eol=lf
+
+.editorconfig   text eol=lf
 .gitattributes  text eol=lf
 .gitignore      text eol=lf
 .gitkeep        text eol=lf
-.editorconfig   text eol=lf
 LICENSE         text eol=lf
+VERSION         text eol=lf
 CITATION.cff    text eol=lf
 
 
 #------------------------------------------------------------------------------
-# OFFICE PACKAGES
+# MICROSOFT OFFICE PACKAGES
 #------------------------------------------------------------------------------
-# Zip containers. Never normalized, never line-merged, and excluded from the
-# repository language breakdown so a demo workbook cannot skew it.
+# Office Open XML files are ZIP containers; legacy formats are binary. Keep all
+# of them opaque to text conversion and line-based merge machinery.
 *.xls   office-doc
 *.xlsx  office-doc
 *.xlsm  office-doc
@@ -154,15 +117,20 @@ CITATION.cff    text eol=lf
 *.doc   office-doc
 *.docx  office-doc
 *.docm  office-doc
+*.dot   office-doc
 *.dotx  office-doc
 *.dotm  office-doc
+
 *.ppt   office-doc
 *.pptx  office-doc
 *.pptm  office-doc
+*.pot   office-doc
 *.potx  office-doc
 *.potm  office-doc
+*.pps   office-doc
 *.ppsx  office-doc
 *.ppsm  office-doc
+*.ppam  office-doc
 
 *.accdb office-doc
 *.accde office-doc
@@ -174,22 +142,15 @@ CITATION.cff    text eol=lf
 
 #------------------------------------------------------------------------------
 # OFFICE LOCK FILES
-#
-# Office writes an owner file beside any open document. These are ignored by
-# .gitignore and must never be tracked, but the rule is stated here as well so
-# that a lock file which reaches the index by accident cannot be normalized,
-# line-merged, or counted as a language.
-#
-# tools/check_repo.py fails the build if one is ever tracked.
 #------------------------------------------------------------------------------
-
+# Normally ignored, but still classified defensively if one reaches the index.
 ~$*        opaque
 *.laccdb   opaque
 *.ldb      opaque
 
 
 #------------------------------------------------------------------------------
-# ARCHIVES AND DISTRIBUTION ARTIFACTS
+# ARCHIVES, EXECUTABLES, AND NATIVE BINARIES
 #------------------------------------------------------------------------------
 *.zip   opaque
 *.7z    opaque
@@ -210,9 +171,9 @@ CITATION.cff    text eol=lf
 
 
 #------------------------------------------------------------------------------
-# IMAGES AND MEDIA
+# IMAGES, MEDIA, DOCUMENTS, AND FONTS
 #------------------------------------------------------------------------------
-# Note: .svg is text and is handled in the documentation section above.
+# SVG remains reviewable text and is classified in the text section above.
 *.png   opaque
 *.jpg   opaque
 *.jpeg  opaque
@@ -239,49 +200,31 @@ CITATION.cff    text eol=lf
 
 
 #------------------------------------------------------------------------------
-# LANGUAGE REPORTING
+# GITHUB LANGUAGE REPORTING
 #------------------------------------------------------------------------------
-# Keep the GitHub language bar representative of the component itself.
-# Screenshots, banners, and social previews carry no language signal but are
-# marked explicitly so intent is recorded rather than inferred.
-assets/**   linguist-vendored
-images/**   linguist-vendored
+# These directories contain project documentation visuals, not vendored code.
+images/**        linguist-documentation
 
 
 #------------------------------------------------------------------------------
-# ARCHIVE AND RELEASE HYGIENE
+# ARCHIVE HYGIENE
 #------------------------------------------------------------------------------
-# Excluded from `git archive`, which is what produces the GitHub source ZIP and
-# release tarballs. Repository plumbing is not part of a consumable release.
-# Note: `git archive` honors the eol attribute, so exported VBA source arrives
-# CRLF in the ZIP regardless of the machine that generated it.
+# These rules apply to git archive and archive producers that honor Git
+# attributes. Repository plumbing is not part of a consumable source package.
 .gitattributes  export-ignore
 .gitignore      export-ignore
-.github/        export-ignore
 .editorconfig   export-ignore
+.github/**      export-ignore
 
 
 #==============================================================================
-# OPTIONAL — ENABLE PER REPOSITORY
+# OPTIONAL PER-REPOSITORY ENCODING POLICY
 #------------------------------------------------------------------------------
-# Uncomment only what applies. Each line is inert while commented.
+# VBE exports use the Windows system code page. If non-ASCII VBA source is not
+# valid UTF-8 and every supported Git client handles working-tree-encoding,
+# consider enabling these rules after a dedicated round-trip and normalization
+# test. Leave them disabled for pure ASCII source.
 #
-# Generated evidence artifacts: keep them versioned and diffable, but collapsed
-# by default in pull requests and excluded from language statistics.
-#   benchmark/**/*.csv  linguist-generated=true
-#   benchmark/**/*.md   linguist-generated=true
-#
-# ANSI-encoded VBA exports. The VBE writes .bas/.cls/.frm in the system code
-# page, not UTF-8, so any non-ASCII character (accented letters, en dashes,
-# typographic quotes) is stored as a byte GitHub cannot render. This converts
-# to UTF-8 in the repository and back to Windows-1252 in the working tree.
-#
-# Before enabling, confirm the files are actually non-ASCII and non-UTF-8:
-#   git ls-files -z '*.bas' '*.cls' '*.frm' | xargs -0 file --mime-encoding
-#
-# Requires Git 2.18+ in every clone, and a renormalization commit. Git verifies
-# the round-trip and warns if a file cannot convert cleanly. If the sources are
-# pure ASCII, leave this off — it buys nothing and adds a compatibility floor.
 #   *.bas  working-tree-encoding=windows-1252
 #   *.cls  working-tree-encoding=windows-1252
 #   *.frm  working-tree-encoding=windows-1252
