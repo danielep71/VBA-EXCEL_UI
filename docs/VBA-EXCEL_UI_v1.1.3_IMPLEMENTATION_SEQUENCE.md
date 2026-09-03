@@ -265,7 +265,7 @@ open until both the complete-mask correction and bounded control evidence land.
 - [x] The recovery fallback restores a visible owned frame without changing
       unrelated style bits.
 - [ ] A successful show is confirmed by a post-operation style readback with
-      `WS_CAPTION` set.
+      `(style And WS_CAPTION) = WS_CAPTION`.
 - [ ] The no-op branch cannot return success solely because `NewStyle =
       CurrentStyle`; achieved visibility must also be true.
 - [ ] A failed readback or missing caption returns `False` with a precise
