@@ -186,6 +186,27 @@ A contract-changing contribution must:
 Do not make an internal helper public merely to simplify a test. Use an explicit
 test seam where the project supports one.
 
+External compatibility is a promise about the `[supported]` facade in
+`M_EXCEL_UI`. It is not the same promise as the deployment rule that all four
+`src/` modules are replaced together: internal boundaries may move in a patch
+release without any caller-visible change, which is why a mixed-version project
+fails to compile even when the external API is untouched.
+
+Preserve the `[supported]` facade unless an explicitly approved breaking release
+requires otherwise:
+
+- public procedure and function names;
+- parameter order;
+- optional defaults;
+- enum values;
+- show/hide/leave-unchanged semantics;
+- fire-and-forget behavior;
+- ordered structured-result behavior;
+- application and window scope;
+- `UI_ShowExcelUI` as the emergency show-all operation.
+
+New backward-compatible parameters must normally be optional and trailing.
+
 ### Excel state ownership
 
 Assume these surfaces belong to the caller or host unless the project explicitly
@@ -234,6 +255,35 @@ under review.
 - Record exact commit, Excel/Windows/Office bitness, multi-window scope, verdict, skips, and cleanup.
 
 Hosted CI can validate source and repository invariants but cannot certify VBA behavior inside Excel. Quote the real-host certification verdict in the pull request and state any environment not exercised.
+
+### Required validation
+
+For production code changes:
+
+```text
+Debug → Compile VBAProject
+Test_EXCEL_UI_RunReleaseCertification
+UI_HideExcelUI / UI_ShowExcelUI
+capture / hide / reset
+```
+
+Certification is the gate. Quote its verdict line in the pull request:
+
+```text
+RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+```
+
+A run reporting `INCOMPLETE`, any `skipped` count above zero, or
+`cleanup=FAILED` is not a pass, whatever the assertions that did execute
+reported. The narrower runners remain useful while iterating, but do not
+substitute for certification: `Test_EXCEL_UI_RunAll` executes no multi-window
+case and produces no machine-readable evidence.
+
+CI runs the static gate on every pull request. It cannot execute VBA — a hosted
+runner has no Excel — so certification remains a manual step on a real host, and
+the two are complementary rather than alternatives.
+
+Record only environments actually tested.
 
 ### Evidence principles
 
@@ -292,6 +342,29 @@ Remove non-applicable fields, but do not omit a material limitation.
 
 ---
 
+### Three SHAs, three different claims
+
+A release involves three commits, and evidence attached to one of them says
+nothing about the others. Naming which is meant is not pedantry: the v1.1.1 and
+v1.1.2 tags were published from commits carrying no automated evidence at all,
+and the only way to notice that is to keep the three apart.
+
+| SHA | What it is | What evidence on it proves |
+|---|---|---|
+| **PR head** | The last commit on `release/v1.1.3` before merge | The reviewed tree passed the static gate and the bot reviewed *this* tree. It does not prove anything about `main`. |
+| **Merge SHA** | The merge commit created on `main` | `main` contains the reviewed tree. The merge itself is a new commit whose tree can differ from the PR head if anything was resolved during merge. |
+| **Tag SHA** | What `v1.1.3` points at | The artefact people install from. It should equal the merge SHA, and until the tag trigger existed nothing checked that it had ever been built. |
+
+Each has a distinct owner. The static gate runs on the PR head and, since the
+`v*` trigger, on the tag SHA as well. Binding a certification run to a specific
+tree and its hashes belongs to
+[#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46). Proving the tag was
+created from the reviewed merge commit belongs to
+[#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49). Do not present
+evidence gathered on one as evidence for another; a green check on the PR head
+is not a certified tag.
+
+
 ## 📖 Documentation and release notes
 
 Installation or packaging changes must keep [INSTALLATION.md](INSTALLATION.md) current. Release preparation must follow [RELEASING.md](RELEASING.md).
@@ -313,7 +386,7 @@ workflow.
 
 ---
 
-## 📚 The wiki and the VERSION file
+### The wiki and the VERSION file
 
 The root `VERSION` file is the single release number this repository states.
 Module headers and the wiki track badges both derive from it, and it moves once
@@ -344,7 +417,7 @@ and an ordered inventory naming each page and the badge it carried. A passing ru
 that records nothing cannot be tied to anything later, and a wiki of fourteen
 agreeing pages would be indistinguishable from a wiki of one.
 
-### What the badge means, and when the two legitimately disagree
+#### What the badge means, and when the two legitimately disagree
 
 `wiki_tracks-v1.1.3` means *this page was written against the v1.1.3 contract*.
 It does not mean the tag exists. The badge is a release-candidate claim, and it
@@ -370,29 +443,7 @@ during it.
 The wiki gates no merge. It makes a silent failure loud, which is the failure
 that let the wiki fall a full release behind before v1.1.2.
 
-## 🧾 Three SHAs, three different claims
-
-A release involves three commits, and evidence attached to one of them says
-nothing about the others. Naming which is meant is not pedantry: the v1.1.1 and
-v1.1.2 tags were published from commits carrying no automated evidence at all,
-and the only way to notice that is to keep the three apart.
-
-| SHA | What it is | What evidence on it proves |
-|---|---|---|
-| **PR head** | The last commit on `release/v1.1.3` before merge | The reviewed tree passed the static gate and the bot reviewed *this* tree. It does not prove anything about `main`. |
-| **Merge SHA** | The merge commit created on `main` | `main` contains the reviewed tree. The merge itself is a new commit whose tree can differ from the PR head if anything was resolved during merge. |
-| **Tag SHA** | What `v1.1.3` points at | The artefact people install from. It should equal the merge SHA, and until the tag trigger existed nothing checked that it had ever been built. |
-
-Each has a distinct owner. The static gate runs on the PR head and, since the
-`v*` trigger, on the tag SHA as well. Binding a certification run to a specific
-tree and its hashes belongs to
-[#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46). Proving the tag was
-created from the reviewed merge commit belongs to
-[#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49). Do not present
-evidence gathered on one as evidence for another; a green check on the PR head
-is not a certified tag.
-
-## ✍️ Markdown is edited as text
+### Markdown is edited as text
 
 Never edit a Markdown file in a WYSIWYG editor. One escapes every character it
 believes is markup, and the result is a document that renders as literal
@@ -407,7 +458,26 @@ expression — and flagging it would make the gate wrong about correct documents
 An editor that escapes a fence escapes the prose around it too, so the rule
 detects the editor rather than every symptom.
 
-## 🔒 Independent reviews are internal
+
+## 🔐 Security, privacy, and provenance
+
+- Follow [SECURITY.md](SECURITY.md) for vulnerability reports.
+- Use synthetic, anonymized, or explicitly redistributable examples and data.
+- Remove names, email addresses, account identifiers, workbook properties,
+  document metadata, credentials, tokens, private URLs, and machine-specific
+  paths.
+- Verify the license and redistribution rights of copied code, formulas,
+  reference tables, images, and generated material.
+- Cite material algorithms and external reference data precisely enough for a
+  reviewer to verify them.
+- You remain responsible for the correctness, licensing, security, and
+  reviewability of tool-assisted contributions.
+
+---
+
+<a id="pull-requests"></a>
+
+### Independent reviews are internal
 
 From v1.1.3 onward this repository does not carry independent review documents.
 They are internal working material: they drive the issue set, and the issue set
@@ -433,7 +503,7 @@ identifier is the only public handle a reader has, and
 [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) publishes the
 disposition table those identifiers resolve against.
 
-## 🔗 Updating a pinned Action
+### Updating a pinned Action
 
 Every `uses:` reference in `.github/workflows/` is pinned to a full 40-character
 commit SHA with a trailing comment naming the release it is, and
@@ -468,75 +538,6 @@ To move a pin:
 A repository-local action — `uses: ./…` — is versioned by this repository's own
 history and is exempt. Nothing else is.
 
-## ✅ Required validation
-
-For production code changes:
-
-```text
-Debug → Compile VBAProject
-Test_EXCEL_UI_RunReleaseCertification
-UI_HideExcelUI / UI_ShowExcelUI
-capture / hide / reset
-```
-
-Certification is the gate. Quote its verdict line in the pull request:
-
-```text
-RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
-```
-
-A run reporting `INCOMPLETE`, any `skipped` count above zero, or
-`cleanup=FAILED` is not a pass, whatever the assertions that did execute
-reported. The narrower runners remain useful while iterating, but do not
-substitute for certification: `Test_EXCEL_UI_RunAll` executes no multi-window
-case and produces no machine-readable evidence.
-
-CI runs the static gate on every pull request. It cannot execute VBA — a hosted
-runner has no Excel — so certification remains a manual step on a real host, and
-the two are complementary rather than alternatives.
-
-Record only environments actually tested.
-
-## 🔒 Public API compatibility
-
-External compatibility is a promise about the `[supported]` facade in
-`M_EXCEL_UI`. It is not the same promise as the deployment rule that all four
-`src/` modules are replaced together: internal boundaries may move in a patch
-release without any caller-visible change, which is why a mixed-version project
-fails to compile even when the external API is untouched.
-
-Preserve the `[supported]` facade unless an explicitly approved breaking release
-requires otherwise:
-
-- public procedure and function names;
-- parameter order;
-- optional defaults;
-- enum values;
-- show/hide/leave-unchanged semantics;
-- fire-and-forget behavior;
-- ordered structured-result behavior;
-- application and window scope;
-- `UI_ShowExcelUI` as the emergency show-all operation.
-
-New backward-compatible parameters must normally be optional and trailing.
-
-## 🔐 Security, privacy, and provenance
-
-- Follow [SECURITY.md](SECURITY.md) for vulnerability reports.
-- Use synthetic, anonymized, or explicitly redistributable examples and data.
-- Remove names, email addresses, account identifiers, workbook properties,
-  document metadata, credentials, tokens, private URLs, and machine-specific
-  paths.
-- Verify the license and redistribution rights of copied code, formulas,
-  reference tables, images, and generated material.
-- Cite material algorithms and external reference data precisely enough for a
-  reviewer to verify them.
-- You remain responsible for the correctness, licensing, security, and
-  reviewability of tool-assisted contributions.
-
----
-
-<a id="pull-requests"></a>
 
 ## 🚀 Pull requests
 
