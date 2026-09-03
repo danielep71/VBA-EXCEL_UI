@@ -106,6 +106,8 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- Standardized the pull-request review contract around exact-candidate evidence, compatibility, risk and recovery, security and provenance, and project-specific validation gates.
+
 - Standardized changelog governance and added an explicit Unreleased staging
   section without altering published release history.
 
