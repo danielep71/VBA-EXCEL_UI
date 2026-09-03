@@ -37,8 +37,8 @@ it with a measurement and remains the evidence behind the current contract.
 The same problem shape was already found for the title bar
 (`ICR-UI-P1-01`, #14): one Boolean describing a per-window resource, restored
 through whichever window happened to be active. That correction moved title-bar
-restore to a retained `Window`; #45 now owns the remaining native Window/hWnd
-pairing proof. Whether the Ribbon shared the active-window defect, was genuinely
+restore to a retained `Window`; v1.1.3 pairs that Window with the native hWnd
+read from the same object. Whether the Ribbon shared the active-window defect, was genuinely
 application-wide, or was something in between is exactly what this probe
 answered.
 

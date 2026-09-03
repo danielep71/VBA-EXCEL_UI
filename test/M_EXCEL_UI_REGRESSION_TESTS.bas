@@ -214,6 +214,7 @@ Option Private Module
     'component to contradict an entry claiming the frame is hidden, which is
     'the evidence a reissued handle presents to the registry.
     Private Const TST_TITLEBAR_FOREIGN_FRAME As Long = &HC80000
+    Private Const TST_TITLEBAR_CAPTIONLESS_FRAME As Long = &H40000
 
     Private Const TST_SWP_NOSIZE            As Long = &H1
     Private Const TST_SWP_NOMOVE            As Long = &H2
@@ -3311,8 +3312,10 @@ Private Sub TST_RunRegressionPack( _
             TST_Case_TitleBarRoundTrip
             TST_Case_TitleBarOwnedBitPreservation
             TST_Case_TitleBarShowRecoversWithoutBaseline
+            TST_Case_TitleBarShowRejectsCaptionlessBaseline
             TST_Case_TitleBarFrameRefreshDebtRetried
             TST_Case_TitleBarStaleFrameEntryNotReused
+            TST_Case_TitleBarSameStyleHandleReuse
         End If
 
 '------------------------------------------------------------------------------
@@ -3473,11 +3476,17 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify that a show restores the frame with no captured baseline
         TST_Case_TitleBarShowRecoversWithoutBaseline
 
+    'Verify that a non-zero captionless baseline is also unusable for show
+        TST_Case_TitleBarShowRejectsCaptionlessBaseline
+
     'Verify that a failed frame refresh is retried rather than short-circuited
         TST_Case_TitleBarFrameRefreshDebtRetried
 
     'Verify that frame state which cannot be proved is discarded, not applied
         TST_Case_TitleBarStaleFrameEntryNotReused
+
+    'Verify equal-zero and equal-nonzero handle reuse with object identity
+        TST_Case_TitleBarSameStyleHandleReuse
 
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
@@ -3529,6 +3538,311 @@ Err_Handler:
             CStr(FailNumber) & ": " & FailDescription & _
             IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
+'
+'==============================================================================
+' TST_Case_TitleBarShowRejectsCaptionlessBaseline
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prove that show cannot adopt a non-zero owned-bit baseline without
+'   WS_CAPTION or report success while the caption remains absent.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+
+#If VBA7 Then
+    Dim TargetHwnd          As LongPtr
+    Dim EntryStyle          As LongPtr
+    Dim CaptionlessStyle    As LongPtr
+    Dim ResultStyle         As LongPtr
+#Else
+    Dim TargetHwnd          As Long
+    Dim EntryStyle          As Long
+    Dim CaptionlessStyle    As Long
+    Dim ResultStyle         As Long
+#End If
+
+    Dim StyleCaptured       As Boolean
+    Dim OK                  As Boolean
+    Dim Msg                 As String
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
+
+    Const PROC As String = _
+        "TST_Case_TitleBarShowRejectsCaptionlessBaseline"
+
+        On Error GoTo Err_Handler
+        TST_Log PROC, "START", _
+            "Validating recovery from a non-zero captionless baseline"
+
+        TargetHwnd = ActiveWindow.hWnd
+        If TargetHwnd = 0 Then
+            Err.Raise TEST_ERR_BASE + 75, PROC, _
+                "invalid Excel Window hWnd"
+        End If
+
+        If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
+            Err.Raise TEST_ERR_BASE + 76, PROC, _
+                "could not read the entry style | " & Msg
+        End If
+        StyleCaptured = True
+
+    'Leave one non-zero owned bit but deliberately remove WS_CAPTION.
+        CaptionlessStyle = _
+            (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+            TST_TITLEBAR_CAPTIONLESS_FRAME
+
+        If Not TST_TrySetWindowStyle( _
+            TargetHwnd, CaptionlessStyle, Msg) Then
+
+            Err.Raise TEST_ERR_BASE + 77, PROC, _
+                "could not write the captionless style | " & Msg
+        End If
+
+        If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
+            Err.Raise TEST_ERR_BASE + 78, PROC, _
+                "could not refresh the captionless frame | " & Msg
+        End If
+
+        UI_InternalResetTitleBarBaseline
+
+        OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=True, _
+            FailMsg:=Msg)
+
+        TST_AssertBooleanEquals True, OK, _
+            "CaptionlessBaseline.ShowReportsSuccess"
+        TST_AssertTitleBarVisible True, _
+            "CaptionlessBaseline.CaptionVisible"
+
+        If Not TST_TryGetWindowStyle(TargetHwnd, ResultStyle, Msg) Then
+            Err.Raise TEST_ERR_BASE + 79, PROC, _
+                "could not read the resulting style | " & Msg
+        End If
+
+        If (ResultStyle And Not TST_TITLEBAR_OWNED_MASK) <> _
+            (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Then
+
+            Err.Raise TEST_ERR_BASE + 80, PROC, _
+                "show changed unrelated window-style bits"
+        End If
+
+Safe_Exit:
+        TST_RestoreTitleBarStyle _
+            TargetHwnd, EntryStyle, StyleCaptured
+
+        If FailNumber <> 0 Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Captionless baseline rejected and visible frame recovered"
+        Exit Sub
+
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarSameStyleHandleReuse()
+'
+'==============================================================================
+' TST_Case_TitleBarSameStyleHandleReuse
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prove that equal style bits cannot authenticate a recycled numeric hWnd.
+'
+' BEHAVIOR
+'   Exercises both equal-zero and equal-nonzero owned-bit collisions. The seam
+'   changes only the slot's numeric name and claimed last-written bits; its
+'   retained Window object remains the original generation token.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+
+    Dim AnchorWindow        As Window
+    Dim ReplacementBook     As Workbook
+    Dim ReplacementWindow   As Window
+    Dim CaseIndex           As Long
+    Dim OK                  As Boolean
+    Dim Msg                 As String
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
+
+#If VBA7 Then
+    Dim AnchorHwnd          As LongPtr
+    Dim ReplacementHwnd     As LongPtr
+    Dim AnchorEntryStyle    As LongPtr
+    Dim ReplacementEntryStyle As LongPtr
+    Dim AnchorVisibleStyle  As LongPtr
+    Dim ReplacementStyle    As LongPtr
+    Dim ResultStyle         As LongPtr
+    Dim CollisionBits       As LongPtr
+#Else
+    Dim AnchorHwnd          As Long
+    Dim ReplacementHwnd     As Long
+    Dim AnchorEntryStyle    As Long
+    Dim ReplacementEntryStyle As Long
+    Dim AnchorVisibleStyle  As Long
+    Dim ReplacementStyle    As Long
+    Dim ResultStyle         As Long
+    Dim CollisionBits       As Long
+#End If
+
+    Dim AnchorCaptured      As Boolean
+    Dim ReplacementCaptured As Boolean
+
+    Const PROC As String = "TST_Case_TitleBarSameStyleHandleReuse"
+
+        On Error GoTo Err_Handler
+        TST_Log PROC, "START", _
+            "Validating same-style recycled-hWnd rejection"
+
+        Set AnchorWindow = ActiveWindow
+        If AnchorWindow Is Nothing Then
+            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 90, PROC, _
+                "no anchor Excel Window is available"
+        End If
+        AnchorHwnd = AnchorWindow.hWnd
+
+        Set ReplacementBook = Workbooks.Add
+        Set ReplacementWindow = ReplacementBook.Windows(1)
+        ReplacementHwnd = ReplacementWindow.hWnd
+
+        If AnchorHwnd = ReplacementHwnd Then
+            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 91, PROC, _
+                "the host did not provide distinct SDI window handles"
+        End If
+
+        If Not TST_TryGetWindowStyle( _
+            AnchorHwnd, AnchorEntryStyle, Msg) Then
+
+            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 92, PROC, Msg
+        End If
+        AnchorCaptured = True
+
+        If Not TST_TryGetWindowStyle( _
+            ReplacementHwnd, ReplacementEntryStyle, Msg) Then
+
+            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 93, PROC, Msg
+        End If
+        ReplacementCaptured = True
+
+        For CaseIndex = 0 To 1
+            UI_InternalResetTitleBarBaseline
+
+        'Give the original generation a distinctive visible baseline before the
+        'component hides it and records ownership.
+            AnchorVisibleStyle = _
+                (AnchorEntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+                TST_TITLEBAR_FOREIGN_FRAME
+
+            If Not TST_TrySetWindowStyle( _
+                AnchorHwnd, AnchorVisibleStyle, Msg) Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 94, PROC, Msg
+            End If
+            If Not TST_TryRefreshWindowFrame(AnchorHwnd, Msg) Then
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 95, PROC, Msg
+            End If
+
+            OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                TargetHwnd:=AnchorHwnd, _
+                IsVisible:=False, _
+                FailMsg:=Msg)
+            TST_AssertBooleanEquals True, OK, _
+                "SameStyleReuse.AnchorHidden"
+
+        'Model a replacement generation whose live style coincides with the
+        'stale slot: zero in the first pass, non-zero captionless in the second.
+            If CaseIndex = 0 Then
+                CollisionBits = 0
+            Else
+                CollisionBits = TST_TITLEBAR_CAPTIONLESS_FRAME
+            End If
+
+            ReplacementStyle = _
+                (ReplacementEntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+                CollisionBits
+
+            If Not TST_TrySetWindowStyle( _
+                ReplacementHwnd, ReplacementStyle, Msg) Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 96, PROC, Msg
+            End If
+            If Not TST_TryRefreshWindowFrame(ReplacementHwnd, Msg) Then
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 97, PROC, Msg
+            End If
+
+            If Not UI_InternalSimulateFrameHandleReuse( _
+                OriginalHwnd:=AnchorHwnd, _
+                ReplacementHwnd:=ReplacementHwnd, _
+                ReplacementOwnedBits:=CollisionBits) Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 98, PROC, _
+                    "unable to arm the recycled-hWnd seam"
+            End If
+
+            OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                TargetHwnd:=ReplacementHwnd, _
+                IsVisible:=True, _
+                FailMsg:=Msg)
+            TST_AssertBooleanEquals True, OK, _
+                "SameStyleReuse.ReplacementShown"
+
+            If Not TST_TryGetWindowStyle( _
+                ReplacementHwnd, ResultStyle, Msg) Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 99, PROC, Msg
+            End If
+
+        'A discarded slot uses the safe visible fallback. The original
+        'generation's distinctive baseline must never cross to the replacement.
+            If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> _
+                TST_TITLEBAR_OWNED_MASK Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 100, PROC, _
+                    "stale frame state crossed to the replacement generation"
+            End If
+        Next CaseIndex
+
+Safe_Exit:
+        On Error Resume Next
+        UI_InternalResetTitleBarBaseline
+        TST_RestoreTitleBarStyle _
+            AnchorHwnd, AnchorEntryStyle, AnchorCaptured
+        TST_RestoreTitleBarStyle _
+            ReplacementHwnd, ReplacementEntryStyle, ReplacementCaptured
+        TST_SafeCloseWorkbook ReplacementBook
+        If Not AnchorWindow Is Nothing Then AnchorWindow.Activate
+        On Error GoTo 0
+
+        If FailNumber <> 0 Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Equal-zero and equal-nonzero recycled handles were rejected"
+        Exit Sub
+
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
         Resume Safe_Exit
 
 End Sub

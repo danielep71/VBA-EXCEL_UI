@@ -54,9 +54,11 @@ gates.
 Work completed so far includes the Wave 1 repository and contract gates plus two
 Wave 2 corrections: destructive test runners now preserve caller-owned
 snapshots, and the quiet-update scope claims only a suppression confirmed by
-readback. `M_EXCEL_UI_RUNTIME` and the regression module have therefore changed;
-the other three production modules and both demo modules remain byte-identical
-to v1.1.2. The supported public facade remains unchanged.
+readback. Title-bar capture and persistent frame state now pair each native hWnd
+with the Excel Window that owns it, and show accepts only a visible baseline
+confirmed by readback. `M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`,
+`M_EXCEL_UI_TITLEBAR` and the regression module have therefore changed. The
+supported public facade remains unchanged.
 
 The API contract gate was implemented first and deliberately. It records the
 shipped v1.1.2 declarations while the production tree is still byte-identical to
@@ -68,7 +70,7 @@ measured against that baseline.
 
 | Area | Current state |
 |---|---|
-| Production VBA | `M_EXCEL_UI_RUNTIME` quiet-scope ownership corrected; the other three modules unchanged from v1.1.2 |
+| Production VBA | Runtime quiet-scope ownership and title-bar Window/hWnd identity, registry generation and show verification corrected |
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
 | Runtime correctness fixes | #26 complete; remaining title-bar and Ribbon defects open |
@@ -82,6 +84,12 @@ measured against that baseline.
 | Release status | Not releasable while P1/P2 blockers remain open |
 
 ### ➕ Added
+
+- Added `UI_InternalSimulateFrameHandleReuse`, a same-project regression seam
+  that changes a registry slot's numeric hWnd while retaining its original
+  Excel Window identity. The two-pass regression uses it to prove that equal
+  zero and equal non-zero owned-style bits cannot authenticate a recycled
+  handle. This adds one `[project-public]` manifest line and no supported API.
 
 - Added `UI_InternalInjectQuietUpdateFault` to **M_EXCEL_UI_RUNTIME**, a
   one-shot regression seam arming a failed entry read, an ineffective write or a
@@ -380,6 +388,19 @@ measured against that baseline.
   recovery, verification, alternatives and explicit non-goals.
 
 ### 🐛 Fixed
+
+- **Title-bar Window/hWnd identity is now paired and retained**
+  ([#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45),
+  [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32)). Active capture
+  reads `Window.hWnd` from the same retained Window object. Registry slots keep
+  that object as their generation token and discard the slot when the retained
+  object no longer owns the stored handle, so equal style bits cannot transfer
+  baselines, ownership or refresh debt to a recycled hWnd.
+- **Show rejects zero and non-zero captionless baselines and verifies the live
+  result** ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)). A show
+  uses the safe visible fallback unless `HasBaseline` is true and `WS_CAPTION`
+  is present, then performs a post-operation style readback before reporting
+  success, including on the no-op path.
 
 - Fixed four public destructive runners clearing a snapshot they had just
   refused because it belonged to the caller. Their precondition checks now run

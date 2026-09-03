@@ -530,9 +530,9 @@ snapshot restoration or release certification in a safety-critical workflow.
 | Area | v1.1.2 boundary | v1.1.3 branch state |
 |---|---|---|
 | Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Open: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
-| Title-bar identity | Snapshot restore does not pair the retained Excel Window identity with its native hWnd strongly enough for every SDI recreation case. | Open: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) |
-| Recycled hWnd | A recycled native handle can collide with a stored same-style title-bar registry entry. | Reopened: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) |
-| Captionless baseline | Showing a title bar from a non-zero captionless baseline can report success without restoring the caption. | Open: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) |
+| Title-bar identity | v1.1.3 pairs the retained Excel Window with the hWnd read from that same object and fails closed when the pair no longer matches. | Corrected on branch; certification pending: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) |
+| Recycled hWnd | Registry slots retain Window generation identity, so equal style bits cannot authenticate a recycled handle. | Corrected on branch; certification pending: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) |
+| Captionless baseline | Show rejects zero and non-zero baselines without WS_CAPTION and confirms the live result by readback. | Corrected on branch; certification pending: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) |
 | Self-test ownership | The tagged self-test can clear a snapshot it has just refused because the caller owns it. | Corrected on the release branch: [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) |
 | Quiet-update ownership | A suppressed or ignored write can be recorded as an achieved transition. | Corrected on the release branch: [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) |
 

@@ -352,31 +352,38 @@ Public Function UI_SnapshotCaptureCore( _
         Set m_SnapshotTitleBarWindow = Nothing
         m_SnapshotTitleBarLabel = vbNullString
 
-    'Resolve the top-level frame ONCE and keep it. Application.Hwnd names the
-    'active workbook window under the Single Document Interface, so resolving it
-    'again at restore time can address an entirely different frame. Capturing
-    'the identity here is what makes the restore verifiable.
-        If Not UI_TryGetActiveTitleBarHwnd(m_SnapshotTitleBarHwnd, Msg) Then
+    'Resolve the Excel Window first and obtain hWnd from that same object. This
+    'forms one atomic identity pair under SDI; Application.hWnd and a separately
+    'resolved ActiveWindow can describe different windows during activation.
+        Set m_SnapshotTitleBarWindow = UI_SnapshotTryGetActiveWindow()
+
+        If m_SnapshotTitleBarWindow Is Nothing Then
+
+            Msg = "no active Excel Window is available for title-bar capture"
 
             UI_RuntimeHandleFailure _
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "TitleBar", Msg
         Else
 
-            'Retain the Window that owned the frame. Excel exposes no handle on
-            'a Window and no Window on a handle, so the pair can only be formed
-            'at this instant, while both are known to describe the same window.
-                Set m_SnapshotTitleBarWindow = UI_SnapshotTryGetActiveWindow()
+            'Read the native handle from the retained Window itself.
+                m_SnapshotTitleBarHwnd = m_SnapshotTitleBarWindow.hWnd
 
                 m_SnapshotTitleBarLabel = _
                     UI_RuntimeBuildWindowLabel(m_SnapshotTitleBarWindow)
 
-            'Read the frame through the retained handle rather than through the
-            'host's current notion of which window is active
-                m_SnapshotTitleBarKnown = UI_TryGetTitleBarVisibleForHwnd( _
-                    TargetHwnd:=m_SnapshotTitleBarHwnd, _
-                    IsVisible:=m_SnapshotTitleBarVisible, _
-                    FailMsg:=Msg)
+            'Read only when the paired handle is a live frame.
+                If UI_InternalIsTitleBarFrameAlive( _
+                    m_SnapshotTitleBarHwnd) Then
+
+                    m_SnapshotTitleBarKnown = _
+                        UI_TryGetTitleBarVisibleForHwnd( _
+                            TargetHwnd:=m_SnapshotTitleBarHwnd, _
+                            IsVisible:=m_SnapshotTitleBarVisible, _
+                            FailMsg:=Msg)
+                Else
+                    Msg = "active Excel Window returned an invalid hWnd"
+                End If
 
                 If Not m_SnapshotTitleBarKnown Then
                     UI_RuntimeHandleFailure _
@@ -975,9 +982,8 @@ Private Function UI_SnapshotTryGetActiveWindow() _
 ' WHY THIS EXISTS
 '   Application.ActiveWindow raises rather than returning Nothing in some host
 '   states, notably when no workbook window is open. The title-bar capture path
-'   must not be turned into an unexpected error by that: an absent Window is a
-'   weaker guarantee, not a failure, because the handle alone still permits a
-'   best-effort capture.
+'   must record that absence as an unavailable frame rather than fall back to a
+'   numeric handle with no generation identity.
 '
 '   Isolating the read keeps that decision in one place and keeps the capture
 '   core free of a second error boundary.
@@ -999,11 +1005,11 @@ Private Function UI_SnapshotTryGetActiveWindow() _
 '   - UI_SnapshotCaptureCore
 '
 ' NOTES
-'   The returned Window is retained only as corroboration of the captured frame
-'   identity. It is never used to locate a frame, because Excel exposes no
-'   handle on a Window.
+'   The returned Window is the authoritative identity and exposes the hWnd that
+'   must be paired with it for title-bar capture and restoration.
 '
 ' UPDATED
+'   2026-09-03 - Made the Window the required hWnd identity source.
 '   2026-08-19
 '==============================================================================
 '
@@ -1102,6 +1108,11 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
     Dim ProbeValue          As Boolean         'Non-mutating probe output
     Dim ProbeMsg            As String          'Diagnostic returned by the probe
     Dim FrameLabel          As String          'Captured window, for diagnostics
+#If VBA7 Then
+    Dim CurrentHwnd         As LongPtr         'Handle still owned by retained Window
+#Else
+    Dim CurrentHwnd         As Long            'Handle still owned by retained Window
+#End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1148,11 +1159,11 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
 '------------------------------------------------------------------------------
 ' PROBE RETAINED WINDOW IDENTITY
 '------------------------------------------------------------------------------
-    'Without a retained Window the handle is all there is. Accept it, and record
-    'that the identity check was the weaker one, so a later diagnostic is not
-    'read as a stronger guarantee than was actually made.
+    'A handle without its captured Window identity is never safe to restore.
         If m_SnapshotTitleBarWindow Is Nothing Then
-            UI_SnapshotTryResolveTitleBarFrame = True
+            FailMsg = _
+                "captured title-bar Window identity is unavailable; no state " & _
+                "was applied | " & FrameLabel
             GoTo Safe_Exit
         End If
 
@@ -1173,6 +1184,17 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
                     FailMsg = FailMsg & " | " & ProbeMsg
                 End If
 
+            GoTo Safe_Exit
+        End If
+
+    'Prove the retained Window still owns the exact native handle captured with
+    'it. A recycled numeric handle therefore cannot redirect restoration.
+        CurrentHwnd = m_SnapshotTitleBarWindow.hWnd
+
+        If CurrentHwnd <> m_SnapshotTitleBarHwnd Then
+            FailMsg = _
+                "captured title-bar Window/hWnd identity no longer matches; " & _
+                "no state was applied | " & FrameLabel
             GoTo Safe_Exit
         End If
 
