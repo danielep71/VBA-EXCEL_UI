@@ -301,7 +301,7 @@ explicit, least-privilege authorization.
 
 <a id="safe-use"></a>
 
-## 🔑 Repository automation and runner security
+### Current automation surface
 
 The repository currently contains three workflows:
 

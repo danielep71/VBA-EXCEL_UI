@@ -267,7 +267,7 @@ Keep when module boundaries or supported surface can change.
 >
 > Passing the manifest gate proves the declared contract matches that file. It
 > does not prove behavior. A procedure whose signature is untouched can still
-> change what it does, and that belongs in the statement above.
+> change what it does, and that belongs under Verification.
 >
 > A change under [supported] is a Semantic Versioning event for external
 > callers and must be declared as one here and in CHANGELOG.md. The gate
