@@ -1,301 +1,328 @@
 <!--
-  Sections that do not apply can be deleted outright.
-  A template filled with "Not applicable" fifteen times hides the parts that
-  matter, so deleting is preferred over padding.
-
-  The collapsed sections near the bottom are relevant only when the change
-  touches that subsystem. Expand the ones that apply; delete the rest.
+  Keep this pull request focused on one coherent outcome.
+  Complete every common section. Delete optional profile blocks that do not apply.
+  Use NOT RUN or NOT APPLICABLE with a reason; never manufacture PASS evidence.
+  Record only checks and environments exercised against the exact candidate.
+  Report vulnerabilities privately through SECURITY.md; do not disclose secrets,
+  exploitable details, confidential workbooks, or restricted data in a pull request.
 -->
+
+<div align="center">
+
+# 🔀 VBA Excel UI Pull Request
+
+### Window identity · Host-state ownership · Recovery · Exact evidence
+
+[![Contributing](https://img.shields.io/badge/guide-CONTRIBUTING-217346?style=flat-square)](../CONTRIBUTING.md)
+[![Security](https://img.shields.io/badge/security-private%20reporting-d73a49?style=flat-square)](../SECURITY.md)
+[![Release](https://img.shields.io/badge/release-RELEASING-6f42c1?style=flat-square)](../RELEASING.md)
+[![Changelog](https://img.shields.io/badge/changes-Unreleased-d97706?style=flat-square)](../CHANGELOG.md)
+
+</div>
+
+---
+
+> [!IMPORTANT]
+> Static checks cannot prove window identity, title-bar behavior, or restoration. Executable changes require interactive Windows Excel evidence from the exact candidate.
 
 ## 📌 Summary
 
-<!-- What changed, and why it was needed. One paragraph is usually enough. -->
+<!-- State the observable outcome and why it is needed. Prefer one precise purpose. -->
 
-## 🔗 Related issue
+## 🔗 Related issues
 
 ```text
 Closes #
+Related to #
 ```
 
----
+Use a closing keyword only when this pull request satisfies the issue's complete acceptance criteria.
 
-## 🏷️ Type of change
+## 🧭 Change classification
 
-- [ ] 🐛 Functional or compatibility fix
-- [ ] 🆘 Recovery or host-state fix
-- [ ] ✨ Backward-compatible feature
-- [ ] ♻️ Internal refactor with no intended public behavior change
-- [ ] 🧪 Regression-test change
-- [ ] 🖼️ Demo change
-- [ ] 📖 Documentation-only change
-- [ ] 🧹 Repository or release maintenance
-- [ ] 🔐 Security-related change
+- [ ] Defect correction
+- [ ] Backward-compatible capability
+- [ ] Breaking API, behavior, deployment, or migration change
+- [ ] Internal refactor with no intended supported-behavior change
+- [ ] Test, fixture, reference-data, or validation change
+- [ ] Performance change
+- [ ] Security or trust-boundary hardening
+- [ ] Documentation-only change
+- [ ] Repository tooling, workflow, or governance change
+- [ ] Packaging or release preparation
+- [ ] Excel-state ownership or recovery change
+- [ ] Window identity, title-bar, Ribbon, or WinAPI change
+- [ ] Snapshot, diagnostic, or structured-result change
 
 ## 🎚️ Affected surface
 
-**Application-level**
-
-- [ ] 📊 Status Bar
-- [ ] ↕️ Scroll Bars
-- [ ] ƒ Formula Bar
-
-**Active-window** — per workbook window; no API accepts a window argument
-
-- [ ] 🎀 Ribbon
-- [ ] 🪟 Title Bar / WinAPI
-
-**Targetable window-level** — honours `UIWindowTargetScope`
-
-- [ ] 🔢 Headings
-- [ ] 📑 Workbook Tabs
-- [ ] ▦ Gridlines
-
-**Subsystem**
-
-- [ ] 📸 Snapshot capture
-- [ ] 🔄 Snapshot restoration
-- [ ] 🧾 Structured diagnostics
-- [ ] ⚙️ `ScreenUpdating`
-- [ ] 🧱 Module dependencies
-- [ ] 🖼️ Demo
-- [ ] 🧪 Tests
-- [ ] 📖 Documentation only
+- [ ] Public `UI_*` facade
+- [ ] Runtime and application-level UI state
+- [ ] Snapshot capture and restoration
+- [ ] Title-bar and native-window integration
+- [ ] Multi-window targeting and identity
+- [ ] Diagnostics and recovery
+- [ ] No runtime or supported surface — documentation/repository-only
 
 ---
 
-## 🔒 Public API and Semantic Versioning
+## 📐 Scope and contract impact
+
+### In scope
+
+- <!-- Deliberate outcome -->
+
+### Out of scope
+
+- <!-- Reasonable adjacent work deliberately deferred -->
+
+### Supported behavior and compatibility
 
 ```text
-Public behavior changed:
-Backward compatible:
-Suggested release:        patch / minor / major
+Supported behavior changed:       Yes / No
+Backward compatible:              Yes / No / Uncertain
+Suggested release impact:         none / patch / minor / major / uncertain
+New supported members:
+Removed or renamed members:
+Changed signatures or defaults:
+Changed results, errors, state, or side effects:
 Migration required:
+Known limitation introduced or retained:
 ```
 
-Confirm changes to names, signatures, parameter order and defaults, enum values,
-targeting, snapshot meaning, diagnostics and recovery. Write
-`No public behavior change` where applicable.
+Assess compatibility against documented behavior, not merely the VBA `Public` keyword. Infrastructure callbacks, Ribbon entry points, test seams, and `Application.Run` targets are not automatically supported API.
 
-> [!IMPORTANT]
-> Adding or removing a `Public` member in `src/` requires an intentional edit to
-> `tools/public_api_manifest.txt`, and CI fails otherwise. That friction is
-> deliberate: a change to the public surface is exactly what breaks callers, and
-> it is invisible in a diff of several thousand lines.
+### Production source and package
+
+All four production modules: `M_EXCEL_UI`, `M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`, and `M_EXCEL_UI_TITLEBAR`.
+
+- [ ] Required source files and import order are unchanged.
+- [ ] Required source files or order changed and `INSTALLATION.md` was updated.
+- [ ] No production source/package impact.
+
+## 🔧 Implementation notes
+
+```text
+Approach and key invariant:
+Alternatives considered:
+New dependency, reference, or generated input:
+State ownership and cleanup:
+Failure behavior:
+```
+
+Explain decisions a future reviewer cannot safely infer from the diff.
 
 ---
 
-## ✅ Testing performed
+## ✅ Verification
+
+### Candidate identity
+
+| Evidence | Result |
+| --- | --- |
+| Exact PR HEAD SHA | <!-- Full 40-character SHA --> |
+| Base branch and base SHA | <!-- Branch + full SHA --> |
+| Working tree used locally | <!-- clean / dirty; explain --> |
+| Source or package tested | <!-- Exact candidate source / artifact / N/A --> |
+
+Evidence from another commit does not certify this candidate.
+
+### Static and repository checks
+
+- `python3 tools/check_repo.py`
+- `python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas`
+- `git diff --check`
+
+| Check | Result / evidence |
+| --- | --- |
+| Hosted required checks | <!-- PASS / FAIL / NOT RUN + workflow URL --> |
+| Local static command | <!-- Command + PASS / FAIL / NOT RUN --> |
+| Formatting / `git diff --check` | <!-- PASS / FAIL --> |
+| Machine-readable artifact | <!-- Name / URL / not produced --> |
+
+### Excel and VBA execution
+
+- [ ] Required and completed against the exact PR HEAD.
+- [ ] Required but incomplete — reason and merge/release consequence stated.
+- [ ] Not required — documentation/repository-only change with no executable or packaging impact.
+
+Relevant entry points:
+
+- `Test_EXCEL_UI_RunReleaseCertification`
+- Relevant focused `Test_EXCEL_UI_*` runners
+- Manual `UI_HideExcelUI` / `UI_ShowExcelUI` and capture/hide/reset scenarios
+
+| Evidence | Result |
+| --- | --- |
+| Tested commit SHA | <!-- Full SHA or N/A --> |
+| `Debug → Compile VBAProject` | <!-- PASS / FAIL / NOT RUN / N/A --> |
+| Regression/certification entry point | <!-- Exact procedure --> |
+| Completion state | <!-- PASS / FAIL / INCOMPLETE / NOT RUN --> |
+| Cases / assertions / failures | <!-- Counts or N/A --> |
+| Skipped / cleanup outcome | <!-- Counts and state or N/A --> |
+| Focused and manual checks | <!-- Scenarios + result --> |
+| Evidence file or workflow | <!-- Name / URL / N/A --> |
+
+### Validation environment
 
 ```text
-Debug → Compile VBAProject             →
-python3 tools/check_repo.py            →
-Test_EXCEL_UI_RunReleaseCertification  →
-Manual UI_HideExcelUI / UI_ShowExcelUI →
-Manual capture / hide / reset          →
+Excel product, version, and build:
+Office bitness:                    32-bit / 64-bit
+Windows version/build:
+Workbook or add-in host:
+Deployment model:
+Workbook type and Excel window state
+Number of open Excel windows
+Other add-ins
+Title-bar and Ribbon configuration
 ```
 
-**Certification verdict**
+Record only tested environments. Source inspection does not constitute host execution, and one Office bitness does not execute the other conditional branch.
+
+### Regression coverage
+
+- [ ] Existing tests cover the changed success path.
+- [ ] New or amended tests cover each corrected defect.
+- [ ] Boundary, invalid-input, failure, fallback, and cleanup paths are covered as applicable.
+- [ ] Test entry points and inventory/count metadata remain synchronized.
+- [ ] Expected results come from the contract or an independent reference.
+- [ ] No regression change is needed — rationale recorded below.
 
 ```text
-RESULT:
+Coverage rationale and new test names:
+Unexecuted or deferred coverage:
 ```
-
-> [!CAUTION]
-> All four counters form the verdict. `failed=0` alone is not a pass:
-> `INCOMPLETE`, a non-zero `skipped` count, or `cleanup=FAILED` each mean the
-> run cannot certify this change.
-
-<details>
-<summary>🔬 Narrower runners used while iterating</summary>
-
-<br>
-
-```text
-Test_EXCEL_UI_RunAll                  →
-Test_EXCEL_UI_RunCore                 →
-Test_EXCEL_UI_RunTitleBarOnly         →
-Test_EXCEL_UI_RunSnapshotIdentity     →
-Test_EXCEL_UI_RunTitleBarSdiIdentity  →
-Test_EXCEL_UI_RunRibbonSdiProbe       →
-```
-
-</details>
-
-## 🖥️ Validation environment
-
-The certification runner writes a JSON document and a text report to `%TEMP%`,
-both naming the exact host. **Attaching one replaces the fields below**, and
-removes the transcription errors that come with retyping build numbers.
-
-<details>
-<summary>Or record the environment by hand</summary>
-
-<br>
-
-```text
-Excel product/version/build:
-Office bitness:
-Windows version:
-Workbook type:
-Excel window state:
-Open Excel windows:
-Other add-ins:
-```
-
-</details>
-
-List only environments actually tested.
 
 ---
 
-## 📋 Always required
+## ⚠️ Risk, rollback, and recovery
 
-### 🧹 Source
+- [ ] Low — documentation, metadata, or mechanically verified change.
+- [ ] Medium — bounded runtime, tooling, or compatibility impact.
+- [ ] High — numerical integrity, shared Excel state, native API, security, release, or breaking impact.
 
-- [ ] Current branch was confirmed before committing.
-- [ ] All four required production modules were present during compilation.
-- [ ] Changed modules were exported to the correct repository paths.
-- [ ] CRLF was preserved for exported VBA source.
-- [ ] No conflict markers or duplicate procedures remain.
-- [ ] The textual diff contains only intended changes.
-- [ ] No lock, backup, generated, confidential, credential, client, or
-      production-data file is included.
+```text
+Principal failure modes:
+Residual risk after validation:
+Rollback or revert procedure:
+Excel-process, workbook, data, or artifact recovery:
+Conditions that make rollback unsafe:
+```
 
-### 🔒 Compatibility
+## 🔐 Security, data, and provenance
 
-- [ ] Existing public names, signatures, defaults and enum values remain
-      compatible, or the breaking rationale is explicit.
-- [ ] `UI_ShowExcelUI` remains an emergency show-all path.
-- [ ] Best-effort continuation remains deliberate.
-- [ ] Failures are not silently discarded.
-- [ ] `ScreenUpdating` is restored.
-- [ ] No unsolicited production `MsgBox` was introduced.
-- [ ] Invalid enum values remain controlled.
+- [ ] No credential, secret, signing material, internal URL, or personal path is included.
+- [ ] No client, employer, counterparty, student, personal, or restricted production data is included.
+- [ ] Test data is synthetic, anonymized, or explicitly redistributable.
+- [ ] External algorithms, code, datasets, and market/vendor data have attributable provenance and compatible licensing.
+- [ ] Formula, command, path, callback, deserialization, and external-content injection surfaces were assessed.
+- [ ] No security-sensitive detail belongs in private disclosure instead of this pull request.
+- [ ] Generated evidence identifies its inputs, tool/runtime version, candidate SHA, and limitations.
 
-### 📖 Documentation
+```text
+Security or privacy impact:
+Source/data provenance:
+New trust boundary:
+```
 
-- [ ] README · INSTALLATION · CONTRIBUTING · Wiki · module headers · demo
-      guidance, as affected
-- [ ] `CHANGELOG.md` entry added
-- [ ] No documentation change required
-- [ ] No binary demo workbook change is included, **or** the binary change is
-      intentional, described, synchronized with exported source, and tested
+## 📚 Documentation and release hygiene
 
-> [!TIP]
-> Documentation belongs in **this** pull request, not a follow-up. A follow-up
-> documentation commit is a commit that does not get written.
+- [ ] `README.md` reflects supported behavior and examples.
+- [ ] `INSTALLATION.md` reflects paths, dependencies, import order, validation, upgrades, and removal.
+- [ ] `CONTRIBUTING.md` reflects development and evidence requirements.
+- [ ] `CHANGELOG.md` records material change under `[Unreleased]`.
+- [ ] `SECURITY.md` reflects supported versions or trust boundaries.
+- [ ] `RELEASING.md` reflects certification, package, provenance, or recovery changes.
+- [ ] Source headers, API references, demos, Wiki pages, and counts remain synchronized.
+- [ ] Version markers remain unchanged unless this is the deliberate release-stamp change.
+- [ ] No documentation change is required — reason recorded below.
+
+```text
+Documentation impact:
+Release, artifact, or migration impact:
+```
 
 ---
 
-## 🧱 Module ownership and dependencies
+## 🧩 Project-specific review
 
 <details>
-<summary>Expand when the change touches module boundaries or shared state</summary>
+<summary><strong>🧱 Module ownership and API manifest</strong></summary>
 
-<br>
-
-```text
-M_EXCEL_UI:
-M_EXCEL_UI_RUNTIME:
-M_EXCEL_UI_SNAPSHOT:
-M_EXCEL_UI_TITLEBAR:
-Dependency graph changed:
-Circular dependency introduced:   no / explain
-Mutable state duplicated:         no / explain
-```
+Keep when module boundaries or supported surface can change.
 
 - [ ] `M_EXCEL_UI` remains the public facade.
-- [ ] Runtime and title-bar modules have no project-module dependencies.
+- [ ] Runtime and title-bar modules retain their allowed dependency boundary.
 - [ ] Snapshot state exists only in `M_EXCEL_UI_SNAPSHOT`.
 - [ ] Title-bar mutable state exists only in `M_EXCEL_UI_TITLEBAR`.
-- [ ] No circular dependency was introduced.
+- [ ] No circular dependency or duplicated mutable state is introduced.
 - [ ] Internal modules retain `Option Private Module`.
-- [ ] Any new test seam is documented as unsupported **and has a caller**.
+- [ ] `tools/public_api_manifest.txt` intentionally reflects every public-surface change.
 
 </details>
-
-## 📸 Snapshot and recovery
-
 <details>
-<summary>Expand when the change touches capture, restoration or identity</summary>
+<summary><strong>📸 Snapshot, identity, and recovery</strong></summary>
 
-<br>
+Keep when capture, restoration, targeting, or reset behavior changes.
 
-```text
-Captured state:
-Window identity strategy:
-Behavior for new windows:
-Behavior for missing/closed/recreated windows:
-Behavior after VBA reset:
-Failure ordering:
-Emergency recovery path:
-```
-
-- [ ] Per-window restore does not use collection index.
-- [ ] Retained Window identity behavior is documented and tested.
-- [ ] New windows remain unchanged.
-- [ ] Missing captured windows produce controlled diagnostics.
-- [ ] Reset-without-snapshot remains controlled.
-- [ ] In-memory lifetime remains documented.
-- [ ] State is never applied to an object that cannot be proven to be the one it
-      was captured from.
+- [ ] Per-window restoration never relies on collection index.
+- [ ] Object identity and recycled-window-handle risks are addressed.
+- [ ] New, missing, closed, and recreated windows have explicit behavior.
+- [ ] Reset without a valid snapshot is controlled.
+- [ ] State is never applied to a window that cannot be proven to be the captured target.
+- [ ] `UI_ShowExcelUI` remains an emergency show-all recovery route.
 
 </details>
-
-## 🪟 Ribbon or WinAPI method
-
 <details>
-<summary>Expand when the change touches the Ribbon or the window frame</summary>
+<summary><strong>🪟 Ribbon and WinAPI</strong></summary>
 
-<br>
+Keep for Ribbon, title-bar, or native-frame changes.
 
-```text
-API or command used:
-Owned style bits:
-32-bit path:
-64-bit path:
-GetLastError treatment:
-Frame refresh:
-Target window treatment:
-Unrelated style bits preserved:
-```
-
-- [ ] Exact owned style mask is preserved or deliberately reviewed.
-- [ ] Unrelated current style bits are preserved.
+- [ ] Only owned style bits are changed and unrelated bits are preserved.
 - [ ] 32-bit and 64-bit declarations are correct.
-- [ ] Valid zero returns are distinguished from failures.
-- [ ] Required frame refresh is performed, and a failed refresh is retried
-      rather than short-circuited.
-- [ ] Multi-window behavior was tested with more than one workbook open.
+- [ ] Valid zero returns are distinguished from native failures.
+- [ ] Required frame refresh is performed and failures remain observable.
+- [ ] Multi-window behavior is tested with more than one workbook open.
 
 </details>
-
-## 🧾 Diagnostics and failure policy
-
 <details>
-<summary>Expand when the change touches failure handling or result contracts</summary>
+<summary><strong>🧾 Diagnostics and cleanup</strong></summary>
 
-<br>
+Keep when failure ordering, results, or Excel state can change.
 
-```text
-Failure contract:
-Logging contract:
-Structured-result contract:
-ScreenUpdating restoration:
-```
-
-- [ ] Insertion order is preserved in structured diagnostics.
-- [ ] Anything reachable from an error handler cannot itself raise.
-- [ ] Outputs that cannot fail are set before anything that can.
+- [ ] Structured diagnostics preserve insertion order and real post-operation state.
+- [ ] Error handlers cannot replace the original failure.
+- [ ] `ScreenUpdating` and other caller-owned state are restored.
+- [ ] Best-effort continuation is deliberate and failures are not discarded.
+- [ ] Certification reports complete, failed, skipped, and cleanup counters.
 
 </details>
 
 ---
 
-## 💬 Reviewer notes
+## 👀 Reviewer focus
 
-<!--
-  Trade-offs, known limitations, environments not tested, and follow-up work.
-  A limitation stated here is a decision. The same limitation discovered later
-  is a defect.
--->
+```text
+Highest-risk decision:
+Files and procedures to inspect first:
+Evidence to challenge:
+Known boundary not proved by this pull request:
+Unresolved question or accepted trade-off:
+```
+
+## ☑️ Final author check
+
+- [ ] The title describes the observable outcome.
+- [ ] The pull request has one coherent purpose and no unrelated churn.
+- [ ] Linked issue acceptance criteria are met or remaining work is explicit.
+- [ ] Compatibility and release impact are assessed.
+- [ ] Evidence belongs to the exact candidate claimed.
+- [ ] Required checks are terminal and passing; incomplete work is not presented as PASS.
+- [ ] Executable VBA was compiled and tested when required.
+- [ ] Failure, cleanup, and recovery behavior were reviewed.
+- [ ] The complete diff, including comments, metadata, binary companions, and documentation, was reviewed.
+- [ ] No merge marker, stale placeholder, unexplained N/A, accidental binary, or private material remains.
+
+---
+
+**Review principle:** approve the smallest coherent change whose contract, evidence, risk, and recovery can all be explained from this pull request.
