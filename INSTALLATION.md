@@ -2,527 +2,234 @@
 
 # 📦 Installation and Upgrade Guide
 
-**Getting VBA Excel UI into a workbook, and back out again**
+### Install, validate, upgrade, recover, and remove the Windows Excel UI controller
 
-[![Modules](https://img.shields.io/badge/production_modules-4-c2185b?style=flat-square)](#-required-production-modules)
-[![Platform](https://img.shields.io/badge/platform-Windows_desktop_Excel-0078D6?style=flat-square)](#-requirements)
-[![Dependencies](https://img.shields.io/badge/external_dependencies-none-2ea44f?style=flat-square)](#-requirements)
-[![Install time](https://img.shields.io/badge/install-under_2_minutes-217346?style=flat-square)](#-fresh-installation)
+[![Deployment](https://img.shields.io/badge/Deployment-Source--first-0969da?style=flat-square)](#deployment-model)
+[![Validation](https://img.shields.io/badge/Validation-Required-d97706?style=flat-square)](#validation)
+[![Security](https://img.shields.io/badge/Security-Review_before_enabling-d73a49?style=flat-square)](SECURITY.md)
+[![Version](https://img.shields.io/badge/Version-VERSION_file-6f42c1?style=flat-square)](VERSION)
+[![License](https://img.shields.io/badge/License-MIT-217346?style=flat-square)](LICENSE)
+
+<br>
+
+**Back up · Import one coherent version · Compile · Validate · Preserve caller state**
 
 </div>
 
 ---
 
-## 🧭 Requirements
-
-| Requirement | Detail |
-|---|---|
-| 🖥️ Host | Desktop Microsoft Excel for **Windows** |
-| ⚙️ Bitness | 32-bit and 64-bit both supported |
-| 🧾 VBA | VBA7 and pre-VBA7 hosts, via conditional compilation |
-| 📥 Installer | None — import four text files |
-| 🔗 References | None — no COM add-in, DLL, or VBA reference to add |
+This guide covers installation, validation, upgrade, recovery, and removal of
+**VBA Excel UI**.
 
 > [!IMPORTANT]
-> `M_EXCEL_UI.bas` is the public facade, **not** a standalone implementation.
-> Every production installation requires all four files in `src/`, from the same
-> release. A mixture of versions compiles into a project that fails at run time
-> in ways the compiler cannot warn you about.
+> VBA source can execute with the user's Office permissions. Review the exact
+> source or use a trusted tagged release, follow the organization's macro
+> security policy, and never enable macros in an untrusted workbook.
 
-> [!NOTE]
-> The ready-to-run macro-enabled demo workbook is not versioned in Git.
-> Tested `.xlsm` demo builds are distributed only as GitHub Release assets.
+---
 
-## 📦 Required production modules
+## 🧭 Support baseline
 
-| Recommended import order | Repository path | VBA module name | Responsibility |
+| Item | Requirement |
+|---|---|
+| Host | Desktop Microsoft Excel for Windows |
+| Office bitness | 32-bit and 64-bit Office |
+| Version identity | Root `VERSION` file and the selected tag/commit |
+| Source policy | Exported repository source is authoritative |
+| Licence | MIT |
+| Current deployment status | Four-module source-first library; all production modules must come from one release. |
+
+Compatibility claims apply only to environments actually certified for the
+selected release. Read [README.md](README.md), [CHANGELOG.md](CHANGELOG.md), and
+the release notes before installation.
+
+<a id="deployment-model"></a>
+
+## 🎯 Deployment model
+
+The public facade is not a standalone installation. Static checks cannot certify Excel behavior; release certification requires a real Windows Excel host.
+
+Choose one supported model and keep its source identity explicit:
+
+| Model | Use when | Trust boundary |
+|---|---|---|
+| Embedded source | The component must travel with a workbook or add-in | Destination project contains the reviewed source |
+| Tagged source | You build or integrate the component yourself | Tag/commit and exported files define identity |
+| Published binary | The project explicitly ships a workbook/add-in asset | Hash, tag binding, and package smoke evidence are required |
+| Development source | Focused testing or contribution work | Not a supported release unless the project says otherwise |
+
+Do not combine files from different tags, commits, release assets, local exports,
+or copied workbooks.
+
+---
+
+## 📂 Production source package
+
+| Order | Repository source | VBE component | Responsibility |
 |---:|---|---|---|
-| 1 | `src/M_EXCEL_UI_RUNTIME.bas` | `M_EXCEL_UI_RUNTIME` | Shared host operations, diagnostics, result buffers, quiet-update scope |
-| 2 | `src/M_EXCEL_UI_TITLEBAR.bas` | `M_EXCEL_UI_TITLEBAR` | WinAPI declarations, owned title-bar bits, frame refresh |
-| 3 | `src/M_EXCEL_UI_SNAPSHOT.bas` | `M_EXCEL_UI_SNAPSHOT` | Snapshot state, capture, restore, retained Window identities |
-| 4 | `src/M_EXCEL_UI.bas` | `M_EXCEL_UI` | Public `UI_...` facade, targeting, and general apply orchestration |
+| 1 | `src/M_EXCEL_UI_RUNTIME.bas` | `M_EXCEL_UI_RUNTIME` | Host operations, diagnostics, result buffers, and quiet-update scope |
+| 2 | `src/M_EXCEL_UI_TITLEBAR.bas` | `M_EXCEL_UI_TITLEBAR` | WinAPI declarations, owned title-bar bits, and frame refresh |
+| 3 | `src/M_EXCEL_UI_SNAPSHOT.bas` | `M_EXCEL_UI_SNAPSHOT` | Snapshot state, capture/restore, and window identity |
+| 4 | `src/M_EXCEL_UI.bas` | `M_EXCEL_UI` | Public `UI_*` facade and targeting orchestration |
 
-The import order is recommended for clarity. VBA resolves project-level references after all modules are present and the project is compiled.
+Optional material is not part of the normal runtime unless stated otherwise:
 
-## 🧪 Optional source modules
+| Source | Purpose |
+|---|---|
+| `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | Regression and release certification |
+| `demo/M_EXCEL_UI_DEMO.bas` | Demonstration actions |
+| `demo/M_DEMO_BUILDER.bas` | Demo worksheet construction |
 
-| Path | Required for production | Purpose |
-|---|:---:|---|
-| `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | No | Regression and release validation |
-| `demo/M_EXCEL_UI_DEMO.bas` | No | Demo actions |
-| `demo/M_DEMO_BUILDER.bas` | No | Demo worksheet construction |
+> [!CAUTION]
+> A `.frm` and its `.frx` companion are one logical component. Keep them in
+> the same directory during import, never import the `.frx` separately, and
+> never process it as text.
 
-## 🖼️ Binary demo distribution
-
-The repository does not version `demo/EXCEL_UI_DEMO.xlsm`.
-
-For a tagged release, the validated workbook should be attached to the GitHub Release, named for the tag it was built from:
-
-```text
-EXCEL_UI_DEMO_v<major>.<minor>.<patch>.xlsm
-```
-
-A SHA-256 checksum may also be published in the release notes.
-
-This keeps source control text-focused while still giving end users a ready-to-run workbook.
-
-## 🔗 Dependency graph
-
-```text
-M_EXCEL_UI
-├── M_EXCEL_UI_RUNTIME
-├── M_EXCEL_UI_TITLEBAR
-└── M_EXCEL_UI_SNAPSHOT
-    ├── M_EXCEL_UI_RUNTIME
-    └── M_EXCEL_UI_TITLEBAR
-```
-
-`M_EXCEL_UI_RUNTIME` and `M_EXCEL_UI_TITLEBAR` do not depend on another project module. The graph is deliberately acyclic.
+---
 
 ## 🚀 Fresh installation
 
-1. Open the destination macro-enabled workbook or add-in.
-2. Open the VBA Editor with `Alt+F11`.
-3. Save a backup before changing the VBA project.
-4. Import the four production modules in dependency-first order.
-5. Confirm the Project Explorer contains exactly:
+1. Back up the macro-enabled host and ensure Excel UI is currently recoverable.
+2. Remove or replace any older complete production set; do not layer new modules over a mixed installation.
+3. Import all four production modules in dependency-first order.
+4. Compile the complete VBA project.
+5. Run `UI_HideExcelUI` followed by `UI_ShowExcelUI`.
+6. Capture, change, and restore a baseline with the public snapshot API.
 
-   ```text
-   M_EXCEL_UI
-   M_EXCEL_UI_RUNTIME
-   M_EXCEL_UI_SNAPSHOT
-   M_EXCEL_UI_TITLEBAR
-   ```
+### VBE import procedure
 
-6. Run:
+1. Open the destination workbook or add-in and press `Alt+F11`.
+2. Select the intended project in Project Explorer.
+3. Use **File → Import File…** for exported modules, classes, and forms.
+4. Confirm component names match the repository source.
+5. Run **Debug → Compile VBAProject**.
+6. Save in a macro-capable format such as `.xlsm`, `.xlsb`, or `.xlam`
+   when the project requires executable VBA.
+7. Close and reopen the host before the clean-session smoke test.
 
-   ```text
-   Debug → Compile VBAProject
-   ```
-
-7. Perform a recovery round-trip:
-
-   ```vb
-   UI_HideExcelUI
-   UI_ShowExcelUI
-   ```
-
-8. Capture and restore a baseline:
-
-   ```vb
-   UI_CaptureExcelUIState
-   UI_HideExcelUI
-   UI_ResetExcelUIToSnapshot
-   ```
-
-## ⬆️ Which upgrade path applies
-
-| Coming from | Path | Caller changes |
-|---|---|:--:|
-| Nothing — new install | [Fresh installation](#-fresh-installation) | — |
-| `v1.0.1` or any single-module build | [Single-module upgrade](#-upgrade-from-v101-or-another-single-module-installation) | ✅ none |
-| An intermediate `v1.1.0` development build | [Intermediate build](#-upgrade-from-an-intermediate-v110-development-build) | ✅ none |
-| A released `v1.1.x` | [Same-line upgrade](#-upgrade-within-the-v11x-line) | ✅ none |
-
-> [!IMPORTANT]
-> Every path replaces **all four** `src/` modules together. The public `UI_...`
-> surface has been stable since `v1.0.1`, so no call site needs editing — but
-> the internal boundaries between the modules have changed, and a project
-> holding a mixture of versions will not work correctly.
+Do not paste source into arbitrarily named modules when an exported component is
+available. VBE attributes, component identity, form resources, and line endings
+are part of a reproducible source installation.
 
 ---
 
-## ⬆️ Upgrade from v1.0.1 or another single-module installation
+<a id="validation"></a>
 
-The old `M_EXCEL_UI` module contains internal implementation that is now distributed across four modules.
+## ✅ Validation
 
-1. Back up the workbook or add-in.
-2. In the VBA Editor, remove the existing `M_EXCEL_UI`.
-3. Export a backup if required.
-4. Remove any experimental modules named:
+A successful import is not sufficient evidence that the installation is correct.
 
-   ```text
-   M_EXCEL_UI_RUNTIME
-   M_EXCEL_UI_SNAPSHOT
-   M_EXCEL_UI_TITLEBAR
-   ```
+- Run `Test_EXCEL_UI_RunReleaseCertification` for production/release validation.
+- Treat any incomplete, skipped, failed, or cleanup-failed unit as not passing.
+- Verify multi-window identity, closed/recreated windows, snapshot reset, and emergency recovery.
+- Exercise title-bar behavior on the affected Office bitness and confirm unrelated style bits remain intact.
+- Confirm `ScreenUpdating` and other caller-owned state are restored after success and failure.
 
-5. Import the four current files from `src/`.
-6. Compile the project.
-7. Run the validation sequence below.
+### Minimum installation evidence
 
-Do not paste the new facade over the old module while leaving old private helpers in place. That can create duplicate procedure names or mixed state.
+~~~text
+Source tag or full commit SHA:
+VERSION:
+Files imported:
+Excel version/build:
+Office bitness:
+Operating system:
+Compile:
+Consumer smoke:
+Regression/certification:
+Cleanup:
+Skipped or unverified:
+~~~
 
-## ⬆️ Upgrade from an intermediate v1.1.0 development build
-
-Replace the complete production set together:
-
-```text
-M_EXCEL_UI_RUNTIME
-M_EXCEL_UI_TITLEBAR
-M_EXCEL_UI_SNAPSHOT
-M_EXCEL_UI
-```
-
-This avoids combining a newer facade with an older internal module.
+Treat a skipped, incomplete, cleanup-failed, or wrong-environment run as not
+certified. Static checks and source review do not replace execution in Excel.
 
 ---
 
-## ⬆️ Upgrade within the v1.1.x line
+## ⬆️ Upgrade
 
-Replace all four `src/` modules together and recompile. Re-import the optional
-test module as well if you use it, since the harness evolves alongside the
-component.
+Before upgrading:
 
-Corrective releases in this line change behaviour and diagnostics rather than
-signatures, so some outcomes become newly **observable** without any call site
-changing:
+1. read the complete version-to-version changelog;
+2. back up the host and export any local modifications;
+3. stop or clean up active component state;
+4. identify every required production component;
+5. decide whether stored configuration or generated assets are compatible.
 
-| You may now see | Because |
+- Replace all four production modules together from the same tag.
+- Re-import the matching optional regression module when validating an upgrade.
+- Review newly observable diagnostics and recovery behavior even when public signatures are unchanged.
+- Never restore per-window state by collection index or reuse a stale snapshot as current authority.
+
+After replacement, compile and repeat the full installation validation. Do not
+claim an upgrade is non-breaking solely because VBA signatures compile.
+
+### Local modifications
+
+A locally modified copy is a fork. Diff it against the old and new exported
+source, reapply changes deliberately, and retest. Do not overwrite it and assume
+the local behavior survived.
+
+---
+
+## 🧯 Troubleshooting
+
+| Symptom | Check |
 |---|---|
-| A `TitleBar` failure on restore | The snapshot targets the window a value was captured from, and reports rather than redirecting when that window has closed |
-| `FailureList` shorter than `FailureCount` | The list is best effort under memory pressure; a `Diagnostics` entry marks the truncation |
+| Compile error or missing procedure | Confirm every required component was imported from one version and optional dependencies are present. |
+| Ambiguous name | Remove duplicate/legacy modules; do not paste new source beside old components. |
+| Form missing controls or corrupt UI | Re-import the `.frm` with its exact adjacent `.frx`. |
+| Behavior differs by workbook | Check caller, active-object, settings namespace, references, locale, and date-system assumptions. |
+| 32/64-bit failure | Confirm the tested Office bitness and conditional WinAPI declarations. |
+| Excel left altered after failure | Run the documented recovery/cleanup path; do not blindly force global state. |
+| Security warning | Verify source origin, signature/hash where provided, trusted location policy, and macro settings. |
+| Output differs from reference | Confirm exact version, inputs, parameterization, tolerance, environment, and reference independence. |
 
-Neither requires a code change. Both are described in
-[CHANGELOG.md](CHANGELOG.md).
+If recovery is uncertain, save user data separately, close Excel, reopen a clean
+session, and reproduce with a minimal sanitized workbook before changing code.
 
----
-
-## 🎯 Public targeting API
-
-Window targeting, added in `1.1.0`:
-
-```vb
-Public Enum UIWindowTargetScope
-    UI_TargetAllExcelWindows = 0
-    UI_TargetActiveWindow = 1
-    UI_TargetActiveWorkbookWindows = 2
-End Enum
-```
-
-`TargetScope` is an optional trailing argument on the selective apply APIs.
-
-The default:
-
-```vb
-UI_TargetAllExcelWindows
-```
-
-preserves existing behavior.
-
-Targeting affects only:
-
-```text
-Headings
-Workbook Tabs
-Gridlines
-```
-
-Status Bar, Scroll Bars and Formula Bar are genuinely application-level and are
-unaffected by `TargetScope`.
-
-The Ribbon and the title bar are **not** application-level, despite `TargetScope`
-not applying to them either. Modern Excel uses the Single Document Interface, in
-which each workbook window is a separate top-level window with its own Ribbon and
-its own frame, so both act on whichever window is active when the call is made.
-
-The two differ in how far the component can keep that promise:
-
-- **Title bar.** A snapshot records the window a value was read from and restores
-  it to that same window. If that window has closed, restoration reports a
-  `TitleBar` failure naming it rather than applying the value elsewhere.
-- **Ribbon.** Every mechanism Excel exposes acts on the active window and none
-  accepts a window argument, so restoring a snapshot applies the captured Ribbon
-  value to whichever window is active at that moment, which need not be the
-  window it was captured from. See
-  [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md).
-
-Example:
-
-```vb
-UI_SetExcelUI _
-    Headings:=UI_Hide, _
-    Gridlines:=UI_Hide, _
-    TargetScope:=UI_TargetActiveWindow
-```
-
-Active workbook windows:
-
-```vb
-UI_SetExcelUI _
-    WorkbookTabs:=UI_Show, _
-    Gridlines:=UI_Show, _
-    TargetScope:=UI_TargetActiveWorkbookWindows
-```
-
-## ✅ Validation sequence
-
-With the optional regression module imported, one command validates the
-installation:
-
-```text
-Debug → Compile VBAProject
-Test_EXCEL_UI_RunReleaseCertification
-```
-
-It runs every mandatory unit and prints an unambiguous verdict:
-
-```text
-RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
-```
-
-All four numbers matter. `failed=0` alone is not a pass: `skipped=0` confirms
-nothing was silently omitted, and `cleanup=OK` confirms the run left no snapshot,
-stray workbook or suppressed screen update behind. A JSON document and a text
-report naming your exact Excel build are written to `%TEMP%`.
-
-The runner is destructive — it creates and closes temporary workbooks and toggles
-every managed element — so save unsaved work first. It also refuses to start if a
-snapshot already exists, rather than degrading into a partial run.
-
-### 🔬 Narrower runners
-
-For focused work, or when the certification runner cannot be used:
-
-```text
-Test_EXCEL_UI_RunAll                  interactive, non-destructive
-Test_EXCEL_UI_RunCore
-Test_EXCEL_UI_RunTitleBarOnly
-Test_EXCEL_UI_RunSnapshotIdentity
-Test_EXCEL_UI_RunTitleBarSdiIdentity  destructive: opens and closes windows
-Test_EXCEL_UI_RunRibbonSdiProbe       characterization only; asserts nothing
-```
-
-`Test_EXCEL_UI_RunAll` is **not** a substitute for certification: it executes no
-multi-window case and produces no machine-readable evidence.
-
-Follow either with a manual recovery check:
-
-```vb
-UI_HideExcelUI
-UI_ShowExcelUI
-```
-
-The tests manipulate the real Excel UI. Run them in a controlled Excel instance.
-
-## 🔌 Public integration
-
-Call only the documented facade members from workbook or add-in code:
-
-```vb
-UI_SetExcelUI
-UI_SetExcelUI_WithResult
-UI_HideExcelUI
-UI_ShowExcelUI
-UI_CaptureExcelUIState
-UI_CaptureExcelUIState_WithResult
-UI_ResetExcelUIToSnapshot
-UI_ResetExcelUIToSnapshot_WithResult
-UI_HasExcelUIStateSnapshot
-UI_ClearExcelUIStateSnapshot
-```
-
-Use these public enums:
-
-```vb
-UIVisibility
-UIWindowTargetScope
-```
-
-Do not call `UI_Runtime...`, `UI_Snapshot...`, or title-bar worker routines from normal application code. Those procedures are internal implementation seams.
-
-### ⏱️ Snapshot lifetime and window references
-
-A captured snapshot holds a live reference to every Excel `Window` it recorded. That retention is deliberate: it is what allows restoration to match windows by object identity rather than by position in `Application.Windows`, so reordered windows restore correctly and a replacement window never receives another window's state.
-
-It also creates an ownership obligation. Those references are released only when:
-
-- `UI_ClearExcelUIStateSnapshot` is called;
-- a new capture replaces the previous snapshot;
-- the VBA project resets, or Excel closes.
-
-Restoring does **not** release them. `UI_ResetExcelUIToSnapshot` and `UI_ResetExcelUIToSnapshot_WithResult` deliberately retain the snapshot so it can be replayed, so a restore is not a release.
-
-Solutions that capture a baseline should clear it once it is no longer needed. `Workbook_BeforeClose` is the natural place:
-
-```vb
-Private Sub Workbook_BeforeClose(Cancel As Boolean)
-    UI_ResetExcelUIToSnapshot
-    UI_ClearExcelUIStateSnapshot
-End Sub
-```
-
-The title bar adds one further reference. Its captured state is recorded together with the top-level window handle it was read from and the owning `Window` object, because neither identifies the frame on its own: Windows may reuse a handle value once its window is destroyed, while a `Window` object cannot be recycled that way but exposes no handle to write through. That reference is released on exactly the same terms as the others.
-
-Holding `Window` references past the lifetime of their workbook can prevent Excel from releasing those objects cleanly. A long-running solution that captures once at open and never clears will retain them for the whole session.
-
-Restoration itself is safe either way: a captured window that has since been closed is detected, reported as unusable, and skipped. Clearing is about resource lifetime, not correctness.
-
-## 🆘 If Excel is stuck in a constrained shell
-
-```vb
-UI_ShowExcelUI
-```
-
-Shows every managed element, needs no snapshot, and works from any state —
-including after a VBA project reset, when module state is gone but the window
-style is not.
-
-If the project will not compile at all, restart Excel: the window style belongs
-to the process and resets with it.
-
-> [!TIP]
-> Keep `UI_ShowExcelUI` on the Quick Access Toolbar while developing. The moment
-> you need it is the moment the Ribbon is hidden.
+Report suspected vulnerabilities privately under [SECURITY.md](SECURITY.md).
 
 ---
 
-## ⚙️ Module settings
+## 🗑️ Removal
 
-The production modules use:
+1. Call `UI_ShowExcelUI` and clear any retained snapshot.
+2. Remove all four production modules and optional demo/test modules.
+3. Compile the remaining project and reopen Excel to confirm the normal shell is visible.
 
-```vb
-Option Explicit
-Option Private Module
-```
-
-`Option Private Module` keeps project members available inside the containing VBA project while preventing normal cross-project automation exposure.
-
-## 🧯 Common problems
-
-| Symptom | Most likely cause |
-|---|---|
-| *Sub or Function not defined* | Partial import — fewer than four modules |
-| *Ambiguous name detected* | A module imported twice, or an old one left in place |
-| *Compile error* on `LongPtr` | Not a Windows desktop Excel host |
-| `TargetScope` failure reported | A value outside `UIWindowTargetScope` |
-| Title bar unchanged | Policy, environment, or another add-in rewriting the same bits |
-| `TitleBar` failure on restore | The captured window has closed — correct behaviour |
-| Wrong window changed | Ribbon and title bar act on the **active** window |
-| UI left hidden after an interrupted run | `UI_ShowExcelUI` — no snapshot needed |
+Removing files does not automatically remove workbook formulas, Ribbon XML,
+registry settings, trusted-location configuration, cached add-ins, shortcuts,
+scheduled callbacks, or other integrations. Remove only state the component
+owns and document anything intentionally retained.
 
 ---
 
-### ❌ Sub or Function not defined
+## 🔐 Security and privacy
 
-Cause: one or more required production modules are missing or an old module version is mixed with the current facade.
+- Obtain source and assets from the official repository or a verified release.
+- Compare the selected tag, `VERSION`, release notes, and any published hash.
+- Review VBA before enabling macros.
+- Do not test with client, personal, regulated, or confidential workbooks.
+- Inspect example and release workbooks for links, connections, names,
+  properties, hidden content, and embedded code.
+- Follow organizational macro, add-in, trusted-location, and signing policy.
+- Report vulnerabilities through [SECURITY.md](SECURITY.md), not publicly.
 
-Resolution: replace all four production modules from the same release or commit.
+---
 
-### ❌ Ambiguous name detected
+## 📚 Related documentation
 
-Cause: a module was imported twice, or old helpers remain in another module.
+- [README.md](README.md) — capabilities, requirements, and public API
+- [CHANGELOG.md](CHANGELOG.md) — version history and compatibility
+- [CONTRIBUTING.md](CONTRIBUTING.md) — source and validation standards
+- [RELEASING.md](RELEASING.md) — maintainer release and provenance procedure
+- [SECURITY.md](SECURITY.md) — private vulnerability reporting
+- [LICENSE](LICENSE) — MIT licence terms
 
-Resolution: remove duplicate or experimental modules, then re-import the complete package.
+---
 
-### ⚠️ Invalid target-scope diagnostic
+### Installation principle
 
-If `UI_SetExcelUI_WithResult` reports a `TargetScope` failure, verify that the value is one of:
-
-```text
-UI_TargetAllExcelWindows
-UI_TargetActiveWindow
-UI_TargetActiveWorkbookWindows
-```
-
-Application-level operations can continue under the fail-soft contract, while unsafe window-level writes are suppressed.
-
-### ⚠️ Expected module name differs from file name
-
-The authoritative VBA module name is the `Attribute VB_Name` value. After import, Project Explorer must show the four exact production module names listed above.
-
-### 🪟 Title bar does not change
-
-Confirm:
-
-- Excel desktop for Windows is being used;
-- organizational policy permits WinAPI calls;
-- no add-in is immediately rewriting the same window-style bits;
-- the project compiles for the installed Office bitness.
-
-Title-bar behavior is best effort and can vary by Excel/Windows environment.
-
-Ribbon behavior across multiple workbook windows has been measured and is
-recorded in [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md).
-
-If another add-in legitimately changes the owned frame bits between a hide and a
-show, the component adopts the change rather than reverting it: while it does not
-own a hidden state for a window, the live owned bits are re-read on every call.
-
-### ℹ️ A TitleBar failure is reported on restore
-
-The title bar is restored to the window it was captured from. If that window has
-since closed, restoration reports a failure such as
-
-```text
-TitleBar | captured title-bar window is no longer open; no state was applied
-```
-
-This is correct behaviour rather than a defect. The alternative would be to apply
-one window's captured frame to whichever window happens to be active, silently
-and with a success result.
-
-Capture again from the window you intend to restore, or call `UI_ShowExcelUI`,
-which acts on the active window and needs no snapshot.
-
-### 🪟 The title bar changed on the wrong window
-
-Under the Single Document Interface each workbook window has its own frame, and
-`UI_HideExcelUI`, `UI_ShowExcelUI` and `UI_SetExcelUI` act on the **active**
-window. Activate the window you mean before calling them. Snapshot restoration
-is different: it targets the captured window regardless of which is active.
-
-### 🆘 Excel UI remains hidden after an interrupted test
-
-Run:
-
-```vb
-UI_ShowExcelUI
-```
-
-This recovery path does not require a snapshot.
-
-## 📦 Building the demo release asset
-
-For a release candidate:
-
-1. Start from the exact release branch/tag source.
-2. Import the four production modules.
-3. Import:
-
-   ```text
-   demo/M_EXCEL_UI_DEMO.bas
-   demo/M_DEMO_BUILDER.bas
-   ```
-
-4. Compile the VBA project.
-5. Run the regression and manual recovery checks.
-6. Save the workbook outside the Git-tracked source tree, named for the tag:
-
-   ```text
-   EXCEL_UI_DEMO_v<major>.<minor>.<patch>.xlsm
-   ```
-
-7. Optionally calculate its SHA-256.
-8. Attach the workbook to the GitHub Release.
-
-The binary workbook should not be committed back into the repository.
-
-## 📐 Line endings and repository work
-
-Exported `.bas` files are expected to use CRLF under `.gitattributes`. Markdown and repository configuration files should remain LF.
-
-The demo `.xlsm` is ignored by repository policy and belongs only in release packaging.
-
-## 🗑️ Removing the component
-
-1. Call `UI_ShowExcelUI`.
-2. Clear any snapshot if the project is still running:
-
-   ```vb
-   UI_ClearExcelUIStateSnapshot
-   ```
-
-3. Remove all four production modules.
-4. Remove optional demo/test modules when they are no longer needed.
-5. Compile the remaining VBA project.
+> Install one identifiable source version, compile it, exercise its real host
+> behavior, and keep evidence of what was—and was not—validated.

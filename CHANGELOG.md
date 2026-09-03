@@ -99,6 +99,8 @@ Use only the categories needed by a release.
 
 ### Added
 
+- Added a standardized installation and maintainer release documentation set with project-specific deployment, certification, provenance, recovery, and post-publication controls.
+
 - Added a root `VERSION` marker at `1.1.2`, aligned with the latest published
   release and the existing source-version contract.
 
