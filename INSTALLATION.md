@@ -43,6 +43,21 @@ Compatibility claims apply only to environments actually certified for the
 selected release. Read [README.md](README.md), [CHANGELOG.md](CHANGELOG.md), and
 the release notes before installation.
 
+### Current release boundaries
+
+Known defects and their correction state on this branch. A row marked
+*corrected on branch* is not certified: certification requires a real
+Windows Excel host and is tracked on the linked issue.
+
+| Area | v1.1.2 boundary | v1.1.3 branch state |
+|---|---|---|
+| Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Open: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
+| Title-bar identity | v1.1.3 pairs the retained Excel Window with the hWnd read from that same object and fails closed when the pair no longer matches. | Corrected on branch; certification pending: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) |
+| Recycled hWnd | Registry slots retain Window generation identity, so equal style bits cannot authenticate a recycled handle. | Corrected on branch; certification pending: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) |
+| Captionless baseline | Show rejects zero and non-zero baselines without WS_CAPTION and confirms the live result by readback. | Corrected on branch; certification pending: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) |
+| Self-test ownership | The tagged self-test can clear a snapshot it has just refused because the caller owns it. | Corrected on the release branch: [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) |
+| Quiet-update ownership | A suppressed or ignored write can be recorded as an achieved transition. | Corrected on the release branch: [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) |
+
 <a id="deployment-model"></a>
 
 ## 🎯 Deployment model

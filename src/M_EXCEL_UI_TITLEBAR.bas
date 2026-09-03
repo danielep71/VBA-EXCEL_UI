@@ -67,8 +67,7 @@ Option Private Module
 '   contract this module can actually keep.
 '
 ' FRAME STATE REGISTRY
-'   Frame state is keyed by handle rather than held as one value for the
-'   process:
+'   Frame state is keyed by handle and retains the Excel Window generation:
 '
 '       hWnd            the top-level window the entry belongs to
 '       OwnedStyleBits  the baseline a show will re-apply
@@ -77,6 +76,7 @@ Option Private Module
 '       RefreshPending  whether a style write succeeded but its frame refresh
 '                       did not, and must be retried before anything else
 '       LastWrittenBits the owned bits this component last wrote to that window
+'       Window object    the retained generation identity paired with hWnd
 '
 '   ComponentHidden is what makes the baseline self-healing. While the
 '   component does not own a hidden state, the live owned bits are the truth and
@@ -86,14 +86,10 @@ Option Private Module
 '   own zeros and the stored baseline is the only surviving record of what to
 '   restore, so it is left alone.
 '
-'   LastWrittenBits is what makes an entry provable. A handle is only a name,
-'   and Windows is free to issue that name again once the window holding it has
-'   closed, so a matching handle is not on its own evidence that the entry
-'   describes the window in front of it. An entry that claims the frame,
-'   because this component hid it or still owes it a repaint, is therefore
-'   checked against the live owned bits before it is reused and discarded when
-'   the two disagree. The window is then treated as one this component has
-'   never touched, which is exactly the state a new entry starts in.
+'   The retained Window object is the generation token. Its current Window.hWnd
+'   must still equal the stored native handle before any slot is reused.
+'   LastWrittenBits remains a state-consistency check, never identity proof:
+'   equal zero or equal non-zero style bits can occur on unrelated windows.
 '
 ' DESIGN PRINCIPLES
 '   - The merge policy is a pure function, deliberately separated from the
@@ -310,12 +306,264 @@ End Type
 'Frame state per top-level window. Held only in memory and lost on a VBA
 'project reset, while the window styles themselves survive in the Excel process.
 Private m_FrameStates()                 As tTitleBarFrameState
+Private m_FrameStateWindows()           As Object
 Private m_FrameStateCount               As Long
 
 'Regression seam. When True the next frame refresh reports failure without
 'calling SetWindowPos, so the refresh-debt path can be exercised without a
 'way to make Windows fail on demand.
 Private m_InjectFrameRefreshFailure     As Boolean
+
+'Regression seam for the active-frame pair. The mismatch it stands in for is an
+'SDI activation transition observed mid-call, which cannot be provoked on
+'demand, so the fail-closed branch would otherwise never execute. Kinds are
+'private: the seam takes a Long rather than exporting an enumeration.
+'
+'   0  no fault
+'   1  the sampled Application.hWnd disagrees with the resolved Window.hWnd
+Private Const FRAME_PAIR_FAULT_NONE     As Long = 0
+Private Const FRAME_PAIR_FAULT_MISMATCH As Long = 1
+
+Private m_InjectFramePairFault          As Long
+
+
+#If VBA7 Then
+Public Function UI_TryGetActiveFramePair( _
+    ByRef WindowOut As Object, _
+    ByRef HwndOut As LongPtr, _
+    ByRef FailMsg As String) _
+    As Boolean
+#Else
+Public Function UI_TryGetActiveFramePair( _
+    ByRef WindowOut As Object, _
+    ByRef HwndOut As Long, _
+    ByRef FailMsg As String) _
+    As Boolean
+#End If
+'
+'==============================================================================
+' UI_TryGetActiveFramePair
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolve the active Excel Window together with the native handle read from
+'   that same object, and refuse the pair when the host does not agree it is
+'   the active frame.
+'
+' WHY THIS EXISTS
+'   Two callers need this pair and were each resolving it themselves:
+'   UI_TryGetActiveTitleBarHwnd here, and the title-bar capture in
+'   M_EXCEL_UI_SNAPSHOT. One of them wanted the handle, the other wanted the
+'   Window as well, so the snapshot could not reuse the handle-only helper and
+'   duplicated the logic instead. A rule expressed twice is a rule that will
+'   diverge.
+'
+'   Reading Window.hWnd from the Window that was just resolved makes the pair
+'   internally consistent. It does not make it current. During an SDI
+'   activation transition Application.ActiveWindow can return a Window that is
+'   no longer the active native frame, and nothing in the pair itself reveals
+'   that. A fire-and-forget title-bar write would then modify the previously
+'   active window, and a snapshot would capture that frame and later restore it
+'   reporting success.
+'
+' INPUTS
+'   WindowOut
+'     ByRef. Receives the resolved Excel Window, or Nothing on failure.
+'
+'   HwndOut
+'     ByRef. Receives the handle read from that same Window, or zero.
+'
+'   FailMsg
+'     ByRef. Receives the reason on failure, or an empty string.
+'
+' RETURNS
+'   TRUE only when a live frame was resolved and the host agreed it is active.
+'
+' BEHAVIOR
+'   no active Window            FALSE, Nothing, zero
+'   sampled handle disagrees    FALSE, Nothing, zero - fail closed
+'   frame is not alive          FALSE, Nothing, zero
+'   otherwise                   TRUE with the paired Window and handle
+'
+' ERROR POLICY
+'   - Never raises. An unexpected runtime error is reported through FailMsg.
+'
+' DEPENDENCIES
+'   - UI_InternalIsTitleBarFrameAlive
+'
+' CALLED FROM
+'   - UI_TryGetActiveTitleBarHwnd
+'   - M_EXCEL_UI_SNAPSHOT
+'
+' NOTES
+'   The comparison narrows the race; it does not close it. Both values can move
+'   during a transition, so no sampling order makes the pair provably current.
+'   What it buys is that a disagreement becomes visible instead of being acted
+'   on, which is the difference between failing and silently changing the wrong
+'   window.
+'
+'   No retry is attempted. A retry would be a second unverified observation,
+'   and the caller is better served by a refusal it can report than by a pair
+'   that happened to agree on the second look.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ActiveTargetWindow  As Object          'Window the handle is read from
+
+#If VBA7 Then
+    Dim SampledHwnd         As LongPtr         'Application-level active handle
+#Else
+    Dim SampledHwnd         As Long            'Application-level active handle
+#End If
+
+    Dim Fault               As Long            'Armed regression fault, if any
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Assume failure until a live, agreed pair has been resolved
+        UI_TryGetActiveFramePair = False
+
+        Set WindowOut = Nothing
+        HwndOut = 0
+        FailMsg = vbNullString
+
+    'One-shot: consumed here whether or not it fires, so a test that forgets to
+    'disarm cannot fault every later resolution in the session
+        Fault = m_InjectFramePairFault
+        m_InjectFramePairFault = FRAME_PAIR_FAULT_NONE
+
+'------------------------------------------------------------------------------
+' RESOLVE THE PAIR
+'------------------------------------------------------------------------------
+    'Resolve one Excel Window first, then read the native handle from that same
+    'object, so the two describe each other rather than being collected
+    'independently
+        Set ActiveTargetWindow = Application.ActiveWindow
+
+        If ActiveTargetWindow Is Nothing Then
+            FailMsg = "no active Excel Window is available"
+            GoTo Safe_Exit
+        End If
+
+        HwndOut = ActiveTargetWindow.hWnd
+
+'------------------------------------------------------------------------------
+' AGREE WITH THE HOST
+'------------------------------------------------------------------------------
+    'An internally consistent pair can still be stale. Sample the
+    'application-level active handle and refuse when the two disagree.
+        SampledHwnd = Application.hWnd
+
+        If Fault = FRAME_PAIR_FAULT_MISMATCH Then
+            SampledHwnd = HwndOut + 1
+        End If
+
+        If SampledHwnd <> HwndOut Then
+            HwndOut = 0
+            FailMsg = "the active Excel Window is not the active native frame"
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE THE FRAME
+'------------------------------------------------------------------------------
+    'Reject a handle that is absent or no longer refers to a window
+        If Not UI_InternalIsTitleBarFrameAlive(HwndOut) Then
+            HwndOut = 0
+            FailMsg = "invalid Excel window handle"
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+        Set WindowOut = ActiveTargetWindow
+        UI_TryGetActiveFramePair = True
+
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+Err_Handler:
+    'Report the unexpected runtime error as the failure reason
+        Set WindowOut = Nothing
+        HwndOut = 0
+        FailMsg = UI_TitleBarBuildRuntimeErrorText
+        Resume Safe_Exit
+
+End Function
+
+
+Public Sub UI_InternalInjectFramePairFault( _
+    ByVal FaultKind As Long)
+'
+'==============================================================================
+' UI_InternalInjectFramePairFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arm a one-shot fault for the next active-frame pair resolution.
+'
+' WHY THIS EXISTS
+'   UI_TryGetActiveFramePair refuses a pair the host does not agree is active.
+'   That branch is reached only during an SDI activation transition observed
+'   mid-call, which cannot be provoked on demand, so without a seam the
+'   fail-closed path would never execute. An untested fail-closed path is the
+'   defect this pairing exists to prevent.
+'
+' INPUTS
+'   FaultKind
+'     0  no fault
+'     1  force the sampled application handle to disagree with the resolved
+'        Window handle
+'
+'     Values are plain Longs so this seam adds one procedure and no type. The
+'     mapping is mirrored by private constants here and in the regression
+'     module; neither is exported.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Records the fault for the next resolution to consume.
+'   - The armed value is consumed whether or not it fires, so a test that
+'     forgets to disarm cannot fault every later resolution in the session.
+'   - An unrecognised value is stored and behaves as no fault.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     keeps it off the external facade, so this is project-public surface.
+'   - Production code must never call it.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' SET SEAM
+'------------------------------------------------------------------------------
+    'Record the armed state for the next resolution to consume
+        m_InjectFramePairFault = FaultKind
+
+End Sub
 
 
 #If VBA7 Then
@@ -361,7 +609,7 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 '     False => Excel reported no usable handle.
 '
 ' BEHAVIOR
-'   - Reads Application.Hwnd once.
+'   - Resolves Application.ActiveWindow once and reads Window.hWnd from it.
 '   - Rejects a zero handle and a handle that is not a live window.
 '
 ' ERROR POLICY
@@ -381,57 +629,24 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 '   retain it must re-probe with UI_InternalIsTitleBarFrameAlive before use.
 '
 ' UPDATED
+'   2026-09-03 - Paired the active Excel Window with its own hWnd.
 '   2026-08-19
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' DELEGATE
 '------------------------------------------------------------------------------
-    'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+    Dim ResolvedWindow      As Object          'Discarded; this caller wants the handle
 
-    'Assume failure until a live handle has been resolved
-        UI_TryGetActiveTitleBarHwnd = False
+    'One implementation of the identity rule lives in UI_TryGetActiveFramePair.
+    'This wrapper exists because two of its three callers want only the handle,
+    'and keeping its signature unchanged meant no caller had to move.
+        UI_TryGetActiveTitleBarHwnd = _
+            UI_TryGetActiveFramePair(ResolvedWindow, HwndOut, FailMsg)
 
-    'Initialize the output and the failure message buffer
-        HwndOut = 0
-        FailMsg = vbNullString
-
-'------------------------------------------------------------------------------
-' RESOLVE HANDLE
-'------------------------------------------------------------------------------
-    'Read the host handle exactly once
-        HwndOut = Application.hWnd
-
-'------------------------------------------------------------------------------
-' VALIDATE HANDLE
-'------------------------------------------------------------------------------
-    'Reject a handle that is absent or no longer refers to a window
-        If Not UI_InternalIsTitleBarFrameAlive(HwndOut) Then
-            HwndOut = 0
-            FailMsg = "invalid Excel window handle"
-            GoTo Safe_Exit
-        End If
-
-    'Report success
-        UI_TryGetActiveTitleBarHwnd = True
-
-'------------------------------------------------------------------------------
-' RETURN SUCCESS
-'------------------------------------------------------------------------------
-Safe_Exit:
-    'Exit before the error-handler block
-        Exit Function
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-Err_Handler:
-    'Report the unexpected runtime error as the failure reason
-        HwndOut = 0
-        FailMsg = UI_TitleBarBuildRuntimeErrorText
-        Resume Safe_Exit
+    'Release the Window this caller did not ask for
+        Set ResolvedWindow = Nothing
 
 End Function
 
@@ -1009,6 +1224,7 @@ Public Sub UI_InternalResetTitleBarBaseline()
 '------------------------------------------------------------------------------
     'Release every entry and reset the count, leaving live windows untouched
         Erase m_FrameStates
+        Erase m_FrameStateWindows
         m_FrameStateCount = 0
 
     'Drop any armed regression seam so one test cannot leak into the next
@@ -1166,6 +1382,55 @@ Public Sub UI_InternalInjectFrameRefreshFailure( _
         m_InjectFrameRefreshFailure = FailNextRefresh
 
 End Sub
+
+
+#If VBA7 Then
+Public Function UI_InternalSimulateFrameHandleReuse( _
+    ByVal OriginalHwnd As LongPtr, _
+    ByVal ReplacementHwnd As LongPtr, _
+    ByVal ReplacementOwnedBits As LongPtr) _
+    As Boolean
+#Else
+Public Function UI_InternalSimulateFrameHandleReuse( _
+    ByVal OriginalHwnd As Long, _
+    ByVal ReplacementHwnd As Long, _
+    ByVal ReplacementOwnedBits As Long) _
+    As Boolean
+#End If
+'
+'==============================================================================
+' UI_InternalSimulateFrameHandleReuse
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Rebinds one registry slot's numeric handle while retaining its original
+'   Window object, reproducing the evidence presented by recycled hWnd values.
+'
+' CONTRACT
+'   Same-project regression seam only. Production code must never call it.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+
+    Dim Slot                As Long
+
+        On Error GoTo Err_Handler
+        UI_InternalSimulateFrameHandleReuse = False
+
+        Slot = UI_FrameStateSlotForHwnd(OriginalHwnd)
+        If Slot < 1 Then Exit Function
+
+        m_FrameStates(Slot).hWnd = ReplacementHwnd
+        m_FrameStates(Slot).LastWrittenBits = _
+            ReplacementOwnedBits And TITLEBAR_OWNED_STYLE_MASK
+
+        UI_InternalSimulateFrameHandleReuse = True
+        Exit Function
+
+Err_Handler:
+        UI_InternalSimulateFrameHandleReuse = False
+
+End Function
 
 
 #If VBA7 Then
@@ -1333,10 +1598,12 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
     Dim CurrentStyle        As LongPtr         'Live GWL_STYLE value
     Dim NewStyle            As LongPtr         'Merged GWL_STYLE value to write
     Dim RestoreBits         As LongPtr         'Owned bits a show will re-apply
+    Dim VerifiedStyle       As LongPtr         'Post-operation visibility readback
 #Else
     Dim CurrentStyle        As Long            'Live GWL_STYLE value
     Dim NewStyle            As Long            'Merged GWL_STYLE value to write
     Dim RestoreBits         As Long            'Owned bits a show will re-apply
+    Dim VerifiedStyle       As Long            'Post-operation visibility readback
 #End If
 
     Dim Slot                As Long            'Registry index for TargetHwnd
@@ -1431,7 +1698,8 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
             'owned bits, the merge becomes a no-op, and the short circuit below
             'reports success while the title bar stays hidden. Falling back to
             'the full owned frame keeps UI_ShowExcelUI a real recovery path.
-                If RestoreBits = 0 Then
+                If Not m_FrameStates(Slot).HasBaseline _
+                   Or (RestoreBits And WS_CAPTION) = 0 Then
                     RestoreBits = TITLEBAR_DEFAULT_STYLE_BITS
                 End If
 
@@ -1459,6 +1727,22 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
                     NewStyle And TITLEBAR_OWNED_STYLE_MASK
 
                 m_FrameStates(Slot).ComponentHidden = Not IsVisible
+
+            'A style-equality no-op is not proof that a show achieved a visible
+            'caption. Read the live frame again before reporting success.
+                If IsVisible Then
+                    If Not UI_TryGetWindowStyle( _
+                        TargetHwnd, VerifiedStyle, FailMsg) Then
+
+                        GoTo Safe_Exit
+                    End If
+
+                    If (VerifiedStyle And WS_CAPTION) = 0 Then
+                        FailMsg = _
+                            "title-bar show completed without a visible caption"
+                        GoTo Safe_Exit
+                    End If
+                End If
 
             UI_TrySetTitleBarVisibleForHwndWorker = True
             GoTo Safe_Exit
@@ -1492,6 +1776,24 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
             GoTo Safe_Exit
         End If
 
+'------------------------------------------------------------------------------
+' VERIFY SHOW RESULT
+'------------------------------------------------------------------------------
+    'A successful API write and repaint still do not prove the requested state.
+    'Confirm WS_CAPTION from the live frame before publishing success.
+        If IsVisible Then
+            If Not UI_TryGetWindowStyle( _
+                TargetHwnd, VerifiedStyle, FailMsg) Then
+
+                GoTo Safe_Exit
+            End If
+
+            If (VerifiedStyle And WS_CAPTION) = 0 Then
+                FailMsg = "title-bar show did not produce a visible caption"
+                GoTo Safe_Exit
+            End If
+        End If
+
     'Report success
         UI_TrySetTitleBarVisibleForHwndWorker = True
 
@@ -1509,6 +1811,54 @@ Err_Handler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
         Resume Safe_Exit
+
+End Function
+
+
+#If VBA7 Then
+Private Function UI_TryResolveWindowForHwnd( _
+    ByVal TargetHwnd As LongPtr, _
+    ByRef WindowOut As Object) _
+    As Boolean
+#Else
+Private Function UI_TryResolveWindowForHwnd( _
+    ByVal TargetHwnd As Long, _
+    ByRef WindowOut As Object) _
+    As Boolean
+#End If
+'
+'==============================================================================
+' UI_TryResolveWindowForHwnd
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the live Excel Window that currently owns TargetHwnd.
+'
+' ERROR POLICY
+'   Fails closed. A handle without a provable Excel Window is never given a
+'   persistent frame-state slot.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+
+    Dim Candidate           As Object
+
+        On Error GoTo Err_Handler
+        Set WindowOut = Nothing
+
+        For Each Candidate In Application.Windows
+            If Candidate.hWnd = TargetHwnd Then
+                Set WindowOut = Candidate
+                UI_TryResolveWindowForHwnd = True
+                Exit Function
+            End If
+        Next Candidate
+
+        Exit Function
+
+Err_Handler:
+        Set WindowOut = Nothing
+        UI_TryResolveWindowForHwnd = False
 
 End Function
 
@@ -1588,6 +1938,7 @@ Private Function UI_FrameStateIndexForHwnd( _
 '------------------------------------------------------------------------------
     Dim Slot                As Long            'Entry already held, if any
     Dim Capacity            As Long            'Slots currently allocated
+    Dim TargetWindow        As Object          'Excel Window owning TargetHwnd
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1603,6 +1954,12 @@ Private Function UI_FrameStateIndexForHwnd( _
 '------------------------------------------------------------------------------
     'A zero handle never names a window and must never be given an entry
         If TargetHwnd = 0 Then
+            GoTo Safe_Exit
+        End If
+
+    'A numeric handle alone has no generation identity. Resolve the owning
+    'Excel Window now and retain that object with any new slot.
+        If Not UI_TryResolveWindowForHwnd(TargetHwnd, TargetWindow) Then
             GoTo Safe_Exit
         End If
 
@@ -1648,11 +2005,14 @@ Private Function UI_FrameStateIndexForHwnd( _
     'Allocate on first use, then grow in fixed steps as windows are added
         If m_FrameStateCount = 0 Then
             ReDim m_FrameStates(1 To FRAME_STATE_GROWTH_SLOTS)
+            ReDim m_FrameStateWindows(1 To FRAME_STATE_GROWTH_SLOTS)
         Else
             Capacity = UBound(m_FrameStates)
 
             If m_FrameStateCount >= Capacity Then
                 ReDim Preserve m_FrameStates( _
+                    1 To Capacity + FRAME_STATE_GROWTH_SLOTS)
+                ReDim Preserve m_FrameStateWindows( _
                     1 To Capacity + FRAME_STATE_GROWTH_SLOTS)
             End If
         End If
@@ -1669,6 +2029,7 @@ Private Function UI_FrameStateIndexForHwnd( _
         m_FrameStates(m_FrameStateCount).ComponentHidden = False
         m_FrameStates(m_FrameStateCount).RefreshPending = False
         m_FrameStates(m_FrameStateCount).LastWrittenBits = 0
+        Set m_FrameStateWindows(m_FrameStateCount) = TargetWindow
 
         UI_FrameStateIndexForHwnd = m_FrameStateCount
 
@@ -1800,11 +2161,9 @@ Private Function UI_FrameStateEntryHolds( _
 '   to restore a closed window's captured frame onto an unrelated window that
 '   happened to inherit its handle.
 '
-'   There is no free identity token for a top-level window, so this proves the
-'   entry the only way it can be proved from the window itself: an entry that
-'   claims the frame must still find the owned bits it last wrote. An entry
-'   that claims nothing needs no proof, because its baseline is recaptured
-'   from the live bits before anything is ever restored from it.
+'   The retained Excel Window object is the generation token. It must still
+'   report the stored hWnd. Owned bits are checked separately as state
+'   consistency when the component claims a hidden frame or refresh debt.
 '
 ' INPUTS
 '   Slot
@@ -1816,7 +2175,8 @@ Private Function UI_FrameStateEntryHolds( _
 '     False => the entry cannot be shown to belong here and must be dropped.
 '
 ' BEHAVIOR
-'   - Fails an entry whose window has closed.
+'   - Fails an entry whose retained Window is absent, closed or reports another
+'     hWnd.
 '   - Passes an entry that neither hid the frame nor owes a repaint.
 '   - Otherwise compares the live owned bits with LastWrittenBits.
 '   - Fails when the style cannot be read, since nothing is then proved.
@@ -1840,6 +2200,7 @@ Private Function UI_FrameStateEntryHolds( _
 '     self-healing rule that applies while it owns nothing.
 '
 ' UPDATED
+'   2026-09-03 - Required retained Window/hWnd generation identity.
 '   2026-08-21
 '==============================================================================
 '
@@ -1849,8 +2210,10 @@ Private Function UI_FrameStateEntryHolds( _
 '------------------------------------------------------------------------------
 #If VBA7 Then
     Dim CurrentStyle        As LongPtr         'Live GWL_STYLE value
+    Dim RetainedHwnd        As LongPtr         'Handle read from retained Window
 #Else
     Dim CurrentStyle        As Long            'Live GWL_STYLE value
+    Dim RetainedHwnd        As Long            'Handle read from retained Window
 #End If
 
     Dim ProbeMsg            As String          'Style-read diagnostic, unused
@@ -1869,6 +2232,22 @@ Private Function UI_FrameStateEntryHolds( _
 '------------------------------------------------------------------------------
     'A slot outside the live range names no entry at all
         If Slot < 1 Or Slot > m_FrameStateCount Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' PROVE RETAINED WINDOW GENERATION
+'------------------------------------------------------------------------------
+    'The retained COM object is the generation token. A closed object raises or
+    'returns a different handle; either result discards the slot before any
+    'baseline, ownership flag or refresh debt can cross generations.
+        If m_FrameStateWindows(Slot) Is Nothing Then
+            GoTo Safe_Exit
+        End If
+
+        RetainedHwnd = m_FrameStateWindows(Slot).hWnd
+
+        If RetainedHwnd <> m_FrameStates(Slot).hWnd Then
             GoTo Safe_Exit
         End If
 
@@ -1997,7 +2376,12 @@ Private Sub UI_DiscardFrameStateEntry( _
     'Move every entry above the removed one down a slot
         For MoveIdx = Slot To m_FrameStateCount - 1
             m_FrameStates(MoveIdx) = m_FrameStates(MoveIdx + 1)
+            Set m_FrameStateWindows(MoveIdx) = _
+                m_FrameStateWindows(MoveIdx + 1)
         Next MoveIdx
+
+    'Release the trailing retained object before reducing the live count
+        Set m_FrameStateWindows(m_FrameStateCount) = Nothing
 
     'Adopt the reduced count; capacity above it is left allocated for reuse
         m_FrameStateCount = m_FrameStateCount - 1
@@ -2083,16 +2467,23 @@ Private Sub UI_CompactFrameStates()
     'Copy every entry whose window still exists toward the front of the array
         For ReadIdx = 1 To m_FrameStateCount
 
-            If UI_InternalIsTitleBarFrameAlive(m_FrameStates(ReadIdx).hWnd) Then
+            If UI_FrameStateEntryHolds(ReadIdx) Then
 
                 KeepCount = KeepCount + 1
 
                 If KeepCount <> ReadIdx Then
                     m_FrameStates(KeepCount) = m_FrameStates(ReadIdx)
+                    Set m_FrameStateWindows(KeepCount) = _
+                        m_FrameStateWindows(ReadIdx)
                 End If
 
             End If
 
+        Next ReadIdx
+
+    'Release retained objects outside the compacted live range
+        For ReadIdx = KeepCount + 1 To m_FrameStateCount
+            Set m_FrameStateWindows(ReadIdx) = Nothing
         Next ReadIdx
 
     'Adopt the retained count; capacity above it is left allocated for reuse

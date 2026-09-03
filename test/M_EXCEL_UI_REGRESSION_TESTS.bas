@@ -122,6 +122,9 @@ Option Private Module
     Private Const TEST_RIBBON_ERR_BASE As Long = vbObjectError + 5200  'Base custom error for the Ribbon probe
     Private Const TEST_OWNERSHIP_ERR_BASE As Long = vbObjectError + 5300  'Base custom error for the snapshot-ownership case
 
+    Private Const TEST_PAIR_FAULT_NONE As Long = 0  'Frame pair: no fault
+    Private Const TEST_PAIR_FAULT_MISMATCH As Long = 1  'Frame pair: sampled handle disagrees
+
     Private Const TEST_QUIET_FAULT_NONE As Long = 0  'Quiet scope: no fault
     Private Const TEST_QUIET_FAULT_ENTRY As Long = 1  'Quiet scope: entry read fails
     Private Const TEST_QUIET_FAULT_WRITE As Long = 2  'Quiet scope: write ineffective
@@ -214,6 +217,7 @@ Option Private Module
     'component to contradict an entry claiming the frame is hidden, which is
     'the evidence a reissued handle presents to the registry.
     Private Const TST_TITLEBAR_FOREIGN_FRAME As Long = &HC80000
+    Private Const TST_TITLEBAR_CAPTIONLESS_FRAME As Long = &H40000
 
     Private Const TST_SWP_NOSIZE            As Long = &H1
     Private Const TST_SWP_NOMOVE            As Long = &H2
@@ -3311,8 +3315,11 @@ Private Sub TST_RunRegressionPack( _
             TST_Case_TitleBarRoundTrip
             TST_Case_TitleBarOwnedBitPreservation
             TST_Case_TitleBarShowRecoversWithoutBaseline
+            TST_Case_TitleBarShowRejectsCaptionlessBaseline
             TST_Case_TitleBarFrameRefreshDebtRetried
             TST_Case_TitleBarStaleFrameEntryNotReused
+            TST_Case_TitleBarSameStyleHandleReuse
+            TST_Case_ActiveFramePairRefusesMismatch
         End If
 
 '------------------------------------------------------------------------------
@@ -3473,11 +3480,20 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify that a show restores the frame with no captured baseline
         TST_Case_TitleBarShowRecoversWithoutBaseline
 
+    'Verify that a non-zero captionless baseline is also unusable for show
+        TST_Case_TitleBarShowRejectsCaptionlessBaseline
+
     'Verify that a failed frame refresh is retried rather than short-circuited
         TST_Case_TitleBarFrameRefreshDebtRetried
 
     'Verify that frame state which cannot be proved is discarded, not applied
         TST_Case_TitleBarStaleFrameEntryNotReused
+
+    'Verify equal-zero and equal-nonzero handle reuse with object identity
+        TST_Case_TitleBarSameStyleHandleReuse
+
+    'Verify that a disagreed active-frame pair is refused by both callers
+        TST_Case_ActiveFramePairRefusesMismatch
 
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
@@ -3529,6 +3545,311 @@ Err_Handler:
             CStr(FailNumber) & ": " & FailDescription & _
             IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
+'
+'==============================================================================
+' TST_Case_TitleBarShowRejectsCaptionlessBaseline
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prove that show cannot adopt a non-zero owned-bit baseline without
+'   WS_CAPTION or report success while the caption remains absent.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+
+#If VBA7 Then
+    Dim TargetHwnd          As LongPtr
+    Dim EntryStyle          As LongPtr
+    Dim CaptionlessStyle    As LongPtr
+    Dim ResultStyle         As LongPtr
+#Else
+    Dim TargetHwnd          As Long
+    Dim EntryStyle          As Long
+    Dim CaptionlessStyle    As Long
+    Dim ResultStyle         As Long
+#End If
+
+    Dim StyleCaptured       As Boolean
+    Dim OK                  As Boolean
+    Dim Msg                 As String
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
+
+    Const PROC As String = _
+        "TST_Case_TitleBarShowRejectsCaptionlessBaseline"
+
+        On Error GoTo Err_Handler
+        TST_Log PROC, "START", _
+            "Validating recovery from a non-zero captionless baseline"
+
+        TargetHwnd = ActiveWindow.hWnd
+        If TargetHwnd = 0 Then
+            Err.Raise TEST_ERR_BASE + 75, PROC, _
+                "invalid Excel Window hWnd"
+        End If
+
+        If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
+            Err.Raise TEST_ERR_BASE + 76, PROC, _
+                "could not read the entry style | " & Msg
+        End If
+        StyleCaptured = True
+
+    'Leave one non-zero owned bit but deliberately remove WS_CAPTION.
+        CaptionlessStyle = _
+            (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+            TST_TITLEBAR_CAPTIONLESS_FRAME
+
+        If Not TST_TrySetWindowStyle( _
+            TargetHwnd, CaptionlessStyle, Msg) Then
+
+            Err.Raise TEST_ERR_BASE + 77, PROC, _
+                "could not write the captionless style | " & Msg
+        End If
+
+        If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
+            Err.Raise TEST_ERR_BASE + 78, PROC, _
+                "could not refresh the captionless frame | " & Msg
+        End If
+
+        UI_InternalResetTitleBarBaseline
+
+        OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=True, _
+            FailMsg:=Msg)
+
+        TST_AssertBooleanEquals True, OK, _
+            "CaptionlessBaseline.ShowReportsSuccess"
+        TST_AssertTitleBarVisible True, _
+            "CaptionlessBaseline.CaptionVisible"
+
+        If Not TST_TryGetWindowStyle(TargetHwnd, ResultStyle, Msg) Then
+            Err.Raise TEST_ERR_BASE + 79, PROC, _
+                "could not read the resulting style | " & Msg
+        End If
+
+        If (ResultStyle And Not TST_TITLEBAR_OWNED_MASK) <> _
+            (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Then
+
+            Err.Raise TEST_ERR_BASE + 80, PROC, _
+                "show changed unrelated window-style bits"
+        End If
+
+Safe_Exit:
+        TST_RestoreTitleBarStyle _
+            TargetHwnd, EntryStyle, StyleCaptured
+
+        If FailNumber <> 0 Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Captionless baseline rejected and visible frame recovered"
+        Exit Sub
+
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarSameStyleHandleReuse()
+'
+'==============================================================================
+' TST_Case_TitleBarSameStyleHandleReuse
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prove that equal style bits cannot authenticate a recycled numeric hWnd.
+'
+' BEHAVIOR
+'   Exercises both equal-zero and equal-nonzero owned-bit collisions. The seam
+'   changes only the slot's numeric name and claimed last-written bits; its
+'   retained Window object remains the original generation token.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+
+    Dim AnchorWindow        As Window
+    Dim ReplacementBook     As Workbook
+    Dim ReplacementWindow   As Window
+    Dim CaseIndex           As Long
+    Dim OK                  As Boolean
+    Dim Msg                 As String
+    Dim FailNumber          As Long
+    Dim FailSource          As String
+    Dim FailDescription     As String
+
+#If VBA7 Then
+    Dim AnchorHwnd          As LongPtr
+    Dim ReplacementHwnd     As LongPtr
+    Dim AnchorEntryStyle    As LongPtr
+    Dim ReplacementEntryStyle As LongPtr
+    Dim AnchorVisibleStyle  As LongPtr
+    Dim ReplacementStyle    As LongPtr
+    Dim ResultStyle         As LongPtr
+    Dim CollisionBits       As LongPtr
+#Else
+    Dim AnchorHwnd          As Long
+    Dim ReplacementHwnd     As Long
+    Dim AnchorEntryStyle    As Long
+    Dim ReplacementEntryStyle As Long
+    Dim AnchorVisibleStyle  As Long
+    Dim ReplacementStyle    As Long
+    Dim ResultStyle         As Long
+    Dim CollisionBits       As Long
+#End If
+
+    Dim AnchorCaptured      As Boolean
+    Dim ReplacementCaptured As Boolean
+
+    Const PROC As String = "TST_Case_TitleBarSameStyleHandleReuse"
+
+        On Error GoTo Err_Handler
+        TST_Log PROC, "START", _
+            "Validating same-style recycled-hWnd rejection"
+
+        Set AnchorWindow = ActiveWindow
+        If AnchorWindow Is Nothing Then
+            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 90, PROC, _
+                "no anchor Excel Window is available"
+        End If
+        AnchorHwnd = AnchorWindow.hWnd
+
+        Set ReplacementBook = Workbooks.Add
+        Set ReplacementWindow = ReplacementBook.Windows(1)
+        ReplacementHwnd = ReplacementWindow.hWnd
+
+        If AnchorHwnd = ReplacementHwnd Then
+            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 91, PROC, _
+                "the host did not provide distinct SDI window handles"
+        End If
+
+        If Not TST_TryGetWindowStyle( _
+            AnchorHwnd, AnchorEntryStyle, Msg) Then
+
+            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 92, PROC, Msg
+        End If
+        AnchorCaptured = True
+
+        If Not TST_TryGetWindowStyle( _
+            ReplacementHwnd, ReplacementEntryStyle, Msg) Then
+
+            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 93, PROC, Msg
+        End If
+        ReplacementCaptured = True
+
+        For CaseIndex = 0 To 1
+            UI_InternalResetTitleBarBaseline
+
+        'Give the original generation a distinctive visible baseline before the
+        'component hides it and records ownership.
+            AnchorVisibleStyle = _
+                (AnchorEntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+                TST_TITLEBAR_FOREIGN_FRAME
+
+            If Not TST_TrySetWindowStyle( _
+                AnchorHwnd, AnchorVisibleStyle, Msg) Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 94, PROC, Msg
+            End If
+            If Not TST_TryRefreshWindowFrame(AnchorHwnd, Msg) Then
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 95, PROC, Msg
+            End If
+
+            OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                TargetHwnd:=AnchorHwnd, _
+                IsVisible:=False, _
+                FailMsg:=Msg)
+            TST_AssertBooleanEquals True, OK, _
+                "SameStyleReuse.AnchorHidden"
+
+        'Model a replacement generation whose live style coincides with the
+        'stale slot: zero in the first pass, non-zero captionless in the second.
+            If CaseIndex = 0 Then
+                CollisionBits = 0
+            Else
+                CollisionBits = TST_TITLEBAR_CAPTIONLESS_FRAME
+            End If
+
+            ReplacementStyle = _
+                (ReplacementEntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+                CollisionBits
+
+            If Not TST_TrySetWindowStyle( _
+                ReplacementHwnd, ReplacementStyle, Msg) Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 96, PROC, Msg
+            End If
+            If Not TST_TryRefreshWindowFrame(ReplacementHwnd, Msg) Then
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 97, PROC, Msg
+            End If
+
+            If Not UI_InternalSimulateFrameHandleReuse( _
+                OriginalHwnd:=AnchorHwnd, _
+                ReplacementHwnd:=ReplacementHwnd, _
+                ReplacementOwnedBits:=CollisionBits) Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 98, PROC, _
+                    "unable to arm the recycled-hWnd seam"
+            End If
+
+            OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                TargetHwnd:=ReplacementHwnd, _
+                IsVisible:=True, _
+                FailMsg:=Msg)
+            TST_AssertBooleanEquals True, OK, _
+                "SameStyleReuse.ReplacementShown"
+
+            If Not TST_TryGetWindowStyle( _
+                ReplacementHwnd, ResultStyle, Msg) Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 99, PROC, Msg
+            End If
+
+        'A discarded slot uses the safe visible fallback. The original
+        'generation's distinctive baseline must never cross to the replacement.
+            If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> _
+                TST_TITLEBAR_OWNED_MASK Then
+
+                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 100, PROC, _
+                    "stale frame state crossed to the replacement generation"
+            End If
+        Next CaseIndex
+
+Safe_Exit:
+        On Error Resume Next
+        UI_InternalResetTitleBarBaseline
+        TST_RestoreTitleBarStyle _
+            AnchorHwnd, AnchorEntryStyle, AnchorCaptured
+        TST_RestoreTitleBarStyle _
+            ReplacementHwnd, ReplacementEntryStyle, ReplacementCaptured
+        TST_SafeCloseWorkbook ReplacementBook
+        If Not AnchorWindow Is Nothing Then AnchorWindow.Activate
+        On Error GoTo 0
+
+        If FailNumber <> 0 Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Equal-zero and equal-nonzero recycled handles were rejected"
+        Exit Sub
+
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
         Resume Safe_Exit
 
 End Sub
@@ -9551,6 +9872,170 @@ Private Sub TST_AssertSnapshotWindowState( _
                 CStr(ExpectedGridlines) & "; actual=" & _
                 CStr(TargetWindow.DisplayGridlines)
         End If
+
+End Sub
+
+
+Private Sub TST_Case_ActiveFramePairRefusesMismatch()
+
+'
+'==============================================================================
+' TST_Case_ActiveFramePairRefusesMismatch
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that the active-frame pair is refused when the host does not agree
+'   the resolved Window is the active native frame, and that the refusal
+'   reaches both callers.
+'
+' WHY THIS EXISTS
+'   Resolving Window.hWnd from the Window just returned by
+'   Application.ActiveWindow makes the pair internally consistent. It does not
+'   make it current: during an SDI activation transition the resolved Window
+'   can already be the previously active frame. A fire-and-forget title-bar
+'   write would then modify the wrong window, and a snapshot would capture that
+'   frame and later restore it reporting success.
+'
+'   The disagreement cannot be provoked on demand, so the fail-closed branch is
+'   reached through the one-shot seam in M_EXCEL_UI_TITLEBAR. Without it the
+'   branch would ship having never executed, which is the shape of the defect
+'   this pairing exists to prevent.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   1  no fault              the pair resolves, Window and handle both set
+'   2  fault armed           refused, Window Nothing, handle zero, exact text
+'   3  seam is one-shot      the next resolution succeeds again
+'   4  refusal delegates     the handle-only wrapper reports the same failure
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Disarms the seam before returning
+'
+' DEPENDENCIES
+'   - UI_InternalInjectFramePairFault
+'   - UI_TryGetActiveFramePair
+'   - UI_TryGetActiveTitleBarHwnd
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'   - TST_RunTitleBarOnlyPack
+'
+' NOTES
+'   The snapshot capture path is not asserted separately here. It reaches the
+'   same helper through the same call, so a separate assertion would restate
+'   this one rather than test anything further; what it would add is coverage
+'   of the snapshot's own failure reporting, which belongs with its structured
+'   result cases.
+'
+' UPDATED
+'   2026-09-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ResolvedWindow      As Object          'Window the helper reports
+
+#If VBA7 Then
+    Dim ResolvedHwnd        As LongPtr         'Handle the helper reports
+#Else
+    Dim ResolvedHwnd        As Long            'Handle the helper reports
+#End If
+
+    Dim FailMsg             As String          'Failure text the helper reports
+    Dim OK                  As Boolean         'Helper verdict
+
+    Const PROC As String = "TST_Case_ActiveFramePairRefusesMismatch"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_Log PROC, "START", _
+            "Validating that a disagreed active-frame pair is refused"
+
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
+
+'------------------------------------------------------------------------------
+' BRANCH 1 - AN AGREED PAIR RESOLVES
+'------------------------------------------------------------------------------
+        Set ResolvedWindow = Nothing
+        ResolvedHwnd = 0
+        FailMsg = vbNullString
+
+        OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".Agreed.Resolved"
+        TST_AssertBooleanEquals _
+            False, (ResolvedWindow Is Nothing), PROC & ".Agreed.WindowSet"
+        TST_AssertBooleanEquals _
+            False, (ResolvedHwnd = 0), PROC & ".Agreed.HandleSet"
+        TST_AssertBooleanEquals _
+            True, (Len(FailMsg) = 0), PROC & ".Agreed.NoFailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 2 - A DISAGREED PAIR IS REFUSED, AND NOTHING IS RETURNED
+'------------------------------------------------------------------------------
+    'Returning a handle alongside a refusal would invite a caller to use it
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_MISMATCH
+
+        Set ResolvedWindow = Application.ActiveWindow
+        ResolvedHwnd = 1
+        FailMsg = vbNullString
+
+        OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
+
+        TST_AssertBooleanEquals False, OK, PROC & ".Disagreed.Refused"
+        TST_AssertBooleanEquals _
+            True, (ResolvedWindow Is Nothing), PROC & ".Disagreed.WindowCleared"
+        TST_AssertBooleanEquals _
+            True, (ResolvedHwnd = 0), PROC & ".Disagreed.HandleCleared"
+        TST_AssertBooleanEquals _
+            True, _
+            (FailMsg = "the active Excel Window is not the active native frame"), _
+            PROC & ".Disagreed.FailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 3 - THE SEAM IS ONE-SHOT
+'------------------------------------------------------------------------------
+    'A fault that survived would refuse every later resolution in the session,
+    'and the symptom would look like the defect rather than like the test
+        Set ResolvedWindow = Nothing
+        ResolvedHwnd = 0
+        FailMsg = vbNullString
+
+        OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".OneShot.SecondResolves"
+
+'------------------------------------------------------------------------------
+' BRANCH 4 - THE HANDLE-ONLY WRAPPER REPORTS THE SAME REFUSAL
+'------------------------------------------------------------------------------
+    'The wrapper delegates, so a refusal must reach its callers unchanged
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_MISMATCH
+
+        ResolvedHwnd = 1
+        FailMsg = vbNullString
+
+        OK = UI_TryGetActiveTitleBarHwnd(ResolvedHwnd, FailMsg)
+
+        TST_AssertBooleanEquals False, OK, PROC & ".Delegated.Refused"
+        TST_AssertBooleanEquals _
+            True, (ResolvedHwnd = 0), PROC & ".Delegated.HandleCleared"
+        TST_AssertBooleanEquals _
+            True, _
+            (FailMsg = "the active Excel Window is not the active native frame"), _
+            PROC & ".Delegated.FailureText"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
+
+        TST_Log PROC, "PASS", _
+            "A disagreed active-frame pair was refused by both callers"
 
 End Sub
 

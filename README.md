@@ -434,12 +434,10 @@ Expected behavior:
 - a closed, recreated, or otherwise unusable captured window is reported as a best-effort failure;
 - state is never intentionally applied to a different replacement window.
 
-The title bar is intended to follow the same rule. Its captured state records a
-top-level handle and an owning `Window` object, but v1.1.2 does not yet pair the
-retained object with its **current** `Window.hWnd` strongly enough before every
-restore. Neither the handle nor the object is sufficient alone: Windows can
-reuse a destroyed window's handle, while the object is not itself the native
-write target. The complete pairing correction is #45.
+The v1.1.3 implementation pairs the retained Excel `Window` with the native
+handle read from that same object's `Window.hWnd`. Restore requires that the
+retained object still reports the captured handle; a handle alone is never
+accepted as generation identity.
 
 The Ribbon is also not identity-safe in v1.1.2. Its APIs act on the active
 window and accept no window argument, so a snapshot restored while a different
@@ -469,18 +467,15 @@ The title-bar subsystem owns only these `GWL_STYLE` bits:
 
 Showing the title bar merges the captured owned bits into the current style. It does not restore an entire historical style value, so unrelated style changes are preserved.
 
-When a show is requested and no baseline was ever captured for the current
-handle, the intended fallback is to restore the full owned frame. The v1.1.2
-implementation uses `RestoreBits = 0` as the fallback test instead of consulting
-its existing `HasBaseline` field. It therefore handles an all-zero hidden frame
-but can adopt a non-zero captionless baseline and report success while the
-caption remains absent. That open recovery defect is tracked by
-[#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6).
+When a show is requested, a stored baseline is usable only when `HasBaseline`
+is true and the baseline contains `WS_CAPTION`. Zero and non-zero captionless
+baselines use the safe visible-frame fallback. Every show, including a no-op,
+reads the live style back and requires `WS_CAPTION` before reporting success.
 
-Frame state is intended to be held per top-level window rather than once per
-process, and is currently keyed by hWnd. Operating on one live workbook window
-does not discard another live window's baseline, but hWnd reuse is why #32 still
-needs a generation-identity repair. While the component does not own a hidden
+Frame state is held per top-level window rather than once per process. Each hWnd
+slot retains its owning Excel `Window` object as a generation token; equal style
+bits are only a consistency check and cannot authenticate a recycled handle.
+While the component does not own a hidden
 state for a window, the live owned bits are re-read on every call, so a
 legitimate frame change made by Excel or another add-in is adopted rather than
 reverted on the next show.
@@ -741,13 +736,12 @@ No third-party DLL, COM component, package manager, or non-standard VBA referenc
 - **Windows only.** Title-bar control depends on WinAPI.
 - **Current Excel instance.** Application-level properties affect the running Excel process.
 - **Targeted window operations.** Headings, Workbook Tabs, and Gridlines support all windows, active window, or active-workbook windows.
-- **Retained identity, in memory only.** Window identity is retained by object reference and the title bar additionally records a top-level handle. The v1.1.2 Window/current-hWnd pairing remains incomplete (#45), and snapshots do not survive VBA reset or Excel restart.
+- **Retained identity, in memory only.** Window identity is retained by object reference and the title bar pairs that object with its `Window.hWnd`; snapshots do not survive VBA reset or Excel restart.
 - **Changed window set after capture.** New windows are unchanged; missing captured windows produce diagnostics.
 - **Ribbon restoration is not window-identity-safe.** Every Ribbon mechanism acts on the active window and accepts no window argument, so a snapshot restored while a different window is active applies the captured value to that window. See [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md).
-- **Native frame identity is incomplete in v1.1.2.** Same-style recycled handles
-  and an unpaired retained Window/current hWnd remain tracked by #32 and #45.
-- **Caption-visible title-bar recovery is incomplete in v1.1.2.** A non-zero
-  captionless baseline can still produce false show success (#6).
+- **Native frame corrections require v1.1.3 certification.** The branch repairs
+  #32, #45 and #6, but those guarantees are not release claims until the exact
+  source passes the Excel regression and release gates.
 - **Best-effort Ribbon and frame behavior.** Excel, Windows, add-ins, and window mode can affect visible results.
 - **No durable transaction.** Process termination can prevent restoration.
 - **Not a security boundary.** Hidden Excel UI does not prevent other code or informed users from changing state.
@@ -790,8 +784,7 @@ The public API is unchanged: no procedure, enum or parameter was added, removed
 or renamed, and no existing call site requires modification.
 
 - title-bar snapshot restoration moved from collection-index targeting to a
-  retained `Window` object; later review found the native Window/hWnd pairing
-  incomplete and it remains tracked by #45;
+  retained `Window` object; v1.1.3 pairs that object with its own native hWnd;
 - title-bar frame state keyed per window rather than once per process, and the
   baseline re-read while the component does not own a hidden state;
 - a failed non-client frame refresh recorded and retried rather than
