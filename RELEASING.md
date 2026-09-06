@@ -191,7 +191,19 @@ Where policy requires a pull request, make these items easy to verify:
 - compatibility, migration, and security notes;
 - remaining limitations.
 
-Require configured checks and record the resulting `main` SHA. If the merge changes source identity, certify that commit before tagging.
+Require configured checks and record the resulting `main` SHA. If the merge
+changes the source commit identity, every pre-merge binary artifact and its hash
+are stale—even when the resulting source tree appears unchanged. Before tagging:
+
+1. check out the resulting `main` SHA;
+2. rerun static and Excel certification on that exact commit;
+3. rebuild every published binary artifact from that commit;
+4. reopen and test each rebuilt artifact as packaged;
+5. recalculate its size and SHA-256; and
+6. replace the pre-merge artifact evidence with the resulting `main` evidence.
+
+Do not tag or upload an artifact built from the pull-request head while claiming
+the merge commit as its source identity.
 
 ## 9. Create the annotated tag
 

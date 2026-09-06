@@ -134,6 +134,15 @@ are part of a reproducible source installation.
 
 A successful import is not sufficient evidence that the installation is correct.
 
+`Test_EXCEL_UI_RunReleaseCertification` is defined in
+`test/M_EXCEL_UI_REGRESSION_TESTS.bas`; it is not part of the four-module
+production package. Before release or production certification, import that
+regression module from the **same tag or commit** as the production modules,
+compile the complete VBA project, and then run the certification procedure. If
+the destination workbook is not intended to retain test code, capture the
+result, remove the regression module afterward, recompile, and repeat the
+public-API smoke test.
+
 - Run `Test_EXCEL_UI_RunReleaseCertification` for production/release validation.
 - Treat any incomplete, skipped, failed, or cleanup-failed unit as not passing.
 - Verify multi-window identity, closed/recreated windows, snapshot reset, and emergency recovery.
@@ -176,6 +185,22 @@ Before upgrading:
 - Review newly observable diagnostics and recovery behavior even when public signatures are unchanged.
 - Never restore per-window state by collection index or reuse a stale snapshot as current authority.
 
+### Upgrade from the legacy single-module layout
+
+Version 1.0.1 and earlier supported a single `M_EXCEL_UI` implementation module.
+Do not import the current four-module package beside that legacy module: the VBE
+can rename the incoming facade or report duplicate and ambiguous procedures
+while leaving old code active.
+
+1. Export and preserve any local modifications to the legacy module.
+2. Return the Excel UI to a recoverable visible state and clear any snapshot.
+3. Remove the legacy `M_EXCEL_UI` module completely.
+4. Import all four current production modules from one tag or commit.
+5. Compile, import the matching regression module for validation, and run the
+   complete certification sequence.
+6. Remove the regression module afterward when the production workbook should
+   contain only the four supported runtime modules, then compile once more.
+
 After replacement, compile and repeat the full installation validation. Do not
 claim an upgrade is non-breaking solely because VBA signatures compile.
 
@@ -184,6 +209,30 @@ claim an upgrade is non-breaking solely because VBA signatures compile.
 A locally modified copy is a fork. Diff it against the old and new exported
 source, reapply changes deliberately, and retest. Do not overwrite it and assume
 the local behavior survived.
+
+---
+
+<a id="snapshot-lifetime-and-window-references"></a>
+
+## 🪟 Snapshot lifetime and Window references
+
+The component maintains one in-memory snapshot slot per loaded VBA project.
+That snapshot retains the Excel `Window` objects captured for later identity-safe
+restoration; a successful restore does **not** clear the slot automatically.
+
+- Capture before applying a temporary UI mode and inspect the structured result.
+- Restore while the captured windows still exist; a closed or recreated window
+  must fail closed rather than redirect its state to another window.
+- Call `UI_HasExcelUIStateSnapshot` before any helper or destructive test runner
+  that might otherwise replace caller-owned state.
+- Call `UI_ClearExcelUIStateSnapshot` as soon as the workflow no longer needs
+  retry or inspection. Clearing releases the retained `Window` references.
+- Do not leave a snapshot alive across unrelated work: retained references can
+  delay workbook/window teardown and make later state appear current when it is
+  not.
+
+A new capture replaces the previous slot. Callers sharing the same VBA project
+must therefore coordinate ownership explicitly.
 
 ---
 
