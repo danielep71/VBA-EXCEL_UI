@@ -14,6 +14,30 @@ body without relying on predicted issue numbers or withdrawn review archives.
 
 ## 1. Release boundary and live state
 
+### Subsequent implementation update — #67, #68, #69
+
+The 2026-09-03 inventory below is a historical planning snapshot. This batch
+implements #67, #68 and #69; GitHub issue closure is recorded only after the
+published source and validation are verified. All other wave dependencies stay
+unchanged.
+
+- #69: matching Windows-native CRLF overrides restored; VBA policy unchanged.
+- #67: `/.mutation-scratch/` is the sole disposable-control location, ignored
+  and excluded from archives; recorded control types are inventoried in
+  CONTRIBUTING. Reviewed results remain separate from disposable source.
+- #68: one README H1, six major sections demoted, child headings corrected;
+  all non-heading text and existing anchors preserved.
+- `tools/repository_policy.py` adds 33 positive/negative policy fixtures to the
+  offline gate. The full gate now has 26 checks, not the historical 24.
+- No production, test or demo VBA file changed. No tracked Windows-native
+  script/configuration files required renormalization.
+- After these three issue closures, the milestone has 22 open / 7 closed.
+
+Wave 3B no longer needs #67; wave 4 no longer needs #69; wave 7 no longer
+needs #68. Runtime work (#23, #45, #32, #6, #66) remains open. The appendix is
+retained as the dated pre-batch acceptance snapshot, not a current checkbox
+inventory; the three live issues carry completion evidence.
+
 v1.1.3 is a corrective release. It may change internal production, test,
 documentation and release-engineering behavior, but it must not change the
 12-member supported caller-facing facade. #44 (opt-in Ribbon activation) and
@@ -173,7 +197,8 @@ No release evidence is valid during the short cross-repository gap.
 
 ## Appendix A — Live open milestone issues
 
-Generated from GitHub after the 2026-09-03 audit. Bodies are verbatim.
+Generated from GitHub after the 2026-09-03 audit. Bodies are verbatim historical
+snapshots; see the subsequent implementation update above for #67–#69.
 
 
 

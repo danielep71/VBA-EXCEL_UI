@@ -54,6 +54,19 @@
 # Explicit VBA and Windows-native rules below override the working-tree EOL.
 * text=auto eol=lf
 
+# Windows-native policy, matching .editorconfig.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.vbs text eol=crlf
+*.reg text eol=crlf
+*.ini text eol=crlf
+
+# Defense in depth if disposable controls are ever force-added.
+/.mutation-scratch export-ignore
+
 
 #------------------------------------------------------------------------------
 # EXPORTED VBA SOURCE

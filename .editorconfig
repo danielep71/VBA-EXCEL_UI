@@ -37,6 +37,10 @@ tab_width = 4
 insert_final_newline = true
 trim_trailing_whitespace = true
 
+# Windows-native scripts/configuration follow the repository CRLF policy.
+[*.{bat,cmd,ps1,psm1,psd1,vbs,reg,ini}]
+end_of_line = crlf
+
 # Python repository and validation tooling.
 [*.{py,pyw}]
 charset = utf-8

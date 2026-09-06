@@ -53,6 +53,7 @@ REQUIRED_FILES = ALL_MODULES + [
     "tools/reformat.py",
     "tools/vba_api.py",
     "tools/wiki_badges.py",
+    "tools/repository_policy.py",
     "tools/public_api_manifest.txt",
 ]
 
@@ -1234,7 +1235,22 @@ def check_formatter_selftest():
 
 
 # --------------------------------------------------------------------------
+def check_repository_policy():
+    import repository_policy
+    for finding in repository_policy.check(REPO):
+        fail('repository policy', finding)
+
+
+def check_repository_policy_selftest():
+    import repository_policy
+    findings, count = repository_policy.selftest(REPO)
+    for finding in findings:
+        fail('repository policy self-test', finding)
+
+
 CHECKS = [
+    ("repository policy", check_repository_policy),
+    ("repository policy self-test", check_repository_policy_selftest),
     ("required files", check_required_files),
     ("module names", check_module_names),
     ("option policy", check_option_policy),

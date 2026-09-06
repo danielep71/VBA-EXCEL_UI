@@ -151,6 +151,34 @@ claims in commit messages.
 
 Exported source is authoritative.
 
+Portable text (Markdown, Python, YAML and JSON) uses LF. Exported VBA keeps its
+existing CRLF policy. Windows-native `.bat`, `.cmd`, `.ps1`, `.psm1`, `.psd1`,
+`.vbs`, `.reg` and `.ini` files use CRLF in editors and Git checkouts. This is a
+repository consistency policy, not a claim that every host rejects LF.
+
+### Disposable mutation controls
+
+Create throwaway mutants and local control output only in the repository-root
+`/.mutation-scratch/` directory (created locally on demand, never committed).
+Do not place mutants beside `src/` or authoritative test fixtures. Do not add
+broad `*.bas`, `*mutant*`, `*control*` or evidence-directory ignore rules.
+
+The recorded v1.1.3 control inventory is:
+
+| Issue | Disposable artifact type | Purpose |
+| --- | --- | --- |
+| #43 | Four one-runner-at-a-time refusal mutants | Prove caller-owned snapshots survive each refusal |
+| #43 | Cleanup-skipping mutant | Prove the success-path snapshot-release assertion detects leakage |
+| #6 / #66 | Title-bar module with the v1.1.2 fallback condition restored | Negative control for captionless recovery; currently hangs, not passing evidence |
+| #45 | Active-frame-pair comparison control | Prove disagreement fails at `.Disagreed.Refused` |
+
+This inventories recorded types and purposes, not recoverable local filenames:
+the historical throwaway files were not committed. For #32, a true unchanged-
+hWnd generation control remains outstanding; do not count the distinct-handle
+seam as that evidence. Preserve reviewed results separately from disposable code.
+
+### Exported-source rules
+
 - Use `Option Explicit`.
 - Preserve the repository's VBE export metadata, module names, encoding, and
   line-ending policy.

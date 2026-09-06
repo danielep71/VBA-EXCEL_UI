@@ -180,6 +180,13 @@ sha256sum dist/<artifact>
 
 Publish only artifacts promised by the installation guide.
 
+Disposable mutants and their local output belong only in `/.mutation-scratch/`.
+They are not release evidence and must never enter source archives or binary
+assets. Package from tracked candidate inputs, not a recursive working-tree
+copy. The directory is ignored and marked `export-ignore` as defense in depth;
+never force-add it. Reviewed control results may be retained separately with
+their exact source identity, but disposable source variants are not deliverables.
+
 ## 8. Review and merge
 
 Where policy requires a pull request, make these items easy to verify:

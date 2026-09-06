@@ -2,7 +2,7 @@
 
 # 🪟 VBA Excel UI
 
-### A structured Windows Excel UI controller for application-style workbooks
+## A structured Windows Excel UI controller for application-style workbooks
 
 **Tri-state visibility control · Targeted window scopes · Best-effort execution · Structured diagnostics · Identity-safe snapshot restore · Owned-bit title-bar management · Modular architecture**
 
@@ -130,7 +130,7 @@ captured from. Measurements and the planned fix are in
 
 <a id="quick-start"></a>
 
-# ⚡ Quick start
+## ⚡ Quick start
 
 > [!IMPORTANT]
 > **Source compatibility is not package compatibility.** Every public `UI_...`
@@ -139,7 +139,7 @@ captured from. Measurements and the planned fix are in
 > together: the internal boundaries between them changed at `1.1.0`, and a
 > project holding a mixture of versions will not compile.
 
-## 1. Import the complete production package
+### 1. Import the complete production package
 
 Import all four files from `src/`:
 
@@ -167,7 +167,7 @@ VBA Editor → Debug → Compile VBAProject
 
 For upgrade and troubleshooting instructions, see [INSTALLATION.md](INSTALLATION.md).
 
-## 2. Apply selective UI control
+### 2. Apply selective UI control
 
 ```vb
 UI_SetExcelUI _
@@ -185,7 +185,7 @@ Only explicitly requested elements are changed.
 
 The default target scope remains all current Excel windows, preserving pre-v1.1.0 behavior.
 
-## 3. Target a specific window scope
+### 3. Target a specific window scope
 
 Only window-level elements are affected by `TargetScope`.
 
@@ -210,7 +210,7 @@ UI_SetExcelUI _
 
 Application-level elements still operate at their established scope even when a restricted target is selected.
 
-## 4. Request structured diagnostics
+### 4. Request structured diagnostics
 
 ```vb
 Dim OK As Boolean
@@ -239,7 +239,7 @@ Failure entries use:
 Stage | Detail
 ```
 
-## 5. Hide or show the complete managed shell
+### 5. Hide or show the complete managed shell
 
 ```vb
 UI_HideExcelUI
@@ -248,7 +248,7 @@ UI_ShowExcelUI
 
 `UI_ShowExcelUI` means **show every managed element**. It does not restore a captured custom baseline.
 
-## 6. Capture and restore a managed baseline
+### 6. Capture and restore a managed baseline
 
 ```vb
 UI_CaptureExcelUIState
@@ -284,7 +284,7 @@ Snapshot capture/restore retains its established all-managed-windows semantics. 
 
 <a id="public-api"></a>
 
-# 🧩 Public API
+## 🧩 Public API
 
 > [!NOTE]
 > The wiki carries a `wiki_tracks-vX.Y.Z` badge on every page, stating the
@@ -303,7 +303,7 @@ Snapshot capture/restore retains its established all-managed-windows semantics. 
 > no external compatibility promise. Neither is the deployment rule: all four
 > `src/` modules are still replaced together.
 
-## Public enums
+### Public enums
 
 ```vb
 Public Enum UIVisibility
@@ -321,7 +321,7 @@ Public Enum UIWindowTargetScope
 End Enum
 ```
 
-## API reference
+### API reference
 
 | Member | Type | Purpose | Diagnostic behavior |
 |---|---|---|---|
@@ -350,7 +350,7 @@ Window targeting, added in `1.1.0`, is backward compatible:
 
 <a id="target-scopes"></a>
 
-# 🎯 Target scopes
+## 🎯 Target scopes
 
 `UIWindowTargetScope` controls only:
 
@@ -376,7 +376,7 @@ An unsupported target value is handled through the established best-effort diagn
 
 <a id="architecture"></a>
 
-# 🏗️ Architecture
+## 🏗️ Architecture
 
 ```mermaid
 flowchart TD
@@ -398,7 +398,7 @@ flowchart TD
     SNAPSHOT --> EXCEL
 ```
 
-## Module responsibilities
+### Module responsibilities
 
 | Module | Responsibility | Caller-facing API |
 |---|---|---|
@@ -409,7 +409,7 @@ flowchart TD
 
 All four modules use `Option Explicit` and `Option Private Module`.
 
-## Dependency constraints
+### Dependency constraints
 
 - `M_EXCEL_UI_RUNTIME` has no project-module dependency.
 - `M_EXCEL_UI_TITLEBAR` has no project-module dependency.
@@ -541,7 +541,7 @@ than no diagnostic at all.
 
 <a id="regression-testing"></a>
 
-# ✅ Regression testing
+## ✅ Regression testing
 
 Optional test module:
 
@@ -711,7 +711,7 @@ The source repository intentionally contains no versioned demo `.xlsm`. Release 
 
 <a id="requirements"></a>
 
-# 💻 Requirements
+## 💻 Requirements
 
 - Microsoft Excel desktop for Windows;
 - a macro-enabled workbook or add-in host;
