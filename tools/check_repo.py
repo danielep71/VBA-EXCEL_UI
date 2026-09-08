@@ -20,7 +20,7 @@ import os
 import re
 import subprocess
 import sys
-from vba_lex import code_only, LexicalError
+from vba_lex import code_only
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -53,6 +53,8 @@ REQUIRED_FILES = ALL_MODULES + [
     "VERSION",
     "tools/reformat.py",
     "tools/vba_lex.py",
+    "tools/vba_analyze.py",
+    "tools/vba_analyze_fixtures.py",
     "tools/reformat_fixtures.py",
     "tools/vba_api.py",
     "tools/wiki_badges.py",
@@ -91,10 +93,7 @@ VERSION_SELFTEST_CASES = [
 
 HOUSE_LABELS = {"Safe_Exit", "Fail_Num", "Err_Handler", "Clean_Exit", "Clean_Fail"}
 
-PROC_RE = re.compile(r"^(Public|Private|Friend)\s+(Sub|Function|Property\s+\w+)\s+(\w+)")
-END_RE = re.compile(r"^End (Sub|Function|Property)\b")
-LABEL_RE = re.compile(r"^([A-Za-z_]\w*):\s*$")
-JUMP_RE = re.compile(r"\b(?:GoTo|Resume)\s+([A-Za-z_]\w*)")
+
 RULE_RE = re.compile(r"^'(=+|-+)$")
 
 FORBIDDEN_TRACKED_ARTIFACTS = [
@@ -219,100 +218,33 @@ def check_banner_rules():
 
 
 # --------------------------------------------------------------------------
-def check_structure():
-    """Procedure pairing, directive balance, label vocabulary, jump targets."""
+def check_house_labels():
+    """Retain the existing style policy separately from procedure resolution."""
+    from vba_analyze import logical_lines, statements
     for rel in ALL_MODULES:
-        try:
-            lines = [code_only(line) for line in read_lines(rel)]
-        except LexicalError as exc:
-            fail("lexical", f"{rel}: {exc}")
-            continue
-
-        depth = 0
-        for n, line in enumerate(lines, 1):
-            s = line.strip()
-            if s.startswith("#If "):
-                depth += 1
-            elif s.startswith("#End If"):
-                depth -= 1
-                if depth < 0:
-                    fail("directives", f"{rel}:{n}: #End If without #If")
-                    depth = 0
-        if depth:
-            fail("directives", f"{rel}: unbalanced conditional compilation ({depth:+d})")
-
-        open_procs = []
-        for n, line in enumerate(lines, 1):
-            m = PROC_RE.match(line)
-            if m:
-                # a #If/#Else pair declares the same procedure twice
-                if open_procs and open_procs[-1][1] == m.group(3):
-                    continue
-                open_procs.append((m.group(2).split()[0], m.group(3), n))
-            elif END_RE.match(line):
-                if not open_procs:
-                    fail("procedures", f"{rel}:{n}: {line.strip()} without opener")
-                else:
-                    open_procs.pop()
-        for kind, name, n in open_procs:
-            fail("procedures", f"{rel}: unclosed {kind} {name} opened at line {n}")
-
-        labels = set()
-        for line in lines:
-            m = LABEL_RE.match(line)
-            if m:
-                labels.add(m.group(1))
-        for bad in sorted(labels - HOUSE_LABELS):
-            fail("labels", f"{rel}: non-house label {bad!r}")
-
-        for n, line in enumerate(lines, 1):
-            if line.strip().startswith("'"):
-                continue
-            for m in JUMP_RE.finditer(line):
-                target = m.group(1)
-                if target in ("Next", "0"):
-                    continue
-                if target not in labels:
-                    fail("jumps", f"{rel}:{n}: jump to undefined label {target!r}")
+        for n, raw in logical_lines(read(rel).decode('ascii')):
+            for statement in statements(raw):
+                code = code_only(statement).strip()
+                if re.fullmatch(r'\w+:', code) and code[:-1] not in HOUSE_LABELS:
+                    fail('labels', f'{rel}:{n}: non-house label {code[:-1]!r}')
 
 
-# --------------------------------------------------------------------------
-def check_ptrsafe():
-    """Every Declare inside a VBA7 branch must carry PtrSafe.
-
-    Omitting it compiles on 32-bit and fails on 64-bit, so the defect is
-    invisible on the machine that introduced it.
-    """
-    for rel in ALL_MODULES:
-        lines = read_lines(rel)
-        vba7 = False
-        for n, line in enumerate(lines, 1):
-            s = line.strip()
-            if s.startswith("#If VBA7"):
-                vba7 = True
-            elif s.startswith("#Else"):
-                vba7 = False
-            elif s.startswith("#End If"):
-                vba7 = False
-            elif vba7 and re.match(r"^(Public |Private )?Declare\s+", s):
-                if "PtrSafe" not in s:
-                    fail("ptrsafe", f"{rel}:{n}: Declare without PtrSafe in a VBA7 branch")
+def check_vba_analyzer():
+    from vba_analyze import run
+    from pathlib import Path
+    findings, inventory = run(Path(REPO))
+    for finding in findings:
+        fail('VBA analyzer', str(finding))
+    for entry in inventory:
+        print('  INVENTORY ' + entry)
 
 
-# --------------------------------------------------------------------------
-def check_duplicate_procedures():
-    seen = {}
-    for rel in ALL_MODULES:
-        local = set()
-        for line in read_lines(rel):
-            m = PROC_RE.match(line)
-            if m:
-                local.add(m.group(3))
-        for name in local:
-            if name in seen:
-                fail("duplicates", f"{name!r} defined in both {seen[name]} and {rel}")
-            else:
-                seen[name] = rel
+def check_vba_analyzer_selftest():
+    from vba_analyze_fixtures import selftest
+    findings, count = selftest()
+    for finding in findings:
+        fail('VBA analyzer self-test', finding)
+    print(f'  {count} VBA analyzer fixtures')
 
 
 # --------------------------------------------------------------------------
@@ -1267,9 +1199,9 @@ CHECKS = [
     ("option policy", check_option_policy),
     ("encoding and line endings", check_encoding_and_endings),
     ("banner rule widths", check_banner_rules),
-    ("procedure structure", check_structure),
-    ("PtrSafe declarations", check_ptrsafe),
-    ("duplicate procedures", check_duplicate_procedures),
+    ("house labels", check_house_labels),
+    ("VBA analyzer", check_vba_analyzer),
+    ("VBA analyzer self-test", check_vba_analyzer_selftest),
     ("public API manifest", check_public_api),
     ("public API self-test", check_public_api_selftest),
     ("supported API declaration", check_supported_api_declaration),

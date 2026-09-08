@@ -393,6 +393,13 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- Strengthened static VBA analysis (#31): project reference and assignment
+  resolution, procedure-local labels, exact procedure-end kinds, conditional
+  declarations, known WinAPI contracts and bounded Err-preservation checks now
+  run in CI with independent defect fixtures. Dynamic dispatch is reported as
+  unresolved inventory. Certification-manifest validation still depends on
+  #42; these tooling checks do not establish Excel runtime results.
+
 - Hardened the formatter (#52) with a shared lexical scanner, ASCII validation,
   preserved conditional/continued regions, executable-token comparison and
   atomic file replacement. Extended fixtures cover lexical boundaries and

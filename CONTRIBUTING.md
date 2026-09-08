@@ -215,10 +215,10 @@ never silently transliterates or changes the VBE code page. The existing Git
 attributes and Windows-native file overrides remain authoritative.
 
 `tools/vba_lex.py` is the shared code/string/comment scanner used by the
-formatter and current static structure/jump analysis. It recognizes doubled
+formatter and VBA analyzer. It recognizes doubled
 quotes, apostrophe comments, statement-position `Rem`, and bracketed identifiers.
-It is not a complete VBA parser. #31 still owns procedure-local resolution,
-assignment analysis and the remaining analyzer extensions.
+It is not a complete VBA parser. The analyzer consumes the same lexical
+boundaries for procedure-local resolution and targeted assignment analysis.
 
 Conditional blocks (including their directives and whitespace) and continued
 logical statements are preserved. `--check` reports that their formatting was
@@ -241,6 +241,49 @@ against power loss. The legacy source/destination form uses the same writer.
 Always inspect the resulting diff and re-import any changed VBA modules into
 the VBE before committing them. A formatter change that leaves every module
 byte-identical does not create a new Excel runtime result.
+
+### Bounded VBA analyzer (#31)
+
+`python tools/vba_analyze.py` checks all `.bas` files in `src/`, `test/` and
+`demo/`. The static gate runs it and its independent malformed/benign fixtures
+on configured pushes and pull requests. Diagnostics identify the source path,
+physical start line, rule and compilation configuration. A continued statement
+uses its first physical line. Dynamic dispatch appears as `INVENTORY` in the
+gate log; these entries are unresolved host/binding work, not validated calls.
+
+The analyzer collects procedure, DLL, constant, variable, type and enum names;
+resolves project-prefixed references against visible declarations; and checks
+simple unqualified assignment targets under `Option Explicit`. Parameters,
+locals and visible module/project names are recognized after continuation and
+colon normalization. This is declaration coverage, not type checking: member,
+array-element, `With` and host-object resolution, argument compatibility and
+complete expression/loop-variable analysis still require the VBA compiler.
+
+Labels resolve within their procedure, opener/end kinds must agree, and
+duplicates are checked independently for VBA7 x64, VBA7 x86 and legacy x86.
+Conditional directives use a nested stack. Boolean `VBA7`/`Win64` expressions
+and local Boolean `#Const` definitions are supported; unknown symbols or
+unsupported expressions fail explicitly, including in inactive nested blocks.
+Each effective VBA7 `Declare` requires `PtrSafe`; prefixed DLL declarations
+require an explicit `Alias`. The eight known WinAPI contracts have versioned
+ABI-v1 fixtures covering parameter types, ByVal passing and return types. This
+is not a general DLL export/ABI verifier.
+
+The error-preservation rule covers straight-line handler segments and direct
+reads of `Err.Number`, `Err.Source` and `Err.Description` after a call or
+`On Error` statement. Arguments are read before the call changes the state;
+saved-local re-raises pass. A subsequent error-producing operation under
+`On Error Resume Next` is a fresh source, while a scalar flag assignment is
+not. Scalar capture intrinsics (`IIf`, `Len`, `CStr`, `CLng`, `CBool`, `CInt`,
+`CDbl`, `CSng`) are treated as capture expressions. This does not prove their
+arguments cannot raise. Branches, loops and label joins delimit the analysis;
+there is no interprocedural or whole-control-flow proof, cleanup proof, or
+protection against re-raise loops.
+
+Run `Debug -> Compile VBAProject` and the relevant Excel tests after VBA edits.
+Passing static analysis does not produce runtime evidence. The mandatory
+certification-manifest registration check remains dependent on #42's manifest;
+the current analyzer does not certify case completeness or execution.
 
 ### Public contracts and compatibility
 
