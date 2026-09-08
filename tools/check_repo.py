@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+from vba_lex import code_only, LexicalError
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -51,6 +52,8 @@ REQUIRED_FILES = ALL_MODULES + [
     "LICENSE",
     "VERSION",
     "tools/reformat.py",
+    "tools/vba_lex.py",
+    "tools/reformat_fixtures.py",
     "tools/vba_api.py",
     "tools/wiki_badges.py",
     "tools/repository_policy.py",
@@ -219,7 +222,11 @@ def check_banner_rules():
 def check_structure():
     """Procedure pairing, directive balance, label vocabulary, jump targets."""
     for rel in ALL_MODULES:
-        lines = read_lines(rel)
+        try:
+            lines = [code_only(line) for line in read_lines(rel)]
+        except LexicalError as exc:
+            fail("lexical", f"{rel}: {exc}")
+            continue
 
         depth = 0
         for n, line in enumerate(lines, 1):
@@ -1204,7 +1211,11 @@ def check_formatter():
         if name is None:
             fail("formatter", f"{rel}: no Attribute VB_Name")
             continue
-        expected = reformat.reformat(path, name).encode("latin-1")
+        try:
+            expected = reformat.reformat(path, name).encode("ascii")
+        except (ValueError, OSError) as exc:
+            fail("formatter", f"{rel}: {exc}")
+            continue
         if read(rel) != expected:
             fail("formatter", f"{rel}: not in house-style normal form "
                               f"(run tools/reformat.py --write)")

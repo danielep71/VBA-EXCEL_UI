@@ -27,18 +27,21 @@ than leaving them to the reader:
   * a comment begins at the first apostrophe OUTSIDE a literal, so an
     apostrophe within quoted text is data and not a comment marker.
 
-VBA escapes a quote by doubling it, which the literal scanner handles by
-toggling: the pair closes the literal and reopens it, which leaves the state
-correct at every position outside the pair.
-
-These fixtures cover ordinary literals, doubled quotes and apostrophes inside
-literals. They are evidence for those named cases, not proof over every VBA
-lexical construct. Issue #52 tracks the wider lexical coverage and explicit
-behaviour-neutrality proof.
+The shared vba_lex scanner protects opaque regions. Unsupported continued
+statements and conditional blocks are preserved and reported. ASCII-only input
+matches the repository gate. A token/statement comparison rejects executable
+changes before any write. This is bounded lexical evidence, not VBA compilation.
 """
 
 import re
 import sys
+import os
+import stat
+import tempfile
+from pathlib import Path
+
+from vba_lex import (LexicalError, split_code_comment, transform_code,
+                     protected_lines, executable_signature, code_only)
 
 RULE_EQ = "'" + "=" * 78
 RULE_DASH = "'" + "-" * 78
@@ -76,9 +79,6 @@ DECL_RE = re.compile(
     r"(?P<rest>\s*=\s*.+)?$"
 )
 
-# One string literal, allowing VBA's doubled-quote escape inside it.
-LITERAL_RE = re.compile(r'"(?:[^"]|"")*"')
-
 PROC_RE = re.compile(
     r"^(Public |Private |Friend )?(Sub|Function|Property (?:Get|Let|Set))\s+[A-Za-z_]\w*"
 )
@@ -88,40 +88,9 @@ def split_lines(text):
     return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
-def split_code_comment(line):
-    """Split a line at the apostrophe that begins a comment, if there is one.
-
-    An apostrophe inside a string literal is data. Treating it as a comment
-    marker is what let alignment padding be written into a literal, so every
-    transformation needing to know where a comment starts asks here instead of
-    matching an apostrophe directly.
-
-    Returns (code, comment). comment is "" when the line has none, and carries
-    its leading apostrophe when it has one.
-    """
-    in_literal = False
-    for i, ch in enumerate(line):
-        if ch == '"':
-            in_literal = not in_literal
-        elif ch == "'" and not in_literal:
-            return line[:i], line[i:]
-    return line, ""
-
-
 def sub_outside_literals(code, fn):
-    """Apply fn to every run of code that is not inside a string literal.
-
-    fn therefore sees only text the compiler treats as code, which is what
-    lets a substitution be written plainly instead of as a lookaround that
-    tries, and fails, to exclude quoted text.
-    """
-    out, last = [], 0
-    for m in LITERAL_RE.finditer(code):
-        out.append(fn(code[last:m.start()]))
-        out.append(m.group(0))
-        last = m.end()
-    out.append(fn(code[last:]))
-    return "".join(out)
+    """Compatibility wrapper around the shared region scanner."""
+    return transform_code(code, fn)
 
 
 def is_rule(line):
@@ -150,8 +119,7 @@ def hoist_options(lines, module_name):
 
         if s.startswith("Option "):
             opt = split_code_comment(s)[0].strip()
-            if opt not in options:
-                options.append(opt)
+            options.append(opt)
             i += 1
             continue
 
@@ -170,8 +138,6 @@ def hoist_options(lines, module_name):
         keep.append(ln)
         i += 1
 
-    if not options:
-        options = ["Option Explicit"]
 
     # Attribute line stays first
     head, body = [], keep
@@ -257,15 +223,14 @@ def rename_labels(lines):
     out = []
     for ln in lines:
         s = ln.strip()
-        m = re.match(r"^([A-Za-z_]\w*):\s*$", s)
+        m = re.match(r"^([A-Za-z_]\w*):", s)
         if m and m.group(1) in LABEL_MAP:
-            out.append(LABEL_MAP[m.group(1)] + ":")
-            continue
+            ln = ln.replace(m.group(1) + ":", LABEL_MAP[m.group(1)] + ":", 1)
 
         code, comment = split_code_comment(ln)
         out.append(
             sub_outside_literals(code, rename_label_text)
-            + rename_label_text(comment)
+            + (comment if comment.lower().startswith("rem") else rename_label_text(comment))
         )
     return out
 
@@ -343,13 +308,28 @@ def reformat(path, module_name):
 
 
 def reformat_text(text, module_name):
-    """The whole pipeline, over text rather than a path.
-
-    Separated so the self-test can state a fixture as a few lines and assert
-    on the result, without a temporary file and without the test depending on
-    the filesystem to describe a formatting rule.
-    """
+    """Validate, transform supported regions and verify executable equivalence."""
+    if not text.isascii():
+        raise LexicalError("non-ASCII VBA input; repository exports must be ASCII")
     lines = split_lines(text)
+    protected, _ = protected_lines(lines)
+    # Label renaming is module-wide. Refuse ambiguous old/new collisions or
+    # jumps across opaque blocks rather than partly renaming a control flow.
+    code = "\n".join(code_only(ln) for ln in lines)
+    for old, new in LABEL_MAP.items():
+        if re.search(r"\b" + old + r"\b", code) and re.search(r"\b" + new + r"\b", code):
+            raise LexicalError(f"ambiguous label mapping {old}/{new}")
+        if any(re.search(r"\b" + old + r"\b", code_only(lines[i])) for i in protected):
+            raise LexicalError(f"unsupported label {old} in preserved region")
+    # Opaque lines remain in place through the structural passes. Unique comment
+    # placeholders also prevent declaration alignment on continuation tails.
+    saved = {}
+    for i in protected:
+        key = f"' @formatter-preserve-{i}@"
+        if key in text:
+            raise LexicalError("reserved formatter marker in source")
+        saved[key] = lines[i]
+        lines[i] = key
     lines = strip_trailing(lines)
     lines = normalise_rules(lines)
     lines = hoist_options(lines, module_name)
@@ -357,11 +337,38 @@ def reformat_text(text, module_name):
     lines = decentre_titles(lines, module_name)
     lines = rename_labels(lines)
     lines = align_declarations(lines)
-    lines = strip_trailing(lines)
-    lines = collapse_blanks(lines)
+    lines = collapse_blanks(strip_trailing(lines))
+    lines = [saved.get(line, line) for line in lines]
     while lines and not lines[-1].strip():
         lines.pop()
-    return "\r\n".join(lines) + "\r\n"
+    result = "\r\n".join(lines) + "\r\n"
+    if executable_signature(text, LABEL_MAP) != executable_signature(result, LABEL_MAP):
+        raise LexicalError("formatting would change executable tokens or statement boundaries")
+    return result
+
+
+def atomic_write(path, data):
+    """Replace one regular file only after a complete, flushed temporary write.
+
+    Same-directory replace is atomic; multi-file writes are not a transaction.
+    Symlinks are refused. Existing permission bits are preserved.
+    """
+    path = Path(path)
+    if path.is_symlink():
+        raise OSError("refusing to replace a symbolic link")
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+    fd, name = tempfile.mkstemp(prefix=".reformat-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(name, mode)
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
 
 
 VB_NAME_RE = re.compile(r'^Attribute\s+VB_Name\s*=\s*"([^"]+)"')
@@ -398,7 +405,15 @@ def check(paths):
             failed.append(path)
             continue
 
-        expected = reformat(path, name).encode("latin-1")
+        try:
+            expected = reformat(path, name).encode("ascii")
+            _, notes = protected_lines(split_lines(Path(path).read_text(encoding="ascii")))
+            if notes:
+                print(f"note {path}: {len(notes)} conditional/continued lines preserved; unsupported formatting skipped")
+        except (ValueError, OSError) as exc:
+            print(f"FAIL {path}: {exc}")
+            failed.append(path)
+            continue
         with open(path, "rb") as fh:
             actual = fh.read()
 
@@ -413,19 +428,23 @@ def check(paths):
 
 
 def write(paths):
-    """Rewrite each file in place in the formatter's normal form."""
-    for path in paths:
-        name = module_name_of(path)
-        if name is None:
-            print(f"skip {path}: no Attribute VB_Name")
-            continue
-        data = reformat(path, name).encode("latin-1")
-        with open(path, "wb") as fh:
-            fh.write(data)
-        print(f"wrote {path}")
+    """Preflight every input, then atomically replace each changed file."""
+    prepared = []
+    try:
+        for path in paths:
+            name = module_name_of(path)
+            if name is None:
+                raise LexicalError(f"{path}: no Attribute VB_Name")
+            data = reformat(path, name).encode("ascii")
+            prepared.append((path, data))
+        for path, data in prepared:
+            if Path(path).read_bytes() != data:
+                atomic_write(path, data)
+            print(f"ok   {path}")
+    except (ValueError, OSError) as exc:
+        print(f"FAIL {exc}")
+        return 1
     return 0
-
-
 
 
 # --------------------------------------------------------------------------
@@ -523,13 +542,15 @@ def selftest():
         if again != "\r\n".join(produced):
             failures.append(f"{label}\n      not idempotent on a second pass")
 
+    from reformat_fixtures import extended_selftest
+    failures.extend(extended_selftest())
     return failures
 
 
 def run_selftest():
     failures = selftest()
     if not failures:
-        print(f"ok   self-test: {len(SELFTEST_CASES)} formatting rules hold")
+        print(f"ok   self-test: {len(SELFTEST_CASES)} historical rules and extended lexical/write fixtures hold")
         return 0
     print(f"FAIL self-test: {len(failures)} rule(s) broken\n")
     for f in failures:
@@ -557,7 +578,7 @@ if __name__ == "__main__":
         sys.exit(write(args[1:]))
     elif len(args) == 3:
         src, dst, name = args
-        open(dst, "wb").write(reformat(src, name).encode("latin-1"))
+        atomic_write(dst, reformat(src, name).encode("ascii"))
         print(f"wrote {dst}")
     else:
         sys.stderr.write(USAGE)

@@ -97,6 +97,7 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
+
 > 🩹 **Planned patch** · v1.1.3 correctness and hardening · not yet certified
 
 ### 🧭 Release intent
@@ -391,6 +392,12 @@ measured against that baseline.
   export path.
 
 ### 🔧 Changed
+
+- Hardened the formatter (#52) with a shared lexical scanner, ASCII validation,
+  preserved conditional/continued regions, executable-token comparison and
+  atomic file replacement. Extended fixtures cover lexical boundaries and
+  write failures. Current VBA modules remain byte-identical; this is tooling
+  verification, not new Excel runtime evidence.
 
 - Moved the active-frame identity rule into one place. `M_EXCEL_UI_SNAPSHOT`
   resolved, paired and liveness-checked the frame itself because the existing

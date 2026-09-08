@@ -207,6 +207,41 @@ seam as that evidence. Preserve reviewed results separately from disposable code
 - Avoid new references, APIs, dependencies, or platform assumptions until their
   support and deployment impact is agreed.
 
+### Formatter verification (#52)
+
+Exported VBA source is **ASCII only**, with CRLF checkout/output line endings.
+The formatter rejects non-ASCII input, including comments, before writing; it
+never silently transliterates or changes the VBE code page. The existing Git
+attributes and Windows-native file overrides remain authoritative.
+
+`tools/vba_lex.py` is the shared code/string/comment scanner used by the
+formatter and current static structure/jump analysis. It recognizes doubled
+quotes, apostrophe comments, statement-position `Rem`, and bracketed identifiers.
+It is not a complete VBA parser. #31 still owns procedure-local resolution,
+assignment analysis and the remaining analyzer extensions.
+
+Conditional blocks (including their directives and whitespace) and continued
+logical statements are preserved. `--check` reports that their formatting was
+skipped; clean preserved input may pass. Malformed literals, interrupted or
+unterminated continuations/conditionals, non-ASCII text and ambiguous label
+renames fail before any file is written. Line endings normalize to CRLF.
+
+Before publication, the formatter compares ordered executable tokens and
+statement boundaries, preserving literal bytes and Option statements; only the
+explicit house-label renaming and Option relocation are normalized. This
+bounded equivalence check is not compilation or Excel runtime certification.
+Every fixture is exercised by the existing formatter self-test in static CI.
+
+`--write` preflights all inputs and replaces each changed file through a flushed
+same-directory temporary file and `os.replace`. Existing permissions are kept,
+symlinks are refused, and failed writes/replacements remove their temporary
+file. This is atomic per file, not a multi-file transaction or a guarantee
+against power loss. The legacy source/destination form uses the same writer.
+
+Always inspect the resulting diff and re-import any changed VBA modules into
+the VBE before committing them. A formatter change that leaves every module
+byte-identical does not create a new Excel runtime result.
+
 ### Public contracts and compatibility
 
 Treat documented procedures, functions, classes, enums, parameters, defaults,
