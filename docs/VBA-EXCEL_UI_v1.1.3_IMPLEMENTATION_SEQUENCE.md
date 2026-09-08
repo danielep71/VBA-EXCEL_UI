@@ -14,6 +14,19 @@ body without relying on predicted issue numbers or withdrawn review archives.
 
 ## 1. Release boundary and live state
 
+### Evidence and local-artifact correction — 2026-09-08
+
+The Unreleased runtime ledger now covers five correction areas and ten variants:
+eight detecting failures, one insufficient same-hWnd generation control (#32),
+and one hanging captionless-recovery attempt (#6/#66). Positive runs do not
+close #45, #32 or #6. No new Excel execution or release certification is claimed.
+The later issue-body audit remains authoritative over the historical appendix.
+
+Root-only legacy mutant/control names, the two known message files and `wiki/`
+now have ignore and archive exclusions alongside `/.mutation-scratch/`.
+Nested source and fixtures remain visible. Policy fixtures expand from 33 to 43;
+the top-level static gate still has 26 checks. No VBA source changes.
+
 ### Subsequent implementation update — #67, #68, #69
 
 The 2026-09-03 inventory below is a historical planning snapshot. This batch

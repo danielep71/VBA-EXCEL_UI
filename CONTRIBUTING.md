@@ -163,12 +163,22 @@ Create throwaway mutants and local control output only in the repository-root
 Do not place mutants beside `src/` or authoritative test fixtures. Do not add
 broad `*.bas`, `*mutant*`, `*control*` or evidence-directory ignore rules.
 
-The recorded v1.1.3 control inventory is:
+Legacy root-only `MUTANT_*.bas`, `CONTROL_*.bas`, `commit-msg.txt`,
+`msg-p2fix.txt` and `wiki/` are also ignored and excluded from source archives.
+These narrow rules do not hide similarly named nested source or fixtures. Put
+new mutation work in `/.mutation-scratch/` and new message files / Wiki clones
+outside the repository. Inspect `git status --short` and stage explicit paths.
+Ignore rules do not untrack a file that has already been committed.
+
+The recorded v1.1.3 inventory accounts for ten variants (including the hanging
+attempt and the insufficiently isolated generation control):
 
 | Issue | Disposable artifact type | Purpose |
 | --- | --- | --- |
 | #43 | Four one-runner-at-a-time refusal mutants | Prove caller-owned snapshots survive each refusal |
 | #43 | Cleanup-skipping mutant | Prove the success-path snapshot-release assertion detects leakage |
+| #26 | Two quiet-scope variants | Detect the old entry-read behavior and missing ownership readback; no dedicated End-side mutation |
+| #32 | Retained-Window generation-proof variant | Fails with the current distinct-handle seam; same-numeric-hWnd generation proof is still missing |
 | #6 / #66 | Title-bar module with the v1.1.2 fallback condition restored | Negative control for captionless recovery; currently hangs, not passing evidence |
 | #45 | Active-frame-pair comparison control | Prove disagreement fails at `.Disagreed.Refused` |
 

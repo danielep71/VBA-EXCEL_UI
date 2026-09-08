@@ -89,6 +89,13 @@
 #------------------------------------------------------------------------------
 /test-output/
 /.mutation-scratch/
+
+# Legacy root-only work artifacts; new controls belong in .mutation-scratch.
+/MUTANT_*.bas
+/CONTROL_*.bas
+/commit-msg.txt
+/msg-p2fix.txt
+/wiki/
 /test-results/
 /coverage/
 /htmlcov/

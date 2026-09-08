@@ -66,6 +66,11 @@
 
 # Defense in depth if disposable controls are ever force-added.
 /.mutation-scratch export-ignore
+/MUTANT_*.bas export-ignore
+/CONTROL_*.bas export-ignore
+/commit-msg.txt export-ignore
+/msg-p2fix.txt export-ignore
+/wiki export-ignore
 
 
 #------------------------------------------------------------------------------

@@ -112,8 +112,10 @@ Work completed so far includes the Wave 1 repository and contract gates plus two
 Wave 2 corrections: destructive test runners now preserve caller-owned
 snapshots, and the quiet-update scope claims only a suppression confirmed by
 readback. Title-bar capture and persistent frame state now pair each native hWnd
-with the Excel Window that owns it, and show accepts only a visible baseline
-confirmed by readback. `M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`,
+with the Excel Window that owns it. Show now uses baseline state and readback,
+but the complete caption-mask correction and bounded control remain open under
+#6/#66; #32 and #45 also retain proof/documentation gaps.
+`M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`,
 `M_EXCEL_UI_TITLEBAR` and the regression module have therefore changed. The
 supported public facade remains unchanged.
 
@@ -127,7 +129,7 @@ measured against that baseline.
 
 | Area | Current state |
 |---|---|
-| Production VBA | Runtime quiet-scope ownership and title-bar Window/hWnd identity, registry generation and show verification corrected |
+| Production VBA | Runtime quiet-scope ownership and title-bar Window/hWnd identity, registry generation and show verification implemented with #6/#32/#45 proof/correction gaps |
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
 | Runtime correctness fixes | #26 complete; remaining title-bar and Ribbon defects open |
@@ -135,15 +137,16 @@ measured against that baseline.
 | Regression VBA | Caller-owned snapshot refusal and ownership-failure coverage added |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | Twenty-four checks; the release branch passes |
-| Wiki | Tracks v1.1.2; badge consistency now checked on push and weekly |
+| Static validation | Twenty-six checks; the release branch passes |
+| Wiki | Last recorded track is v1.1.2; path-filtered badge workflow exists on the release branch, with default-branch scheduling and final evidence still pending under #53 |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
 ### ➕ Added
 
 - Added `UI_TryGetActiveFramePair` and `UI_InternalInjectFramePairFault` to
-  **M_EXCEL_UI_TITLEBAR**, and a four-branch regression case registered in both
+  **M_EXCEL_UI_TITLEBAR**, and the four-branch
+  `TST_Case_ActiveFramePairRefusesMismatch` case registered in both
   the regression pack and the title-bar pack. The refusal branch is reached
   only through the seam, because an SDI activation transition observed mid-call
   cannot be provoked on demand; without it the fail-closed path would ship
@@ -164,9 +167,10 @@ measured against that baseline.
   in the security policy.
 - Added `UI_InternalSimulateFrameHandleReuse`, a same-project regression seam
   that changes a registry slot's numeric hWnd while retaining its original
-  Excel Window identity. The two-pass regression uses it to prove that equal
-  zero and equal non-zero owned-style bits cannot authenticate a recycled
-  handle. This adds one `[project-public]` manifest line and no supported API.
+  Excel Window identity. The two-pass regression and generation-proof
+  negative control exercise rejection with equal owned-style bits, but changing
+  the numeric hWnd leaves same-handle generation reuse unproved under #32.
+  This adds one `[project-public]` manifest line and no supported API.
 - Added `UI_InternalInjectQuietUpdateFault` to **M_EXCEL_UI_RUNTIME**, a
   one-shot regression seam arming a failed entry read, an ineffective write or a
   failed readback for the next quiet-scope entry. The branches it reaches are
@@ -784,34 +788,41 @@ This is **static validation**, not release certification:
 
 #### Excel runtime evidence
 
-Static checks cannot exercise either Wave 2 correction: both concern host
-refusals. Both were run on Excel 16.0 x64, and each was checked against
-deliberately broken variants rather than only against itself.
+Static checks do not execute the Excel behavior under test. Recorded Excel
+16.0 x64 runs cover five correction areas: #43 caller-snapshot preservation,
+#26 quiet-scope ownership, #45 object/native frame pairing, #32 frame-registry
+generation identity, and #6 captionless show recovery. Positive runs do not
+establish that every defect has a valid negative control or is ready to close.
 
-`Test_EXCEL_UI_RunAll` passes with the caller-owned snapshot case and the
-quiet-scope case dispatched by the pack, and with the pre-existing
-`TST_Case_ScreenUpdatingPreserved` unregressed.
-`Test_EXCEL_UI_RunOwnershipCleanupChecks` passes standalone. It is not
-registered in the pack, because inside a certification run the self-test's
-inner call meets the re-entrancy guard rather than the snapshot precondition it
-needs.
+`Test_EXCEL_UI_RunAll` passed with the caller-snapshot and quiet-scope cases;
+`Test_EXCEL_UI_RunOwnershipCleanupChecks` passed standalone at the #43 closure
+head `32baef3`. The quiet-scope implementation was tested at `c143554`, with
+its documentation correction at `02de0ab`. The later title-bar and full packs
+passed at `adc9271`, before PR #63 merged at `3d8fcdcf`. These are historical
+candidate results, not a new Excel run against the current documentation head.
+The owned-cleanup runner remains standalone because its inner certification
+call must exercise the snapshot refusal rather than corrupt active accounting.
 
-Seven throwaway variants were run and none was committed. Four reverted one
-destructive runner each to its v1.1.2 shape: every one failed at that runner's
-own snapshot-survival assertion with no earlier failure, so each block is
-independently sensitive rather than one failure masking three. One discarded
-the ownership flag after the self-test's establishment guard and failed on the
-leaked snapshot. Two targeted the quiet scope: restoring the v1.1.2 procedure
-failed on the entry-read branch, and removing only the readback check failed on
-the ineffective-write branch.
+Ten throwaway variants were produced; none was committed. Their outcomes differ:
 
-That last variant is the one that matters. The seam still fires and the
-entry-read branch still passes, so its failure isolates the ownership
-verification itself rather than the presence of the seam.
+| Correction | Variants | Recorded outcome and proof limit |
+|---|---:|---|
+| #43 caller-owned refusal | 4 | Reverting each destructive runner separately failed its own `.Survived` assertion after the exact refusal passed, with no earlier failure. |
+| #43 owned cleanup | 1 | Skipping owned cleanup failed `.SelfTestSuccess.SnapshotReleased` after normal self-test completion. |
+| #26 quiet ownership | 2 | The old procedure failed the entry-read branch; removing only readback verification failed the ineffective-write branch while entry-read coverage still passed. No dedicated End-side mutation was run. |
+| #45 active-frame pairing | 1 | Removing the active native-frame comparison failed `TST_Case_ActiveFramePairRefusesMismatch.Disagreed.Refused` (`expected=False actual=True`). Public refusal paths still need complete untouched-frame evidence. |
+| #32 generation proof | 1 | Removing retained-Window proof failed `TST_Case_TitleBarSameStyleHandleReuse`. The seam also changes the numeric hWnd, so this is not a valid same-hWnd, changed-generation negative control; equal-handle proof remains open. |
+| #6 captionless recovery | 1 | Restoring the v1.1.2 condition hung `TST_Case_TitleBarShowRejectsCaptionlessBaseline` before cleanup in both packs. Excel required termination. This is an attempted mutant, not successful negative-control evidence; #66 owns the blocker. |
 
-This is runtime evidence for two corrections, not a release certification. No
-v1.1.3 certification has been run, and none of it was produced against a frozen
-head.
+Thus eight variants produced useful detecting failures, one generation control
+has insufficient isolation, and one attempt hangs. #6 has no completed negative
+control and also still needs the complete composite `WS_CAPTION` mask correction.
+#45, #32 and #6 remain open despite their positive runs and merged code.
+
+This is runtime evidence across five correction areas, not final release
+certification. No frozen v1.1.3 head or cross-bitness release matrix is certified
+by these results. Disposable source belongs in `/.mutation-scratch/`; reviewed
+results must be preserved separately.
 
 ### 🔗 Compatibility
 
@@ -819,8 +830,8 @@ head.
 |---|---|
 | Existing VBA calls affected | None so far |
 | Public API changed | No |
-| Production modules changed | Yes — `M_EXCEL_UI_RUNTIME` only so far |
-| Runtime behavior changed | Yes — quiet-update ownership is now readback-confirmed |
+| Production modules changed | Yes — runtime, snapshot and title-bar modules |
+| Runtime behavior changed | Quiet-update ownership and title-bar identity/recovery paths; remaining title-bar corrections and proof are tracked explicitly |
 | Workbook migration required for this batch | Replace all four production modules together; no caller-code edit |
 | Developer tooling behavior changed | Yes — repository hygiene evaluates the Git index, and the public API gate now protects full declarations |
 | Intended release type | Patch |

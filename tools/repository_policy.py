@@ -14,6 +14,11 @@ WINDOWS = ('bat', 'cmd', 'ps1', 'psm1', 'psd1', 'vbs', 'reg', 'ini')
 VBA = ('bas', 'cls', 'frm')
 PORTABLE = ('md', 'py', 'yml', 'yaml', 'json', 'txt', 'sh')
 FILES = ('.editorconfig', '.gitattributes', '.gitignore')
+LOCAL_ARTIFACTS = (('MUTANT_probe.bas', '/MUTANT_*.bas'),
+                   ('CONTROL_probe.bas', '/CONTROL_*.bas'),
+                   ('commit-msg.txt', '/commit-msg.txt'),
+                   ('msg-p2fix.txt', '/msg-p2fix.txt'),
+                   ('wiki', '/wiki'))
 
 
 def git(root, *args, data=None):
@@ -69,9 +74,13 @@ def findings(root):
         if attrs.get((path, 'eol')) != expected or attrs.get((path, 'text')) not in ('set', 'auto'):
             errors.append('Git EOL: ' + path)
     scratch = ['.mutation-scratch/probe.bas', '.mutation-scratch/nested/control.json']
+    scratch += [path if path != 'wiki' else 'wiki/Home.md'
+                for path, _ in LOCAL_ARTIFACTS]
     visible = ['src/mutant.bas', 'test/control.bas', 'test/fixtures/mutant.json',
                'docs/evidence/control.md', 'evidence/control.json',
-               'test/.mutation-scratch/control.bas']
+               'test/.mutation-scratch/control.bas', 'test/MUTANT_probe.bas',
+               'src/CONTROL_probe.bas', 'docs/commit-msg.txt',
+               'test/msg-p2fix.txt', 'docs/wiki/Home.md']
     output = git(root, 'check-ignore', '--no-index', '-z', '--stdin',
                  data='\0'.join(scratch + visible) + '\0')
     ignored = set(output.rstrip('\0').split('\0'))
@@ -81,9 +90,10 @@ def findings(root):
     for path in visible:
         if path in ignored:
             errors.append('Authoritative path ignored: ' + path)
-    archive = git(root, 'check-attr', 'export-ignore', '--', '.mutation-scratch')
-    if not archive.strip().endswith(': set'):
-        errors.append('Scratch archive exclusion missing')
+    for path in ['.mutation-scratch'] + [p for p, _ in LOCAL_ARTIFACTS]:
+        archive = git(root, 'check-attr', 'export-ignore', '--', path)
+        if not archive.strip().endswith(': set'):
+            errors.append('Local artifact archive exclusion missing: ' + path)
     return errors
 
 
@@ -116,6 +126,12 @@ def selftest(root):
         cases.append(('broad ignore ' + rule, '.gitignore', originals['.gitignore'] + '\n' + rule + '\n', True))
     cases.append(('missing archive rule', '.gitattributes',
                   originals['.gitattributes'].replace('/.mutation-scratch export-ignore', ''), True))
+    for path, pattern in LOCAL_ARTIFACTS:
+        ignore_rule = pattern + ('/' if path == 'wiki' else '')
+        cases.append(('removed local ignore ' + path, '.gitignore',
+                      originals['.gitignore'].replace(ignore_rule + '\n', ''), True))
+        cases.append(('removed local archive ' + path, '.gitattributes',
+                      originals['.gitattributes'].replace(pattern + ' export-ignore\n', ''), True))
     failures = []
     for label, file, replacement, expect_failure in cases:
         with tempfile.TemporaryDirectory(prefix='excel-ui-policy-test-') as name:
