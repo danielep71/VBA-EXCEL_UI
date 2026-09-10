@@ -3560,7 +3560,7 @@ Private Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
 '   WS_CAPTION or report success while the caption remains absent.
 '
 ' UPDATED
-'   2026-09-03
+'   2026-09-10
 '==============================================================================
 
 #If VBA7 Then
@@ -3601,11 +3601,16 @@ Private Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
         End If
         StyleCaptured = True
 
+        TST_Log PROC, "TRACE", _
+            "entry captured | hwnd=" & CStr(TargetHwnd) & _
+            " | style=" & CStr(EntryStyle)
+
     'Leave one non-zero owned bit but deliberately remove WS_CAPTION.
         CaptionlessStyle = _
             (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
             TST_TITLEBAR_CAPTIONLESS_FRAME
 
+        TST_Log PROC, "TRACE", "captionless style write: enter"
         If Not TST_TrySetWindowStyle( _
             TargetHwnd, CaptionlessStyle, Msg) Then
 
@@ -3613,18 +3618,22 @@ Private Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
                 "could not write the captionless style | " & Msg
         End If
 
+        TST_Log PROC, "TRACE", "style write returned; frame refresh: enter"
         If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
             Err.Raise TEST_ERR_BASE + 78, PROC, _
                 "could not refresh the captionless frame | " & Msg
         End If
 
+        TST_Log PROC, "TRACE", "frame refresh returned; baseline reset: enter"
         UI_InternalResetTitleBarBaseline
 
+        TST_Log PROC, "TRACE", "baseline reset returned; show worker: enter"
         OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
             TargetHwnd:=TargetHwnd, _
             IsVisible:=True, _
             FailMsg:=Msg)
 
+        TST_Log PROC, "TRACE", "show worker returned; assertions: enter"
         TST_AssertBooleanEquals True, OK, _
             "CaptionlessBaseline.ShowReportsSuccess"
         TST_AssertTitleBarVisible True, _
@@ -3643,10 +3652,19 @@ Private Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
         End If
 
 Safe_Exit:
+        TST_Log PROC, "TRACE", "entry style restoration: enter"
         TST_RestoreTitleBarStyle _
             TargetHwnd, EntryStyle, StyleCaptured
 
+    'Resume ends active handling but leaves the local handler enabled.
+    'Disable it before re-raising.
+    'Otherwise the saved failure re-enters Err_Handler and repeats cleanup.
+        On Error GoTo 0
+        TST_Log PROC, "TRACE", _
+            "restoration helper returned; restoration is not verified here"
+
         If FailNumber <> 0 Then
+            TST_Log PROC, "FAIL", FailSource & " | " & FailDescription
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
