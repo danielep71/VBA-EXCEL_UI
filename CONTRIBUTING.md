@@ -287,6 +287,23 @@ the current analyzer does not certify case completeness or execution.
 
 ### Public contracts and compatibility
 
+Demo cleanup (#71) is single-pass, not a host watchdog. With
+`ReProtectAtEnd=True`, reset captures the fifteen Boolean `Worksheet.Protect`
+options and `EnableSelection` before unprotecting, then attempts to restore
+them only if that invocation's unprotect returned successfully. A missing or
+incorrect password must not arm reprotection. With `ReProtectAtEnd=False`
+(the existing default), leaving the sheet unprotected is intentional.
+
+An operation error retains its number/source and description prefix; cleanup
+failures append a separately identified diagnostic. A cleanup-only failure is
+raised to the caller. This does not restore deleted cells, shapes, tables or
+range-level permissions, nor guarantee recovery after Reset/End or a blocked
+Excel call. `UserInterfaceOnly` is restored for the current session, not promised
+across workbook reopening. Source fixtures do not establish Excel outcomes.
+Before closure, use disposable worksheets and a bounded host harness to test
+ordinary failure, missing/wrong password, reprotection and selection failure,
+and read back every captured option at the exact tested commit.
+
 Treat documented procedures, functions, classes, enums, parameters, defaults,
 return values, errors, side effects, workbook formats, and supported platforms
 as contracts.

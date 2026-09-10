@@ -393,6 +393,12 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- Corrected demo template/reset cleanup (#71) so saved errors do not re-enter
+  their own handlers. Reset re-protects only after an owned successful
+  unprotect, reuses captured protection options, and reports cleanup failures.
+  Source fixtures guard these paths; Excel fault-injection and protection
+  readback remain outstanding. Reset is still destructive, not transactional.
+
 - Added stage diagnostics to the captionless-baseline regression (#66) and
   disabled its local handler before the saved-error re-raise, preventing that
   cleanup path from re-entering itself. A source regression guards the change.

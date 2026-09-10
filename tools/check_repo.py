@@ -56,6 +56,7 @@ REQUIRED_FILES = ALL_MODULES + [
     "tools/vba_analyze.py",
     "tools/vba_analyze_fixtures.py",
     "tools/titlebar_control_fixtures.py",
+    "tools/demo_cleanup_fixtures.py",
     "tools/reformat_fixtures.py",
     "tools/vba_api.py",
     "tools/wiki_badges.py",
@@ -252,6 +253,14 @@ def check_titlebar_control():
     from titlebar_control_fixtures import selftest
     for finding in selftest(REPO):
         fail('title-bar control regression', finding)
+
+
+def check_demo_cleanup():
+    from demo_cleanup_fixtures import selftest
+    findings, count = selftest(REPO)
+    for finding in findings:
+        fail('demo cleanup regression', finding)
+    print(f'  {count} demo cleanup source fixtures')
 
 
 # --------------------------------------------------------------------------
@@ -1210,6 +1219,7 @@ CHECKS = [
     ("VBA analyzer", check_vba_analyzer),
     ("VBA analyzer self-test", check_vba_analyzer_selftest),
     ("title-bar control regression", check_titlebar_control),
+    ("demo cleanup regression", check_demo_cleanup),
     ("public API manifest", check_public_api),
     ("public API self-test", check_public_api_selftest),
     ("supported API declaration", check_supported_api_declaration),

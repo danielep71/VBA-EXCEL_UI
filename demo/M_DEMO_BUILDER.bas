@@ -40,7 +40,7 @@ Option Private Module
 '     during sheet-building operations.
 '
 ' UPDATED
-'   2026-08-18 - Reformatted to the project house style. No behavior change.
+'   2026-09-10 - Single-pass demo cleanup and owned protection restoration.
 '
 ' AUTHOR
 '   Daniele Penza
@@ -97,6 +97,25 @@ Option Private Module
 '------------------------------------------------------------------------------
 ' PRIVATE TYPES
 '------------------------------------------------------------------------------
+    Private Type tDEMOProtectionState
+        DrawingObjects As Boolean
+        Contents As Boolean
+        Scenarios As Boolean
+        UserInterfaceOnly As Boolean
+        AllowFormattingCells As Boolean
+        AllowFormattingColumns As Boolean
+        AllowFormattingRows As Boolean
+        AllowInsertingColumns As Boolean
+        AllowInsertingRows As Boolean
+        AllowInsertingHyperlinks As Boolean
+        AllowDeletingColumns As Boolean
+        AllowDeletingRows As Boolean
+        AllowSorting As Boolean
+        AllowFiltering As Boolean
+        AllowUsingPivotTables As Boolean
+        EnableSelection As Long
+    End Type
+
     Private Type tButtonAppearance
         FillVisible         As MsoTriState      'Original fill visibility
         FillColor           As Long             'Original fill color
@@ -233,7 +252,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '     for backward compatibility
 '
 ' UPDATED
-'   2026-04-19
+'   2026-09-10
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -588,6 +607,7 @@ Clean_Exit:
 ' RE-RAISE ERROR AFTER CLEANUP
 '------------------------------------------------------------------------------
     'Re-raise the captured error after cleanup when needed
+        On Error GoTo 0
         If SavedErrNum <> 0 Then
             Err.Raise SavedErrNum, SavedErrSrc, SavedErrDesc
         End If
@@ -1096,6 +1116,12 @@ Public Sub DEMO_Sheet_Reset( _
 '     TRUE  => re-protect the sheet at the end when it was successfully unprotected
 '     FALSE => leave the sheet unprotected after reset
 '
+' PROTECTION CONTRACT
+'   Captures Protect options and EnableSelection before unprotecting. Cleanup
+'   attempts each restoration once. This does not roll back deleted contents,
+'   shapes, tables or AllowEditRanges definitions; host verification is required.
+'   The supplied password is reused; no password is read back from Excel.
+'
 ' RETURNS
 '   None
 '
@@ -1103,8 +1129,13 @@ Public Sub DEMO_Sheet_Reset( _
 '   Raises errors normally except for explicitly marked best-effort cleanup
 '   steps guarded with On Error Resume Next
 '
+'   Protection cleanup errors are reported, not silently ignored. An existing
+'   operation error keeps its number/source and original description prefix;
+'   a separate cleanup diagnostic is appended. Otherwise cleanup failure is
+'   raised directly. There is no retry or watchdog for a blocked Excel call.
+'
 ' UPDATED
-'   2026-04-19
+'   2026-09-10
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1113,6 +1144,14 @@ Public Sub DEMO_Sheet_Reset( _
     Dim WS                  As Worksheet       'Resolved worksheet to reset
     Dim i                   As Long            'Reverse loop index
     Dim WasProtected        As Boolean         'TRUE when the sheet was protected on entry
+    Dim DidUnprotect        As Boolean         'This invocation owns the unprotect
+    Dim EntryProtection     As tDEMOProtectionState
+    Dim CleanupErrNumber    As Long
+    Dim CleanupErrSource    As String
+    Dim CleanupErrDescription As String
+    Dim SelectionErrNumber  As Long
+    Dim SelectionErrSource  As String
+    Dim SelectionErrDescription As String
     Dim SavedErrNumber      As Long            'Captured error number
     Dim SavedErrSource      As String          'Captured error source
     Dim SavedErrDescription As String          'Captured error description
@@ -1177,6 +1216,28 @@ Public Sub DEMO_Sheet_Reset( _
     'Capture whether the sheet is protected on entry
         WasProtected = WS.ProtectContents Or WS.ProtectDrawingObjects Or WS.ProtectScenarios
 
+    'Capture every Protect option before changing protection; getters may fail.
+        If WasProtected Then
+            EntryProtection.DrawingObjects = WS.ProtectDrawingObjects
+            EntryProtection.Contents = WS.ProtectContents
+            EntryProtection.Scenarios = WS.ProtectScenarios
+            EntryProtection.UserInterfaceOnly = WS.ProtectionMode
+            EntryProtection.EnableSelection = WS.EnableSelection
+            With WS.Protection
+                EntryProtection.AllowFormattingCells = .AllowFormattingCells
+                EntryProtection.AllowFormattingColumns = .AllowFormattingColumns
+                EntryProtection.AllowFormattingRows = .AllowFormattingRows
+                EntryProtection.AllowInsertingColumns = .AllowInsertingColumns
+                EntryProtection.AllowInsertingRows = .AllowInsertingRows
+                EntryProtection.AllowInsertingHyperlinks = .AllowInsertingHyperlinks
+                EntryProtection.AllowDeletingColumns = .AllowDeletingColumns
+                EntryProtection.AllowDeletingRows = .AllowDeletingRows
+                EntryProtection.AllowSorting = .AllowSorting
+                EntryProtection.AllowFiltering = .AllowFiltering
+                EntryProtection.AllowUsingPivotTables = .AllowUsingPivotTables
+            End With
+        End If
+
 '------------------------------------------------------------------------------
 ' OPTIONAL UNPROTECT
 '------------------------------------------------------------------------------
@@ -1184,6 +1245,7 @@ Public Sub DEMO_Sheet_Reset( _
         If WasProtected Then
             If Len(ProtectPassword) > 0 Then
                 WS.Unprotect Password:=ProtectPassword
+                DidUnprotect = True
             Else
                 Err.Raise vbObjectError + 2100, _
                           "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
@@ -1307,9 +1369,60 @@ Clean_Exit:
 '------------------------------------------------------------------------------
 ' OPTIONAL RE-PROTECT
 '------------------------------------------------------------------------------
-    'Re-protect the sheet when requested and when it was protected on entry
-        If WasProtected And ReProtectAtEnd Then
-            WS.Protect Password:=ProtectPassword
+    'Cleanup is single-pass and only restores an unprotect owned by this call.
+        On Error Resume Next
+        If DidUnprotect And ReProtectAtEnd Then
+            Err.Clear
+            WS.Protect Password:=ProtectPassword, _
+                DrawingObjects:=EntryProtection.DrawingObjects, _
+                Contents:=EntryProtection.Contents, _
+                Scenarios:=EntryProtection.Scenarios, _
+                UserInterfaceOnly:=EntryProtection.UserInterfaceOnly, _
+                AllowFormattingCells:=EntryProtection.AllowFormattingCells, _
+                AllowFormattingColumns:=EntryProtection.AllowFormattingColumns, _
+                AllowFormattingRows:=EntryProtection.AllowFormattingRows, _
+                AllowInsertingColumns:=EntryProtection.AllowInsertingColumns, _
+                AllowInsertingRows:=EntryProtection.AllowInsertingRows, _
+                AllowInsertingHyperlinks:=EntryProtection.AllowInsertingHyperlinks, _
+                AllowDeletingColumns:=EntryProtection.AllowDeletingColumns, _
+                AllowDeletingRows:=EntryProtection.AllowDeletingRows, _
+                AllowSorting:=EntryProtection.AllowSorting, _
+                AllowFiltering:=EntryProtection.AllowFiltering, _
+                AllowUsingPivotTables:=EntryProtection.AllowUsingPivotTables
+            CleanupErrNumber = Err.Number
+            CleanupErrSource = Err.Source
+            CleanupErrDescription = Err.Description
+
+            Err.Clear
+            WS.EnableSelection = EntryProtection.EnableSelection
+            SelectionErrNumber = Err.Number
+            SelectionErrSource = Err.Source
+            SelectionErrDescription = Err.Description
+        End If
+        On Error GoTo 0
+
+    'Retain both cleanup diagnostics without replacing the operation error.
+        If SelectionErrNumber <> 0 Then
+            If CleanupErrNumber = 0 Then
+                CleanupErrNumber = SelectionErrNumber
+                CleanupErrSource = SelectionErrSource
+                CleanupErrDescription = SelectionErrDescription
+            Else
+                CleanupErrDescription = CleanupErrDescription & _
+                    " | EnableSelection: " & CStr(SelectionErrNumber) & _
+                    " | " & SelectionErrSource & " | " & SelectionErrDescription
+            End If
+        End If
+        If CleanupErrNumber <> 0 Then
+            If SavedErrNumber = 0 Then
+                SavedErrNumber = CleanupErrNumber
+                SavedErrSource = CleanupErrSource
+                SavedErrDescription = CleanupErrDescription
+            Else
+                SavedErrDescription = SavedErrDescription & vbCrLf & _
+                    "Cleanup failure: " & CStr(CleanupErrNumber) & _
+                    " | " & CleanupErrSource & " | " & CleanupErrDescription
+            End If
         End If
 
 '------------------------------------------------------------------------------

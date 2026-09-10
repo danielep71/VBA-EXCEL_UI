@@ -8,7 +8,7 @@ from vba_lex import code_only
 CASE = 'TST_Case_TitleBarShowRejectsCaptionlessBaseline'
 
 
-def findings(source):
+def findings(source, case=CASE, cleanup_label='safe_exit', handler_label='err_handler'):
     errors = []
     for config_name, config in CONFIGS.items():
         inside = False
@@ -18,13 +18,13 @@ def findings(source):
         for line, raw in active_lines(source, config):
             for part in statements(raw):
                 code = code_only(part).strip().lower()
-                if re.match(r'private sub ' + CASE.lower() + r'\b', code):
+                if re.match(r'(?:private|public) sub ' + re.escape(case.lower()) + r'\b', code):
                     inside = True
                 if not inside:
                     continue
-                if code == 'safe_exit:':
+                if code == cleanup_label + ':':
                     cleanup = True
-                if code == 'err_handler:':
+                if code == handler_label + ':':
                     cleanup = False
                 if cleanup:
                     if code == 'on error goto 0':
@@ -38,7 +38,7 @@ def findings(source):
                 if code == 'end sub':
                     inside = False
         if raises != 1:
-            errors.append(f'{config_name}: expected one saved-error re-raise in {CASE}')
+            errors.append(f'{config_name}: expected one saved-error re-raise in {case}')
     return errors
 
 
