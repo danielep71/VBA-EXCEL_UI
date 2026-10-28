@@ -52,9 +52,9 @@ Windows Excel host and is tracked on the linked issue.
 | Area | v1.1.2 boundary | v1.1.3 branch state |
 |---|---|---|
 | Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Open: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
-| Title-bar identity | v1.1.3 pairs the retained Excel Window with the hWnd read from that same object and fails closed when the pair no longer matches. | Corrected on branch; certification pending: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) |
-| Recycled hWnd | Registry slots retain Window generation identity, so equal style bits cannot authenticate a recycled handle. | Corrected on branch; certification pending: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) |
-| Captionless baseline | Show rejects zero and non-zero baselines without WS_CAPTION and confirms the live result by readback. | Corrected on branch; certification pending: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) |
+| Title-bar identity | The retained Window and native handle were proved independently, without proving that they still form the captured pair. | Pairing correction merged; public-path no-write evidence and final documentation remain open: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45). |
+| Recycled hWnd | Equal owned style bits could let a recycled numeric handle retrieve stale registry state. | Retained-Window identity merged; the current test changes the stored numeric handle and does not prove unchanged-hWnd generation reuse: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32). |
+| Captionless baseline | A non-zero captionless baseline could bypass the all-zero recovery fallback. | Partial correction merged; any-bit tests still accept incomplete composite WS_CAPTION masks. Complete-mask correction and bounded negative-control evidence remain open: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6), [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66). |
 | Self-test ownership | The tagged self-test can clear a snapshot it has just refused because the caller owns it. | Corrected on the release branch: [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) |
 | Quiet-update ownership | A suppressed or ignored write can be recorded as an achieved transition. | Corrected on the release branch: [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) |
 

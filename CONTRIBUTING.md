@@ -132,8 +132,8 @@ use branches and pull requests.
 Write imperative, specific subjects, normally in this form:
 
 ```text
-fix: preserve formulas during write-back
-feat: add explicit tail calculation
+fix: preserve caller-owned UI snapshots
+feat: add an explicit window-targeting option
 test: cover cleanup after initialization failure
 docs: clarify supported Office environments
 chore: harden repository validation
@@ -536,10 +536,12 @@ which would silently exempt any future page named that way.
 Two things about that arrangement are deliberate. The expected version comes
 from this repository and not from the wiki, because deriving it from the first
 page read would make the check circular: fourteen pages agreeing on a stale
-release would pass. And the workflow runs on a schedule as well as on push,
-because a wiki edit does not touch this repository and therefore starts nothing
-— without the timer, drift introduced in the wiki editor stays invisible until
-the next commit lands here.
+release would pass. The workflow declares scheduled and push triggers because a Wiki edit does
+not touch this repository. As checked on 2026-10-28, the workflow exists on
+`release/v1.1.3` but is absent from `main` at `45dc93c`; its default-branch
+schedule/manual route is not operational yet. Do not treat a declared trigger
+or the historical badge run as a fresh Wiki check. #53 and #49 require a runnable
+check bound to the final repository and Wiki SHAs before release readiness.
 
 `tools/check_repo.py` never touches the network. It runs the badge rules against
 their own fixtures so the policy cannot rot, and leaves the clone to the
@@ -560,21 +562,24 @@ satisfy at the moment it matters.
 
 That produces one deliberate window per release, in wave 7:
 
-1. `VERSION` moves to the new release, together with the module headers under
+1. Review the governed Wiki pages against the candidate contract, update every
+   badge to `wiki_tracks-v1.1.3`, and record the Wiki SHA first, as required by
+   [#53](https://github.com/danielep71/VBA-EXCEL_UI/issues/53).
+2. Update root `VERSION` and the reviewed module headers together under
    [#36](https://github.com/danielep71/VBA-EXCEL_UI/issues/36).
-2. The wiki gate goes red. Every page still claims the previous release, and
-   the repository now states the new one. **This is the signal working**, not a
-   fault.
-3. The wiki pages are reviewed against the new contract and re-badged.
-4. The gate goes green again, before the tree is frozen.
+3. Treat the interval between these separate repository updates as transitional;
+   no release evidence is valid during that interval.
+4. Run the badge check against the settled repository and recorded Wiki SHAs.
+   Require a passing result before the exact-head freeze.
 
 Order matters. Wiki edits do not touch this repository, so re-badging cannot
 invalidate a frozen tree — but bumping `VERSION` can, because it is a tracked
 file. Bump `VERSION` and re-badge the wiki *before* the release freeze, never
 during it.
 
-The wiki gates no merge. It makes a silent failure loud, which is the failure
-that let the wiki fall a full release behind before v1.1.2.
+The currently configured required status check does not include the Wiki job.
+#49 must make missing, failed, stale or unreadable final Wiki evidence block
+release readiness; a historical passing run does not satisfy that requirement.
 
 ### Markdown is edited as text
 

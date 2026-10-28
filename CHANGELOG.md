@@ -523,13 +523,18 @@ measured against that baseline.
   [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32)). Active capture
   reads `Window.hWnd` from the same retained Window object. Registry slots keep
   that object as their generation token and discard the slot when the retained
-  object no longer owns the stored handle, so equal style bits cannot transfer
-  baselines, ownership or refresh debt to a recycled hWnd.
-- **Show rejects zero and non-zero captionless baselines and verifies the live
-  result** ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)). A show
-  uses the safe visible fallback unless `HasBaseline` is true and `WS_CAPTION`
-  is present, then performs a post-operation style readback before reporting
-  success, including on the no-op path.
+  object no longer owns the stored handle. **2026-10-28 status correction:**
+  this is implemented identity checking, not completed same-hWnd generation
+  proof. The current control changes the stored numeric handle; #32 still
+  requires unchanged-hWnd equal-zero/equal-nonzero controls, and #45 retains
+  public-path no-write and documentation requirements.
+- **Partial captionless-baseline correction; complete-mask verification remains
+  open** ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)).
+  **2026-10-28 status correction:** the merged show path consults
+  `HasBaseline` and reads the resulting style, but its any-bit checks accept
+  `WS_BORDER`-only or `WS_DLGFRAME`-only styles. Complete
+  `(style And WS_CAPTION) = WS_CAPTION` checks and the bounded,
+  host-restoring negative control under #66 remain required.
 
 - Fixed four public destructive runners clearing a snapshot they had just
   refused because it belonged to the caller. Their precondition checks now run

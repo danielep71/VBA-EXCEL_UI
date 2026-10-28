@@ -323,8 +323,12 @@ The static workflow:
 - does not package or publish a release workbook.
 
 The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
-file. It clones the public Wiki without credentials, runs on a weekly schedule
-and on relevant repository changes, and cannot write to the Wiki.
+file and clones the public Wiki without credentials. It declares a weekly
+schedule and relevant-change triggers and cannot write to the Wiki. As checked
+on 2026-10-28, it is present on `release/v1.1.3` but absent from default branch
+`main` at `45dc93c`; the schedule/manual route is not operational there.
+#53 and #49 retain the requirement for a runnable final-repository/final-Wiki
+check before release readiness.
 
 The label-color workflow is the only current workflow with write permission. It
 has `issues: write` solely to apply the repository's fixed label-color map, runs
