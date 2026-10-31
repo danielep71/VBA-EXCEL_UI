@@ -718,7 +718,7 @@ Reviewers evaluate correctness, safety, maintainability, compatibility,
 evidence, documentation, and fit with the project's direction. Approval of an
 idea does not guarantee acceptance of every implementation detail.
 
-The maintainer may edit, squash, defer, or decline a contribution to protect the
+I may edit, squash, defer, or decline a contribution to protect the
 coherence and supportability of the project. Contributors will be credited
 through Git history and release notes where appropriate.
 
