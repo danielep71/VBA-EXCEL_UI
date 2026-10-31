@@ -67,8 +67,8 @@ If the project has not yet published a functional release, development code is
 pre-release and no production version is security-supported.
 
 Security fixes normally land on **main** and are included in a new tagged
-release. Older releases are not normally patched in place unless the maintainer
-states otherwise.
+release. Older releases are not normally patched in place unless I
+state otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such
 as “latest” or “yesterday's main” are insufficient because branches change.
@@ -122,7 +122,7 @@ time perfecting the report.
 
 This project is maintained by one person. Response times are best-effort rather than a contractual SLA.
 
-The maintainer aims to:
+I aim to:
 
 | Stage | Target |
 |---|---|
@@ -149,7 +149,7 @@ Anonymous credit is also acceptable.
 
 ## 🎯 Security issue or ordinary defect?
 
-When uncertain, report privately. The maintainer can reclassify a report safely.
+When uncertain, report privately. I can reclassify a report safely.
 
 Security reports include credible risks of:
 
@@ -425,11 +425,11 @@ Avoid public disclosure while exploitability is being assessed, a fix is being
 prepared, affected users have not had reasonable time to update, an exposed
 secret remains valid, or a malicious artifact or runner remains reachable.
 
-The maintainer and reporter should agree a disclosure plan based on severity,
+The reporter and I should agree a disclosure plan based on severity,
 active exploitation, remediation complexity, availability of a workaround, and
 the time needed to validate a corrected release.
 
-The maintainer may ask for a sanitized reproduction, additional environment
+I may ask for a sanitized reproduction, additional environment
 detail, confirmation against a candidate fix, or a reasonable embargo. The
 reporter does not surrender ownership of their research.
 
@@ -457,7 +457,7 @@ conducted in good faith and consistently with this policy. This statement does
 not authorize testing of third-party systems or bind Microsoft, GitHub, an
 employer, a client, or any other third party.
 
-No paid bug bounty is offered unless the maintainer states otherwise in writing.
+No paid bug bounty is offered unless I state otherwise in writing.
 
 ---
 
