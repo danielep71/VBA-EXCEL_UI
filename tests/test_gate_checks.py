@@ -7,6 +7,7 @@ finding that names it. The self-test checks are proved the same way, by
 breaking the rule their fixtures exercise and expecting the self-test to say so.
 """
 
+import hashlib
 import re
 import unittest
 from unittest.mock import patch
@@ -272,6 +273,20 @@ class ReleaseState(GateTestCase):
         self.repo.write("VERSION", "v1.1.2\n")
         self.assertFails("VERSION does not hold a release number: 'v1.1.2'")
 
+    def test_fails_when_version_is_not_the_newest_release(self) -> None:
+        self.repo.write("VERSION", "1.1.3\n")
+        self.assertFails("VERSION is 1.1.3, but the newest release in CHANGELOG.md is [1.1.2]")
+
+    def test_fails_when_unreleased_is_not_the_first_version_section(self) -> None:
+        self.repo.replace("CHANGELOG.md", "## [Unreleased]\n", "## [Unreleased] - 2026-11-01\n")
+        self.assertFails("the first version section must be '## [Unreleased]'",
+                         "malformed release heading '## [Unreleased] - 2026-11-01'")
+
+    def test_fails_on_a_release_link_to_another_repository(self) -> None:
+        self.repo.replace("CHANGELOG.md", "[1.0.1]: https://github.com/danielep71/VBA-EXCEL_UI/",
+                          "[1.0.1]: https://github.com/example/VBA-EXCEL_UI/")
+        self.assertFails("link reference [1.0.1] points outside this repository")
+
 
 class ReleaseStateSelfTest(GateTestCase):
     check = "release state self-test"
@@ -301,6 +316,50 @@ class RepositoryHygiene(GateTestCase):
     def test_fails_on_a_tracked_file_the_gitignore_hides(self) -> None:
         self.repo.write("notes.tmp", "scratch\n")
         self.assertFails("notes.tmp: tracked file is hidden by the current .gitignore")
+
+    # Binary content (#82). A ZIP local-file header carries NUL bytes, as does
+    # every Office Open XML workbook, which is a ZIP container.
+    ZIP = b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00[Content_Types].xml"
+    ALLOWLIST = "tools/binary_allowlist.txt"
+
+    def test_fails_on_a_tracked_archive(self) -> None:
+        self.repo.write("tools/bundle.zip", self.ZIP)
+        self.assertFails("tools/bundle.zip: binary file outside images/ "
+                         "(Git treats it as binary (text attribute unset))")
+
+    def test_fails_on_a_workbook_renamed_with_a_text_extension(self) -> None:
+        self.repo.write("docs/notes.txt", self.ZIP)
+        self.assertFails("docs/notes.txt: binary file outside images/ (its content contains a NUL byte)")
+
+    def test_fails_on_a_nul_byte_in_a_module(self) -> None:
+        self.repo.replace(RUNTIME, "Option Explicit", "Option\0Explicit")
+        self.assertFails(f"{RUNTIME}: binary file outside images/ (its content contains a NUL byte)")
+
+    def test_fails_on_an_image_outside_images(self) -> None:
+        self.repo.write("docs/diagram.png", self.repo.read_bytes("images/excel_ui_banner.png"))
+        self.assertFails("docs/diagram.png: binary file outside images/")
+
+    def test_passes_with_a_new_image_under_images(self) -> None:
+        self.repo.write("images/diagram.png", self.repo.read_bytes("images/excel_ui_banner.png"))
+        self.assertPasses()
+
+    def test_passes_with_an_allowlisted_binary_while_its_digest_matches(self) -> None:
+        self.repo.write("tools/bundle.zip", self.ZIP)
+        self.repo.append(self.ALLOWLIST, f"{hashlib.sha256(self.ZIP).hexdigest()}  tools/bundle.zip\n")
+        self.assertPasses()
+
+    def test_fails_when_an_allowlisted_binary_changes(self) -> None:
+        self.repo.write("tools/bundle.zip", self.ZIP + b"\0changed")
+        self.repo.append(self.ALLOWLIST, f"{hashlib.sha256(self.ZIP).hexdigest()}  tools/bundle.zip\n")
+        self.assertFails("tools/bundle.zip: allowlisted binary has changed")
+
+    def test_fails_on_an_allowlist_entry_for_an_untracked_path(self) -> None:
+        self.repo.append(self.ALLOWLIST, f"{'0' * 64}  tools/gone.zip\n")
+        self.assertFails(f"{self.ALLOWLIST}: tools/gone.zip is listed but not tracked")
+
+    def test_fails_on_a_malformed_allowlist_entry(self) -> None:
+        self.repo.append(self.ALLOWLIST, "tools/bundle.zip\n")
+        self.assertFails(f"{self.ALLOWLIST}:", "expected '<sha256>  <path>'")
 
 
 class MarkdownLinks(GateTestCase):
