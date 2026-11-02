@@ -321,6 +321,31 @@ class ReleaseStateSelfTest(GateTestCase):
             self.assertFails("a leading v is rejected")
 
 
+class ReviewFindingCrosswalk(GateTestCase):
+    check = "review finding crosswalk"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_on_an_unmapped_identifier(self) -> None:
+        self.repo.append("docs/RIBBON_SDI_BEHAVIOR.md", "\nSee ICR-UI-112-P9-99.\n")
+        self.assertFails("ICR-UI-112-P9-99 is cited in docs/RIBBON_SDI_BEHAVIOR.md but has no row")
+
+    def test_fails_on_a_duplicate_row(self) -> None:
+        row = next(line for line in self.repo.read_text("CHANGELOG.md").splitlines()
+                   if line.startswith("| `ICR-UI-P1-01` |"))
+        self.repo.replace("CHANGELOG.md", row + "\n", row + "\n" + row + "\n")
+        self.assertFails("CHANGELOG.md crosswalk: ICR-UI-P1-01 has more than one row")
+
+    def test_fails_when_a_renumbered_identifier_points_nowhere(self) -> None:
+        self.repo.replace("CHANGELOG.md", "| `ICR-UI-112-P3-04` | v1.1.2", "| `ICR-UI-112-P3-44` | v1.1.2")
+        self.assertFails("ICR-UI-111-P3-07 points at ICR-UI-112-P3-04, which has no row")
+
+    def test_fails_without_the_crosswalk_section(self) -> None:
+        self.repo.replace("CHANGELOG.md", "### 🔎 Review finding crosswalk", "### Review findings")
+        self.assertFails("CHANGELOG.md has no '### 🔎 Review finding crosswalk' section")
+
+
 class RepositoryHygiene(GateTestCase):
     check = "repository hygiene"
 
