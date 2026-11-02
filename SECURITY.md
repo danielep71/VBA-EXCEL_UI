@@ -67,8 +67,8 @@ If the project has not yet published a functional release, development code is
 pre-release and no production version is security-supported.
 
 Security fixes normally land on **main** and are included in a new tagged
-release. Older releases are not normally patched in place unless the maintainer
-states otherwise.
+release. Older releases are not normally patched in place unless I
+state otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such
 as “latest” or “yesterday's main” are insufficient because branches change.
@@ -122,7 +122,7 @@ time perfecting the report.
 
 This project is maintained by one person. Response times are best-effort rather than a contractual SLA.
 
-The maintainer aims to:
+I aim to:
 
 | Stage | Target |
 |---|---|
@@ -149,7 +149,7 @@ Anonymous credit is also acceptable.
 
 ## 🎯 Security issue or ordinary defect?
 
-When uncertain, report privately. The maintainer can reclassify a report safely.
+When uncertain, report privately. I can reclassify a report safely.
 
 Security reports include credible risks of:
 
@@ -297,6 +297,10 @@ Workflow code and configuration are security-sensitive.
 Automation that writes repository content or publishes releases must have
 explicit, least-privilege authorization.
 
+---
+
+<a id="safe-use"></a>
+
 ### Current automation surface
 
 The repository currently contains these workflows:
@@ -311,26 +315,117 @@ The repository currently contains these workflows:
 .github/workflows/pr-milestones.yml
 .github/workflows/rulesets-drift.yml
 .github/workflows/static-checks.yml
+.github/workflows/wiki-badges.yml
 ~~~
 
-Actions are pinned to full commit SHAs with the release each one resolves to,
-and Dependabot (`.github/dependabot.yml`) proposes pin updates; nothing merges
-automatically. Every checkout sets `persist-credentials: false`.
+The static workflow:
+
+- runs on a GitHub-hosted Ubuntu runner;
+- checks exported source as text;
+- uses the repository’s Python tooling;
+- installs no project package dependencies;
+- declares contents: read;
+- does not require repository secrets;
+- does not execute Excel or VBA;
+- does not package or publish a release workbook.
+
+**CodeQL** analyses the Python tooling and the workflows. Its pull-request job
+is read-only and uploads nothing; only the push and scheduled job has
+`security-events: write`. **Workflow lint** runs a pinned actionlint release
+whose archive is verified by SHA-256 before it runs, with a read-only token.
+Dependabot (`.github/dependabot.yml`) proposes updates to the pinned Actions;
+nothing merges automatically.
+
+The issue workflows are documented in
+[docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md). Only **Sync issue labels** has
+`issues: write`, and it reconciles labels only from the default branch; only
+**Keep milestones issue-only** has `pull-requests: write`, runs from the base
+branch through `pull_request_target`, and never checks out or runs
+pull-request code. **Detect issue-label drift** and **Issue triage** are
+read-only.
+
+**Ruleset drift** compares the live repository rulesets with
+`.github/rulesets/` using the job's read-only token and never changes them.
+
+**External links** requests the public URLs already published in the tracked
+Markdown files, weekly and on demand, with a read-only token and no secrets.
+
+The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
+file and clones the public Wiki without credentials. It declares a weekly
+schedule and relevant-change triggers and cannot write to the Wiki. It is
+present on both `main` and `release/v1.1.3`, so its scheduled and manual runs
+operate from the default branch.
+#53 and #49 retain the requirement for a runnable final-repository/final-Wiki
+check before release readiness.
 
 Three jobs hold a write permission, each confined to that job: **Sync issue
 labels** (`issues: write`, reconciling only from the default branch), **Keep
-milestones issue-only** (`pull-requests: write`, run from the base branch
-through `pull_request_target`, never checking out or running pull-request
-code), and the push and scheduled **CodeQL** job (`security-events: write`).
-CodeQL's pull-request job is read-only and uploads nothing. **Static checks**,
-**Workflow lint** (a SHA-256-verified actionlint release), **External links**,
-**Detect issue-label drift**, **Issue triage** and **Ruleset drift** are
-read-only. None of them executes Excel or VBA, uses repository secrets, or
-publishes a release artifact.
+milestones issue-only** (`pull-requests: write`), and the push and scheduled
+**CodeQL** job (`security-events: write`). None reads or publishes release
+artifacts, and their permissions must not be copied into static or Wiki jobs.
+
+This is intentionally a low-privilege automation surface.
+
+### Current workflow boundary
+
+Static analysis can establish repository properties such as:
+
+~~~text
+required files
+module names
+Option policy
+encoding and line endings
+procedure structure
+PtrSafe declarations
+duplicate procedures
+public API manifest
+release-state markers
+workflow pin and tag-trigger policy
+tracked-file hygiene
+Markdown links
+Markdown escape and private-review exclusion policy
+Wiki-badge rule fixtures
+house-style formatter state
+~~~
+
+It cannot establish:
+
+~~~text
+VBE import success
+VBA compile success
+Excel object-model behavior
+Windows API runtime behavior
+Office bitness behavior
+SDI window identity behavior
+Ribbon active-window behavior
+runtime cleanup
+release workbook packaging
+~~~
+
+Do not present a green static workflow as proof that Excel executed or certified
+the component.
+
+### Workflow change controls
+
+Changes to automation should preserve:
+
+- least-privilege permissions;
+- no secrets for ordinary static checks;
+- review of every third-party action;
+- minimal dependency installation;
+- exact-SHA checkout for the event being evaluated;
+- separation of testing from signing and publishing;
+- sanitized logs and artifacts.
+
+Every third-party Action reference is pinned to a full 40-character commit SHA
+with a trailing release-version comment. `tools/check_repo.py` enforces the pin
+shape across every tracked workflow, and the static workflow also runs on `v*`
+tag pushes so the tagged SHA receives its own repository check. A pin still
+requires human verification against the upstream release when it is updated;
+immutability does not prove that the selected upstream commit is trustworthy.
 
 ---
 
-<a id="safe-use"></a>
 
 ## ✅ Safe-use guidance
 
@@ -358,11 +453,11 @@ Avoid public disclosure while exploitability is being assessed, a fix is being
 prepared, affected users have not had reasonable time to update, an exposed
 secret remains valid, or a malicious artifact or runner remains reachable.
 
-The maintainer and reporter should agree a disclosure plan based on severity,
+The reporter and I should agree a disclosure plan based on severity,
 active exploitation, remediation complexity, availability of a workaround, and
 the time needed to validate a corrected release.
 
-The maintainer may ask for a sanitized reproduction, additional environment
+I may ask for a sanitized reproduction, additional environment
 detail, confirmation against a candidate fix, or a reasonable embargo. The
 reporter does not surrender ownership of their research.
 
@@ -390,7 +485,7 @@ conducted in good faith and consistently with this policy. This statement does
 not authorize testing of third-party systems or bind Microsoft, GitHub, an
 employer, a client, or any other third party.
 
-No paid bug bounty is offered unless the maintainer states otherwise in writing.
+No paid bug bounty is offered unless I state otherwise in writing.
 
 ---
 

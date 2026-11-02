@@ -43,6 +43,21 @@ Compatibility claims apply only to environments actually certified for the
 selected release. Read [README.md](README.md), [CHANGELOG.md](CHANGELOG.md), and
 the release notes before installation.
 
+### Current release boundaries
+
+Known defects and their correction state on `release/v1.1.3`. A row marked
+*corrected on branch* is not certified: certification requires a real
+Windows Excel host and is tracked on the linked issue.
+
+| Area | v1.1.2 boundary | v1.1.3 branch state |
+|---|---|---|
+| Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Open: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
+| Title-bar identity | The retained Window and native handle were proved independently, without proving that they still form the captured pair. | Pairing correction merged; public-path no-write evidence and final documentation remain open: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45). |
+| Recycled hWnd | Equal owned style bits could let a recycled numeric handle retrieve stale registry state. | Retained-Window identity merged; the current test changes the stored numeric handle and does not prove unchanged-hWnd generation reuse: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32). |
+| Captionless baseline | A non-zero captionless baseline could bypass the all-zero recovery fallback. | Partial correction merged; any-bit tests still accept incomplete composite WS_CAPTION masks. Complete-mask correction and bounded negative-control evidence remain open: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6), [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66). |
+| Self-test ownership | The tagged self-test can clear a snapshot it has just refused because the caller owns it. | Corrected on the release branch: [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) |
+| Quiet-update ownership | A suppressed or ignored write can be recorded as an achieved transition. | Corrected on the release branch: [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) |
+
 <a id="deployment-model"></a>
 
 ## 🎯 Deployment model
@@ -119,6 +134,15 @@ are part of a reproducible source installation.
 
 A successful import is not sufficient evidence that the installation is correct.
 
+`Test_EXCEL_UI_RunReleaseCertification` is defined in
+`test/M_EXCEL_UI_REGRESSION_TESTS.bas`; it is not part of the four-module
+production package. Before release or production certification, import that
+regression module from the **same tag or commit** as the production modules,
+compile the complete VBA project, and then run the certification procedure. If
+the destination workbook is not intended to retain test code, capture the
+result, remove the regression module afterward, recompile, and repeat the
+public-API smoke test.
+
 - Run `Test_EXCEL_UI_RunReleaseCertification` for production/release validation.
 - Treat any incomplete, skipped, failed, or cleanup-failed unit as not passing.
 - Verify multi-window identity, closed/recreated windows, snapshot reset, and emergency recovery.
@@ -161,6 +185,22 @@ Before upgrading:
 - Review newly observable diagnostics and recovery behavior even when public signatures are unchanged.
 - Never restore per-window state by collection index or reuse a stale snapshot as current authority.
 
+### Upgrade from the legacy single-module layout
+
+Version 1.0.1 and earlier supported a single `M_EXCEL_UI` implementation module.
+Do not import the current four-module package beside that legacy module: the VBE
+can rename the incoming facade or report duplicate and ambiguous procedures
+while leaving old code active.
+
+1. Export and preserve any local modifications to the legacy module.
+2. Return the Excel UI to a recoverable visible state and clear any snapshot.
+3. Remove the legacy `M_EXCEL_UI` module completely.
+4. Import all four current production modules from one tag or commit.
+5. Compile, import the matching regression module for validation, and run the
+   complete certification sequence.
+6. Remove the regression module afterward when the production workbook should
+   contain only the four supported runtime modules, then compile once more.
+
 After replacement, compile and repeat the full installation validation. Do not
 claim an upgrade is non-breaking solely because VBA signatures compile.
 
@@ -169,6 +209,30 @@ claim an upgrade is non-breaking solely because VBA signatures compile.
 A locally modified copy is a fork. Diff it against the old and new exported
 source, reapply changes deliberately, and retest. Do not overwrite it and assume
 the local behavior survived.
+
+---
+
+<a id="snapshot-lifetime-and-window-references"></a>
+
+## 🪟 Snapshot lifetime and Window references
+
+The component maintains one in-memory snapshot slot per loaded VBA project.
+That snapshot retains the Excel `Window` objects captured for later identity-safe
+restoration; a successful restore does **not** clear the slot automatically.
+
+- Capture before applying a temporary UI mode and inspect the structured result.
+- Restore while the captured windows still exist; a closed or recreated window
+  must fail closed rather than redirect its state to another window.
+- Call `UI_HasExcelUIStateSnapshot` before any helper or destructive test runner
+  that might otherwise replace caller-owned state.
+- Call `UI_ClearExcelUIStateSnapshot` as soon as the workflow no longer needs
+  retry or inspection. Clearing releases the retained `Window` references.
+- Do not leave a snapshot alive across unrelated work: retained references can
+  delay workbook/window teardown and make later state appear current when it is
+  not.
+
+A new capture replaces the previous slot. Callers sharing the same VBA project
+must therefore coordinate ownership explicitly.
 
 ---
 
@@ -223,7 +287,7 @@ owns and document anything intentionally retained.
 - [README.md](README.md) — capabilities, requirements, and public API
 - [CHANGELOG.md](CHANGELOG.md) — version history and compatibility
 - [CONTRIBUTING.md](CONTRIBUTING.md) — source and validation standards
-- [RELEASING.md](RELEASING.md) — maintainer release and provenance procedure
+- [RELEASING.md](RELEASING.md) — release and provenance procedure
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting
 - [LICENSE](LICENSE) — MIT licence terms
 
