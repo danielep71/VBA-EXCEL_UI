@@ -78,3 +78,10 @@ jobs:
           echo "::notice::Formatting drift is mechanical. Run:"
           echo "::notice::  python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas"
           echo "::notice::then re-import the affected modules into the VBE before committing."
+
+      # The gate is only as good as its checks. Each check has a fixture it
+      # must pass and one it must reject; a check that silently stopped
+      # detecting its defect would otherwise still print ok above.
+      - name: Run the gate's unit tests
+        if: always()
+        run: python3 -m unittest discover -s tests

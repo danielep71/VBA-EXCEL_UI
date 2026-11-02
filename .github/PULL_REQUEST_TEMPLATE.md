@@ -131,6 +131,7 @@ Evidence from another commit does not certify this candidate.
 
 - `python3 tools/check_repo.py`
 - `python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas`
+- `python3 -m unittest discover -s tests`
 - `git diff --check`
 
 | Check | Result / evidence |
