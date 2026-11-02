@@ -5,7 +5,7 @@ physical-line lexer. Findings carry physical start lines, never generated-line
 numbers. Unknown conditional symbols fail explicitly rather than hiding code.
 """
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -423,7 +423,15 @@ def analyze(sources: dict[str, str]) -> tuple[list[Finding], list[str]]:  # noqa
     return sorted(findings), sorted(dynamic)
 
 
-def run(root: str | Path) -> tuple[list[Finding], list[str]]:
+def run(root: str | Path, modules: Iterable[str] | None = None) -> tuple[list[Finding], list[str]]:
+    """Analyze the given repository-relative modules, or every *.bas when none are given.
+
+    The gate passes the modules Git tracks, so a module the glob would miss
+    (another extension, or one not yet in the working tree's layout) is still
+    analyzed. The glob remains for running this file by hand.
+    """
+    if modules is not None:
+        return analyze({rel: (Path(root) / rel).read_text(encoding='ascii') for rel in modules})
     sources = {str(p.relative_to(root)): p.read_text(encoding='ascii')
                for directory in ('src', 'test', 'demo') for p in (Path(root)/directory).glob('*.bas')}
     return analyze(sources)

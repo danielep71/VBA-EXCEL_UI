@@ -27,23 +27,39 @@ from vba_lex import code_only
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PRODUCTION_MODULES = [
-    "src/M_EXCEL_UI.bas",
+# Every module check iterates the modules Git tracks, not a list written here.
+# A hard-coded list let a new module, or a test module split out of the suite,
+# skip every module check while the gate still reported PASS. The lists below
+# are filled by load_modules() from `git ls-files`, before any check runs.
+MODULE_DIRECTORIES = ("src", "test", "demo")
+
+VBA_EXTENSIONS = (".bas", ".cls", ".frm")
+
+PRODUCTION_MODULES: list[str] = []
+TEST_MODULES: list[str] = []
+DEMO_MODULES: list[str] = []
+ALL_MODULES: list[str] = []
+
+# The production set as I document it, in the INSTALLATION.md import order.
+# It is data, not the list the checks iterate: the module-inventory check fails
+# when the discovered src/ set disagrees with it, so adding or removing a
+# production module has to be a deliberate change here and in INSTALLATION.md.
+EXPECTED_PRODUCTION_MODULES = [
     "src/M_EXCEL_UI_RUNTIME.bas",
-    "src/M_EXCEL_UI_SNAPSHOT.bas",
     "src/M_EXCEL_UI_TITLEBAR.bas",
+    "src/M_EXCEL_UI_SNAPSHOT.bas",
+    "src/M_EXCEL_UI.bas",
 ]
 
-TEST_MODULES = ["test/M_EXCEL_UI_REGRESSION_TESTS.bas"]
-
-DEMO_MODULES = [
+# Modules that other checks read by name: the title-bar and demo-cleanup
+# regressions inspect these files directly, so they must exist.
+REQUIRED_MODULES = EXPECTED_PRODUCTION_MODULES + [
+    "test/M_EXCEL_UI_REGRESSION_TESTS.bas",
     "demo/M_DEMO_BUILDER.bas",
     "demo/M_EXCEL_UI_DEMO.bas",
 ]
 
-ALL_MODULES = PRODUCTION_MODULES + TEST_MODULES + DEMO_MODULES
-
-REQUIRED_FILES = ALL_MODULES + [
+REQUIRED_FILES = REQUIRED_MODULES + [
     ".gitattributes",
     ".gitignore",
     "README.md",
@@ -159,6 +175,85 @@ def read_lines(path: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+def is_vba_module(rel: str) -> bool:
+    return rel.lower().endswith(VBA_EXTENSIONS)
+
+
+def is_standard_module(rel: str) -> bool:
+    return rel.lower().endswith(".bas")
+
+
+def discover_modules(tracked: Iterable[str]) -> tuple[dict[str, list[str]], list[str]]:
+    """Sort tracked VBA modules by directory.
+
+    Returns ({directory: [modules]}, misplaced). A module counts only when it
+    sits directly in src/, test/ or demo/; anywhere else, including a nested
+    directory, it would be imported by nobody and checked by nothing, so it is
+    returned as misplaced.
+    """
+    found: dict[str, list[str]] = {directory: [] for directory in MODULE_DIRECTORIES}
+    misplaced: list[str] = []
+    for rel in sorted(tracked):
+        if not is_vba_module(rel):
+            continue
+        directory, _, name = rel.partition("/")
+        if directory in found and name and "/" not in name:
+            found[directory].append(rel)
+        else:
+            misplaced.append(rel)
+    return found, misplaced
+
+
+def load_modules() -> list[str]:
+    """Fill the module lists from the Git index and return misplaced modules.
+
+    When the index cannot be read, git_tracked_files() has already recorded a
+    finding and the lists stay empty, so the gate fails rather than passing on
+    an empty module set.
+    """
+    tracked = git_tracked_files()
+    found, misplaced = discover_modules(tracked or [])
+    PRODUCTION_MODULES[:] = found["src"]
+    TEST_MODULES[:] = found["test"]
+    DEMO_MODULES[:] = found["demo"]
+    ALL_MODULES[:] = PRODUCTION_MODULES + TEST_MODULES + DEMO_MODULES
+    return misplaced
+
+
+def check_module_inventory() -> None:
+    """Discover the modules every other module check iterates, and audit them.
+
+    Three things fail here: a VBA module tracked outside src/, test/ or demo/;
+    a production set that disagrees with EXPECTED_PRODUCTION_MODULES; and a
+    production module that tools/vba_api.py assigns to no public API section,
+    whose public declarations would otherwise never reach the manifest.
+    """
+    for rel in load_modules():
+        fail("module-inventory",
+             f"{rel}: VBA module tracked outside src/, test/ or demo/; it "
+             f"would escape every module check")
+
+    discovered = set(PRODUCTION_MODULES)
+    expected = set(EXPECTED_PRODUCTION_MODULES)
+    for rel in sorted(discovered - expected):
+        fail("module-inventory",
+             f"{rel}: production module is not in EXPECTED_PRODUCTION_MODULES; "
+             f"add it there and to the INSTALLATION.md import order")
+    for rel in sorted(expected - discovered):
+        fail("module-inventory",
+             f"{rel}: listed in EXPECTED_PRODUCTION_MODULES but not tracked")
+
+    vba_api = import_vba_api()
+    if vba_api is None:
+        return
+    sectioned = {rel for _, modules in vba_api.SECTIONS for rel in modules}
+    for rel in sorted(discovered - sectioned):
+        fail("module-inventory",
+             f"{rel}: production module in no public API section of "
+             f"tools/vba_api.py; its declarations would never be recorded")
+
+
+# --------------------------------------------------------------------------
 def check_required_files() -> None:
     for rel in REQUIRED_FILES:
         path = os.path.join(REPO, rel)
@@ -174,24 +269,39 @@ def check_module_names() -> None:
 
     A mismatch imports cleanly and then silently shadows or duplicates a module
     in the VBE, which is far harder to diagnose than a failed check.
+
+    A standard module carries the attribute on line 1. A class or form export
+    starts with its VERSION/BEGIN header, so there the first attribute line is
+    the one that counts.
     """
     for rel in ALL_MODULES:
-        expected = os.path.basename(rel)[:-4]
+        expected = os.path.splitext(os.path.basename(rel))[0]
         text = read(rel).decode("latin-1")
-        m = re.match(r'^Attribute\s+VB_Name\s*=\s*"([^"]+)"', text)
+        pattern = r'^Attribute\s+VB_Name\s*=\s*"([^"]+)"'
+        if is_standard_module(rel):
+            m = re.match(pattern, text)
+            where = "on line 1"
+        else:
+            m = re.search(pattern, text, re.M)
+            where = "after the module header"
         if not m:
-            fail("module-name", f"{rel}: no Attribute VB_Name on line 1")
+            fail("module-name", f"{rel}: no Attribute VB_Name {where}")
         elif m.group(1) != expected:
             fail("module-name", f"{rel}: declares {m.group(1)!r}, expected {expected!r}")
 
 
 # --------------------------------------------------------------------------
 def check_option_policy() -> None:
+    """Require Option Explicit everywhere and Option Private Module where it applies.
+
+    Option Private Module is a standard-module statement, so it is required of
+    the production and test .bas modules only.
+    """
     for rel in ALL_MODULES:
         text = read(rel).decode("latin-1")
         if not re.search(r"^Option Explicit\s*$", text, re.M):
             fail("option-policy", f"{rel}: missing Option Explicit")
-        if rel in PRODUCTION_MODULES + TEST_MODULES:
+        if rel in PRODUCTION_MODULES + TEST_MODULES and is_standard_module(rel):
             if not re.search(r"^Option Private Module\s*$", text, re.M):
                 fail("option-policy", f"{rel}: missing Option Private Module")
 
@@ -238,7 +348,7 @@ def check_vba_analyzer() -> None:
     from pathlib import Path
 
     from vba_analyze import run
-    findings, inventory = run(Path(REPO))
+    findings, inventory = run(Path(REPO), ALL_MODULES)
     for finding in findings:
         fail('VBA analyzer', str(finding))
     for entry in inventory:
@@ -1156,6 +1266,13 @@ def check_formatter() -> None:
         return
 
     for rel in ALL_MODULES:
+        if not is_standard_module(rel):
+            # The formatter's rules are written for standard modules. A class
+            # or form export has a header it would rewrite, so it fails here
+            # explicitly until the formatter learns that layout.
+            fail("formatter", f"{rel}: the house-style formatter supports "
+                              f"standard (.bas) modules only")
+            continue
         path = os.path.join(REPO, rel)
         name = reformat.module_name_of(path)
         if name is None:
@@ -1212,6 +1329,7 @@ def check_repository_policy_selftest() -> None:
 CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("repository policy", check_repository_policy),
     ("repository policy self-test", check_repository_policy_selftest),
+    ("module inventory", check_module_inventory),
     ("required files", check_required_files),
     ("module names", check_module_names),
     ("option policy", check_option_policy),
