@@ -439,6 +439,39 @@ Other workflows run alongside the gate and are not required checks:
 
 Record only environments actually tested.
 
+### Testing the gate itself
+
+The static gate is tested like any other code. `tests/` holds unittest modules
+that copy this repository into a temporary Git repository, plant one defect,
+and run one check against it:
+
+```text
+python3 -m unittest discover -s tests
+```
+
+Every entry in `CHECKS` in `tools/check_repo.py` has a passing fixture (the
+current tree) and at least one failing fixture (a named defect).
+`tests/test_coverage.py` fails when a check has no test in either direction, so
+a new check needs a `GateTestCase` subclass in `tests/test_gate_checks.py`
+before it can merge. Like the gate, the tests use only the standard library.
+`test/` is a different directory: it holds the VBA regression suite.
+
+The Python code under `tools/` and `tests/` must also be clean under Ruff and
+`mypy --strict`, configured in `pyproject.toml` against Python 3.11, the oldest
+interpreter I support for the gate. CI installs both from
+`tools/requirements-quality-ci.txt`, where every wheel is hash-locked. To run
+them locally, install them into a virtual environment the same way:
+
+```text
+python3 -m pip install --require-hashes --only-binary=:all: -r tools/requirements-quality-ci.txt
+ruff check tools tests
+mypy --strict tools
+```
+
+A finding is fixed in the code, not silenced, unless the fix would change what
+a check accepts or rejects. The few complexity exemptions carry their reason
+beside them.
+
 ### Evidence principles
 
 - Test the behavior, not only the implementation path.

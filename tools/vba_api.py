@@ -40,6 +40,8 @@ is verified on every push rather than only when someone suspects it.
 import os
 import re
 import sys
+from collections.abc import Iterable, Iterator
+from typing import Any
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -75,6 +77,11 @@ POINTER_NARROWING = [
 ]
 
 
+# One enclosing conditional: (condition, line, arm index, effective predicate).
+Frame = tuple[str, int, int, str]
+ArmPath = tuple[Frame, ...]
+
+
 class ApiError(Exception):
     """A declaration could not be modelled, which is a finding, not a crash."""
 
@@ -82,7 +89,7 @@ class ApiError(Exception):
 # --------------------------------------------------------------------------
 # LEXICAL HELPERS
 # --------------------------------------------------------------------------
-def split_code_comment(line):
+def split_code_comment(line: str) -> tuple[str, str]:
     """Split a line at the apostrophe that begins a comment, if there is one.
 
     An apostrophe inside a string literal is data. This is the same rule
@@ -100,7 +107,7 @@ def split_code_comment(line):
     return line, ""
 
 
-def logical_lines(text):
+def logical_lines(text: str) -> Iterator[tuple[int, str]]:
     """Yield (line_number, code) with comments removed and continuations joined.
 
     line_number is the line the logical statement started on, so a finding
@@ -134,9 +141,9 @@ def logical_lines(text):
         n += 1
 
 
-def balanced_split(text, sep=","):
+def balanced_split(text: str, sep: str = ",") -> list[str]:
     """Split on sep at paren depth zero and outside string literals."""
-    parts = []
+    parts: list[str] = []
     depth = 0
     in_literal = False
     current = ""
@@ -160,7 +167,7 @@ def balanced_split(text, sep=","):
     return parts
 
 
-def narrow_pointers(signature):
+def narrow_pointers(signature: str) -> str:
     """Rewrite a VBA7 signature into the declaration its #Else arm must carry."""
     for pattern, replacement in POINTER_NARROWING:
         signature = pattern.sub(replacement, signature)
@@ -170,7 +177,7 @@ def narrow_pointers(signature):
 # --------------------------------------------------------------------------
 # PARAMETER AND SIGNATURE MODEL
 # --------------------------------------------------------------------------
-def canonical_parameter(text):
+def canonical_parameter(text: str) -> str:
     """Normalise one parameter to 'Optional ByVal Name As Type = Default'.
 
     Passing mode is written out even when the source omits it, because VBA
@@ -202,7 +209,7 @@ def canonical_parameter(text):
         mode = "ByVal" if m.group(1).lower() == "byval" else "ByRef"
         rest = rest[len(m.group(1)):].strip()
 
-    default = None
+    default: str | None = None
     parts = balanced_split(rest, "=")
     if len(parts) > 2:
         raise ApiError(f"parameter {text!r} has more than one default")
@@ -231,14 +238,14 @@ def canonical_parameter(text):
     return out
 
 
-def canonical_procedure(kind, name, code):
+def canonical_procedure(kind: str, name: str, code: str) -> str:
     """Build the canonical text of a Sub/Function/Property declaration."""
     open_at = code.find("(")
     if open_at == -1:
         params, tail = "", code[code.find(name) + len(name):]
     else:
         depth = 0
-        close_at = None
+        close_at: int | None = None
         in_literal = False
         for i in range(open_at, len(code)):
             ch = code[i]
@@ -276,15 +283,15 @@ def canonical_procedure(kind, name, code):
     return f"{name}({rendered}){returns}"
 
 
-def canonical_enum(name, members):
+def canonical_enum(name: str, members: list[str]) -> str:
     """Build 'Name(A = 0, B = 1)' with implicit values resolved.
 
     VBA assigns an omitted value as the previous member plus one. Recording the
     resolved number is the point: renumbering an early member silently shifts
     every later one, and that is exactly the break the gate has to see.
     """
-    rendered = []
-    nxt = 0
+    rendered: list[str] = []
+    nxt: int | None = 0
     for member in members:
         m = re.match(r"^\[?(\w+)\]?\s*(?:=\s*(.+))?$", member.strip())
         if not m:
@@ -304,8 +311,8 @@ def canonical_enum(name, members):
     return f"{name}({', '.join(rendered)})"
 
 
-def canonical_type(name, members):
-    rendered = []
+def canonical_type(name: str, members: list[str]) -> str:
+    rendered: list[str] = []
     for member in members:
         m = re.match(r"^(\w+)\s*(\([^)]*\))?\s*As\s+(.+)$", member.strip(), re.I)
         if not m:
@@ -321,7 +328,7 @@ def canonical_type(name, members):
 class Declaration:
     __slots__ = ("kind", "name", "text", "line", "path")
 
-    def __init__(self, kind, name, text, line, path):
+    def __init__(self, kind: str, name: str, text: str, line: int, path: ArmPath) -> None:
         self.kind = kind
         self.name = name
         self.text = text
@@ -334,7 +341,7 @@ class Declaration:
         # call that a duplicate.
         self.path = path
 
-    def where(self):
+    def where(self) -> str:
         if not self.path:
             return f"line {self.line}, unconditional"
         trail = " > ".join(f"{cond} arm {arm} ({pred})"
@@ -342,13 +349,15 @@ class Declaration:
         return f"line {self.line}, {trail}"
 
 
-def declarations_of_text(text):
+def declarations_of_text(text: str) -> list[Declaration]:  # noqa: C901
     """Return every Public declaration, tagged with its compilation arm."""
-    found = []
-    stack = []
+    # The directive stack and the pending Enum/Type are one state machine;
+    # splitting the loop would spread that state across helpers.
+    found: list[Declaration] = []
+    stack: list[list[Any]] = []
 
-    pending = None          # (kind, name, line, path, [members])
-    terminator = None
+    pending: list[Any] | None = None          # (kind, name, line, path, [members])
+    terminator: str | None = None
 
     for line, code in logical_lines(text):
         m_if = IF_RE.match(code)
@@ -427,7 +436,7 @@ def declarations_of_text(text):
 PTR_RE = re.compile(r"\b(?:LongPtr|LongLong)\b")
 
 
-def arm_key(path):
+def arm_key(path: ArmPath) -> str:
     """Render a condition path as stable text, with no line numbers in it.
 
     The arms a member is declared in are part of its contract. Deleting the
@@ -441,11 +450,11 @@ def arm_key(path):
     return ">".join(f"{pred}#{arm}" for _, _, arm, pred in path)
 
 
-def arms_field(paths):
+def arms_field(paths: Iterable[ArmPath]) -> str:
     return " | ".join(sorted(arm_key(p) for p in paths if p))
 
 
-def effective_predicate(preceding, own):
+def effective_predicate(preceding: list[str], own: str | None) -> str:
     """Return what actually has to hold for an arm to compile.
 
     An arm is reached only when every earlier arm of its block was not taken.
@@ -461,7 +470,7 @@ def effective_predicate(preceding, own):
     return " And ".join(negated + [own])
 
 
-def normalise_predicate(text):
+def normalise_predicate(text: str) -> str:
     """Collapse a conditional predicate to a comparable form."""
     text = re.sub(r"\s+", " ", text).strip().casefold()
     while text.startswith("(") and text.endswith(")"):
@@ -469,7 +478,7 @@ def normalise_predicate(text):
     return text
 
 
-def are_complementary(first, second):
+def are_complementary(first: str, second: str) -> bool:
     """Return True when two predicates are syntactic negations of each other.
 
     Declaring a member under #If VBA7 and again under #If Not VBA7 is two
@@ -488,7 +497,7 @@ def are_complementary(first, second):
     return False
 
 
-def exclusivity_finding(name, arms):
+def exclusivity_finding(name: str, arms: list[Declaration]) -> str | None:
     """Return a finding when two arms are not provably mutually exclusive.
 
     Two declarations are alternatives only when they sit in different arms of
@@ -531,7 +540,8 @@ def exclusivity_finding(name, arms):
     return None
 
 
-def fold_conditionals(declarations):
+def fold_conditionals(
+        declarations: list[Declaration]) -> tuple[list[tuple[str, str, str]], list[str]]:
     """Collapse the conditional arms of one member into its logical contract.
 
     Returns (records, findings).
@@ -548,11 +558,11 @@ def fold_conditionals(declarations):
     Anything else is a genuine disagreement between two compilations and is
     reported rather than normalised away.
     """
-    records = []
-    findings = []
+    records: list[tuple[str, str, str]] = []
+    findings: list[str] = []
 
-    grouped = {}
-    order = []
+    grouped: dict[tuple[str, str], list[Declaration]] = {}
+    order: list[tuple[str, str]] = []
     for decl in declarations:
         key = (decl.kind, decl.name)
         if key not in grouped:
@@ -571,7 +581,7 @@ def fold_conditionals(declarations):
         # Two declarations reachable under the same conditions are a duplicate,
         # not a variant, whether that is twice at top level or twice inside one
         # arm. VBA would reject it; so does this.
-        seen = {}
+        seen: dict[ArmPath, Declaration] = {}
         duplicated = False
         for decl in arms:
             if decl.path in seen:
@@ -632,7 +642,7 @@ def fold_conditionals(declarations):
     return records, findings
 
 
-def records_of_text(text, module):
+def records_of_text(text: str, module: str) -> tuple[list[str], list[str]]:
     """Return (manifest lines, findings) for one module's source text."""
     records, findings = fold_conditionals(declarations_of_text(text))
     lines = sorted(
@@ -645,18 +655,18 @@ def records_of_text(text, module):
 # --------------------------------------------------------------------------
 # REPOSITORY SURFACE
 # --------------------------------------------------------------------------
-def read_module(repo, rel):
+def read_module(repo: str, rel: str) -> str:
     with open(os.path.join(repo, rel), "rb") as fh:
         return fh.read().decode("latin-1")
 
 
-def surface(repo=REPO):
+def surface(repo: str = REPO) -> tuple[dict[str, list[str]], list[str]]:
     """Return ({section: [lines]}, findings) for the whole production tree."""
-    sections = {}
-    findings = []
+    sections: dict[str, list[str]] = {}
+    findings: list[str] = []
 
     for section, modules in SECTIONS:
-        lines = []
+        lines: list[str] = []
         for rel in modules:
             module = os.path.basename(rel)[:-4]
             try:
@@ -671,17 +681,17 @@ def surface(repo=REPO):
     return sections, findings
 
 
-def parse_manifest(path):
+def parse_manifest(path: str) -> tuple[dict[str, list[str]], str]:
     """Read the manifest into ({section: [lines]}, baseline_version).
 
     The baseline section carries the release it was captured from in its own
     header, because a frozen contract that does not say what it is frozen at is
     not evidence of anything.
     """
-    sections = {name: [] for name, _ in SECTIONS}
+    sections: dict[str, list[str]] = {name: [] for name, _ in SECTIONS}
     sections[BASELINE_SECTION] = []
-    baseline_version = None
-    current = None
+    baseline_version: str | None = None
+    current: str | None = None
 
     with open(path, encoding="utf-8") as fh:
         for raw in fh:
@@ -762,7 +772,7 @@ MANIFEST_HEADER = """\
 """
 
 
-def render_manifest(sections, baseline_version, baseline_lines):
+def render_manifest(sections: dict[str, list[str]], baseline_version: str, baseline_lines: list[str]) -> str:
     out = [MANIFEST_HEADER]
     for name, _ in SECTIONS:
         out.append(f"\n[{name}]\n")
@@ -796,7 +806,7 @@ End Function
 """
 
 
-def declares(record, member):
+def declares(record: str, member: str) -> bool:
     """Return True when a manifest record declares exactly this member.
 
     Substring matching would let UI_Frame match a record for UI_FrameState, so
@@ -807,17 +817,17 @@ def declares(record, member):
     if len(fields) < 3:
         return False
     m = re.match(r"^(\w+)", fields[2])
-    return bool(m) and m.group(1) == member
+    return m is not None and m.group(1) == member
 
 
-def _records(text):
+def _records(text: str) -> list[str]:
     lines, findings = records_of_text(text, "M_SELFTEST")
     if findings:
         raise ApiError("; ".join(findings))
     return lines
 
 
-def _mutate(old, new, source=None):
+def _mutate(old: str, new: str, source: str | None = None) -> str:
     source = BASE if source is None else source
     if old not in source:
         raise ApiError(f"self-test fixture does not contain {old!r}")
@@ -905,7 +915,7 @@ ARM_REMOVED = CONDITIONAL_OK.replace(
 
 ELSEIF_INSTEAD_OF_ELSE = CONDITIONAL_OK.replace("#Else", "#ElseIf Mac Then")
 
-def _three_arm(lead):
+def _three_arm(lead: str) -> str:
     return (
         'Attribute VB_Name = "M_SELFTEST"\n'
         "Option Explicit\n"
@@ -925,7 +935,7 @@ THREE_ARM_WIN64 = _three_arm("Win64")
 THREE_ARM_MAC = _three_arm("Mac")
 
 
-def _elseif_only(lead):
+def _elseif_only(lead: str) -> str:
     """One member, in the #ElseIf arm, and nothing public before it.
 
     The three-arm fixture cannot prove that an #ElseIf arm records the
@@ -945,7 +955,7 @@ def _elseif_only(lead):
     )
 
 
-def _final_else_only(lead):
+def _final_else_only(lead: str) -> str:
     """One member, in the final #Else, and nothing public before it."""
     return (
         'Attribute VB_Name = "M_SELFTEST"\n'
@@ -1153,9 +1163,9 @@ NEUTRAL_CASES = [
      "'   Public Sub UI_NotReal(ByVal A As Long)\n'\nPublic Function UI_Probe("),
 ]
 
-def selftest():
+def selftest() -> list[str]:  # noqa: C901 - one loop per fixture family, kept side by side
     """Return a list of failure descriptions; empty means the model holds."""
-    failures = []
+    failures: list[str] = []
 
     try:
         baseline = _records(BASE)
@@ -1191,6 +1201,7 @@ def selftest():
                 f"      expected: {baseline}\n      produced: {changed}"
             )
 
+    property_baseline: list[str] | None
     try:
         property_baseline = _records(PROPERTY_BASE)
     except ApiError as exc:
@@ -1271,7 +1282,7 @@ def selftest():
     return failures
 
 
-def run_selftest():
+def run_selftest() -> int:
     failures = selftest()
     total = (len(BREAKING_CASES) + len(NEUTRAL_CASES)
              + len(PROPERTY_CASES) + len(CONDITIONAL_CASES) + len(ARM_CASES))
@@ -1295,7 +1306,7 @@ USAGE = """usage:
 """
 
 
-def main():
+def main() -> int:
     args = sys.argv[1:]
 
     if args and args[0] == "--selftest":

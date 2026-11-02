@@ -93,7 +93,7 @@ Evidence from another commit does not certify this candidate.
 | Check | Result / evidence |
 | --- | --- |
 | Hosted required checks | <!-- PASS / FAIL / NOT RUN + workflow URL --> |
-| Local static command | <!-- python3 tools/check_repo.py; python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas — PASS / FAIL / NOT RUN --> |
+| Local static command | <!-- python3 tools/check_repo.py; python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas; python3 -m unittest discover -s tests — PASS / FAIL / NOT RUN --> |
 | Formatting / `git diff --check` | <!-- PASS / FAIL --> |
 | Machine-readable artifact | <!-- Name / URL / not produced --> |
 

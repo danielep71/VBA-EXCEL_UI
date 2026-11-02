@@ -4,16 +4,19 @@ Analyze each supported Windows compilation independently, using the shared
 physical-line lexer. Findings carry physical start lines, never generated-line
 numbers. Unknown conditional symbols fail explicitly rather than hiding code.
 """
-from dataclasses import dataclass, field
 import re
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
-from vba_lex import code_only, split_code_comment, LexicalError
 
-CONFIGS = {'vba7-x64': {'vba7': True, 'win64': True},
+from vba_lex import LexicalError, code_only, split_code_comment
+
+CONFIGS: dict[str, dict[str, bool]] = {'vba7-x64': {'vba7': True, 'win64': True},
            'vba7-x86': {'vba7': True, 'win64': False},
            'legacy-x86': {'vba7': False, 'win64': False}}
 PREFIX = re.compile(r'\b(?:UI_|TST_|Test_EXCEL_UI_|Demo_|DEMO_)\w+', re.I)
-PROC = re.compile(r'^(?:(Public|Private|Friend)\s+)?(?:Static\s+)?(Sub|Function|Property\s+(?:Get|Let|Set))\s+(\w+)\b', re.I)
+PROC = re.compile(r'^(?:(Public|Private|Friend)\s+)?(?:Static\s+)?'
+                  r'(Sub|Function|Property\s+(?:Get|Let|Set))\s+(\w+)\b', re.I)
 DECLARE = re.compile(r'^(?:(Public|Private)\s+)?Declare\s+(PtrSafe\s+)?(Sub|Function)\s+(\w+)\b', re.I)
 VAR = re.compile(r'^(?:(Public|Private|Dim|Static|Global)\s+)(?:Const\s+)?(.+)$|^Const\s+(.+)$', re.I)
 BLOCK = re.compile(r'^(?:(Public|Private)\s+)?(Type|Enum)\s+(\w+)', re.I)
@@ -27,7 +30,7 @@ class Finding:
     rule: str
     message: str
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f'{self.file}:{self.line}: {self.rule}: {self.message}'
 
 
@@ -37,21 +40,22 @@ class Procedure:
     kind: str
     line: int
     public: bool
-    params: set = field(default_factory=set)
-    locals: set = field(default_factory=set)
-    statements: list = field(default_factory=list)
+    params: set[str] = field(default_factory=set)
+    locals: set[str] = field(default_factory=set)
+    statements: list[tuple[int, str]] = field(default_factory=list)
 
 
-def expression(text, symbols):
+def expression(text: str, symbols: dict[str, bool]) -> bool:
     """Restricted boolean conditional grammar; no eval or unknown-symbol guess."""
     tokens = re.findall(r'\w+|<>|[()=]|\S', text.lower())
     pos = 0
 
-    def atom():
+    def atom() -> bool:
         nonlocal pos
         if pos >= len(tokens):
             raise LexicalError('incomplete conditional expression')
-        t = tokens[pos]; pos += 1
+        t = tokens[pos]
+        pos += 1
         if t == 'not':
             return not atom()
         if t == '(':
@@ -66,28 +70,31 @@ def expression(text, symbols):
             return symbols[t]
         raise LexicalError(f'unsupported conditional symbol {t}')
 
-    def comparison():
+    def comparison() -> bool:
         nonlocal pos
         value = atom()
         if pos < len(tokens) and tokens[pos] in ('=', '<>'):
-            op = tokens[pos]; pos += 1
+            op = tokens[pos]
+            pos += 1
             other = atom()
             value = (value == other) if op == '=' else (value != other)
         return value
 
-    def conjunction():
+    def conjunction() -> bool:
         nonlocal pos
         value = comparison()
         while pos < len(tokens) and tokens[pos] == 'and':
             pos += 1
-            other = comparison(); value = value and other
+            other = comparison()
+            value = value and other
         return value
 
-    def disjunction():
+    def disjunction() -> bool:
         nonlocal pos
         value = conjunction()
         while pos < len(tokens) and tokens[pos] in ('or', 'xor'):
-            op = tokens[pos]; pos += 1
+            op = tokens[pos]
+            pos += 1
             other = conjunction()
             value = value != other if op == 'xor' else value or other
         return value
@@ -98,7 +105,7 @@ def expression(text, symbols):
     return value
 
 
-def logical_lines(text):
+def logical_lines(text: str) -> Iterator[tuple[int, str]]:
     pending, first = '', 0
     for n, raw in enumerate(text.splitlines(), 1):
         raw = split_code_comment(raw)[0]
@@ -116,8 +123,9 @@ def logical_lines(text):
         raise LexicalError('unterminated continuation')
 
 
-def active_lines(text, config):
-    stack, enabled, symbols = [], True, dict(config)
+def active_lines(text: str, config: dict[str, bool]) -> Iterator[tuple[int, str]]:
+    stack: list[list[bool]] = []
+    enabled, symbols = True, dict(config)
     for n, raw in logical_lines(text):
         code = code_only(raw).strip()
         m = re.match(r'#(If|ElseIf)\s+(.+?)\s+Then$', code, re.I)
@@ -161,7 +169,7 @@ def active_lines(text, config):
         raise LexicalError('unterminated #If')
 
 
-def comma_parts(code):
+def comma_parts(code: str) -> Iterator[str]:
     depth, start = 0, 0
     for i, ch in enumerate(code):
         if ch == '(':
@@ -174,8 +182,8 @@ def comma_parts(code):
     yield code[start:]
 
 
-def names(code):
-    result = set()
+def names(code: str) -> set[str]:
+    result: set[str] = set()
     for part in comma_parts(code):
         part = re.sub(r'\b(?:Optional|ByVal|ByRef|ParamArray)\s+', '', part.strip(), flags=re.I)
         m = re.match(r'(\w+)', part)
@@ -184,7 +192,7 @@ def names(code):
     return result
 
 
-def statements(raw):
+def statements(raw: str) -> Iterator[str]:
     """Split colon statements, retaining labels; ignore := and opaque regions."""
     code = code_only(raw)
     start = 0
@@ -201,7 +209,7 @@ def statements(raw):
 
 # Versioned native ABI contracts: ordered parameter types and result type.
 # P = pointer-sized in VBA7, Long in legacy. A/W exports share the same types.
-ABI = {
+ABI: dict[str, tuple[list[str], str | None]] = {
     'getwindowlongptra': (['P', 'Long'], 'P'),
     'setwindowlongptra': (['P', 'Long', 'P'], 'P'),
     'getwindowlonga': (['P', 'Long'], 'Long'),
@@ -218,7 +226,7 @@ ABI = {
 PURE_CAPTURE = {'iif', 'len', 'cstr', 'clng', 'cbool', 'cint', 'cdbl', 'csng'}
 
 
-def error_operation(code):
+def error_operation(code: str) -> bool:
     """Possible call/host operation, excluding scalar local copies/captures."""
     assignment = re.match(r'(?:(?:Set|Let)\s+)?[A-Za-z_]\w*\s*=(?!=)', code, re.I)
     expression_code = code[assignment.end():] if assignment else code
@@ -237,14 +245,19 @@ def error_operation(code):
     return bool(re.match(r'(?:Call\s+)?[A-Za-z_]\w*(?:\s|$)', code))
 
 
-def analyze(sources):
-    findings, dynamic = set(), set()
+def analyze(sources: dict[str, str]) -> tuple[list[Finding], list[str]]:  # noqa: C901
+    # One pass per compilation keeps every rule beside the state it reads.
+    # Splitting it would mean threading that state through a dozen helpers.
+    findings: set[Finding] = set()
+    dynamic: set[str] = set()
+    modules: dict[str, tuple[bool, set[str], list[Procedure]]]
     for config_name, config in CONFIGS.items():
         modules = {}
-        project = set()
-        exported_procs = {}
+        project: set[str] = set()
+        exported_procs: dict[tuple[str, str], str] = {}
         for file, text in sources.items():
-            def add(n, rule, message):
+            def add(n: int, rule: str, message: str,
+                    file: str = file, config_name: str = config_name) -> None:
                 findings.add(Finding(file, n, rule, f'{config_name}: {message}'))
             try:
                 lines = [(n, part) for n, raw in active_lines(text, config)
@@ -253,14 +266,19 @@ def analyze(sources):
                 match = re.search(r'line (\d+)', str(exc))
                 add(int(match[1]) if match else 1, 'conditional/lexical', str(exc))
                 continue
-            module_names, procedures, current, block = set(), [], None, None
-            explicit = any(re.fullmatch(r'Option\s+Explicit', code_only(raw).strip(), re.I) for _, raw in lines)
-            seen = set()
+            module_names: set[str] = set()
+            procedures: list[Procedure] = []
+            current: Procedure | None = None
+            block: tuple[str, bool] | None = None
+            explicit = any(re.fullmatch(r'Option\s+Explicit', code_only(raw).strip(), re.I)
+                           for _, raw in lines)
+            seen: set[tuple[str, str]] = set()
             for n, raw in lines:
                 code = code_only(raw).strip()
                 decl, proc, blk = DECLARE.match(code), PROC.match(code), BLOCK.match(code)
                 if decl:
-                    name = decl[4].lower(); module_names.add(name)
+                    name = decl[4].lower()
+                    module_names.add(name)
                     if decl[1] is None or decl[1].lower() == 'public':
                         project.add(name)
                     if config['vba7'] and not decl[2]:
@@ -274,11 +292,14 @@ def analyze(sources):
                         actual = re.findall(r'\bAs\s+(\w+)', args, re.I)
                         tail = re.search(r'\bAs\s+(\w+)', code[code.rfind(')')+1:], re.I)
                         expected, result = ABI[export]
-                        def resolved(t):
+                        def resolved(t: str, config: dict[str, bool] = config) -> str:
                             return ('LongPtr' if config['vba7'] else 'Long') if t == 'P' else t
+                        actual_result = tail[1].lower() if tail else None
+                        expected_result = resolved(result).lower() if result else None
                         if (any(not re.match(r'\s*ByVal\b', arg, re.I) for arg in comma_parts(args) if arg.strip())
                                 or (decl[3].lower() == 'sub') != (result is None)
-                                or [t.lower() for t in actual] != [resolved(t).lower() for t in expected] or (tail[1].lower() if tail else None) != (resolved(result).lower() if result else None)):
+                                or [t.lower() for t in actual] != [resolved(t).lower() for t in expected]
+                                or actual_result != expected_result):
                             add(n, 'winapi-signature', f'{decl[4]} disagrees with {export} ABI')
                     continue
                 if proc:
@@ -292,7 +313,8 @@ def analyze(sources):
                         add(n, 'structure', f'{current.name} is not closed before {name}')
                     params = code[code.find('(')+1:code.rfind(')')] if '(' in code else ''
                     current = Procedure(name, kind, n, proc[1] is None or proc[1].lower() != 'private', names(params))
-                    procedures.append(current); module_names.add(name)
+                    procedures.append(current)
+                    module_names.add(name)
                     if current.public:
                         project.add(name)
                         global_key = key
@@ -309,7 +331,8 @@ def analyze(sources):
                 if blk and current is None:
                     block = (blk[2].lower(), blk[1] is None or blk[1].lower() == 'public')
                     module_names.add(blk[3].lower())
-                    if block[1]: project.add(blk[3].lower())
+                    if block[1]:
+                        project.add(blk[3].lower())
                     continue
                 if block:
                     if re.match(r'End\s+(Type|Enum)', code, re.I):
@@ -318,7 +341,8 @@ def analyze(sources):
                         m = re.match(r'(\w+)', code)
                         if m:
                             module_names.add(m[1].lower())
-                            if block[1]: project.add(m[1].lower())
+                            if block[1]:
+                                project.add(m[1].lower())
                     continue
                 for statement in statements(raw):
                     masked = code_only(statement).strip()
@@ -329,32 +353,36 @@ def analyze(sources):
                             current.locals.update(defined)
                         else:
                             module_names.update(defined)
-                            if re.match(r'(Public|Global)\b', masked, re.I): project.update(defined)
+                            if re.match(r'(Public|Global)\b', masked, re.I):
+                                project.update(defined)
                     if current:
                         current.statements.append((n, statement))
             if current:
                 add(current.line, 'structure', f'unclosed {current.name}')
             modules[file] = (explicit, module_names, procedures)
         for file, (explicit, module_names, procedures) in modules.items():
-            def add(n, rule, message):
+            def add(n: int, rule: str, message: str,
+                    file: str = file, config_name: str = config_name) -> None:
                 findings.add(Finding(file, n, rule, f'{config_name}: {message}'))
-            for proc in procedures:
-                known = project | module_names | proc.params | proc.locals | {proc.name}
-                labels = {code_only(raw).strip()[:-1].lower() for _, raw in proc.statements if re.fullmatch(r'\w+:', code_only(raw).strip())}
+            for procedure in procedures:
+                known = project | module_names | procedure.params | procedure.locals | {procedure.name}
+                labels = {code_only(raw).strip()[:-1].lower() for _, raw in procedure.statements
+                          if re.fullmatch(r'\w+:', code_only(raw).strip())}
                 known |= labels
-                seen_labels = set()
-                for n, raw in proc.statements:
+                seen_labels: set[str] = set()
+                for n, raw in procedure.statements:
                     label = code_only(raw).strip()
                     if re.fullmatch(r'\w+:', label):
                         if label.lower() in seen_labels:
-                            add(n, 'label', f'{proc.name}: duplicate label {label}')
+                            add(n, 'label', f'{procedure.name}: duplicate label {label}')
                         seen_labels.add(label.lower())
-                handlers = set()
-                for _, raw in proc.statements:
+                handlers: set[str] = set()
+                for _, raw in procedure.statements:
                     m = re.search(r'\bOn\s+Error\s+GoTo\s+(\w+)', code_only(raw), re.I)
-                    if m and m[1] != '0': handlers.add(m[1].lower())
+                    if m and m[1] != '0':
+                        handlers.add(m[1].lower())
                 stale, in_handler, resume_next = False, False, False
-                for n, raw in proc.statements:
+                for n, raw in procedure.statements:
                     code = code_only(raw).strip()
                     if re.fullmatch(r'\w+:', code):
                         in_handler = code[:-1].lower() in handlers
@@ -362,22 +390,23 @@ def analyze(sources):
                         continue
                     for m in re.finditer(r'\b(?:GoTo|Resume)\s+(\w+)', code, re.I):
                         if m[1].lower() not in labels | {'next', '0'}:
-                            add(n, 'label', f'{proc.name}: undefined local label {m[1]}')
+                            add(n, 'label', f'{procedure.name}: undefined local label {m[1]}')
                     if re.search(r'\bApplication\s*\.\s*Run\b|\.\s*OnAction\b|\bCallByName\b', code, re.I):
-                        dynamic.add(f'{file}:{n}: {proc.name}: dynamic dispatch requires host/binding review')
+                        dynamic.add(f'{file}:{n}: {procedure.name}: dynamic dispatch requires host/binding review')
                     if not VAR.match(code):
                         for m in PREFIX.finditer(code):
-                            if m[0].lower() in known or code[:m.start()].rstrip().endswith('.') or re.match(r'\s*:=', code[m.end():]):
+                            if (m[0].lower() in known or code[:m.start()].rstrip().endswith('.')
+                                    or re.match(r'\s*:=', code[m.end():])):
                                 continue
-                            add(n, 'unresolved', f'{proc.name}: unresolved project reference {m[0]}')
+                            add(n, 'unresolved', f'{procedure.name}: unresolved project reference {m[0]}')
                     # Only direct, simple assignment LHS; inline If/Else bodies
                     # are checked without treating their conditions as writes.
                     for part in re.split(r'\bThen\b|\bElse\b', code, flags=re.I):
                         assignment = re.match(r'^\s*(?:(?:Let|Set)\s+)?([A-Za-z_]\w*)\s*=(?!=)', part, re.I)
                         if explicit and assignment and assignment[1].lower() not in known:
-                            add(n, 'undeclared-assignment', f'{proc.name}: undeclared {assignment[1]}')
+                            add(n, 'undeclared-assignment', f'{procedure.name}: undeclared {assignment[1]}')
                     if stale and ERR_READ.search(code):
-                        add(n, 'stale-err', f'{proc.name}: Err read after handler state was overwritten')
+                        add(n, 'stale-err', f'{procedure.name}: Err read after handler state was overwritten')
                     if re.match(r'On\s+Error\b', code, re.I):
                         stale = True
                         resume_next = bool(re.search(r'Resume\s+Next', code, re.I))
@@ -394,7 +423,15 @@ def analyze(sources):
     return sorted(findings), sorted(dynamic)
 
 
-def run(root):
+def run(root: str | Path, modules: Iterable[str] | None = None) -> tuple[list[Finding], list[str]]:
+    """Analyze the given repository-relative modules, or every *.bas when none are given.
+
+    The gate passes the modules Git tracks, so a module the glob would miss
+    (another extension, or one not yet in the working tree's layout) is still
+    analyzed. The glob remains for running this file by hand.
+    """
+    if modules is not None:
+        return analyze({rel: (Path(root) / rel).read_text(encoding='ascii') for rel in modules})
     sources = {str(p.relative_to(root)): p.read_text(encoding='ascii')
                for directory in ('src', 'test', 'demo') for p in (Path(root)/directory).glob('*.bas')}
     return analyze(sources)

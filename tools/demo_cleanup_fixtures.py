@@ -1,6 +1,6 @@
 """#71 source contracts and negative fixtures, not Excel execution evidence."""
-from pathlib import Path
 import re
+from pathlib import Path
 
 from titlebar_control_fixtures import findings as propagation_findings
 from vba_analyze import logical_lines
@@ -14,7 +14,7 @@ ALLOW_OPTIONS = ('AllowFormattingCells', 'AllowFormattingColumns',
                  'AllowFiltering', 'AllowUsingPivotTables')
 
 
-def reset_findings(source):
+def reset_findings(source: str) -> list[str]:
     match = re.search(r'^Public Sub DEMO_Sheet_Reset\b.*?^End Sub', source, re.M | re.S)
     if not match:
         return ['reset procedure missing']
@@ -57,7 +57,7 @@ def reset_findings(source):
     return errors
 
 
-def selftest(root):
+def selftest(root: str | Path) -> tuple[list[str], int]:
     source = (Path(root) / 'demo/M_DEMO_BUILDER.bas').read_text(encoding='ascii')
     errors = reset_findings(source)
     count = 0

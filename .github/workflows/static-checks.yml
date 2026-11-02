@@ -111,16 +111,39 @@ jobs:
         if: always()
         run: python3 tools/check_issues.py --check-config
 
-      - name: Run the issue-triage unit tests
-        if: always()
-        run: python3 -m unittest discover -s tests
-
       - name: Remind how to fix formatting drift
         if: failure() && steps.format.outcome == 'failure'
         run: |
           echo "::notice::Formatting drift is mechanical. Run:"
           echo "::notice::  python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas"
           echo "::notice::then re-import the affected modules into the VBE before committing."
+
+      # The gate is only as good as its checks. Each check has a fixture it
+      # must pass and one it must reject; a check that silently stopped
+      # detecting its defect would otherwise still print ok above.
+      - name: Run the gate's unit tests
+        if: always()
+        run: python3 -m unittest discover -s tests
+
+      # Lint and type-check the gate's own Python code. These are the only
+      # third-party tools in this workflow, and they never run the gate: the
+      # steps above still need nothing but the standard library. Every wheel is
+      # hash-locked and source builds are refused, so an upstream file replaced
+      # under the same version fails here instead of executing.
+      - name: Install the hash-locked Python quality tools
+        if: always()
+        run: >-
+          python3 -m pip install --disable-pip-version-check
+          --require-hashes --only-binary=:all:
+          -r tools/requirements-quality-ci.txt
+
+      - name: Lint the gate's Python code with Ruff
+        if: always()
+        run: ruff check tools tests
+
+      - name: Type-check the gate's Python code with mypy --strict
+        if: always()
+        run: mypy --strict tools
 
   minimum-python:
     # Not a required check: it reports when the tools stop running on the
@@ -140,9 +163,20 @@ jobs:
         with:
           python-version: '3.11.18'
 
+      # The issue-triage tests validate the label catalogue with Node.js.
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+
       - name: Run the static gate
         run: python3 tools/check_repo.py
 
       - name: Verify house-style normal form
         if: always()
         run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
+
+      - name: Run the gate's unit tests
+        if: always()
+        run: python3 -m unittest discover -s tests

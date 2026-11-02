@@ -2,12 +2,11 @@
 import contextlib
 import io
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
-from vba_lex import LexicalError, code_only, executable_signature, regions
-
+from vba_lex import LexicalError, code_only, executable_signature, regions, split_code_comment
 
 CASES = [
     ('Rem at start', 'Rem GoTo Fail "unterminated', 'Rem GoTo Fail "unterminated'),
@@ -24,15 +23,15 @@ CASES = [
 ]
 
 
-def extended_selftest():
+def extended_selftest() -> list[str]:
     import reformat as f
-    failures = []
+    failures: list[str] = []
 
-    def require(condition, name):
+    def require(condition: bool, name: str) -> None:
         if not condition:
             failures.append('extended: ' + name)
 
-    def module(fragment):
+    def module(fragment: str) -> str:
         return 'Attribute VB_Name = "M_PROBE"\r\nOption Explicit\r\nPrivate Sub Probe()\r\n' + fragment + '\r\nEnd Sub\r\n'
 
     for name, before, expected in CASES:
@@ -92,21 +91,21 @@ def extended_selftest():
     literal = 'x = "GoTo Fail"'
     require(f.rename_label_text(literal) != literal, 'historical literal rewrite control detects corruption')
     declaration = 'Const S As String = "a\'b"'
-    require(declaration.split("'", 1)[0] != f.split_code_comment(declaration)[0], 'historical first-apostrophe split control')
+    require(declaration.split("'", 1)[0] != split_code_comment(declaration)[0], 'historical first-apostrophe split control')
 
     with tempfile.TemporaryDirectory() as directory:
         p = Path(directory) / 'probe.bas'
         original = module('Dim x As Long').encode('ascii')
         p.write_bytes(original)
         os.chmod(p, 0o640)
-        with patch.object(f.os, 'replace', side_effect=OSError('injected replace failure')):
+        with patch.object(os, 'replace', side_effect=OSError('injected replace failure')):
             try:
                 f.atomic_write(p, b'new')
             except OSError:
                 pass
         require(p.read_bytes() == original, 'replace failure preserves original')
         require(list(Path(directory).glob('.reformat-*')) == [], 'replace failure removes temporary')
-        with patch.object(f.os, 'fsync', side_effect=OSError('injected flush failure')):
+        with patch.object(os, 'fsync', side_effect=OSError('injected flush failure')):
             try:
                 f.atomic_write(p, b'new')
             except OSError:
