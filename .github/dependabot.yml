@@ -1,17 +1,47 @@
-# Dependabot proposes updates to the hash-locked Python quality tools in
-# tools/requirements-quality-ci.txt. Those tools lint and type-check the gate
-# in CI; the gate itself uses only the standard library and has nothing to
-# update. A proposal still needs my review: a tool upgrade can add findings,
-# and the pull request's own CI run shows them.
-
+# Dependabot proposes updates to two kinds of pinned dependency. Nothing merges
+# automatically: I review every update, and the pull request's own CI run
+# shows its effect.
+#
+# - GitHub Actions in .github/workflows/ are pinned to full commit SHAs. Each
+#   update keeps the SHA pin and its exact version comment, so the workflow
+#   pin policy in tools/check_repo.py still applies.
+# - The hash-locked Python quality tools in tools/requirements-quality-ci.txt
+#   lint and type-check the gate in CI. The gate itself uses only the standard
+#   library and has nothing to update. A tool upgrade can add findings.
 version: 2
 updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:23"
+      timezone: Europe/Rome
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - ci
+      - P3
+    assignees:
+      - danielep71
+    commit-message:
+      prefix: ci
+
   - package-ecosystem: pip
     directory: /tools
     schedule:
       interval: monthly
+    groups:
+      python-quality-tools:
+        patterns:
+          - "*"
     open-pull-requests-limit: 5
-    commit-message:
-      prefix: ci
     labels:
       - ci
+      - P3
+    assignees:
+      - danielep71
+    commit-message:
+      prefix: ci
