@@ -753,8 +753,11 @@ To move a pin:
 4. Run `python3 tools/check_repo.py`.
 
 Dependabot (`.github/dependabot.yml`) opens a weekly grouped pull request when a
-pinned Action has a newer release. It changes the SHA and the version comment
-together; review it with the steps above before merging.
+pinned Action has a newer release, and a monthly one for the hash-locked Python
+quality tools. It changes the SHA and the version comment together; review it
+with the steps above before merging. While a release branch is open, Dependabot
+opens the same updates against it too, so neither branch falls behind; remove
+those entries when the release branch is merged.
 
 A repository-local action — `uses: ./…` — is versioned by this repository's own
 history and is exempt. Nothing else is.
