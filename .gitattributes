@@ -17,12 +17,20 @@
 #   in a top-level attributes file.
 #
 # ADOPTION / POLICY CHANGES
-#   Attribute changes do not rewrite existing blobs automatically. Inspect any
-#   normalization separately:
+#   Attribute changes do not rewrite existing blobs automatically. Stage the
+#   normalization, inspect exactly what it changes, and undo it if needed:
 #
-#       git add --renormalize --dry-run .
 #       git add --renormalize .
+#       git status --short
+#       git diff --cached --stat
 #       git diff --cached --check
+#
+#   To undo the staged normalization:
+#
+#       git restore --staged .
+#
+#   (git add --renormalize --dry-run lists every tracked file, not only the
+#   files whose stored form would change, so it cannot show the effect.)
 #
 #   Commit a required normalization as its own mechanical change.
 #

@@ -636,6 +636,17 @@ measured against that baseline.
 - Added a weekly, non-blocking check of every external link in the tracked
   Markdown files (#85). Broken links fail the scheduled run and are listed in
   its summary; links inside the repository remain part of the required gate.
+- Shortened the pull-request template from 348 to 199 lines (#89). Every
+  verification table, including the Excel-execution table and its
+  `INCOMPLETE` state, is unchanged; the classification and surface lists, the
+  documentation, regression, security and risk lists, and the four
+  project-specific review profiles moved to the new pull request reference in
+  `CONTRIBUTING.md`.
+- Wrote my decisions and responsibilities in first person in
+  `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `RELEASING.md` and `INSTALLATION.md`,
+  and replaced the `.gitattributes` renormalization recipe, whose `--dry-run`
+  listed every tracked file, with one that stages, inspects and can undo the
+  change (#88).
 - Corrected the pull-request template, which told reviewers the manifest gate
   proved only that exported names matched the file. It now proves parameter
   order and names, passing mode, types, `Optional` status, defaults, return
