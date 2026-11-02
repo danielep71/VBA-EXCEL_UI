@@ -307,7 +307,8 @@ def collapse_blanks(lines: list[str]) -> list[str]:
 
 
 def reformat(path: str | Path, module_name: str) -> str:
-    return reformat_text(open(path, encoding="latin-1").read(), module_name)
+    with open(path, encoding="latin-1") as fh:
+        return reformat_text(fh.read(), module_name)
 
 
 def reformat_text(text: str, module_name: str) -> str:
