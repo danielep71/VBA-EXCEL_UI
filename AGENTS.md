@@ -27,11 +27,11 @@ Keep editorial rules, assistant instructions, branch-naming preferences, and col
 
 ## Review findings
 
-When a review of this repository finds something to fix, record each finding, or each group of findings that one change will fix, as an issue before or instead of fixing it silently. Each issue must be:
+When a review of this repository finds something to fix, record each finding, or each group of findings that one change will fix, as an issue before or instead of fixing it silently. Each issue must pass the triage rules in `docs/ISSUE_LABELS.md`; in short, it must be:
 
 - assigned to me;
-- labelled with exactly one priority label, plus the type labels that fit;
-- placed in the open milestone with the earliest due date, when one exists;
+- labelled with exactly one priority label, plus the type and area labels that fit;
+- placed in the open milestone with the earliest due date;
 - given a `- Target end date: YYYY-MM-DD (Europe/Rome)` line earlier than that milestone's due date;
 - given a dependency section that names prerequisites or says "None".
 
@@ -39,4 +39,11 @@ Describe the finding with its file and line, the evidence, why it matters, and t
 
 ## Validation
 
-Before pushing, run `python tools/check_repo.py` and fix every finding. Keep VBA modules in house-style normal form with `python tools/reformat.py --write <file.bas>`, and keep `tools/public_api_manifest.txt` in sync with the public `UI_*` API.
+Before pushing, run these and fix every finding:
+
+- `python3 tools/check_repo.py`
+- `python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas` (fix drift with `--write`)
+- `python3 -m unittest discover -s tests`
+- `ruff check tools tests` and `mypy --strict tools`, installed from `tools/requirements-quality-ci.txt`
+
+Keep `tools/public_api_manifest.txt` in sync with the public `UI_*` API (`python3 tools/vba_api.py --write`). Code that changes VBA behaviour also needs `Test_EXCEL_UI_RunReleaseCertification` on a real Excel host; static checks cannot replace it.
