@@ -9,7 +9,8 @@ merge.
 
 Each unique URL is requested with bounded retries and timeouts:
 
-- 2xx and 3xx (redirects are followed) pass;
+- 2xx passes, after any redirects are followed;
+- a redirect that never resolves (a loop, or no target) is broken;
 - 404 and 410 are broken;
 - 5xx, timeouts and connection errors are retried, then reported as broken;
 - 401, 403 and 429 cannot be verified without credentials or a slower rate,
@@ -39,13 +40,18 @@ ROOT = Path(__file__).resolve().parents[1]
 EXCLUSIONS = ROOT / "tools" / "external_link_exclusions.txt"
 USER_AGENT = "VBA-EXCEL_UI-link-check (+https://github.com/danielep71/VBA-EXCEL_UI)"
 
-# Inline links and images, autolinks, and reference definitions. Code spans and
-# fenced code are removed first, so example URLs in code are not requested.
+# Inline links and images, autolinks, reference definitions, and the src or
+# href of HTML img, a and source tags (a tag may span several lines). Code spans
+# and fenced code are removed first, so example URLs in code are not requested.
 INLINE = re.compile(r"\]\(\s*<?(https?://[^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 AUTOLINK = re.compile(r"<(https?://[^>\s]+)>")
 REFERENCE = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*<?(https?://[^>\s]+)>?", re.M)
 FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.M | re.S)
 CODE_SPAN = re.compile(r"`[^`\n]*`")
+HTML_ATTRIBUTE = re.compile(
+    r"<(?:img|a|source)\b[^>]*?\s(?:src|href)\s*=\s*[\"'](https?://[^\"'\s>]+)[\"']",
+    re.I,
+)
 
 BROKEN_STATUSES = {404, 410}
 UNVERIFIED_STATUSES = {401, 403, 429}
@@ -72,7 +78,7 @@ def extract_links(text: str) -> list[str]:
     text = FENCE.sub("", text)
     text = CODE_SPAN.sub("", text)
     found: list[tuple[int, str]] = []
-    for pattern in (INLINE, AUTOLINK, REFERENCE):
+    for pattern in (INLINE, AUTOLINK, REFERENCE, HTML_ATTRIBUTE):
         found += [(match.start(), match.group(1)) for match in pattern.finditer(text)]
     return [url.rstrip(".,;") for _, url in sorted(found)]
 
@@ -96,14 +102,27 @@ def collect(root: Path, files: list[str]) -> dict[str, list[str]]:
     return dict(sorted(sources.items()))
 
 
+class UnresolvedRedirect(Exception):
+    """A redirect chain ended without a final response (a loop or no target)."""
+
+
 def request_status(url: str, timeout: float) -> int:
-    """Return the final HTTP status of a GET request; raise on a transport error."""
+    """Return the final HTTP status of a GET request after following redirects.
+
+    Raise UnresolvedRedirect when the redirects never reach a final response:
+    urllib reports a redirect loop, or a redirect without a target, as an
+    HTTPError carrying the 3xx status, which must not read as success.
+    Raise on a transport error.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return int(response.status)
+            status = int(response.status)
     except urllib.error.HTTPError as error:
-        return int(error.code)
+        status = int(error.code)
+    if 300 <= status < 400:
+        raise UnresolvedRedirect(f"HTTP {status}: the redirect did not resolve")
+    return status
 
 
 def check_url(url: str, attempts: int, timeout: float, delay: float) -> tuple[str, str]:
@@ -111,10 +130,12 @@ def check_url(url: str, attempts: int, timeout: float, delay: float) -> tuple[st
     for attempt in range(1, attempts + 1):
         try:
             status = request_status(url, timeout)
+        except UnresolvedRedirect as error:
+            return "broken", str(error)
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             detail = f"transport error: {error}"
         else:
-            if status < 400:
+            if status < 300:
                 return "ok", f"HTTP {status}"
             if status in BROKEN_STATUSES:
                 return "broken", f"HTTP {status}"
