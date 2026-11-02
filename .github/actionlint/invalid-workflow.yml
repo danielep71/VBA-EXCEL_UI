@@ -1,0 +1,18 @@
+# Negative probe for .github/workflows/actionlint.yml. This file is not a
+# workflow GitHub runs: it lives outside .github/workflows/. Each error below
+# is one actionlint must report; the lint job fails if it reports none.
+name: Invalid workflow probe
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    # Error: the job named in needs does not exist.
+    needs: missing-job
+    steps:
+      # Error: the expression references an unknown context.
+      - run: echo "${{ unknown_context.value }}"
