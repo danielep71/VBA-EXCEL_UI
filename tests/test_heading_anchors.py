@@ -50,6 +50,21 @@ class GithubAnchor(unittest.TestCase):
         self.assertEqual(anchors("<!--", "# Notes", "-->", "# Notes"), ["notes"])
         self.assertEqual(anchors("<!-- # Notes -->", "# Notes"), ["notes"])
         self.assertEqual(anchors("<!-- a --> text", "# Notes", "# Notes"), ["notes", "notes-1"])
+        self.assertEqual(anchors("<!-- c --> # Notes", "# Notes"), ["notes"])
+
+    def test_a_comment_opener_that_is_not_a_block_hides_nothing(self) -> None:
+        self.assertEqual(anchors("## The `<!--` marker", "## Install"),
+                         ["the----marker", "install"])
+        self.assertEqual(anchors("Text <!-- never closed", "## Install"), ["install"])
+
+    def test_fences_inside_a_comment_block_are_content(self) -> None:
+        self.assertEqual(anchors("<!--", "```", "-->", "", "## Install"), ["install"])
+
+    def test_comment_delimiters_inside_a_fence_are_content(self) -> None:
+        self.assertEqual(anchors("```", "<!--", "```", "## Install"), ["install"])
+
+    def test_an_inline_comment_in_a_heading_renders_nothing(self) -> None:
+        self.assertEqual(anchor("Notes <!-- draft -->"), "notes")
 
     def test_emphasis_around_a_code_span_is_removed(self) -> None:
         self.assertEqual(anchor("_`Notes`_"), "notes")

@@ -1574,6 +1574,7 @@ def _inline_text(text: str) -> str:
     text = IMAGE_RE.sub("", text)
     text = LINK_RE.sub(lambda m: m.group("text"), text)
     text = AUTOLINK_RE.sub(lambda m: m.group("url"), text)
+    text = INLINE_HTML_COMMENT_RE.sub("", text)
     text = HTML_TAG_RE.sub("", text)
     previous = None
     while previous != text:
@@ -1598,29 +1599,45 @@ def github_anchor(heading: str) -> str:
     return "".join(kept).replace(" ", "-")
 
 
-def without_html_comments(line: str, in_comment: bool) -> tuple[str, bool]:
-    """Remove HTML comment text from one line; report whether a comment stays open.
+HTML_COMMENT_BLOCK_START_RE = re.compile(r"^ {0,3}<!--")
 
-    A comment may span lines, so the caller passes back the returned state.
+INLINE_HTML_COMMENT_RE = re.compile(r"<!--.*?-->")
+
+
+def heading_candidate_lines(text: str) -> Iterator[str]:
+    """Yield each line that can hold a heading, in one pass over fences and comments.
+
+    Two kinds of block hide their lines, and each one's delimiters are plain
+    content inside the other:
+
+    - a fenced code block, from its opening fence to a closing fence;
+    - an HTML comment block, which starts on a line that begins with <!--
+      (after at most three spaces) and ends on the line that contains -->.
+
+    A comment that opens anywhere else on a line is inline HTML. It belongs to
+    that line only and hides nothing below it, even if it is never closed,
+    because the next line's block structure is read first. So <!-- inside a
+    code span, or after other text, never changes the state.
     """
-    out: list[str] = []
-    pos = 0
-    while pos < len(line):
+    fence: tuple[str, int] | None = None
+    in_comment = False
+    for line in text.split("\n"):
         if in_comment:
-            end = line.find("-->", pos)
-            if end < 0:
-                return "".join(out), True
-            pos = end + 3
-            in_comment = False
-        else:
-            start = line.find("<!--", pos)
-            if start < 0:
-                out.append(line[pos:])
-                break
-            out.append(line[pos:start])
-            pos = start + 4
-            in_comment = True
-    return "".join(out), in_comment
+            in_comment = "-->" not in line
+            continue
+        m = FENCE_RE.match(line)
+        if fence is not None:
+            if (m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1]
+                    and not line[m.end():].strip()):
+                fence = None
+            continue
+        if m:
+            fence = (m.group(1)[0], len(m.group(1)))
+            continue
+        if HTML_COMMENT_BLOCK_START_RE.match(line):
+            in_comment = "-->" not in line[line.index("<!--") + 4:]
+            continue
+        yield line
 
 
 def heading_anchors(text: str) -> list[str]:
@@ -1629,16 +1646,14 @@ def heading_anchors(text: str) -> list[str]:
     A repeated anchor gets -1, -2 and so on, and a suffixed anchor that
     collides with one already taken is suffixed again, so every anchor in the
     document is unique and each link resolves to one heading. Headings inside
-    fenced code blocks or HTML comments are not headings: GitHub renders
+    fenced code blocks or HTML comment blocks are not headings: GitHub renders
     neither, so they must neither create an anchor nor shift the numbering of
     a visible duplicate.
     """
     anchors: list[str] = []
     counts: dict[str, int] = {}
     taken: set[str] = set()
-    in_comment = False
-    for _, raw in markdown_outside_fences(text):
-        line, in_comment = without_html_comments(raw, in_comment)
+    for line in heading_candidate_lines(text):
         m = ATX_HEADING_RE.match(line)
         if not m:
             continue
