@@ -20,6 +20,9 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable, Iterable
+from types import ModuleType
+
 from vba_lex import code_only
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,9 +70,9 @@ REQUIRED_FILES = ALL_MODULES + [
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?$")
 
 
-def version_findings(raw):
+def version_findings(raw: str) -> list[str]:
     """Return every problem with the contents of the root VERSION file."""
-    findings = []
+    findings: list[str] = []
 
     if raw != raw.rstrip("\n") + "\n":
         findings.append(
@@ -127,15 +130,15 @@ FORBIDDEN_TRACKED_ARTIFACTS = [
     ("*.ade", "Microsoft Access project binary"),
 ]
 
-failures = []
-notes = []
+failures: list[str] = []
+notes: list[str] = []
 
 
-def fail(check, detail):
+def fail(check: str, detail: str) -> None:
     failures.append(f"{check}: {detail}")
 
 
-def note(check, detail):
+def note(check: str, detail: str) -> None:
     """Record something the reader should see that is not a failure.
 
     A correctly declared API change still has to be legible in the log. Raising
@@ -146,17 +149,17 @@ def note(check, detail):
     notes.append(f"{check}: {detail}")
 
 
-def read(path):
+def read(path: str) -> bytes:
     with open(os.path.join(REPO, path), "rb") as fh:
         return fh.read()
 
 
-def read_lines(path):
+def read_lines(path: str) -> list[str]:
     return read(path).decode("latin-1").split("\r\n")
 
 
 # --------------------------------------------------------------------------
-def check_required_files():
+def check_required_files() -> None:
     for rel in REQUIRED_FILES:
         path = os.path.join(REPO, rel)
         if os.path.isdir(path):
@@ -166,7 +169,7 @@ def check_required_files():
 
 
 # --------------------------------------------------------------------------
-def check_module_names():
+def check_module_names() -> None:
     """Attribute VB_Name must match the filename.
 
     A mismatch imports cleanly and then silently shadows or duplicates a module
@@ -183,7 +186,7 @@ def check_module_names():
 
 
 # --------------------------------------------------------------------------
-def check_option_policy():
+def check_option_policy() -> None:
     for rel in ALL_MODULES:
         text = read(rel).decode("latin-1")
         if not re.search(r"^Option Explicit\s*$", text, re.M):
@@ -194,7 +197,7 @@ def check_option_policy():
 
 
 # --------------------------------------------------------------------------
-def check_encoding_and_endings():
+def check_encoding_and_endings() -> None:
     for rel in ALL_MODULES:
         data = read(rel)
         bare_lf = data.count(b"\n") - data.count(b"\r\n")
@@ -212,7 +215,7 @@ def check_encoding_and_endings():
 
 
 # --------------------------------------------------------------------------
-def check_banner_rules():
+def check_banner_rules() -> None:
     for rel in ALL_MODULES:
         for n, line in enumerate(read_lines(rel), 1):
             if RULE_RE.match(line) and len(line) != 79:
@@ -220,7 +223,7 @@ def check_banner_rules():
 
 
 # --------------------------------------------------------------------------
-def check_house_labels():
+def check_house_labels() -> None:
     """Retain the existing style policy separately from procedure resolution."""
     from vba_analyze import logical_lines, statements
     for rel in ALL_MODULES:
@@ -231,9 +234,10 @@ def check_house_labels():
                     fail('labels', f'{rel}:{n}: non-house label {code[:-1]!r}')
 
 
-def check_vba_analyzer():
-    from vba_analyze import run
+def check_vba_analyzer() -> None:
     from pathlib import Path
+
+    from vba_analyze import run
     findings, inventory = run(Path(REPO))
     for finding in findings:
         fail('VBA analyzer', str(finding))
@@ -241,7 +245,7 @@ def check_vba_analyzer():
         print('  INVENTORY ' + entry)
 
 
-def check_vba_analyzer_selftest():
+def check_vba_analyzer_selftest() -> None:
     from vba_analyze_fixtures import selftest
     findings, count = selftest()
     for finding in findings:
@@ -249,13 +253,13 @@ def check_vba_analyzer_selftest():
     print(f'  {count} VBA analyzer fixtures')
 
 
-def check_titlebar_control():
+def check_titlebar_control() -> None:
     from titlebar_control_fixtures import selftest
     for finding in selftest(REPO):
         fail('title-bar control regression', finding)
 
 
-def check_demo_cleanup():
+def check_demo_cleanup() -> None:
     from demo_cleanup_fixtures import selftest
     findings, count = selftest(REPO)
     for finding in findings:
@@ -264,7 +268,7 @@ def check_demo_cleanup():
 
 
 # --------------------------------------------------------------------------
-def import_vba_api():
+def import_vba_api() -> ModuleType | None:
     sys.path.insert(0, os.path.join(REPO, "tools"))
     try:
         import vba_api
@@ -274,7 +278,7 @@ def import_vba_api():
     return vba_api
 
 
-def check_public_api():
+def check_public_api() -> None:
     """Diff the full declaration contract against the versioned manifest.
 
     Recording only module, kind and name detected a member appearing or
@@ -333,7 +337,7 @@ SEMVER_ROW_RE = re.compile(
 SEMVER_WORDS = ("patch", "minor", "major")
 
 
-def check_supported_api_declaration():
+def check_supported_api_declaration() -> None:
     """Require a Semantic Versioning statement whenever the facade moves.
 
     Documented policy is not a gate. The manifest carries the facade as it
@@ -397,7 +401,7 @@ def check_supported_api_declaration():
                  f"new in the facade since {baseline_version}: {added}")
 
 
-def check_release_state_selftest():
+def check_release_state_selftest() -> None:
     """Run the VERSION rules against their own fixtures.
 
     Two other checks derive from this file, so a rule that quietly accepted
@@ -411,7 +415,7 @@ def check_release_state_selftest():
                  + (f" | {found}" if found else ""))
 
 
-def check_wiki_badge_selftest():
+def check_wiki_badge_selftest() -> None:
     """Run the wiki badge rules against their own fixtures.
 
     The wiki itself is not reachable from here — check_repo.py reads the tree
@@ -432,7 +436,7 @@ def check_wiki_badge_selftest():
         fail("wiki-badge-selftest", finding.replace("\n", " | "))
 
 
-def check_public_api_selftest():
+def check_public_api_selftest() -> None:
     """Run the contract model's own fixtures.
 
     The manifest is only as good as the parser that produces it. A model that
@@ -471,9 +475,9 @@ ON_KEY_RE = re.compile(r"""^(?:on|'on'|"on"|True)\s*:\s*$""")
 GATE_WORKFLOW = ".github/workflows/static-checks.yml"
 
 
-def yaml_block_lines(text):
+def yaml_block_lines(text: str) -> list[tuple[int, str]]:
     """Return [(indent, content)] for lines that carry YAML structure."""
-    out = []
+    out: list[tuple[int, str]] = []
     for raw in text.split("\n"):
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
@@ -481,7 +485,7 @@ def yaml_block_lines(text):
     return out
 
 
-def child_block(lines, start):
+def child_block(lines: list[tuple[int, str]], start: int) -> tuple[list[tuple[int, str]], int]:
     """Return the lines nested under lines[start], and the index after them."""
     parent_indent = lines[start][0]
     end = start + 1
@@ -490,7 +494,7 @@ def child_block(lines, start):
     return lines[start + 1:end], end
 
 
-def find_key(lines, name):
+def find_key(lines: list[tuple[int, str]], name: str) -> int | None:
     """Return the index of a mapping key at the block's own indentation."""
     if not lines:
         return None
@@ -502,7 +506,7 @@ def find_key(lines, name):
     return None
 
 
-def has_push_tag_trigger(text):
+def has_push_tag_trigger(text: str) -> bool:
     """Return True only when on.push.tags contains the v* pattern.
 
     Searching the file for a tags: block matched one under pull_request, or
@@ -538,7 +542,7 @@ def has_push_tag_trigger(text):
     return False
 
 
-def workflow_findings(rel, text, require_tag_trigger=False):
+def workflow_findings(rel: str, text: str, require_tag_trigger: bool = False) -> list[str]:
     """Return every pin-policy violation in one workflow file.
 
     A version tag is a mutable pointer: actions/checkout@v4 has moved between
@@ -551,7 +555,7 @@ def workflow_findings(rel, text, require_tag_trigger=False):
     reading it. The comment states the claim so a reviewer can resolve and
     verify it independently.
     """
-    findings = []
+    findings: list[str] = []
 
     for n, line in enumerate(text.split("\n"), 1):
         m = USES_RE.match(line)
@@ -599,7 +603,7 @@ def workflow_findings(rel, text, require_tag_trigger=False):
     return findings
 
 
-def check_workflow_policy():
+def check_workflow_policy() -> None:
     """Enforce immutable Action pins across every tracked workflow."""
     tracked = git_tracked_files()
     if tracked is None:
@@ -696,7 +700,7 @@ WORKFLOW_SELFTEST_CASES = [
 ]
 
 
-def check_workflow_policy_selftest():
+def check_workflow_policy_selftest() -> None:
     """Run the pin policy against its own fixtures.
 
     The policy is one regular expression away from accepting everything, and
@@ -723,12 +727,12 @@ FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 
 
-def strip_inline_code(line):
+def strip_inline_code(line: str) -> str:
     """Blank out inline code spans, preserving length so columns stay true."""
     return INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line)
 
 
-def escape_findings(rel, text):
+def escape_findings(rel: str, text: str) -> list[str]:
     r"""Report Markdown punctuation escaped outside code.
 
     A WYSIWYG editor escapes every character it thinks is markup, and both
@@ -743,8 +747,8 @@ def escape_findings(rel, text):
     documents. This is a deliberate boundary: the rule detects characteristic
     escaping in prose, not every possible backslash a WYSIWYG editor can emit.
     """
-    findings = []
-    fence = None                      # (character, opening length)
+    findings: list[str] = []
+    fence: tuple[str, int] | None = None   # (character, opening length)
 
     for n, line in enumerate(text.split("\n"), 1):
         m = FENCE_RE.match(line)
@@ -775,7 +779,7 @@ def escape_findings(rel, text):
     return findings
 
 
-def check_markdown_escapes():
+def check_markdown_escapes() -> None:
     """Fail on escaped Markdown punctuation in any tracked document."""
     tracked = git_tracked_files()
     if tracked is None:
@@ -839,7 +843,7 @@ ESCAPE_SELFTEST_CASES = [
 ]
 
 
-def check_markdown_escape_selftest():
+def check_markdown_escape_selftest() -> None:
     """Run the escape rules against their own fixtures.
 
     Fence handling is the part that can silently invert: a rule that treated
@@ -871,7 +875,7 @@ PRIVATE_PATTERNS = [
 ]
 
 
-def denies(rel, pattern):
+def denies(rel: str, pattern: str) -> bool:
     """Match a path against a denylist pattern, ignoring case.
 
     fnmatch is case-sensitive on Linux, which is where the gate runs. A file
@@ -886,9 +890,9 @@ def denies(rel, pattern):
             or fnmatch.fnmatchcase(os.path.basename(rel), pattern))
 
 
-def denylist_findings(tracked, present):
+def denylist_findings(tracked: Iterable[str], present: Iterable[str]) -> list[tuple[str, str, str]]:
     """Return (path, reason, where) for every denied document."""
-    findings = []
+    findings: list[tuple[str, str, str]] = []
 
     for pattern, why in PRIVATE_PATTERNS:
         for rel in sorted(tracked):
@@ -902,7 +906,7 @@ def denylist_findings(tracked, present):
     return findings
 
 
-def check_private_review_denylist():
+def check_private_review_denylist() -> None:
     """Fail when a private document is tracked or present in the tree.
 
     Both are checked. The index catches it after a commit; the working tree
@@ -912,7 +916,7 @@ def check_private_review_denylist():
     if tracked is None:
         return
 
-    present = set()
+    present: set[str] = set()
     for root, dirs, names in os.walk(REPO):
         dirs[:] = [x for x in dirs if x != ".git"]
         for name in names:
@@ -960,7 +964,7 @@ DENYLIST_SELFTEST_CASES = [
 ]
 
 
-def check_private_review_denylist_selftest():
+def check_private_review_denylist_selftest() -> None:
     """Run the denylist against its own fixtures.
 
     A denylist with no fixtures is a list of strings nobody has ever seen
@@ -976,7 +980,7 @@ def check_private_review_denylist_selftest():
                  f"{'denied' if denied else 'allowed'}")
 
 
-def check_release_state():
+def check_release_state() -> None:
     """Reject known stale release markers and a malformed root VERSION.
 
     This is the check that would have caught the tagged README still carrying a
@@ -1013,7 +1017,7 @@ def check_release_state():
 
 
 # --------------------------------------------------------------------------
-def git_tracked_files():
+def git_tracked_files() -> list[str] | None:
     """Return the exact index-backed file set, or fail closed.
 
     Walking the working tree is incorrect here: an ignored local demo workbook
@@ -1023,8 +1027,7 @@ def git_tracked_files():
     try:
         result = subprocess.run(
             ["git", "-C", REPO, "ls-files", "-z"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
     except OSError as exc:
@@ -1044,7 +1047,7 @@ def git_tracked_files():
     )
 
 
-def git_ignored_files(paths):
+def git_ignored_files(paths: list[str]) -> list[str]:
     """Return tracked paths that the current .gitignore would hide."""
     if not paths:
         return []
@@ -1054,8 +1057,7 @@ def git_ignored_files(paths):
         result = subprocess.run(
             ["git", "-C", REPO, "check-ignore", "--no-index", "-z", "--stdin"],
             input=payload,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
     except OSError as exc:
@@ -1075,7 +1077,7 @@ def git_ignored_files(paths):
     )
 
 
-def forbidden_tracked_reason(path):
+def forbidden_tracked_reason(path: str) -> str | None:
     """Return why a tracked path is forbidden, or None when it is allowed."""
     name = path.rsplit("/", 1)[-1].lower()
     for pattern, reason in FORBIDDEN_TRACKED_ARTIFACTS:
@@ -1084,7 +1086,7 @@ def forbidden_tracked_reason(path):
     return None
 
 
-def check_repository_hygiene():
+def check_repository_hygiene() -> None:
     """Keep .gitignore, the Git index, and the release-binary policy aligned."""
     ignore_rules = {
         line.strip()
@@ -1101,7 +1103,7 @@ def check_repository_hygiene():
     if tracked is None:
         return
 
-    forbidden_paths = set()
+    forbidden_paths: set[str] = set()
     for rel in tracked:
         reason = forbidden_tracked_reason(rel)
         if reason:
@@ -1115,8 +1117,8 @@ def check_repository_hygiene():
 
 
 # --------------------------------------------------------------------------
-def check_markdown_links():
-    md_files = []
+def check_markdown_links() -> None:
+    md_files: list[str] = []
     for root, dirs, files in os.walk(REPO):
         dirs[:] = [d for d in dirs if d != ".git"]
         md_files += [
@@ -1145,7 +1147,7 @@ def check_markdown_links():
 
 
 # --------------------------------------------------------------------------
-def check_formatter():
+def check_formatter() -> None:
     sys.path.insert(0, os.path.join(REPO, "tools"))
     try:
         import reformat
@@ -1169,7 +1171,7 @@ def check_formatter():
                               f"(run tools/reformat.py --write)")
 
 
-def check_formatter_selftest():
+def check_formatter_selftest() -> None:
     """Run the formatter's own rule fixtures.
 
     The formatter is the one tool here whose defects the VBA suite cannot see,
@@ -1194,20 +1196,20 @@ def check_formatter_selftest():
 
 
 # --------------------------------------------------------------------------
-def check_repository_policy():
+def check_repository_policy() -> None:
     import repository_policy
     for finding in repository_policy.check(REPO):
         fail('repository policy', finding)
 
 
-def check_repository_policy_selftest():
+def check_repository_policy_selftest() -> None:
     import repository_policy
     findings, count = repository_policy.selftest(REPO)
     for finding in findings:
         fail('repository policy self-test', finding)
 
 
-CHECKS = [
+CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("repository policy", check_repository_policy),
     ("repository policy self-test", check_repository_policy_selftest),
     ("required files", check_required_files),
@@ -1239,7 +1241,7 @@ CHECKS = [
 ]
 
 
-def main():
+def main() -> int:
     print(f"VBA-EXCEL_UI static gate\nrepository: {REPO}\n")
 
     for label, fn in CHECKS:

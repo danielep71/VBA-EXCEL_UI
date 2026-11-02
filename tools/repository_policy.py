@@ -5,10 +5,10 @@ fnmatch patterns and comma braces; unsupported brace syntax fails closed.
 """
 import fnmatch
 import os
-from pathlib import Path
 import re
 import subprocess
 import tempfile
+from pathlib import Path
 
 WINDOWS = ('bat', 'cmd', 'ps1', 'psm1', 'psd1', 'vbs', 'reg', 'ini')
 VBA = ('bas', 'cls', 'frm')
@@ -21,7 +21,7 @@ LOCAL_ARTIFACTS = (('MUTANT_probe.bas', '/MUTANT_*.bas'),
                    ('wiki', '/wiki'))
 
 
-def git(root, *args, data=None):
+def git(root: str | Path, *args: str, data: str | None = None) -> str:
     env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
     # Isolate fixture Git operations from caller repository overrides.
     for name in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'):
@@ -32,9 +32,9 @@ def git(root, *args, data=None):
                           check=True, env=env).stdout
 
 
-def editor_eol(text, path):
-    pattern = None
-    result = None
+def editor_eol(text: str, path: str) -> str | None:
+    pattern: str | None = None
+    result: str | None = None
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith(('#', ';')):
@@ -57,9 +57,9 @@ def editor_eol(text, path):
     return result
 
 
-def findings(root):
+def findings(root: str | Path) -> list[str]:
     root = Path(root)
-    errors = []
+    errors: list[str] = []
     text = (root / '.editorconfig').read_text(encoding='utf-8')
     paths = [(f'{prefix}probe.{ext}', 'crlf' if ext in WINDOWS + VBA else 'lf')
              for prefix in ('', 'tools/nested/') for ext in WINDOWS + VBA + PORTABLE]
@@ -97,7 +97,7 @@ def findings(root):
     return errors
 
 
-def check(root):
+def check(root: str | Path) -> list[str]:
     """Evaluate tracked policy in isolation from personal Git settings."""
     with tempfile.TemporaryDirectory(prefix='excel-ui-policy-') as name:
         target = Path(name)
@@ -107,10 +107,10 @@ def check(root):
         return findings(target)
 
 
-def selftest(root):
+def selftest(root: str | Path) -> tuple[list[str], int]:
     """Positive baseline plus removed/shadowed rules and broad-ignore mutants."""
     originals = {file: (Path(root) / file).read_text(encoding='utf-8') for file in FILES}
-    cases = [('baseline', None, None, False)]
+    cases: list[tuple[str, str | None, str | None, bool]] = [('baseline', None, None, False)]
     for ext in WINDOWS:
         cases.append(('removed Git ' + ext, '.gitattributes',
                       originals['.gitattributes'].replace(f'*.{ext} text eol=crlf\n', ''), True))
@@ -119,7 +119,8 @@ def selftest(root):
         cases.append(('shadow editor ' + ext, '.editorconfig',
                       originals['.editorconfig'] + f'\n[*.{ext}]\nend_of_line = lf\n', True))
     cases.append(('removed editor override', '.editorconfig',
-                  originals['.editorconfig'].replace('[*.{bat,cmd,ps1,psm1,psd1,vbs,reg,ini}]\nend_of_line = crlf', ''), True))
+                  originals['.editorconfig'].replace(
+                      '[*.{bat,cmd,ps1,psm1,psd1,vbs,reg,ini}]\nend_of_line = crlf', ''), True))
     cases.append(('removed scratch', '.gitignore',
                   originals['.gitignore'].replace('/.mutation-scratch/\n', ''), True))
     for rule in ('*.bas', '*mutant*', '*control*', '/evidence/', '/docs/evidence/'):
@@ -138,7 +139,8 @@ def selftest(root):
             target = Path(name)
             git(target, 'init', '-q')
             for key, value in originals.items():
-                (target / key).write_text(replacement if key == file else value, encoding='utf-8')
+                text = replacement if key == file and replacement is not None else value
+                (target / key).write_text(text, encoding='utf-8')
             try:
                 actual = bool(findings(target))
             except subprocess.CalledProcessError as exc:

@@ -61,7 +61,7 @@ class WikiError(Exception):
     """The check could not be run, which is a failure rather than a crash."""
 
 
-def expected_version(repo=REPO):
+def expected_version(repo: str = REPO) -> str:
     """Return the version the repository states, as a tag-shaped string.
 
     Deriving this from the first wiki page it happens to read would make the
@@ -73,7 +73,7 @@ def expected_version(repo=REPO):
         with open(path, encoding="utf-8") as fh:
             raw = fh.read()
     except OSError as exc:
-        raise WikiError(f"cannot read {VERSION_FILE}: {exc}")
+        raise WikiError(f"cannot read {VERSION_FILE}: {exc}") from exc
 
     value = raw.strip()
     if not VERSION_RE.match(value):
@@ -82,12 +82,12 @@ def expected_version(repo=REPO):
     return "v" + value
 
 
-def page_badges(text):
+def page_badges(text: str) -> list[str]:
     """Return every track version named on a page, in order of appearance."""
     return [m.group("version") for m in BADGE_RE.finditer(text)]
 
 
-def malformed_badges(text):
+def malformed_badges(text: str) -> list[str]:
     """Return badge-shaped tokens that are not valid badges."""
     valid = {m.group(0) for m in BADGE_RE.finditer(text)}
     return [
@@ -96,7 +96,7 @@ def malformed_badges(text):
     ]
 
 
-def wiki_revision(wiki_path):
+def wiki_revision(wiki_path: str) -> str | None:
     """Return the commit the wiki working copy is at, or None.
 
     The version the pages claim is only half the evidence. Which revision of
@@ -115,14 +115,14 @@ def wiki_revision(wiki_path):
     return out.stdout.strip() if out.returncode == 0 else None
 
 
-def inventory(wiki_path):
+def inventory(wiki_path: str) -> list[tuple[str, str]]:
     """Return the ordered page inventory as (name, badge-or-status) pairs.
 
     A passing run that records nothing is not evidence. The inventory names
     every page and what it claimed, so a later reader can distinguish a complete
     multi-page wiki from an incomplete clone containing only one page.
     """
-    rows = []
+    rows: list[tuple[str, str]] = []
     for name in sorted(os.listdir(wiki_path)):
         path = os.path.join(wiki_path, name)
         if not (name.endswith(".md") and os.path.isfile(path)):
@@ -139,7 +139,7 @@ def inventory(wiki_path):
     return rows
 
 
-def render_evidence(wiki_path, expected):
+def render_evidence(wiki_path: str, expected: str) -> list[str]:
     """Return the lines recording what was inspected and at which revision."""
     revision = wiki_revision(wiki_path)
     rows = inventory(wiki_path)
@@ -155,7 +155,7 @@ def render_evidence(wiki_path, expected):
     return lines
 
 
-def check_wiki(wiki_path, expected):
+def check_wiki(wiki_path: str, expected: str) -> list[str]:
     """Return a list of findings for a wiki working copy.
 
     An empty list means every content page carries the expected badge and no
@@ -172,8 +172,8 @@ def check_wiki(wiki_path, expected):
     if not pages:
         return [f"{wiki_path} contains no wiki pages; the clone is probably empty"]
 
-    findings = []
-    seen = {}
+    findings: list[str] = []
+    seen: dict[str, str] = {}
 
     for name in pages:
         with open(os.path.join(wiki_path, name), encoding="utf-8") as fh:
@@ -201,7 +201,7 @@ def check_wiki(wiki_path, expected):
         # the other behind, making the page contradict itself.
         if len(badges) > 1:
             distinct = sorted(set(badges))
-            detail = (f"the same badge twice" if len(distinct) == 1
+            detail = ("the same badge twice" if len(distinct) == 1
                       else "different badges: " + ", ".join(distinct))
             findings.append(
                 f"{name} carries {len(badges)} track badges, {detail}; a page "
@@ -234,7 +234,7 @@ def check_wiki(wiki_path, expected):
 # --------------------------------------------------------------------------
 # SELF-TEST
 # --------------------------------------------------------------------------
-def _badge(version):
+def _badge(version: str) -> str:
     return (
         f"[![Version](https://img.shields.io/badge/wiki_tracks-{version}"
         f"-217346?style=flat-square)]"
@@ -242,7 +242,7 @@ def _badge(version):
     )
 
 
-def _write_wiki(root, pages):
+def _write_wiki(root: str, pages: dict[str, str]) -> str:
     os.makedirs(root, exist_ok=True)
     for name, text in pages.items():
         with open(os.path.join(root, name), "w", encoding="utf-8") as fh:
@@ -257,13 +257,13 @@ GOOD = {
 }
 
 
-def _variant(**changes):
+def _variant(**changes: str) -> dict[str, str]:
     pages = dict(GOOD)
     pages.update(changes)
     return pages
 
 
-SELFTEST_CASES = [
+SELFTEST_CASES: list[tuple[str, dict[str, str], str, int]] = [
     ("a fully badged wiki agreeing with VERSION passes", GOOD, "v1.1.2", 0),
     ("a navigation page needs no badge", GOOD, "v1.1.2", 0),
     ("a content page with no badge is reported",
@@ -294,9 +294,9 @@ SELFTEST_CASES = [
 ]
 
 
-def selftest():
+def selftest() -> list[str]:
     """Return a list of failure descriptions; empty means the rules hold."""
-    failures = []
+    failures: list[str] = []
 
     with tempfile.TemporaryDirectory() as tmp:
         for i, (label, pages, expected, count) in enumerate(SELFTEST_CASES):
@@ -336,7 +336,7 @@ def selftest():
     return failures
 
 
-def run_selftest():
+def run_selftest() -> int:
     failures = selftest()
     if not failures:
         print(f"ok   self-test: {len(SELFTEST_CASES) + 2} wiki-badge rules hold")
@@ -354,7 +354,7 @@ USAGE = """usage:
 """
 
 
-def main():
+def main() -> int:
     args = sys.argv[1:]
 
     if args and args[0] == "--selftest":

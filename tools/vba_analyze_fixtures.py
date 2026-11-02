@@ -3,14 +3,17 @@
 Expectations specify exact rule, source path and physical line (configuration
 multiplicity is deliberately deduplicated). No fixture is allowed extra rules.
 """
+from collections.abc import Iterable
+
 from vba_analyze import analyze
 
 
-def selftest():
-    failures = []
+def selftest() -> tuple[list[str], int]:
+    failures: list[str] = []
     count = 0
 
-    def case(name, source, expected=(), dynamic=0):
+    def case(name: str, source: str | dict[str, str],
+             expected: Iterable[tuple[str, int, str]] = (), dynamic: int = 0) -> None:
         nonlocal count
         count += 1
         sources = source if isinstance(source, dict) else {'fixture.bas': source}
@@ -21,7 +24,7 @@ def selftest():
             failures.append(f'{name}: expected {sorted(wanted)}, dynamic={dynamic}; '
                             f'got {sorted(actual)}, dynamic={len(inventory)}')
 
-    def bad(name, source, line, rule):
+    def bad(name: str, source: str | dict[str, str], line: int, rule: str) -> None:
         case(name, source, [('fixture.bas', line, rule)])
 
     bad('unresolved direct call', 'Sub Test()\nUI_Missing\nEnd Sub', 2, 'unresolved')

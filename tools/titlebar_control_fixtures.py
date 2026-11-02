@@ -1,6 +1,6 @@
 """Narrow #66 source regression; not an Excel or native-call timeout test."""
-from pathlib import Path
 import re
+from pathlib import Path
 
 from vba_analyze import CONFIGS, active_lines, statements
 from vba_lex import code_only
@@ -8,8 +8,9 @@ from vba_lex import code_only
 CASE = 'TST_Case_TitleBarShowRejectsCaptionlessBaseline'
 
 
-def findings(source, case=CASE, cleanup_label='safe_exit', handler_label='err_handler'):
-    errors = []
+def findings(source: str, case: str = CASE, cleanup_label: str = 'safe_exit',
+             handler_label: str = 'err_handler') -> list[str]:
+    errors: list[str] = []
     for config_name, config in CONFIGS.items():
         inside = False
         cleanup = False
@@ -42,7 +43,7 @@ def findings(source, case=CASE, cleanup_label='safe_exit', handler_label='err_ha
     return errors
 
 
-def selftest(root):
+def selftest(root: str | Path) -> list[str]:
     source = f'''Private Sub {CASE}()
 On Error GoTo Err_Handler
 Safe_Exit:

@@ -33,15 +33,15 @@ matches the repository gate. A token/statement comparison rejects executable
 changes before any write. This is bounded lexical evidence, not VBA compilation.
 """
 
-import re
-import sys
 import os
+import re
 import stat
+import sys
 import tempfile
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from vba_lex import (LexicalError, split_code_comment, transform_code,
-                     protected_lines, executable_signature, code_only)
+from vba_lex import LexicalError, code_only, executable_signature, protected_lines, split_code_comment, transform_code
 
 RULE_EQ = "'" + "=" * 78
 RULE_DASH = "'" + "-" * 78
@@ -84,21 +84,21 @@ PROC_RE = re.compile(
 )
 
 
-def split_lines(text):
+def split_lines(text: str) -> list[str]:
     return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
-def sub_outside_literals(code, fn):
+def sub_outside_literals(code: str, fn: Callable[[str], str]) -> str:
     """Compatibility wrapper around the shared region scanner."""
     return transform_code(code, fn)
 
 
-def is_rule(line):
+def is_rule(line: str) -> bool:
     return re.match(r"^'[-=]{5,}$", line.strip()) is not None
 
 
-def normalise_rules(lines):
-    out = []
+def normalise_rules(lines: list[str]) -> list[str]:
+    out: list[str] = []
     for ln in lines:
         s = ln.strip()
         if re.match(r"^'={5,}$", s):
@@ -110,9 +110,11 @@ def normalise_rules(lines):
     return out
 
 
-def hoist_options(lines, module_name):
+def hoist_options(lines: list[str], module_name: str) -> list[str]:
     """Move Option statements to the top and drop the MODULE SETTINGS banner."""
-    options, keep, i = [], [], 0
+    options: list[str] = []
+    keep: list[str] = []
+    i = 0
     while i < len(lines):
         ln = lines[i]
         s = ln.strip()
@@ -140,7 +142,8 @@ def hoist_options(lines, module_name):
 
 
     # Attribute line stays first
-    head, body = [], keep
+    head: list[str] = []
+    body = keep
     if body and body[0].startswith("Attribute VB_Name"):
         head, body = [body[0]], body[1:]
 
@@ -153,7 +156,7 @@ def hoist_options(lines, module_name):
     return head + options + [""] + body
 
 
-def decentre_titles(lines, module_name):
+def decentre_titles(lines: list[str], module_name: str) -> list[str]:
     """Flush-left the title line that sits between a '=== rule and a '--- rule."""
     out = list(lines)
     for i in range(1, len(out) - 1):
@@ -176,8 +179,9 @@ def decentre_titles(lines, module_name):
     return out
 
 
-def rename_banners(lines):
-    out, i = [], 0
+def rename_banners(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    i = 0
     while i < len(lines):
         ln = lines[i]
         if (
@@ -201,18 +205,17 @@ def rename_banners(lines):
     return out
 
 
-def rename_label_text(text):
+def rename_label_text(text: str) -> str:
     """Rewrite GoTo/Resume targets in one run of code or comment prose."""
     for old, rep in LABEL_MAP.items():
-        text = re.sub(
-            r"\b(GoTo|Resume)\s+" + old + r"\b",
-            lambda mm, r=rep: mm.group(1) + " " + r,
-            text,
-        )
+        def renamed(mm: re.Match[str], r: str = rep) -> str:
+            return mm.group(1) + " " + r
+
+        text = re.sub(r"\b(GoTo|Resume)\s+" + old + r"\b", renamed, text)
     return text
 
 
-def rename_labels(lines):
+def rename_labels(lines: list[str]) -> list[str]:
     """Rename error-handling labels, in code and in the prose describing it.
 
     Not in string literals. A module quoting a label in a diagnostic - "use
@@ -220,7 +223,7 @@ def rename_labels(lines):
     which changed what the module printed at run time rather than where it
     jumped.
     """
-    out = []
+    out: list[str] = []
     for ln in lines:
         s = ln.strip()
         m = re.match(r"^([A-Za-z_]\w*):", s)
@@ -235,9 +238,9 @@ def rename_labels(lines):
     return out
 
 
-def align_declarations(lines):
+def align_declarations(lines: list[str]) -> list[str]:
     """Align Dim/Const on the 20/19 grid inside procedures only."""
-    out = []
+    out: list[str] = []
     in_proc = False
     for ln in lines:
         s = ln.strip()
@@ -285,12 +288,12 @@ def align_declarations(lines):
     return out
 
 
-def strip_trailing(lines):
+def strip_trailing(lines: list[str]) -> list[str]:
     return [ln.rstrip() for ln in lines]
 
 
-def collapse_blanks(lines):
-    out = []
+def collapse_blanks(lines: list[str]) -> list[str]:
+    out: list[str] = []
     blanks = 0
     for ln in lines:
         if not ln.strip():
@@ -303,11 +306,11 @@ def collapse_blanks(lines):
     return out
 
 
-def reformat(path, module_name):
+def reformat(path: str | Path, module_name: str) -> str:
     return reformat_text(open(path, encoding="latin-1").read(), module_name)
 
 
-def reformat_text(text, module_name):
+def reformat_text(text: str, module_name: str) -> str:
     """Validate, transform supported regions and verify executable equivalence."""
     if not text.isascii():
         raise LexicalError("non-ASCII VBA input; repository exports must be ASCII")
@@ -323,7 +326,7 @@ def reformat_text(text, module_name):
             raise LexicalError(f"unsupported label {old} in preserved region")
     # Opaque lines remain in place through the structural passes. Unique comment
     # placeholders also prevent declaration alignment on continuation tails.
-    saved = {}
+    saved: dict[str, str] = {}
     for i in protected:
         key = f"' @formatter-preserve-{i}@"
         if key in text:
@@ -347,7 +350,7 @@ def reformat_text(text, module_name):
     return result
 
 
-def atomic_write(path, data):
+def atomic_write(path: str | Path, data: bytes) -> None:
     """Replace one regular file only after a complete, flushed temporary write.
 
     Same-directory replace is atomic; multi-file writes are not a transaction.
@@ -374,7 +377,7 @@ def atomic_write(path, data):
 VB_NAME_RE = re.compile(r'^Attribute\s+VB_Name\s*=\s*"([^"]+)"')
 
 
-def module_name_of(path):
+def module_name_of(path: str | Path) -> str | None:
     """Read the module name from the file's own VB_Name attribute.
 
     Taking the name from the file rather than the command line removes a class
@@ -385,11 +388,11 @@ def module_name_of(path):
         for line in fh:
             m = VB_NAME_RE.match(line.strip())
             if m:
-                return m.group(1)
+                return str(m.group(1))
     return None
 
 
-def check(paths):
+def check(paths: Sequence[str | Path]) -> int:
     """Report which files are not already in the formatter's normal form.
 
     Exit status is the point: this is what makes a formatter gate possible.
@@ -397,7 +400,7 @@ def check(paths):
     property for every named fixture. A file that differs from its formatted
     output has drifted from the normal form this tool currently defines.
     """
-    failed = []
+    failed: list[str | Path] = []
     for path in paths:
         name = module_name_of(path)
         if name is None:
@@ -409,7 +412,8 @@ def check(paths):
             expected = reformat(path, name).encode("ascii")
             _, notes = protected_lines(split_lines(Path(path).read_text(encoding="ascii")))
             if notes:
-                print(f"note {path}: {len(notes)} conditional/continued lines preserved; unsupported formatting skipped")
+                print(f"note {path}: {len(notes)} conditional/continued lines preserved; "
+                      f"unsupported formatting skipped")
         except (ValueError, OSError) as exc:
             print(f"FAIL {path}: {exc}")
             failed.append(path)
@@ -427,9 +431,9 @@ def check(paths):
     return 1 if failed else 0
 
 
-def write(paths):
+def write(paths: Sequence[str | Path]) -> int:
     """Preflight every input, then atomically replace each changed file."""
-    prepared = []
+    prepared: list[tuple[str | Path, bytes]] = []
     try:
         for path in paths:
             name = module_name_of(path)
@@ -519,9 +523,9 @@ SELFTEST_HEAD = [
 SELFTEST_TAIL = ["End Sub"]
 
 
-def selftest():
+def selftest() -> list[str]:
     """Return a list of failure descriptions; empty means every rule holds."""
-    failures = []
+    failures: list[str] = []
 
     for label, before, after in SELFTEST_CASES:
         source = "\r\n".join(SELFTEST_HEAD + [before] + SELFTEST_TAIL) + "\r\n"
@@ -547,7 +551,7 @@ def selftest():
     return failures
 
 
-def run_selftest():
+def run_selftest() -> int:
     failures = selftest()
     if not failures:
         print(f"ok   self-test: {len(SELFTEST_CASES)} historical rules and extended lexical/write fixtures hold")

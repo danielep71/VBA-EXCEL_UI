@@ -4,14 +4,19 @@ Regions preserve their original spelling. Strings and bracketed identifiers
 are opaque. Rem starts a comment only at a statement boundary.
 """
 import re
+from collections.abc import Callable
+
+Region = tuple[str, str]
+Token = tuple[str, str]
 
 
 class LexicalError(ValueError):
     """Input cannot safely be transformed."""
 
 
-def regions(line):
-    out, start, i = [], 0, 0
+def regions(line: str) -> list[Region]:
+    out: list[Region] = []
+    start, i = 0, 0
     boundary = True
     while i < len(line):
         ch = line[i]
@@ -57,24 +62,25 @@ def regions(line):
     return out
 
 
-def split_code_comment(line):
+def split_code_comment(line: str) -> tuple[str, str]:
     parts = regions(line)
     return (''.join(s for k, s in parts if k != 'comment'),
             ''.join(s for k, s in parts if k == 'comment'))
 
 
-def code_only(line):
+def code_only(line: str) -> str:
     """Mask literals/comments without changing column offsets for analysis."""
     return ''.join(s if k == 'code' else ' ' * len(s) for k, s in regions(line))
 
 
-def transform_code(line, fn):
+def transform_code(line: str, fn: Callable[[str], str]) -> str:
     return ''.join(fn(s) if k == 'code' else s for k, s in regions(line))
 
 
-def protected_lines(lines):
+def protected_lines(lines: list[str]) -> tuple[set[int], list[str]]:
     """Preserve conditional blocks and complete continued logical statements."""
-    protected, notes = set(), []
+    protected: set[int] = set()
+    notes: list[str] = []
     depth, continuing = 0, False
     for n, line in enumerate(lines):
         code = split_code_comment(line)[0].strip()
@@ -103,16 +109,18 @@ def protected_lines(lines):
 TOKEN = re.compile(r'[A-Za-z_]\w*|\d+(?:\.\d+)?|[^\s]')
 
 
-def executable_signature(text, label_map=None):
+def executable_signature(
+        text: str, label_map: dict[str, str] | None = None) -> tuple[list[list[Token]], list[list[Token]]]:
     """Token sequence including statement boundaries, opaque literal bytes,
     directives and options; only declared house-label substitutions permitted.
     Whitespace changes never merge two identifier tokens unnoticed.
     """
     label_map = label_map or {}
-    rows, options = [], []
+    rows: list[list[Token]] = []
+    options: list[list[Token]] = []
     depth, in_proc = 0, False
     for line in text.replace('\r\n', '\n').split('\n'):
-        tokens = []
+        tokens: list[Token] = []
         for kind, value in regions(line):
             if kind == 'comment':
                 continue
