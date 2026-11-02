@@ -538,6 +538,22 @@ Do not edit a released version or tag merely to describe unreleased work. Releas
 numbers, artifacts, hashes, and dates belong to the repository's release
 workflow.
 
+### External links
+
+The static gate checks links inside the repository on every pull request. The
+**External links** workflow checks every external link in the tracked Markdown
+files each Monday, and on demand, with `tools/check_external_links.py`. It is not
+a required check: another host can be down for reasons unrelated to your change.
+A `404` or `410`, or a link that still fails after retries, fails the run; `401`,
+`403` and `429` are reported as unverified. To run it locally:
+
+```text
+python3 tools/check_external_links.py
+```
+
+Add a prefix to `tools/external_link_exclusions.txt` only for a host that
+refuses automated requests, with a comment saying why.
+
 ---
 
 ### The wiki and the VERSION file

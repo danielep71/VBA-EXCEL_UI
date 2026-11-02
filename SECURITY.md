@@ -308,6 +308,7 @@ The repository currently contains these workflows:
 ~~~text
 .github/workflows/actionlint.yml
 .github/workflows/codeql.yml
+.github/workflows/external-links.yml
 .github/workflows/issue-triage.yml
 .github/workflows/labels-drift.yml
 .github/workflows/labels-sync.yml
@@ -345,6 +346,9 @@ read-only.
 
 **Ruleset drift** compares the live repository rulesets with
 `.github/rulesets/` using the job's read-only token and never changes them.
+
+**External links** requests the public URLs already published in the tracked
+Markdown files, weekly and on demand, with a read-only token and no secrets.
 
 The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly
