@@ -1,0 +1,390 @@
+#!/usr/bin/env python3
+"""
+Wiki track-badge consistency check for VBA-EXCEL_UI.
+
+Before v1.1.2 the wiki had drifted a full release behind and nothing signalled
+it. Every content page now carries a `wiki_tracks-vX.Y.Z` badge, but a convention
+held up by memory is not a gate: a page added without a badge, or a sync that
+updates every page but one, reproduces the original failure while looking
+correct.
+
+This tool reads a wiki working copy from disk and asserts three things:
+
+  * every content page carries a badge;
+  * every badge names the same version;
+  * that version is the one the repository states in its root VERSION file.
+
+The wiki is a separate Git-backed repository with no Actions surface of its own,
+so it cannot check itself. The clone belongs to a workflow in the main
+repository; this tool receives a path and never touches the network.
+tools/check_repo.py stays entirely offline for the same reason — every other
+check reads the tree, and a gate that fails without network access is a gate
+people route around.
+
+GitHub's reserved navigation pages carry no content and are listed explicitly
+below rather than matched by a leading-underscore pattern. A path pattern would
+silently exempt any future page someone happened to name that way.
+
+--selftest exercises the rules against fixtures on a temporary directory.
+"""
+
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+VERSION_FILE = "VERSION"
+
+# Reserved GitHub wiki navigation pages. Not required to carry a badge; if one
+# does, it must agree with the rest.
+NAVIGATION_PAGES = (
+    "_Sidebar.md",
+    "_Footer.md",
+    "_Header.md",
+)
+
+BADGE_RE = re.compile(r"wiki_tracks-(?P<version>v[0-9][0-9A-Za-z.]*?)-[0-9A-Fa-f]{6}\b")
+
+# Anything naming the badge without being one. A page reading `wiki_tracks-1.1.2`
+# has a badge as far as a human skimming it is concerned, and none at all as far
+# as BADGE_RE is concerned; reporting that as "no badge" sends the reader
+# looking for something that is already there.
+BADGE_TOKEN_RE = re.compile(r"wiki_tracks-\S*")
+
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?$")
+
+
+class WikiError(Exception):
+    """The check could not be run, which is a failure rather than a crash."""
+
+
+def expected_version(repo: str = REPO) -> str:
+    """Return the version the repository states, as a tag-shaped string.
+
+    Deriving this from the first wiki page it happens to read would make the
+    check circular: thirteen pages agreeing on a stale version would pass. It
+    comes from the repository, which is the thing the wiki is supposed to track.
+    """
+    path = os.path.join(repo, VERSION_FILE)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        raise WikiError(f"cannot read {VERSION_FILE}: {exc}") from exc
+
+    value = raw.strip()
+    if not VERSION_RE.match(value):
+        raise WikiError(f"{VERSION_FILE} does not hold a release number: {value!r}")
+
+    return "v" + value
+
+
+def page_badges(text: str) -> list[str]:
+    """Return every track version named on a page, in order of appearance."""
+    return [m.group("version") for m in BADGE_RE.finditer(text)]
+
+
+def malformed_badges(text: str) -> list[str]:
+    """Return badge-shaped tokens that are not valid badges."""
+    valid = {m.group(0) for m in BADGE_RE.finditer(text)}
+    return [
+        m.group(0) for m in BADGE_TOKEN_RE.finditer(text)
+        if not any(m.group(0).startswith(v) for v in valid)
+    ]
+
+
+def wiki_revision(wiki_path: str) -> str | None:
+    """Return the commit the wiki working copy is at, or None.
+
+    The version the pages claim is only half the evidence. Which revision of
+    the wiki made that claim is the other half, and without it a passing run
+    cannot be tied to anything later.
+    """
+    if not os.path.isdir(os.path.join(wiki_path, ".git")):
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", wiki_path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def inventory(wiki_path: str) -> list[tuple[str, str]]:
+    """Return the ordered page inventory as (name, badge-or-status) pairs.
+
+    A passing run that records nothing is not evidence. The inventory names
+    every page and what it claimed, so a later reader can distinguish a complete
+    multi-page wiki from an incomplete clone containing only one page.
+    """
+    rows: list[tuple[str, str]] = []
+    for name in sorted(os.listdir(wiki_path)):
+        path = os.path.join(wiki_path, name)
+        if not (name.endswith(".md") and os.path.isfile(path)):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            badges = page_badges(fh.read())
+        if badges:
+            state = ", ".join(badges)
+        elif name in NAVIGATION_PAGES:
+            state = "(navigation, no badge required)"
+        else:
+            state = "(no badge)"
+        rows.append((name, state))
+    return rows
+
+
+def render_evidence(wiki_path: str, expected: str) -> list[str]:
+    """Return the lines recording what was inspected and at which revision."""
+    revision = wiki_revision(wiki_path)
+    rows = inventory(wiki_path)
+
+    lines = [
+        f"expected track: {expected}",
+        f"wiki revision:  {revision or '(not a Git working copy)'}",
+        f"pages:          {len(rows)}",
+    ]
+    width = max((len(name) for name, _ in rows), default=0)
+    for name, state in rows:
+        lines.append(f"  {name.ljust(width)}  {state}")
+    return lines
+
+
+def check_wiki(wiki_path: str, expected: str) -> list[str]:
+    """Return a list of findings for a wiki working copy.
+
+    An empty list means every content page carries the expected badge and no
+    page disagrees.
+    """
+    if not os.path.isdir(wiki_path):
+        return [f"{wiki_path} is not a directory"]
+
+    pages = sorted(
+        name for name in os.listdir(wiki_path)
+        if name.endswith(".md") and os.path.isfile(os.path.join(wiki_path, name))
+    )
+
+    if not pages:
+        return [f"{wiki_path} contains no wiki pages; the clone is probably empty"]
+
+    findings: list[str] = []
+    seen: dict[str, str] = {}
+
+    for name in pages:
+        with open(os.path.join(wiki_path, name), encoding="utf-8") as fh:
+            text = fh.read()
+
+        badges = page_badges(text)
+
+        for token in malformed_badges(text):
+            findings.append(
+                f"{name} carries a malformed track badge {token!r}; it names "
+                f"wiki_tracks but does not match wiki_tracks-vX.Y.Z-RRGGBB, so "
+                f"it reads as a badge and counts as none"
+            )
+
+        if not badges:
+            if name not in NAVIGATION_PAGES:
+                findings.append(
+                    f"{name} carries no wiki_tracks badge; every content page "
+                    f"must state the release it was written against"
+                )
+            continue
+
+        # Exactly one, not merely one distinct value. Duplicate identical badges
+        # are ambiguous update targets: a later release can change one and leave
+        # the other behind, making the page contradict itself.
+        if len(badges) > 1:
+            distinct = sorted(set(badges))
+            detail = ("the same badge twice" if len(distinct) == 1
+                      else "different badges: " + ", ".join(distinct))
+            findings.append(
+                f"{name} carries {len(badges)} track badges, {detail}; a page "
+                f"must state its release exactly once"
+            )
+            continue
+
+        seen[name] = badges[0]
+
+    versions = sorted(set(seen.values()))
+
+    if len(versions) > 1:
+        findings.append(
+            "the wiki does not agree with itself; pages name "
+            + ", ".join(versions)
+        )
+        for name in sorted(seen):
+            findings.append(f"    {name}: {seen[name]}")
+        return findings
+
+    if versions and versions[0] != expected:
+        findings.append(
+            f"the wiki tracks {versions[0]} and the repository states "
+            f"{expected}; every page is stale by at least one release"
+        )
+
+    return findings
+
+
+# --------------------------------------------------------------------------
+# SELF-TEST
+# --------------------------------------------------------------------------
+def _badge(version: str) -> str:
+    return (
+        f"[![Version](https://img.shields.io/badge/wiki_tracks-{version}"
+        f"-217346?style=flat-square)]"
+        "(https://github.com/danielep71/VBA-EXCEL_UI/blob/main/CHANGELOG.md)\n"
+    )
+
+
+def _write_wiki(root: str, pages: dict[str, str]) -> str:
+    os.makedirs(root, exist_ok=True)
+    for name, text in pages.items():
+        with open(os.path.join(root, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return root
+
+
+GOOD = {
+    "Home.md": _badge("v1.1.2") + "\n# Home\n",
+    "Architecture.md": _badge("v1.1.2") + "\n# Architecture\n",
+    "_Sidebar.md": "- [Home](Home)\n",
+}
+
+
+def _variant(**changes: str) -> dict[str, str]:
+    pages = dict(GOOD)
+    pages.update(changes)
+    return pages
+
+
+SELFTEST_CASES: list[tuple[str, dict[str, str], str, int]] = [
+    ("a fully badged wiki agreeing with VERSION passes", GOOD, "v1.1.2", 0),
+    ("a navigation page needs no badge", GOOD, "v1.1.2", 0),
+    ("a content page with no badge is reported",
+     _variant(**{"Examples.md": "# Examples\n"}), "v1.1.2", 1),
+    ("one page left behind is reported",
+     _variant(**{"Architecture.md": _badge("v1.1.1") + "\n# Architecture\n"}),
+     "v1.1.2", 3),
+    ("a wiki that agrees with itself but not the repository is reported",
+     {"Home.md": _badge("v1.1.1"), "Architecture.md": _badge("v1.1.1")},
+     "v1.1.2", 1),
+    ("a page carrying two different badges is reported",
+     _variant(**{"Home.md": _badge("v1.1.2") + _badge("v1.1.1")}),
+     "v1.1.2", 1),
+    ("a navigation page disagreeing with the rest is reported",
+     _variant(**{"_Sidebar.md": _badge("v1.1.1")}), "v1.1.2", 4),
+    ("an empty clone is reported rather than passing vacuously",
+     {}, "v1.1.2", 1),
+    ("the same badge twice on one page is reported",
+     _variant(**{"Home.md": _badge("v1.1.2") + _badge("v1.1.2")}),
+     "v1.1.2", 1),
+    ("a badge missing its v prefix is reported as malformed",
+     _variant(**{"Examples.md": "wiki_tracks-1.1.2-217346\n"}), "v1.1.2", 2),
+    ("a badge with a short colour is reported as malformed",
+     _variant(**{"Examples.md": "wiki_tracks-v1.1.2-217\n"}), "v1.1.2", 2),
+    ("a malformed badge beside a valid one is still reported",
+     _variant(**{"Examples.md": _badge("v1.1.2") + "wiki_tracks-broken\n"}),
+     "v1.1.2", 1),
+]
+
+
+def selftest() -> list[str]:
+    """Return a list of failure descriptions; empty means the rules hold."""
+    failures: list[str] = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, (label, pages, expected, count) in enumerate(SELFTEST_CASES):
+            root = _write_wiki(os.path.join(tmp, f"case{i}"), pages)
+            found = check_wiki(root, expected)
+            if len(found) != count:
+                failures.append(
+                    f"{label}: expected {count} finding(s), got {len(found)}"
+                    + (f" | {found}" if found else "")
+                )
+
+    # The inventory is evidence, so it has to name every page.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _write_wiki(os.path.join(tmp, "inv"), GOOD)
+        rows = inventory(root)
+        if len(rows) != len(GOOD):
+            failures.append(
+                f"inventory() listed {len(rows)} of {len(GOOD)} pages"
+            )
+        elif not any(name == "_Sidebar.md" and "navigation" in state
+                     for name, state in rows):
+            failures.append(
+                "inventory() must name a navigation page rather than omit it"
+            )
+
+    # The expected version must come from the repository, not from the wiki.
+    try:
+        version = expected_version()
+    except WikiError as exc:
+        failures.append(f"expected_version() could not read the repository: {exc}")
+    else:
+        if not version.startswith("v"):
+            failures.append(
+                f"expected_version() must return a tag-shaped string, got {version!r}"
+            )
+
+    return failures
+
+
+def run_selftest() -> int:
+    failures = selftest()
+    if not failures:
+        print(f"ok   self-test: {len(SELFTEST_CASES) + 2} wiki-badge rules hold")
+        return 0
+    print(f"FAIL self-test: {len(failures)} rule(s) broken\n")
+    for f in failures:
+        print(f"  - {f}")
+    return 1
+
+
+# --------------------------------------------------------------------------
+USAGE = """usage:
+  wiki_badges.py <wiki-path>   check a wiki working copy against VERSION
+  wiki_badges.py --selftest    verify the rules against their own fixtures
+"""
+
+
+def main() -> int:
+    args = sys.argv[1:]
+
+    if args and args[0] == "--selftest":
+        return run_selftest()
+
+    if len(args) != 1:
+        print(USAGE, file=sys.stderr)
+        return 2
+
+    try:
+        expected = expected_version()
+    except WikiError as exc:
+        print(f"FAIL {exc}", file=sys.stderr)
+        return 1
+
+    findings = check_wiki(args[0], expected)
+
+    if os.path.isdir(args[0]):
+        for line in render_evidence(args[0], expected):
+            print(line)
+
+    if not findings:
+        print(f"\nok   wiki badges agree with {expected}")
+        return 0
+
+    print(f"\nFAIL wiki badges: {len(findings)} finding(s)\n", file=sys.stderr)
+    for f in findings:
+        print(f"  {f}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

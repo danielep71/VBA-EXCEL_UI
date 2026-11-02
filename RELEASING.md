@@ -6,7 +6,7 @@
 [![Security policy](https://img.shields.io/badge/security-policy-success)](SECURITY.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-This maintainer guide turns a reviewed commit into a traceable VBA Excel UI release. Source identity, validation, packaging, provenance, and publication must describe the same candidate.
+This guide describes how I turn a reviewed commit into a traceable VBA Excel UI release. Source identity, validation, packaging, provenance, and publication must describe the same candidate.
 
 > [!IMPORTANT]
 > Certification must run in interactive Windows desktop Excel. Static checks alone cannot validate multi-window identity, title-bar integration, or restoration behavior.
@@ -75,7 +75,7 @@ The Git tag adds the lower-case prefix: version `1.2.3` becomes annotated tag `v
 - Compatibility and migration consequences are understood.
 - Security-sensitive work has completed private handling where necessary.
 - The working tree and exported VBA sources are reproducible.
-- Maintainers and required reviewers are available.
+- I am available for the release, together with any required reviewers.
 
 Record which Windows and Office-bitness combinations were exercised; do not generalize beyond the tested matrix.
 
@@ -180,6 +180,13 @@ sha256sum dist/<artifact>
 
 Publish only artifacts promised by the installation guide.
 
+Disposable mutants and their local output belong only in `/.mutation-scratch/`.
+They are not release evidence and must never enter source archives or binary
+assets. Package from tracked candidate inputs, not a recursive working-tree
+copy. The directory is ignored and marked `export-ignore` as defense in depth;
+never force-add it. Reviewed control results may be retained separately with
+their exact source identity, but disposable source variants are not deliverables.
+
 ## 8. Review and merge
 
 Where policy requires a pull request, make these items easy to verify:
@@ -191,7 +198,19 @@ Where policy requires a pull request, make these items easy to verify:
 - compatibility, migration, and security notes;
 - remaining limitations.
 
-Require configured checks and record the resulting `main` SHA. If the merge changes source identity, certify that commit before tagging.
+Require configured checks and record the resulting `main` SHA. If the merge
+changes the source commit identity, every pre-merge binary artifact and its hash
+are stale—even when the resulting source tree appears unchanged. Before tagging:
+
+1. check out the resulting `main` SHA;
+2. rerun static and Excel certification on that exact commit;
+3. rebuild every published binary artifact from that commit;
+4. reopen and test each rebuilt artifact as packaged;
+5. recalculate its size and SHA-256; and
+6. replace the pre-merge artifact evidence with the resulting `main` evidence.
+
+Do not tag or upload an artifact built from the pull-request head while claiming
+the merge commit as its source identity.
 
 ## 9. Create the annotated tag
 
@@ -276,7 +295,7 @@ Do not silently replace assets or move the tag.
 - Use [SECURITY.md](SECURITY.md) for vulnerabilities.
 - Preserve evidence explaining what users received.
 
-## ☑️ Final maintainer checklist
+## ☑️ Final release checklist
 
 | # | Gate | Done |
 | ---: | --- | :---: |

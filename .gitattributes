@@ -17,12 +17,20 @@
 #   in a top-level attributes file.
 #
 # ADOPTION / POLICY CHANGES
-#   Attribute changes do not rewrite existing blobs automatically. Inspect any
-#   normalization separately:
+#   Attribute changes do not rewrite existing blobs automatically. Stage the
+#   normalization, inspect exactly what it changes, and undo it if needed:
 #
-#       git add --renormalize --dry-run .
 #       git add --renormalize .
+#       git status --short
+#       git diff --cached --stat
 #       git diff --cached --check
+#
+#   To undo the staged normalization:
+#
+#       git restore --staged .
+#
+#   (git add --renormalize --dry-run lists every tracked file, not only the
+#   files whose stored form would change, so it cannot show the effect.)
 #
 #   Commit a required normalization as its own mechanical change.
 #
@@ -53,6 +61,24 @@
 # Normalize detected text to LF in the index and use LF in the working tree.
 # Explicit VBA and Windows-native rules below override the working-tree EOL.
 * text=auto eol=lf
+
+# Windows-native policy, matching .editorconfig.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.vbs text eol=crlf
+*.reg text eol=crlf
+*.ini text eol=crlf
+
+# Defense in depth if disposable controls are ever force-added.
+/.mutation-scratch export-ignore
+/MUTANT_*.bas export-ignore
+/CONTROL_*.bas export-ignore
+/commit-msg.txt export-ignore
+/msg-p2fix.txt export-ignore
+/wiki export-ignore
 
 
 #------------------------------------------------------------------------------

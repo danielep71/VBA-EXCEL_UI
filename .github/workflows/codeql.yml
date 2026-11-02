@@ -1,0 +1,105 @@
+name: CodeQL
+
+# Code scanning for the Python tooling under tools/ and for the workflows
+# themselves, with the security-extended query suite.
+#
+# Pull requests run a read-only analysis: the job has no write permission and
+# does not upload results, so a pull request from a fork never receives a
+# token that can write security events. Pushes to main and release/** and the
+# weekly schedule upload results to Security -> Code scanning; only that job
+# has security-events: write.
+#
+# The VBA source is not analysed: CodeQL has no extractor for it. The static
+# gate and the release certification cover it instead.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+  push:
+    branches:
+      - main
+      - 'release/**'
+  schedule:
+    - cron: '41 4 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Pull requests share one group per ref, so a newer push cancels the run it
+# supersedes. Every other run gets a group of its own (its run id): GitHub
+# replaces a pending run when a newer one joins the same group, even without
+# cancel-in-progress, and a shared group would let a later push to main,
+# release/** or a tag drop an earlier commit's queued run and its evidence.
+concurrency:
+  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze-pull-request:
+    name: Analyze (${{ matrix.language }}, read-only)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - actions
+          - python
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+
+      - name: Analyze without uploading
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}
+          upload: never
+
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - actions
+          - python
+
+    steps:
+      - name: Check out the exact SHA to analyse
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+
+      - name: Analyze and upload
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}

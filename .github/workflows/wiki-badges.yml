@@ -1,0 +1,86 @@
+# ==========================================================================
+# Wiki track-badge consistency
+# ==========================================================================
+#
+# The wiki is a separate Git-backed repository. It has no Actions surface of
+# its own, so it cannot check itself, and nothing gated it: before v1.1.2 it
+# had drifted a full release behind and the only signal was a reader noticing.
+#
+# This workflow lives here because this is where automation can run, and
+# because the version the wiki is supposed to track is stated here — in the
+# root VERSION file — rather than in the wiki. Deriving the expected value from
+# the wiki would make the check circular: every page agreeing on a stale
+# release would pass.
+#
+# The clone is read-only and unauthenticated. The wiki is public, so no token
+# is needed, and not supplying one means this job cannot write to the wiki even
+# if something here were wrong.
+#
+# The schedule matters as much as the push trigger. A wiki edit does not touch
+# this repository and therefore starts nothing; without a timer, drift
+# introduced directly in the wiki editor stays invisible until the next commit
+# lands here, which is exactly the window the v1.1.2 drift lived in.
+#
+# It runs on pull requests as well, so a VERSION bump is checked against the
+# wiki before it reaches a branch rather than after. During a release that is
+# the moment the two legitimately disagree, and seeing it in the pull request
+# is the difference between a planned wiki update and a surprise.
+#
+# This job does not gate a merge. It makes a silent failure loud.
+
+name: Wiki badges
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'VERSION'
+      - 'tools/wiki_badges.py'
+      - '.github/workflows/wiki-badges.yml'
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'VERSION'
+      - 'tools/wiki_badges.py'
+      - '.github/workflows/wiki-badges.yml'
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  badges:
+    name: Wiki track badges
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The pinned Action leaves the job's token in .git/config by
+          # default. This job clones a second repository; a credential it has
+          # no use for is a credential that can only be misused.
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Clone the wiki read-only
+        run: |
+          git clone --depth 1 \
+            https://github.com/${{ github.repository }}.wiki.git \
+            "${RUNNER_TEMP}/wiki"
+
+      - name: Verify the badge rules against their own fixtures
+        run: python3 tools/wiki_badges.py --selftest
+
+      - name: Check the wiki against VERSION
+        run: python3 tools/wiki_badges.py "${RUNNER_TEMP}/wiki"

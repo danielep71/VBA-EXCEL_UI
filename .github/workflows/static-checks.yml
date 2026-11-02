@@ -2,19 +2,39 @@ name: Static checks
 
 # Why this exists
 #
-# Until now no commit in this repository has ever carried a status check, and
-# release validation existed only as prose in CHANGELOG.md. A tag could be, and
-# was, published from a SHA with no automated evidence attached to it at all.
+# Before this workflow was introduced, no commit in this repository carried a
+# status check and release validation existed only as prose in CHANGELOG.md. A
+# tag could be, and was, published from a SHA with no automated evidence.
 #
 # What this workflow can and cannot do is worth stating plainly. A hosted runner
 # has no Excel, so it cannot execute a single line of VBA. It therefore covers
 # what is decidable from the repository text — module structure, the public
 # surface, house style, encoding, documentation state — and deliberately does
 # not pretend to replace Test_EXCEL_UI_RunReleaseCertification, which remains
-# the behavioural gate and is run by a maintainer on a real host.
+# the behavioural gate and which I run on a real host.
 #
 # The division is the point: this catches the mechanical mistakes cheaply and
 # on every push, so that manual certification time is spent on behaviour.
+#
+# The tag trigger exists because a tag is the artefact people install from.
+# Before that trigger was added, nothing ran against a tag and a release could
+# be, and was, published from a SHA carrying no evidence. actions/checkout
+# resolves a tag to its exact commit, and every check here reads repository
+# state only, so the same job is correct on a tag without knowing it is running
+# on one.
+#
+# Actions are pinned by full commit SHA rather than by a version tag. A tag is
+# mutable: v4 has moved between commits, and an upstream account compromise
+# would otherwise reach this repository silently. The trailing comment names
+# the release that SHA was, so a reader can audit the pin without resolving it
+# by hand. tools/check_repo.py enforces both, and Dependabot proposes updates
+# to the pins (.github/dependabot.yml).
+#
+# The required job pins an exact Python release on a fixed runner image, so a
+# new interpreter or image cannot change the gate's result between two runs of
+# the same commit. A second, non-required job runs the same gate on the oldest
+# Python version the tools support (CONTRIBUTING.md), so a change that needs a
+# newer interpreter is caught before it reaches a contributor's machine.
 
 on:
   pull_request:
@@ -25,28 +45,43 @@ on:
     branches:
       - main
       - 'release/**'
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pull requests share one group per ref, so a newer push cancels the run it
+# supersedes. Every other run gets a group of its own (its run id): GitHub
+# replaces a pending run when a newer one joins the same group, even without
+# cancel-in-progress, and a shared group would let a later push to main,
+# release/** or a tag drop an earlier commit's queued run and its evidence.
+concurrency:
+  group: static-checks-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   static:
+    # The ruleset on main and release/** requires this job by name.
     name: Repository and module checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Check out the exact SHA under review
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: '3.12.16'
 
       # No dependencies are installed on purpose. The gate uses only the
       # standard library, so it cannot be broken by an upstream release and
-      # runs identically on a maintainer's machine.
+      # runs identically on your machine.
       - name: Run the static gate
         run: python3 tools/check_repo.py
 
@@ -54,12 +89,94 @@ jobs:
       # obvious at a glance in the checks list, rather than being one finding
       # among several in a combined log.
       - name: Verify house-style normal form
+        id: format
         if: always()
         run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
 
+      # The label scripts and the issue-form check run on Node.js.
+      - name: Set up Node.js
+        if: always()
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+
+      - name: Self-test the label scripts
+        if: always()
+        run: |
+          node .github/scripts/labels-sync.mjs --self-test
+          node .github/scripts/labels-drift.mjs --self-test
+
+      - name: Check issue forms against the label catalogue
+        if: always()
+        run: python3 tools/check_issues.py --check-config
+
       - name: Remind how to fix formatting drift
-        if: failure()
+        if: failure() && steps.format.outcome == 'failure'
         run: |
           echo "::notice::Formatting drift is mechanical. Run:"
           echo "::notice::  python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas"
           echo "::notice::then re-import the affected modules into the VBE before committing."
+
+      # The gate is only as good as its checks. Each check has a fixture it
+      # must pass and one it must reject; a check that silently stopped
+      # detecting its defect would otherwise still print ok above.
+      - name: Run the gate's unit tests
+        if: always()
+        run: python3 -m unittest discover -s tests
+
+      # Lint and type-check the gate's own Python code. These are the only
+      # third-party tools in this workflow, and they never run the gate: the
+      # steps above still need nothing but the standard library. Every wheel is
+      # hash-locked and source builds are refused, so an upstream file replaced
+      # under the same version fails here instead of executing.
+      - name: Install the hash-locked Python quality tools
+        if: always()
+        run: >-
+          python3 -m pip install --disable-pip-version-check
+          --require-hashes --only-binary=:all:
+          -r tools/requirements-quality-ci.txt
+
+      - name: Lint the gate's Python code with Ruff
+        if: always()
+        run: ruff check tools tests
+
+      - name: Type-check the gate's Python code with mypy --strict
+        if: always()
+        run: mypy --strict tools
+
+  minimum-python:
+    # Not a required check: it reports when the tools stop running on the
+    # oldest supported Python version, without blocking a merge on it.
+    name: Gate on the minimum Python version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the minimum supported Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11.18'
+
+      # The issue-triage tests validate the label catalogue with Node.js.
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+
+      - name: Run the static gate
+        run: python3 tools/check_repo.py
+
+      - name: Verify house-style normal form
+        if: always()
+        run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
+
+      - name: Run the gate's unit tests
+        if: always()
+        run: python3 -m unittest discover -s tests

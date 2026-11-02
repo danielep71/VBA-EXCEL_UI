@@ -2,7 +2,9 @@
 """
 House-style reformatter for VBA .bas modules.
 
-Applies only mechanical, provably behaviour-neutral transformations:
+Applies a bounded set of mechanical formatting transformations. They are
+intended to be behaviour-neutral, and the named lexical rules below are
+exercised by ``--selftest``:
 
   1. Option statements hoisted above the module header block, flush left,
      and the now-empty MODULE SETTINGS banner removed.
@@ -11,26 +13,35 @@ Applies only mechanical, provably behaviour-neutral transformations:
   3. Error-handling labels renamed to the house convention.
   4. In-procedure section banners renamed to the house vocabulary.
   5. Procedure-level Dim/Const declarations aligned on the 20/19 grid.
-  6. Return types moved onto their own continuation line.
-  7. Trailing whitespace stripped, rules normalised to 79 columns, CRLF.
+  6. Trailing whitespace stripped, excess blank lines collapsed, rules
+     normalised to 79 columns, and line endings normalised to CRLF.
 
-Every transformation is line-local. None of them may alter a string literal: a
-literal is data the module evaluates at run time, so rewriting one changes
-behaviour rather than layout. Two rules follow, and --selftest enforces both
-rather than leaving them to the reader:
+The pipeline includes module-wide operations such as Option hoisting; it is not
+line-local. No transformation may alter text inside a string literal: a literal
+is data the module evaluates at run time, so rewriting one changes behaviour
+rather than layout. Two rules follow, and ``--selftest`` enforces both rather
+than leaving them to the reader:
 
   * text inside a literal is never substituted, so a label name quoted in a
     diagnostic survives a label rename;
   * a comment begins at the first apostrophe OUTSIDE a literal, so an
     apostrophe within quoted text is data and not a comment marker.
 
-VBA escapes a quote by doubling it, which the literal scanner handles by
-toggling: the pair closes the literal and reopens it, which leaves the state
-correct at every position outside the pair.
+The shared vba_lex scanner protects opaque regions. Unsupported continued
+statements and conditional blocks are preserved and reported. ASCII-only input
+matches the repository gate. A token/statement comparison rejects executable
+changes before any write. This is bounded lexical evidence, not VBA compilation.
 """
 
+import os
 import re
+import stat
 import sys
+import tempfile
+from collections.abc import Callable, Sequence
+from pathlib import Path
+
+from vba_lex import LexicalError, code_only, executable_signature, protected_lines, split_code_comment, transform_code
 
 RULE_EQ = "'" + "=" * 78
 RULE_DASH = "'" + "-" * 78
@@ -68,60 +79,26 @@ DECL_RE = re.compile(
     r"(?P<rest>\s*=\s*.+)?$"
 )
 
-# One string literal, allowing VBA's doubled-quote escape inside it.
-LITERAL_RE = re.compile(r'"(?:[^"]|"")*"')
-
 PROC_RE = re.compile(
     r"^(Public |Private |Friend )?(Sub|Function|Property (?:Get|Let|Set))\s+[A-Za-z_]\w*"
 )
 
 
-def split_lines(text):
+def split_lines(text: str) -> list[str]:
     return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
-def split_code_comment(line):
-    """Split a line at the apostrophe that begins a comment, if there is one.
-
-    An apostrophe inside a string literal is data. Treating it as a comment
-    marker is what let alignment padding be written into a literal, so every
-    transformation needing to know where a comment starts asks here instead of
-    matching an apostrophe directly.
-
-    Returns (code, comment). comment is "" when the line has none, and carries
-    its leading apostrophe when it has one.
-    """
-    in_literal = False
-    for i, ch in enumerate(line):
-        if ch == '"':
-            in_literal = not in_literal
-        elif ch == "'" and not in_literal:
-            return line[:i], line[i:]
-    return line, ""
+def sub_outside_literals(code: str, fn: Callable[[str], str]) -> str:
+    """Compatibility wrapper around the shared region scanner."""
+    return transform_code(code, fn)
 
 
-def sub_outside_literals(code, fn):
-    """Apply fn to every run of code that is not inside a string literal.
-
-    fn therefore sees only text the compiler treats as code, which is what
-    lets a substitution be written plainly instead of as a lookaround that
-    tries, and fails, to exclude quoted text.
-    """
-    out, last = [], 0
-    for m in LITERAL_RE.finditer(code):
-        out.append(fn(code[last:m.start()]))
-        out.append(m.group(0))
-        last = m.end()
-    out.append(fn(code[last:]))
-    return "".join(out)
-
-
-def is_rule(line):
+def is_rule(line: str) -> bool:
     return re.match(r"^'[-=]{5,}$", line.strip()) is not None
 
 
-def normalise_rules(lines):
-    out = []
+def normalise_rules(lines: list[str]) -> list[str]:
+    out: list[str] = []
     for ln in lines:
         s = ln.strip()
         if re.match(r"^'={5,}$", s):
@@ -133,17 +110,18 @@ def normalise_rules(lines):
     return out
 
 
-def hoist_options(lines, module_name):
+def hoist_options(lines: list[str], module_name: str) -> list[str]:
     """Move Option statements to the top and drop the MODULE SETTINGS banner."""
-    options, keep, i = [], [], 0
+    options: list[str] = []
+    keep: list[str] = []
+    i = 0
     while i < len(lines):
         ln = lines[i]
         s = ln.strip()
 
         if s.startswith("Option "):
             opt = split_code_comment(s)[0].strip()
-            if opt not in options:
-                options.append(opt)
+            options.append(opt)
             i += 1
             continue
 
@@ -162,11 +140,10 @@ def hoist_options(lines, module_name):
         keep.append(ln)
         i += 1
 
-    if not options:
-        options = ["Option Explicit"]
 
     # Attribute line stays first
-    head, body = [], keep
+    head: list[str] = []
+    body = keep
     if body and body[0].startswith("Attribute VB_Name"):
         head, body = [body[0]], body[1:]
 
@@ -179,7 +156,7 @@ def hoist_options(lines, module_name):
     return head + options + [""] + body
 
 
-def decentre_titles(lines, module_name):
+def decentre_titles(lines: list[str], module_name: str) -> list[str]:
     """Flush-left the title line that sits between a '=== rule and a '--- rule."""
     out = list(lines)
     for i in range(1, len(out) - 1):
@@ -202,8 +179,9 @@ def decentre_titles(lines, module_name):
     return out
 
 
-def rename_banners(lines):
-    out, i = [], 0
+def rename_banners(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    i = 0
     while i < len(lines):
         ln = lines[i]
         if (
@@ -227,18 +205,17 @@ def rename_banners(lines):
     return out
 
 
-def rename_label_text(text):
+def rename_label_text(text: str) -> str:
     """Rewrite GoTo/Resume targets in one run of code or comment prose."""
     for old, rep in LABEL_MAP.items():
-        text = re.sub(
-            r"\b(GoTo|Resume)\s+" + old + r"\b",
-            lambda mm, r=rep: mm.group(1) + " " + r,
-            text,
-        )
+        def renamed(mm: re.Match[str], r: str = rep) -> str:
+            return mm.group(1) + " " + r
+
+        text = re.sub(r"\b(GoTo|Resume)\s+" + old + r"\b", renamed, text)
     return text
 
 
-def rename_labels(lines):
+def rename_labels(lines: list[str]) -> list[str]:
     """Rename error-handling labels, in code and in the prose describing it.
 
     Not in string literals. A module quoting a label in a diagnostic - "use
@@ -246,25 +223,24 @@ def rename_labels(lines):
     which changed what the module printed at run time rather than where it
     jumped.
     """
-    out = []
+    out: list[str] = []
     for ln in lines:
         s = ln.strip()
-        m = re.match(r"^([A-Za-z_]\w*):\s*$", s)
+        m = re.match(r"^([A-Za-z_]\w*):", s)
         if m and m.group(1) in LABEL_MAP:
-            out.append(LABEL_MAP[m.group(1)] + ":")
-            continue
+            ln = ln.replace(m.group(1) + ":", LABEL_MAP[m.group(1)] + ":", 1)
 
         code, comment = split_code_comment(ln)
         out.append(
             sub_outside_literals(code, rename_label_text)
-            + rename_label_text(comment)
+            + (comment if comment.lower().startswith("rem") else rename_label_text(comment))
         )
     return out
 
 
-def align_declarations(lines):
+def align_declarations(lines: list[str]) -> list[str]:
     """Align Dim/Const on the 20/19 grid inside procedures only."""
-    out = []
+    out: list[str] = []
     in_proc = False
     for ln in lines:
         s = ln.strip()
@@ -312,12 +288,12 @@ def align_declarations(lines):
     return out
 
 
-def strip_trailing(lines):
+def strip_trailing(lines: list[str]) -> list[str]:
     return [ln.rstrip() for ln in lines]
 
 
-def collapse_blanks(lines):
-    out = []
+def collapse_blanks(lines: list[str]) -> list[str]:
+    out: list[str] = []
     blanks = 0
     for ln in lines:
         if not ln.strip():
@@ -330,18 +306,34 @@ def collapse_blanks(lines):
     return out
 
 
-def reformat(path, module_name):
-    return reformat_text(open(path, encoding="latin-1").read(), module_name)
+def reformat(path: str | Path, module_name: str) -> str:
+    with open(path, encoding="latin-1") as fh:
+        return reformat_text(fh.read(), module_name)
 
 
-def reformat_text(text, module_name):
-    """The whole pipeline, over text rather than a path.
-
-    Separated so the self-test can state a fixture as a few lines and assert
-    on the result, without a temporary file and without the test depending on
-    the filesystem to describe a formatting rule.
-    """
+def reformat_text(text: str, module_name: str) -> str:
+    """Validate, transform supported regions and verify executable equivalence."""
+    if not text.isascii():
+        raise LexicalError("non-ASCII VBA input; repository exports must be ASCII")
     lines = split_lines(text)
+    protected, _ = protected_lines(lines)
+    # Label renaming is module-wide. Refuse ambiguous old/new collisions or
+    # jumps across opaque blocks rather than partly renaming a control flow.
+    code = "\n".join(code_only(ln) for ln in lines)
+    for old, new in LABEL_MAP.items():
+        if re.search(r"\b" + old + r"\b", code) and re.search(r"\b" + new + r"\b", code):
+            raise LexicalError(f"ambiguous label mapping {old}/{new}")
+        if any(re.search(r"\b" + old + r"\b", code_only(lines[i])) for i in protected):
+            raise LexicalError(f"unsupported label {old} in preserved region")
+    # Opaque lines remain in place through the structural passes. Unique comment
+    # placeholders also prevent declaration alignment on continuation tails.
+    saved: dict[str, str] = {}
+    for i in protected:
+        key = f"' @formatter-preserve-{i}@"
+        if key in text:
+            raise LexicalError("reserved formatter marker in source")
+        saved[key] = lines[i]
+        lines[i] = key
     lines = strip_trailing(lines)
     lines = normalise_rules(lines)
     lines = hoist_options(lines, module_name)
@@ -349,17 +341,44 @@ def reformat_text(text, module_name):
     lines = decentre_titles(lines, module_name)
     lines = rename_labels(lines)
     lines = align_declarations(lines)
-    lines = strip_trailing(lines)
-    lines = collapse_blanks(lines)
+    lines = collapse_blanks(strip_trailing(lines))
+    lines = [saved.get(line, line) for line in lines]
     while lines and not lines[-1].strip():
         lines.pop()
-    return "\r\n".join(lines) + "\r\n"
+    result = "\r\n".join(lines) + "\r\n"
+    if executable_signature(text, LABEL_MAP) != executable_signature(result, LABEL_MAP):
+        raise LexicalError("formatting would change executable tokens or statement boundaries")
+    return result
+
+
+def atomic_write(path: str | Path, data: bytes) -> None:
+    """Replace one regular file only after a complete, flushed temporary write.
+
+    Same-directory replace is atomic; multi-file writes are not a transaction.
+    Symlinks are refused. Existing permission bits are preserved.
+    """
+    path = Path(path)
+    if path.is_symlink():
+        raise OSError("refusing to replace a symbolic link")
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+    fd, name = tempfile.mkstemp(prefix=".reformat-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(name, mode)
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
 
 
 VB_NAME_RE = re.compile(r'^Attribute\s+VB_Name\s*=\s*"([^"]+)"')
 
 
-def module_name_of(path):
+def module_name_of(path: str | Path) -> str | None:
     """Read the module name from the file's own VB_Name attribute.
 
     Taking the name from the file rather than the command line removes a class
@@ -370,18 +389,19 @@ def module_name_of(path):
         for line in fh:
             m = VB_NAME_RE.match(line.strip())
             if m:
-                return m.group(1)
+                return str(m.group(1))
     return None
 
 
-def check(paths):
+def check(paths: Sequence[str | Path]) -> int:
     """Report which files are not already in the formatter's normal form.
 
     Exit status is the point: this is what makes a formatter gate possible.
-    The formatter is idempotent, so a file that differs from its own formatted
-    output has drifted and can be corrected mechanically.
+    Normal form is required to be idempotent, and the self-test verifies that
+    property for every named fixture. A file that differs from its formatted
+    output has drifted from the normal form this tool currently defines.
     """
-    failed = []
+    failed: list[str | Path] = []
     for path in paths:
         name = module_name_of(path)
         if name is None:
@@ -389,7 +409,16 @@ def check(paths):
             failed.append(path)
             continue
 
-        expected = reformat(path, name).encode("latin-1")
+        try:
+            expected = reformat(path, name).encode("ascii")
+            _, notes = protected_lines(split_lines(Path(path).read_text(encoding="ascii")))
+            if notes:
+                print(f"note {path}: {len(notes)} conditional/continued lines preserved; "
+                      f"unsupported formatting skipped")
+        except (ValueError, OSError) as exc:
+            print(f"FAIL {path}: {exc}")
+            failed.append(path)
+            continue
         with open(path, "rb") as fh:
             actual = fh.read()
 
@@ -403,20 +432,24 @@ def check(paths):
     return 1 if failed else 0
 
 
-def write(paths):
-    """Rewrite each file in place in the formatter's normal form."""
-    for path in paths:
-        name = module_name_of(path)
-        if name is None:
-            print(f"skip {path}: no Attribute VB_Name")
-            continue
-        data = reformat(path, name).encode("latin-1")
-        with open(path, "wb") as fh:
-            fh.write(data)
-        print(f"wrote {path}")
+def write(paths: Sequence[str | Path]) -> int:
+    """Preflight every input, then atomically replace each changed file."""
+    prepared: list[tuple[str | Path, bytes]] = []
+    try:
+        for path in paths:
+            name = module_name_of(path)
+            if name is None:
+                raise LexicalError(f"{path}: no Attribute VB_Name")
+            data = reformat(path, name).encode("ascii")
+            prepared.append((path, data))
+        for path, data in prepared:
+            if Path(path).read_bytes() != data:
+                atomic_write(path, data)
+            print(f"ok   {path}")
+    except (ValueError, OSError) as exc:
+        print(f"FAIL {exc}")
+        return 1
     return 0
-
-
 
 
 # --------------------------------------------------------------------------
@@ -491,9 +524,9 @@ SELFTEST_HEAD = [
 SELFTEST_TAIL = ["End Sub"]
 
 
-def selftest():
+def selftest() -> list[str]:
     """Return a list of failure descriptions; empty means every rule holds."""
-    failures = []
+    failures: list[str] = []
 
     for label, before, after in SELFTEST_CASES:
         source = "\r\n".join(SELFTEST_HEAD + [before] + SELFTEST_TAIL) + "\r\n"
@@ -514,13 +547,15 @@ def selftest():
         if again != "\r\n".join(produced):
             failures.append(f"{label}\n      not idempotent on a second pass")
 
+    from reformat_fixtures import extended_selftest
+    failures.extend(extended_selftest())
     return failures
 
 
-def run_selftest():
+def run_selftest() -> int:
     failures = selftest()
     if not failures:
-        print(f"ok   self-test: {len(SELFTEST_CASES)} formatting rules hold")
+        print(f"ok   self-test: {len(SELFTEST_CASES)} historical rules and extended lexical/write fixtures hold")
         return 0
     print(f"FAIL self-test: {len(failures)} rule(s) broken\n")
     for f in failures:
@@ -548,7 +583,7 @@ if __name__ == "__main__":
         sys.exit(write(args[1:]))
     elif len(args) == 3:
         src, dst, name = args
-        open(dst, "wb").write(reformat(src, name).encode("latin-1"))
+        atomic_write(dst, reformat(src, name).encode("ascii"))
         print(f"wrote {dst}")
     else:
         sys.stderr.write(USAGE)

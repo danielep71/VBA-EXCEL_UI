@@ -1,0 +1,62 @@
+# Configuration for the Python quality tools that check this repository's own
+# release gate.
+#
+# There is no package here, and nothing is built or installed from this file.
+# tools/check_repo.py and the tests under tests/ use only the standard
+# library and run with a bare interpreter. Ruff and mypy are continuous-
+# integration tools only; their exact versions and wheel hashes are locked in
+# tools/requirements-quality-ci.txt.
+#
+# Python 3.11 is the oldest interpreter I support for the gate, so both tools
+# check against it: a construct that only a newer interpreter accepts would
+# otherwise pass here and break on the oldest supported one.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["tools", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes: unused imports and names, undefined names
+    "I",    # import order
+    "C90",  # McCabe complexity
+    "B",    # bugbear: likely bugs such as loop-variable capture
+    "UP",   # constructs that the minimum Python version makes obsolete
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixture modules are tables of VBA source, one case per line. Wrapping a case
+# across lines would make the source under test harder to read than the
+# finding it guards, so line length is not enforced there.
+"tools/*_fixtures.py" = ["E501"]
+
+[tool.ruff.lint.mccabe]
+# A function above this needs a reason recorded next to it as a noqa comment.
+max-complexity = 15
+
+[tool.ruff.lint.isort]
+# The gate's modules import one another by bare name from tools/, as the
+# tests do, so Ruff has to treat them as first-party.
+known-first-party = [
+    "check_repo",
+    "demo_cleanup_fixtures",
+    "gate_fixture",
+    "reformat",
+    "reformat_fixtures",
+    "repository_policy",
+    "titlebar_control_fixtures",
+    "vba_analyze",
+    "vba_analyze_fixtures",
+    "vba_api",
+    "vba_lex",
+    "wiki_badges",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "tools"
+warn_unreachable = true
