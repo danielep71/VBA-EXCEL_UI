@@ -43,6 +43,7 @@ max-complexity = 15
 known-first-party = [
     "check_repo",
     "demo_cleanup_fixtures",
+    "gate_fixture",
     "reformat",
     "reformat_fixtures",
     "repository_policy",
