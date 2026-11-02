@@ -1,0 +1,54 @@
+name: External links
+
+# Checks every external link in the tracked Markdown files with
+# tools/check_external_links.py. This is not a required check: another host
+# can be down for reasons unrelated to any change here, so a broken external
+# link is reported weekly instead of blocking a merge. The static gate keeps
+# checking links inside the repository on every pull request.
+#
+# The job reads only public URLs and has no write permission. The report is
+# written to the run summary and kept as an artifact.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-links-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  links:
+    name: Check external links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the exact SHA to inspect
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.16'
+
+      - name: Check external links
+        run: >-
+          python3 tools/check_external_links.py
+          --output test-results/external-links.json
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: external-links-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/external-links.json
+          if-no-files-found: warn
+          retention-days: 30
