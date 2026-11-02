@@ -11,7 +11,7 @@ name: Static checks
 # what is decidable from the repository text — module structure, the public
 # surface, house style, encoding, documentation state — and deliberately does
 # not pretend to replace Test_EXCEL_UI_RunReleaseCertification, which remains
-# the behavioural gate and is run by a maintainer on a real host.
+# the behavioural gate and which I run on a real host.
 #
 # The division is the point: this catches the mechanical mistakes cheaply and
 # on every push, so that manual certification time is spent on behaviour.
@@ -27,7 +27,14 @@ name: Static checks
 # mutable: v4 has moved between commits, and an upstream account compromise
 # would otherwise reach this repository silently. The trailing comment names
 # the release that SHA was, so a reader can audit the pin without resolving it
-# by hand. tools/check_repo.py enforces both.
+# by hand. tools/check_repo.py enforces both, and Dependabot proposes updates
+# to the pins (.github/dependabot.yml).
+#
+# The required job pins an exact Python release on a fixed runner image, so a
+# new interpreter or image cannot change the gate's result between two runs of
+# the same commit. A second, non-required job runs the same gate on the oldest
+# Python version the tools support (CONTRIBUTING.md), so a change that needs a
+# newer interpreter is caught before it reaches a contributor's machine.
 
 on:
   pull_request:
@@ -45,23 +52,36 @@ on:
 permissions:
   contents: read
 
+# Pull requests share one group per ref, so a newer push cancels the run it
+# supersedes. Every other run gets a group of its own (its run id): GitHub
+# replaces a pending run when a newer one joins the same group, even without
+# cancel-in-progress, and a shared group would let a later push to main,
+# release/** or a tag drop an earlier commit's queued run and its evidence.
+concurrency:
+  group: static-checks-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   static:
+    # The ruleset on main and release/** requires this job by name.
     name: Repository and module checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Check out the exact SHA under review
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.12'
+          python-version: '3.12.16'
 
       # No dependencies are installed on purpose. The gate uses only the
       # standard library, so it cannot be broken by an upstream release and
-      # runs identically on a maintainer's machine.
+      # runs identically on your machine.
       - name: Run the static gate
         run: python3 tools/check_repo.py
 
@@ -105,3 +125,32 @@ jobs:
       - name: Type-check the gate's Python code with mypy --strict
         if: always()
         run: mypy --strict tools
+
+  minimum-python:
+    # Not a required check: it reports when the tools stop running on the
+    # oldest supported Python version, without blocking a merge on it.
+    name: Gate on the minimum Python version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up the minimum supported Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11.18'
+
+      - name: Run the static gate
+        run: python3 tools/check_repo.py
+
+      - name: Verify house-style normal form
+        if: always()
+        run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
+
+      - name: Run the gate's unit tests
+        if: always()
+        run: python3 -m unittest discover -s tests
