@@ -854,6 +854,36 @@ def strip_inline_code(line: str) -> str:
     return INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line)
 
 
+def fence_opener(line: str) -> tuple[str, int] | None:
+    """Return (character, length) when the line opens a fenced code block.
+
+    A backtick fence's info string cannot contain a backtick, so a line such
+    as ```Use `code` here``` is inline code, not an opener.
+    """
+    m = FENCE_RE.match(line)
+    if not m:
+        return None
+    token = m.group(1)
+    if token[0] == "`" and "`" in line[m.end():]:
+        return None
+    return token[0], len(token)
+
+
+def closes_fence(line: str, fence: tuple[str, int]) -> bool:
+    """Return whether the line closes the block that the given fence opened.
+
+    A closing fence must use the same character, be at least as long as the
+    one that opened it, and carry nothing but spaces after it. Collapsing every
+    opener to three let a ``` line close a ```` block; accepting an info string
+    let a ```python line inside a ```markdown example close it early. Either
+    way the rest of the block was read as prose and its real closing fence as a
+    new opener, hiding the headings after it.
+    """
+    m = FENCE_RE.match(line)
+    return bool(m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1]
+                and not line[m.end():].strip())
+
+
 def markdown_outside_fences(text: str) -> Iterator[tuple[int, str]]:
     """Yield (line number, line) for every line outside a fenced code block.
 
@@ -862,23 +892,11 @@ def markdown_outside_fences(text: str) -> Iterator[tuple[int, str]]:
     fence: tuple[str, int] | None = None   # (character, opening length)
 
     for n, line in enumerate(text.split("\n"), 1):
-        m = FENCE_RE.match(line)
-        if m:
-            token = m.group(1)
-            if fence is None:
-                fence = (token[0], len(token))
-            elif (token[0] == fence[0] and len(token) >= fence[1]
-                  and not line[m.end():].strip()):
-                # A closing fence must use the same character, be at least as
-                # long as the one that opened it, and carry nothing but spaces
-                # after it. Collapsing every opener to three let a ``` line
-                # close a ```` block; accepting an info string let a ```python
-                # line inside a ```markdown example close it early. Either way
-                # the rest of the block was read as prose and its real closing
-                # fence as a new opener, hiding the headings after it.
+        if fence is not None:
+            if closes_fence(line, fence):
                 fence = None
             continue
-
+        fence = fence_opener(line)
         if fence is None:
             yield n, line
 
@@ -1625,14 +1643,12 @@ def heading_candidate_lines(text: str) -> Iterator[str]:
         if in_comment:
             in_comment = "-->" not in line
             continue
-        m = FENCE_RE.match(line)
         if fence is not None:
-            if (m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1]
-                    and not line[m.end():].strip()):
+            if closes_fence(line, fence):
                 fence = None
             continue
-        if m:
-            fence = (m.group(1)[0], len(m.group(1)))
+        fence = fence_opener(line)
+        if fence is not None:
             continue
         if HTML_COMMENT_BLOCK_START_RE.match(line):
             in_comment = "-->" not in line[line.index("<!--") + 4:]

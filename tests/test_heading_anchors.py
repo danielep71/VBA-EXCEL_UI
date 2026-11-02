@@ -41,6 +41,10 @@ class GithubAnchor(unittest.TestCase):
         self.assertEqual(anchors("~~~~", "~~~", "## Inside", "~~~~", "## After"), ["after"])
         self.assertEqual(anchors("```", "## Inside", "```   ", "## After"), ["after"])
 
+    def test_inline_code_on_its_own_line_does_not_open_a_fence(self) -> None:
+        self.assertEqual(anchors("```Use `code` here```", "## Install"), ["install"])
+        self.assertEqual(anchors("~~~ info with `ticks`", "## Inside", "~~~", "## After"), ["after"])
+
     def test_indented_code_backticks_do_not_open_a_fence(self) -> None:
         self.assertEqual(anchors("    ```", "", "## Install"), ["install"])
         self.assertEqual(anchors("\t~~~", "", "## Install"), ["install"])
