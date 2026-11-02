@@ -435,6 +435,22 @@ a new check needs a `GateTestCase` subclass in `tests/test_gate_checks.py`
 before it can merge. Like the gate, the tests use only the standard library.
 `test/` is a different directory: it holds the VBA regression suite.
 
+The Python code under `tools/` and `tests/` must also be clean under Ruff and
+`mypy --strict`, configured in `pyproject.toml` against Python 3.11, the oldest
+interpreter I support for the gate. CI installs both from
+`tools/requirements-quality-ci.txt`, where every wheel is hash-locked. To run
+them locally, install them into a virtual environment the same way:
+
+```text
+python3 -m pip install --require-hashes --only-binary=:all: -r tools/requirements-quality-ci.txt
+ruff check tools tests
+mypy --strict tools
+```
+
+A finding is fixed in the code, not silenced, unless the fix would change what
+a check accepts or rejects. The few complexity exemptions carry their reason
+beside them.
+
 ### Evidence principles
 
 - Test the behavior, not only the implementation path.

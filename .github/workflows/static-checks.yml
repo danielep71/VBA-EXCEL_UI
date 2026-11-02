@@ -85,3 +85,23 @@ jobs:
       - name: Run the gate's unit tests
         if: always()
         run: python3 -m unittest discover -s tests
+
+      # Lint and type-check the gate's own Python code. These are the only
+      # third-party tools in this workflow, and they never run the gate: the
+      # steps above still need nothing but the standard library. Every wheel is
+      # hash-locked and source builds are refused, so an upstream file replaced
+      # under the same version fails here instead of executing.
+      - name: Install the hash-locked Python quality tools
+        if: always()
+        run: >-
+          python3 -m pip install --disable-pip-version-check
+          --require-hashes --only-binary=:all:
+          -r tools/requirements-quality-ci.txt
+
+      - name: Lint the gate's Python code with Ruff
+        if: always()
+        run: ruff check tools tests
+
+      - name: Type-check the gate's Python code with mypy --strict
+        if: always()
+        run: mypy --strict tools

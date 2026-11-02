@@ -1,0 +1,17 @@
+# Dependabot proposes updates to the hash-locked Python quality tools in
+# tools/requirements-quality-ci.txt. Those tools lint and type-check the gate
+# in CI; the gate itself uses only the standard library and has nothing to
+# update. A proposal still needs my review: a tool upgrade can add findings,
+# and the pull request's own CI run shows them.
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    labels:
+      - ci
