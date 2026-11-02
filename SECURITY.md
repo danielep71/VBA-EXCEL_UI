@@ -308,6 +308,7 @@ The repository currently contains these workflows:
 ~~~text
 .github/workflows/actionlint.yml
 .github/workflows/codeql.yml
+.github/workflows/external-links.yml
 .github/workflows/static-checks.yml
 .github/workflows/sync-label-colors.yml
 .github/workflows/wiki-badges.yml
@@ -330,6 +331,9 @@ is read-only and uploads nothing; only the push and scheduled job has
 whose archive is verified by SHA-256 before it runs, with a read-only token.
 Dependabot (`.github/dependabot.yml`) proposes updates to the pinned Actions;
 nothing merges automatically.
+
+**External links** requests the public URLs already published in the tracked
+Markdown files, weekly and on demand, with a read-only token and no secrets.
 
 The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly

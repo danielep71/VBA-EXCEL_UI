@@ -621,6 +621,9 @@ measured against that baseline.
 
 ### 📖 Documentation
 
+- Added a weekly, non-blocking check of every external link in the tracked
+  Markdown files (#85). Broken links fail the scheduled run and are listed in
+  its summary; links inside the repository remain part of the required gate.
 - Corrected the pull-request template, which told reviewers the manifest gate
   proved only that exported names matched the file. It now proves parameter
   order and names, passing mode, types, `Optional` status, defaults, return
