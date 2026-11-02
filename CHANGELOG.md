@@ -914,6 +914,81 @@ The remaining v1.1.3 runtime corrections can change defective behavior while
 remaining backward-compatible. Their final compatibility assessment belongs to
 the commits that implement and certify them, not to this documentation batch.
 
+### 🔎 Review finding crosswalk
+
+Source comments, tests, this changelog and the documentation cite findings
+from three independent reviews. Each review's document is withdrawn (#40), so
+this table is the public resolution layer: every identifier cited anywhere in
+the repository maps here to exactly one issue. Identifiers without a version
+come from the v1.1.0 review, `ICR-UI-111-*` from the v1.1.1 review, and
+`ICR-UI-112-*` from the v1.1.2 review. The v1.1.2 backlog renumbered several
+v1.1.1 findings; the *Current identifier* column gives the new number. The
+static gate fails if a cited identifier is missing from this table or appears
+in it twice.
+
+Dispositions are as of 2026-11-02 and are updated with the issues.
+
+| Cited identifier | Review | Issue | Current identifier | Disposition |
+|---|---|---|---|---|
+| `ICR-UI-P1-01` | v1.1.0 | [#14](https://github.com/danielep71/VBA-EXCEL_UI/issues/14) | — | Corrected in v1.1.1 |
+| `ICR-UI-P2-01` | v1.1.0 | [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21) | — | Characterized in v1.1.1 (`docs/RIBBON_SDI_BEHAVIOR.md`); fail-closed restore continues in #23 |
+| `ICR-UI-P2-02` | v1.1.0 | [#17](https://github.com/danielep71/VBA-EXCEL_UI/issues/17) | — | Corrected in v1.1.1 |
+| `ICR-UI-P2-03` | v1.1.0 | [#16](https://github.com/danielep71/VBA-EXCEL_UI/issues/16) | — | Corrected in v1.1.1 |
+| `ICR-UI-P2-04` | v1.1.0 | [#15](https://github.com/danielep71/VBA-EXCEL_UI/issues/15) | — | Corrected in v1.1.1 |
+| `ICR-UI-P2-05` | v1.1.0 | [#20](https://github.com/danielep71/VBA-EXCEL_UI/issues/20) | — | Corrected in v1.1.1 |
+| `ICR-UI-P2-06` | v1.1.0 | [#19](https://github.com/danielep71/VBA-EXCEL_UI/issues/19) | — | Corrected in v1.1.1 |
+| `ICR-UI-P2-07` | v1.1.0 | [#18](https://github.com/danielep71/VBA-EXCEL_UI/issues/18) | — | Corrected in v1.1.1 |
+| `ICR-UI-P3-03` | v1.1.0 | [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) | — | Corrected on `release/v1.1.3`; not yet certified |
+| `ICR-UI-111-P1-01` | v1.1.1 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | `ICR-UI-112-P1-01` | Open (v1.1.3) |
+| `ICR-UI-111-P2-01` | v1.1.1 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | `ICR-UI-112-P2-02` | Reopened (v1.1.3): the v1.1.2 closure was incomplete; see the erratum below |
+| `ICR-UI-111-P2-02` | v1.1.1 | [#33](https://github.com/danielep71/VBA-EXCEL_UI/issues/33) | — | Corrected in v1.1.2 |
+| `ICR-UI-111-P2-03` | v1.1.1 | [#34](https://github.com/danielep71/VBA-EXCEL_UI/issues/34) | — | Corrected in v1.1.2 |
+| `ICR-UI-111-P2-04` | v1.1.1 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | `ICR-UI-112-P2-05` | Open (v1.1.3) |
+| `ICR-UI-111-P3-03` | v1.1.1 | [#36](https://github.com/danielep71/VBA-EXCEL_UI/issues/36) | `ICR-UI-112-P3-01` | Open (v1.1.3) |
+| `ICR-UI-111-P3-07` | v1.1.1 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | `ICR-UI-112-P3-04` | Open (v1.1.3) |
+| `ICR-UI-111-P3-08` | v1.1.1 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | `ICR-UI-112-P3-07` | Open (v1.1.3); the CI supply-chain finding, not `ICR-UI-112-P3-08` |
+| `ICR-UI-112-P1-01` | v1.1.2 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | — | Open (v1.1.3) |
+| `ICR-UI-112-P2-01` | v1.1.2 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | — | Open (v1.1.3) |
+| `ICR-UI-112-P2-02` | v1.1.2 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | — | Reopened (v1.1.3) |
+| `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Reopened (v1.1.3); bounded negative control blocked by #66 |
+| `ICR-UI-112-P2-04` | v1.1.2 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | — | Corrected on `release/v1.1.3`; not yet certified (`32baef384ee306082483ea5dcaf40abfe3224118`) |
+| `ICR-UI-112-P2-05` | v1.1.2 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | — | Open (v1.1.3) |
+| `ICR-UI-112-P2-06` | v1.1.2 | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | — | Reopened (v1.1.3) |
+| `ICR-UI-112-P2-07` | v1.1.2 | [#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46) | — | Open (v1.1.3) |
+| `ICR-UI-112-P2-08` | v1.1.2 | [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | — | Open (v1.1.3) |
+| `ICR-UI-112-P2-11` | v1.1.2 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | — | Open (v1.1.3); this crosswalk is part of it |
+| `ICR-UI-112-P2-12` | v1.1.2 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-01` | v1.1.2 | [#36](https://github.com/danielep71/VBA-EXCEL_UI/issues/36) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-02` | v1.1.2 | [#31](https://github.com/danielep71/VBA-EXCEL_UI/issues/31) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-03` | v1.1.2 | [#50](https://github.com/danielep71/VBA-EXCEL_UI/issues/50) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-04` | v1.1.2 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-05` | v1.1.2 | [#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-06` | v1.1.2 | [#28](https://github.com/danielep71/VBA-EXCEL_UI/issues/28) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-07` | v1.1.2 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-08` | v1.1.2 | [#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51) | — | Open (v1.1.3); the x86 and second-build finding, not `ICR-UI-111-P3-08` |
+| `ICR-UI-112-P3-09` | v1.1.2 | [#52](https://github.com/danielep71/VBA-EXCEL_UI/issues/52) | — | Corrected on `release/v1.1.3`; not yet certified |
+| `ICR-UI-112-P3-10` | v1.1.2 | [#29](https://github.com/danielep71/VBA-EXCEL_UI/issues/29) | — | Corrected on `release/v1.1.3`; not yet certified |
+| `ICR-UI-112-P3-11` | v1.1.2 | [#53](https://github.com/danielep71/VBA-EXCEL_UI/issues/53) | — | Open (v1.1.3) |
+
+### 📝 Erratum to v1.1.2
+
+Recorded on 2026-11-02 (#48). The v1.1.2 entry below is kept as published;
+three of its closure claims were incomplete:
+
+- **Recycled window handles** (`ICR-UI-111-P2-01`, [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32)): v1.1.2
+  invalidates a registry slot when the owned style bits contradict it, but
+  equal owned bits can still let a recycled handle reuse stale state. #32 is
+  reopened for v1.1.3; style equality is a consistency check, not identity.
+- **Self-test snapshot refusal** (`ICR-UI-112-P2-04`, [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43)): the
+  v1.1.2 self-test refused a pre-existing snapshot, but its unconditional
+  cleanup still cleared it. Corrected on `release/v1.1.3` at
+  `32baef384ee306082483ea5dcaf40abfe3224118`.
+- **Captionless baseline** (`ICR-UI-112-P2-03`, [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)): the title-bar
+  recovery fallback covers an all-zero baseline, not a non-zero baseline
+  without `WS_CAPTION`. A visible baseline requires `WS_CAPTION`; #6 is
+  reopened for v1.1.3, with its bounded negative control tracked in
+  [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66).
+
 ### ⚠️ Release-blocker status
 
 The historical v1.1.2 entry below records what that release claimed and the

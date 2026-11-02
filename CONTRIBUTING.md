@@ -716,9 +716,12 @@ tree hashes the reviews themselves cite as what they reviewed.
 Cite a finding by its identifier — `ICR-UI-*` for the v1.1.0 review,
 `ICR-UI-111-*` for v1.1.1, `ICR-UI-112-*` for v1.1.2. Never quote or attach the
 document. Issue bodies must be self-contained, because from v1.1.3 the
-identifier is the only public handle a reader has, and
-[#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) publishes the
-disposition table those identifiers resolve against.
+identifier is the only public handle a reader has. Those identifiers resolve
+against the review finding crosswalk in `CHANGELOG.md` (under
+`[Unreleased]`, tracked in
+[#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48)). When you cite an
+identifier that is not in the table yet, add its row in the same pull request:
+`check_repo.py` fails on a cited identifier without exactly one row.
 
 ### Updating a pinned Action
 

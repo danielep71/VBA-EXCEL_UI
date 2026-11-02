@@ -1260,6 +1260,78 @@ def changelog_findings(text: str, version: str | None) -> list[str]:  # noqa: C9
     return findings
 
 
+# --------------------------------------------------------------------------
+REVIEW_ID_RE = re.compile(r"\bICR-UI-(?:11[12]-)?P[0-9]-[0-9]{2}\b")
+
+CROSSWALK_HEADING = "### 🔎 Review finding crosswalk"
+
+CROSSWALK_ROW_RE = re.compile(
+    r"^\| `(?P<id>[^`]+)` \| (?P<review>v1\.1\.[0-2]) \| \[#(?P<issue>[0-9]+)\]"
+    r"\([^)]*/issues/(?P=issue)\) \| (?:`(?P<current>[^`]+)`|—) \| .+ \|$")
+
+
+def crosswalk_findings(changelog: str, cited: dict[str, list[str]]) -> list[str]:
+    """Check the review-finding crosswalk in CHANGELOG.md against the citations.
+
+    ``cited`` maps each review identifier found in a tracked file to the files
+    that cite it. Every cited identifier must appear in exactly one table row,
+    each row must name an issue, and a renumbered v1.1.1 identifier must point
+    at a row of the table.
+    """
+    start = changelog.find(CROSSWALK_HEADING + "\n")
+    if start < 0:
+        return [f"CHANGELOG.md has no '{CROSSWALK_HEADING}' section"]
+    end = len(changelog)
+    for marker in ("\n### ", "\n## "):
+        at = changelog.find(marker, start + len(CROSSWALK_HEADING))
+        if 0 <= at < end:
+            end = at
+    section = changelog[start:end]
+
+    findings: list[str] = []
+    rows: dict[str, str | None] = {}
+    for line in section.splitlines():
+        if not REVIEW_ID_RE.search(line) or not line.startswith("| `"):
+            continue
+        m = CROSSWALK_ROW_RE.match(line)
+        if not m:
+            findings.append(f"CHANGELOG.md crosswalk: malformed row: {line[:80]}")
+            continue
+        ident = m.group("id")
+        if not REVIEW_ID_RE.fullmatch(ident):
+            findings.append(f"CHANGELOG.md crosswalk: {ident!r} is not a review identifier")
+        elif ident in rows:
+            findings.append(f"CHANGELOG.md crosswalk: {ident} has more than one row")
+        else:
+            rows[ident] = m.group("current")
+
+    for ident, current in sorted(rows.items()):
+        if current is not None and current not in rows:
+            findings.append(f"CHANGELOG.md crosswalk: {ident} points at {current}, "
+                            "which has no row of its own")
+    for ident in sorted(set(cited) - set(rows)):
+        where = ", ".join(sorted(set(cited[ident]))[:3])
+        findings.append(f"{ident} is cited in {where} but has no row in the "
+                        "CHANGELOG.md review finding crosswalk")
+    return findings
+
+
+def check_review_crosswalk() -> None:
+    """Every review identifier cited in the repository resolves through one row."""
+    tracked = git_tracked_files()
+    if tracked is None:
+        return
+    cited: dict[str, list[str]] = {}
+    for rel in tracked:
+        if not rel.lower().endswith((".md", ".bas", ".cls", ".frm")):
+            continue
+        text = read(rel).decode("utf-8", errors="replace")
+        for ident in REVIEW_ID_RE.findall(text):
+            cited.setdefault(ident, []).append(rel)
+    for finding in crosswalk_findings(read("CHANGELOG.md").decode("utf-8"), cited):
+        fail("review-crosswalk", finding)
+
+
 def check_release_state() -> None:
     """Reject known stale release markers and a malformed root VERSION.
 
@@ -1816,6 +1888,7 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("workflow policy self-test", check_workflow_policy_selftest),
     ("wiki badge self-test", check_wiki_badge_selftest),
     ("release state", check_release_state),
+    ("review finding crosswalk", check_review_crosswalk),
     ("release state self-test", check_release_state_selftest),
     ("repository hygiene", check_repository_hygiene),
     ("markdown links", check_markdown_links),
