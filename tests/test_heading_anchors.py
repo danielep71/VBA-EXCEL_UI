@@ -35,6 +35,14 @@ class GithubAnchor(unittest.TestCase):
         self.assertEqual(anchor("``a `tick` b``"), "a-tick-b")
         self.assertEqual(anchor("Run `tools/check_repo.py`"), "run-toolscheck_repopy")
 
+    def test_emphasis_around_a_code_span_is_removed(self) -> None:
+        self.assertEqual(anchor("_`Notes`_"), "notes")
+        self.assertEqual(anchor("__`UI_Hide`__ member"), "ui_hide-member")
+        self.assertEqual(anchor("See _the `x` flag_"), "see-the-x-flag")
+
+    def test_underscores_inside_a_code_span_are_content(self) -> None:
+        self.assertEqual(anchor("a `_x_` b"), "a-_x_-b")
+
     def test_underscores_are_kept_but_emphasis_is_not(self) -> None:
         self.assertEqual(anchor("M_EXCEL_UI module"), "m_excel_ui-module")
         self.assertEqual(anchor("snake_case and __dunder__"), "snake_case-and-dunder")

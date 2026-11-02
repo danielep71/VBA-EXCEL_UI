@@ -125,7 +125,34 @@ class ChangelogStructure(unittest.TestCase):
         self.assertLess(check_repo.version_key("1.1.9"), check_repo.version_key("1.2.0-rc.1"))
         self.assertLess(check_repo.version_key("1.9.0"), check_repo.version_key("1.10.0"))
 
+    def test_pre_release_identifiers_follow_semver_precedence(self) -> None:
+        key = check_repo.version_key
+        self.assertLess(key("1.2.0-rc.2"), key("1.2.0-rc.10"))
+        self.assertLess(key("1.2.0-rc"), key("1.2.0-rc.1"))
+        self.assertLess(key("1.2.0-1"), key("1.2.0-alpha"))
+        self.assertLess(key("1.2.0-alpha.beta"), key("1.2.0-beta"))
+
+    def test_pre_releases_newest_first_pass(self) -> None:
+        text = changed("## [1.1.0] - 2026-08-19\n",
+                       "## [1.2.0-rc.10] - 2026-09-02\n\n- RC.\n\n"
+                       "## [1.2.0-rc.2] - 2026-09-01\n\n- RC.\n\n## [1.1.0] - 2026-08-19\n")
+        text = text.replace(f"[Unreleased]: {URL}/compare/v1.1.0...HEAD",
+                            f"[Unreleased]: {URL}/compare/v1.2.0-rc.10...HEAD\n"
+                            f"[1.2.0-rc.10]: {URL}/compare/v1.2.0-rc.2...v1.2.0-rc.10\n"
+                            f"[1.2.0-rc.2]: {URL}/compare/v1.1.0...v1.2.0-rc.2")
+        self.assertEqual(findings(text, "1.2.0-rc.10"), [])
+        swapped = text.replace("## [1.2.0-rc.10] - 2026-09-02", "## [1.2.0-rc.X] - 2026-09-02")
+        swapped = swapped.replace("## [1.2.0-rc.2] - 2026-09-01", "## [1.2.0-rc.10] - 2026-09-01")
+        swapped = swapped.replace("## [1.2.0-rc.X] - 2026-09-02", "## [1.2.0-rc.2] - 2026-09-02")
+        self.assertFinding(findings(swapped, "1.2.0-rc.2"),
+                           "[1.2.0-rc.10] follows [1.2.0-rc.2]; releases must be newest first")
+
     # Link references -----------------------------------------------------
+    def test_a_missing_unreleased_link_reference_fails(self) -> None:
+        self.assertFinding(findings(changed(f"[Unreleased]: {URL}/compare/v1.1.0...HEAD\n", "")),
+                           f"[Unreleased] has no link reference; expected "
+                           f"[Unreleased]: {URL}/compare/v1.1.0...HEAD")
+
     def test_a_release_without_a_link_reference_fails(self) -> None:
         self.assertFinding(findings(changed(f"[1.0.1]: {URL}/compare/v1.0.0...v1.0.1\n", "")),
                            "release [1.0.1] has no link reference")

@@ -1120,11 +1120,24 @@ RELEASE_HEADING_RE = re.compile(
 LINK_REFERENCE_RE = re.compile(r"^ {0,3}\[(?P<label>[^\]]+)\]:\s*(?P<url>\S+)")
 
 
-def version_key(version: str) -> tuple[int, int, int, int, str]:
-    """Order release numbers; a pre-release sorts before its release."""
+PreReleaseKey = tuple[tuple[int, int, str], ...]
+
+
+def version_key(version: str) -> tuple[int, int, int, int, PreReleaseKey]:
+    """Order release numbers by Semantic Versioning precedence.
+
+    A pre-release sorts before its release. Pre-release identifiers compare
+    one dot-separated field at a time: numeric fields numerically and below
+    alphanumeric ones, alphanumeric fields as text, and a shorter list first
+    when every shared field is equal, so rc.2 < rc.10 and rc < rc.1.
+    """
     core, _, pre = version.partition("-")
     major, minor, patch = (int(part) for part in core.split("."))
-    return major, minor, patch, 0 if pre else 1, pre
+    fields: PreReleaseKey = tuple(
+        (0, int(field), "") if field.isdigit() else (1, 0, field)
+        for field in pre.split(".")
+    ) if pre else ()
+    return major, minor, patch, 0 if pre else 1, fields
 
 
 def release_link_finding(version: str, older: str | None, url: str) -> str | None:
@@ -1214,7 +1227,10 @@ def changelog_findings(text: str, version: str | None) -> list[str]:  # noqa: C9
             findings.append(f"CHANGELOG.md:{link[0]}: {problem}")
 
     unreleased = references.get(UNRELEASED)
-    if unreleased and releases:
+    if releases and unreleased is None:
+        findings.append(f"CHANGELOG.md: [{UNRELEASED}] has no link reference; expected "
+                        f"[{UNRELEASED}]: {REPOSITORY_URL}/compare/v{releases[0][1]}...HEAD")
+    elif unreleased and releases:
         expected = f"{REPOSITORY_URL}/compare/v{releases[0][1]}...HEAD"
         if unreleased[1] != expected and unreleased[1].startswith(REPOSITORY_URL + "/"):
             findings.append(f"CHANGELOG.md:{unreleased[0]}: [{UNRELEASED}] links to {unreleased[1]}; "
@@ -1502,6 +1518,8 @@ ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+(?P<text>.*?))?(?:[ \t]+#+)?
 
 CODE_SPAN_RE = re.compile(r"(?P<ticks>`+)(?P<code>.+?)(?P=ticks)")
 
+CODE_PLACEHOLDER_RE = re.compile("\ue000([0-9]+)\ue001")
+
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 
 LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\](?:\([^)]*\)|\[[^\]]*\])")
@@ -1523,17 +1541,22 @@ def heading_plain_text(markdown: str) -> str:
     underscore emphasis delimiters removed; every other markup character is
     punctuation and is dropped when the anchor is made.
     """
-    out = []
-    last = 0
-    for span in CODE_SPAN_RE.finditer(markdown):
-        out.append(_inline_text(markdown[last:span.start()]))
+    # Each code span becomes a placeholder, so the markup around it is read
+    # as one piece: in _`Notes`_ the underscores still pair up as emphasis.
+    # The placeholders use private-use characters that no other rule touches,
+    # and the code content is put back only after the inline rules ran.
+    codes: list[str] = []
+
+    def hold(span: re.Match[str]) -> str:
         code = span.group("code")
         if len(code) > 2 and code.startswith(" ") and code.endswith(" ") and code.strip():
             code = code[1:-1]
-        out.append(code)
-        last = span.end()
-    out.append(_inline_text(markdown[last:]))
-    return "".join(out).strip()
+        codes.append(code)
+        return f"\ue000{len(codes) - 1}\ue001"
+
+    text = _inline_text(CODE_SPAN_RE.sub(hold, markdown))
+    text = CODE_PLACEHOLDER_RE.sub(lambda m: codes[int(m.group(1))], text)
+    return text.strip()
 
 
 def _inline_text(text: str) -> str:
