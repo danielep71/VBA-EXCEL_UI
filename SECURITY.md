@@ -297,6 +297,37 @@ Workflow code and configuration are security-sensitive.
 Automation that writes repository content or publishes releases must have
 explicit, least-privilege authorization.
 
+### Current automation surface
+
+The repository currently contains these workflows:
+
+~~~text
+.github/workflows/actionlint.yml
+.github/workflows/codeql.yml
+.github/workflows/external-links.yml
+.github/workflows/issue-triage.yml
+.github/workflows/labels-drift.yml
+.github/workflows/labels-sync.yml
+.github/workflows/pr-milestones.yml
+.github/workflows/rulesets-drift.yml
+.github/workflows/static-checks.yml
+~~~
+
+Actions are pinned to full commit SHAs with the release each one resolves to,
+and Dependabot (`.github/dependabot.yml`) proposes pin updates; nothing merges
+automatically. Every checkout sets `persist-credentials: false`.
+
+Three jobs hold a write permission, each confined to that job: **Sync issue
+labels** (`issues: write`, reconciling only from the default branch), **Keep
+milestones issue-only** (`pull-requests: write`, run from the base branch
+through `pull_request_target`, never checking out or running pull-request
+code), and the push and scheduled **CodeQL** job (`security-events: write`).
+CodeQL's pull-request job is read-only and uploads nothing. **Static checks**,
+**Workflow lint** (a SHA-256-verified actionlint release), **External links**,
+**Detect issue-label drift**, **Issue triage** and **Ruleset drift** are
+read-only. None of them executes Excel or VBA, uses repository secrets, or
+publishes a release artifact.
+
 ---
 
 <a id="safe-use"></a>

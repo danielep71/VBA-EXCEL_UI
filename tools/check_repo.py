@@ -14,6 +14,7 @@ their time.
 Exit status is 0 when every check passed, 1 otherwise.
 """
 
+import json
 import os
 import re
 import sys
@@ -46,6 +47,9 @@ REQUIRED_FILES = ALL_MODULES + [
     "LICENSE",
     "tools/reformat.py",
     "tools/public_api_manifest.txt",
+    "tools/check_issues.py",
+    ".github/labels.json",
+    "docs/ISSUE_LABELS.md",
 ]
 
 HOUSE_LABELS = {"Safe_Exit", "Fail_Num", "Err_Handler", "Clean_Exit", "Clean_Fail"}
@@ -382,6 +386,34 @@ def check_formatter_selftest():
 
 
 # --------------------------------------------------------------------------
+def check_label_catalogue() -> None:
+    """docs/ISSUE_LABELS.md must state the catalogue in .github/labels.json."""
+    try:
+        labels = json.loads(read(".github/labels.json").decode("utf-8"))["labels"]
+        guide = read("docs/ISSUE_LABELS.md").decode("utf-8")
+    except (OSError, ValueError, KeyError) as exc:
+        fail("label-catalogue", f"cannot read the catalogue: {exc}")
+        return
+
+    count = len(labels)
+    if f"badge/labels-{count}-" not in guide:
+        fail("label-catalogue", f"docs/ISSUE_LABELS.md badge does not show {count} labels")
+    if f"defines {count} issue labels" not in guide:
+        fail("label-catalogue", f"docs/ISSUE_LABELS.md does not state {count} labels")
+
+    rows = re.findall(r"^\| `([^`]+)` \| `#([0-9A-F]{6})` \| (.+?) \|$", guide, re.M)
+    expected = [(label["name"], label["color"], label["description"]) for label in labels]
+    if rows != expected:
+        missing = sorted(set(expected) - set(rows))
+        extra = sorted(set(rows) - set(expected))
+        detail = "; ".join(
+            [f"missing or different: {m[0]}" for m in missing]
+            + [f"not in labels.json: {e[0]}" for e in extra]
+        ) or "rows are out of order"
+        fail("label-catalogue", f"docs/ISSUE_LABELS.md catalogue table: {detail}")
+
+
+# --------------------------------------------------------------------------
 CHECKS = [
     ("required files", check_required_files),
     ("module names", check_module_names),
@@ -395,6 +427,7 @@ CHECKS = [
     ("release state", check_release_state),
     ("tracked binaries", check_no_binaries),
     ("markdown links", check_markdown_links),
+    ("label catalogue", check_label_catalogue),
     ("house-style formatter", check_formatter),
     ("formatter self-test", check_formatter_selftest),
 ]
