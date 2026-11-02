@@ -1,0 +1,81 @@
+name: Workflow lint
+
+# actionlint checks every workflow for syntax, expression, job-reference and
+# runner errors, and passes each run: block through shellcheck, which the
+# ubuntu-24.04 image provides.
+#
+# The binary is a pinned release whose archive is verified against the SHA-256
+# below before it runs, so neither a moved tag nor a replaced download can
+# change what lints the workflows.
+#
+# A lint step that silently checks nothing would pass forever. The negative
+# probe lints .github/actionlint/invalid-workflow.yml, which holds known
+# errors, and the job fails unless actionlint rejects it. The probe lives
+# outside .github/workflows/, so GitHub never runs it.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint/**'
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Pull requests share one group per ref, so a newer push cancels the run it
+# supersedes. Every other run gets a group of its own (its run id): GitHub
+# replaces a pending run when a newer one joins the same group, even without
+# cancel-in-progress, and a shared group would let a later push to main,
+# release/** or a tag drop an earlier commit's queued run and its evidence.
+concurrency:
+  group: actionlint-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+
+jobs:
+  actionlint:
+    name: Lint workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install the verified actionlint release
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "${RUNNER_TEMP}/${archive}" --directory "${RUNNER_TEMP}" actionlint
+          "${RUNNER_TEMP}/actionlint" -version
+
+      - name: Prove actionlint rejects an invalid workflow
+        run: |
+          if "${RUNNER_TEMP}/actionlint" -no-color .github/actionlint/invalid-workflow.yml; then
+            echo "::error::actionlint accepted .github/actionlint/invalid-workflow.yml, which holds known errors"
+            exit 1
+          fi
+          echo "actionlint rejected the invalid workflow, as required."
+
+      - name: Lint every workflow
+        run: |
+          "${RUNNER_TEMP}/actionlint" -color

@@ -111,6 +111,31 @@ Use only the categories needed by a release.
 - Standardized changelog governance and added an explicit Unreleased staging
   section without altering published release history.
 
+- Replaced the Markdown issue templates with issue forms (bug, enhancement,
+  documentation, private security contact) that require the exact commit, the
+  Excel build and bitness, expected and observed behaviour, and the recovery
+  result (#86). The issue labels are a versioned catalogue
+  (`.github/labels.json`, 27 labels) that **Sync issue labels** applies from
+  this branch and **Detect issue-label drift** checks daily; **Issue triage**
+  reports open issues that miss their planning metadata. The rules are in
+  [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md).
+
+### Security
+
+- Hardened continuous integration (#76, #77, #78): Actions pinned to full
+  commit SHAs, checkouts without a persisted token, job time limits, per-run
+  concurrency groups, an exact Python release with a non-required job on the
+  minimum Python 3.11, Dependabot for the pinned Actions, CodeQL for the Python
+  tooling and the workflows, and actionlint with a negative probe.
+- Versioned the repository rulesets in `.github/rulesets/` with a daily,
+  read-only **Ruleset drift** check (#87); `CONTRIBUTING.md` no longer
+  describes a direct-push route that the `main` ruleset forbids.
+
+### Documentation
+
+- Added a weekly, non-blocking check of every external link in the tracked
+  Markdown files (#85).
+
 ### Validation
 
 - Verified historical version ordering, comparison links, and policy links.

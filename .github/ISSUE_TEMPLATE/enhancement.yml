@@ -1,0 +1,117 @@
+name: "✨ Enhancement"
+description: "Propose a backward-compatible UI-control, recovery, diagnostic, demo, testing, or tooling improvement."
+title: "[Enhancement]: "
+labels: ["enhancement", "P3"]
+assignees: ["danielep71"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ✨ Enhancement
+
+        **Outcome first · Explicit target · Checkable acceptance · Compatibility stated**
+
+        Describe the result you need and how it will be proved before any implementation. State which windows the change targets, how it interacts with snapshots and recovery, and its effect on the public `UI_*` API. Triage sets the milestone and confirms the priority (`P3` by default).
+
+        > [!NOTE]
+        > No confidential workbook data, credentials, or private links.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: "🎚️ Area"
+      options:
+        - Public UI_* API
+        - Ribbon
+        - Application-level UI (status bar, formula bar, scroll bars)
+        - Window-level UI (headings, workbook tabs, gridlines)
+        - Title bar and native window frame
+        - Snapshot capture and restoration
+        - Multi-window targeting and identity (SDI)
+        - Structured diagnostics and recovery
+        - Demo workbook or builder
+        - Regression harness
+        - Tooling and CI
+        - Documentation
+        - Repository and governance
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "🎯 Problem and user"
+      description: What need is unmet, and for whom. What does the current UI_* API not support cleanly?
+    validations:
+      required: true
+
+  - type: textarea
+    id: requested
+    attributes:
+      label: "🧩 Requested behavior"
+      description: The observable result, the intended target (application, all windows, active window, workbook), the default, and the expected result or diagnostics. An illustrative call is welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: "📐 Scope and non-goals"
+      description: What is in and out of this change, including snapshot, reset, and emergency-recovery behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: "🏁 Acceptance criteria"
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: "🧪 Validation evidence required"
+      description: The regression cases, multi-window and failure-path scenarios, and Office bitness coverage that will prove the change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: "💥 Compatibility impact"
+      description: Effect on existing calls, public members, enum values, optional parameters, defaults, and supported hosts, with the suggested release (patch / minor / major). Write "None" if there is none.
+    validations:
+      required: true
+
+  - type: input
+    id: target_end_date
+    attributes:
+      label: "🗓️ Target end date (Europe/Rome)"
+      description: ISO calendar date YYYY-MM-DD, earlier than the due date of the milestone. Triage checks it against the milestone it assigns.
+      placeholder: "YYYY-MM-DD"
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: "🔗 Dependencies and blocking status"
+      description: Name each prerequisite as an issue link (#12) or on a line starting "External condition:". Write "None" if nothing blocks this work. Triage adds `blocked` only while a named prerequisite is unresolved.
+      placeholder: None
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: "☑️ Submission checks"
+      options:
+        - label: I searched open and closed issues for an equivalent proposal.
+          required: true
+        - label: I separated the required behavior from implementation preferences.
+          required: true
+        - label: This proposal contains no confidential workbook data, secrets, or private links.
+          required: true

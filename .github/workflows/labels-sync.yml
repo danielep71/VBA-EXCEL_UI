@@ -1,0 +1,89 @@
+name: Sync issue labels
+
+# Pull requests validate without write permission. Only a trusted push to the default branch
+# or an explicit manual dispatch on the default branch can reconcile the live repository
+# taxonomy; a dispatch on any other branch skips reconciliation.
+# The job runs the script's self-test, then reconciles; the script validates
+# before the first API mutation and verifies an exact post-run match.
+
+on:
+  pull_request:
+    paths:
+      - .github/labels.json
+      - .github/scripts/labels-sync.mjs
+      - .github/workflows/labels-sync.yml
+  push:
+    paths:
+      - .github/labels.json
+      - .github/scripts/labels-sync.mjs
+      - .github/workflows/labels-sync.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: labels-sync-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: Validate label manifest
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+
+      - name: Exercise validation and reconciliation paths
+        run: node .github/scripts/labels-sync.mjs --self-test
+
+      - name: Validate the canonical manifest
+        run: node .github/scripts/labels-sync.mjs --mode validate
+
+  reconcile:
+    name: Reconcile live labels
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Check out the exact SHA to apply
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+
+      - name: Exercise validation and reconciliation paths
+        run: node .github/scripts/labels-sync.mjs --self-test
+
+      - name: Reconcile and verify the versioned label catalogue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/labels-sync.mjs --mode reconcile --repository "${GITHUB_REPOSITORY}"

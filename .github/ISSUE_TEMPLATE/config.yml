@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 📚 Documentation and Wiki
-    url: https://github.com/danielep71/VBA-EXCEL_UI/wiki
-    about: Check the README and Wiki first for setup, API behavior, limitations, testing, and recovery guidance.
-  - name: 🔒 Report a security issue
-    url: https://github.com/danielep71/VBA-EXCEL_UI/security/policy
-    about: Report suspected vulnerabilities privately, not through a public issue.
+  - name: "🔒 Report a security vulnerability privately"
+    url: "https://github.com/danielep71/VBA-EXCEL_UI/security/policy"
+    about: "Do not open an issue. Report it privately, as SECURITY.md describes."
+  - name: "🏷️ Issue rules and labels"
+    url: "https://github.com/danielep71/VBA-EXCEL_UI/blob/HEAD/docs/ISSUE_LABELS.md"
+    about: "Priorities, labels, milestones, dependency status, and how issues are closed."
+  - name: "📚 Documentation and Wiki"
+    url: "https://github.com/danielep71/VBA-EXCEL_UI/wiki"
+    about: "Check the README and Wiki first for setup, API behavior, limitations, testing, and recovery guidance."

@@ -1,0 +1,161 @@
+name: "🐛 Bug report"
+description: "Report incorrect UI behavior, restoration failure, compatibility defect, or crash. Report documentation problems with the Documentation form."
+title: "[Bug]: "
+labels: ["bug", "P2"]
+assignees: ["danielep71"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🐛 Bug report
+
+        **Reproducible · Exact commit · Smallest call · Recovery result**
+
+        Name the exact commit or release, give the smallest call that reproduces the defect, and state whether Excel could be recovered. Triage sets the milestone and confirms the priority: `P2` by default, `P1` only for a confirmed release-blocking correctness or safety defect.
+
+        > [!CAUTION]
+        > Never attach workbooks with confidential, personal, client, credential, or production data; build a minimal sanitized reproduction instead. Report a vulnerability privately as `SECURITY.md` describes, never in an issue.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: "🎚️ Affected area"
+      options:
+        - Public UI_* API
+        - Ribbon
+        - Application-level UI (status bar, formula bar, scroll bars)
+        - Window-level UI (headings, workbook tabs, gridlines)
+        - Title bar and native window frame
+        - Snapshot capture and restoration
+        - Multi-window targeting and identity (SDI)
+        - Structured diagnostics and recovery
+        - Demo workbook or builder
+        - Regression harness
+        - Tooling and CI
+        - Repository and governance
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: "🎯 Defect and impact"
+      description: What is wrong, who is affected, and what the consequence is.
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: "🔖 Exact commit or release"
+      description: Full 40-character commit SHA, or release tag, that reproduces the defect. Do not write only "latest".
+      placeholder: 0123456789abcdef0123456789abcdef01234567
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: "🔁 Minimal reproduction"
+      description: The smallest exact call and deterministic steps, including the active workbook and window, the number of open Excel windows, and whether a snapshot existed.
+      placeholder: |
+        1. Open ... with ... Excel windows
+        2. Run:
+           OK = UI_SetExcelUI_WithResult(Ribbon:=UI_Hide, FailureCount:=FailureCount, FailureList:=FailureList)
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "✅ Expected behavior"
+      description: The expected UI state, returned value, or diagnostics, and the documented contract it comes from.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: "❌ Observed behavior"
+      description: Returned Boolean, FailureCount, FailureList, Immediate Window output, runtime errors, and whether the failure is repeatable.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: recovery
+    attributes:
+      label: "🆘 Recovery result"
+      description: Whether UI_ShowExcelUI or UI_ResetExcelUIToSnapshot restored the interface, and whether Excel had to be restarted.
+      value: |
+        UI_ShowExcelUI restored the interface:   Yes / No / Not tested
+        Snapshot reset restored the interface:   Yes / No / Not applicable
+        Excel restart required:                  Yes / No
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: "🖥️ Environment"
+      description: Write "N/A" for tooling defects that do not depend on the host.
+      value: |
+        Excel product, version, and build:
+        Office bitness:                   32-bit / 64-bit
+        Windows version:
+        Workbook type:                    .xlsm / .xlsb / .xlam / other
+        Excel window state:               maximized / normal / minimized
+        Open Excel windows:
+        Other add-ins or custom Ribbon XML:
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: "🏁 Acceptance criteria"
+      description: Checkable conditions for the fix, including the regression case that must pass.
+      placeholder: |
+        - [ ] ...
+        - [ ] Regression case that fails before the fix and passes after it
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: "🧪 Validation evidence required"
+      description: The checks and evidence that will prove the fix, for example `Test_EXCEL_UI_RunReleaseCertification`, a focused `Test_EXCEL_UI_*` runner, a multi-window scenario, or `python3 tools/check_repo.py`.
+    validations:
+      required: true
+
+  - type: input
+    id: target_end_date
+    attributes:
+      label: "🗓️ Target end date (Europe/Rome)"
+      description: ISO calendar date YYYY-MM-DD, earlier than the due date of the milestone. Triage checks it against the milestone it assigns.
+      placeholder: "YYYY-MM-DD"
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: "🔗 Dependencies and blocking status"
+      description: Name each prerequisite as an issue link (#12) or on a line starting "External condition:". Write "None" if nothing blocks this work. Triage adds `blocked` only while a named prerequisite is unresolved.
+      placeholder: None
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: "☑️ Submission checks"
+      options:
+        - label: I searched open and closed issues for an equivalent report.
+          required: true
+        - label: I reproduced this on the exact commit or release stated above.
+          required: true
+        - label: This report contains no confidential workbook data, secrets, private links, or vulnerability details.
+          required: true
