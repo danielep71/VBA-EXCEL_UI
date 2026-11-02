@@ -21,7 +21,8 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from datetime import date
 from types import ModuleType
 
 from vba_lex import code_only
@@ -844,22 +845,11 @@ def strip_inline_code(line: str) -> str:
     return INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line)
 
 
-def escape_findings(rel: str, text: str) -> list[str]:
-    r"""Report Markdown punctuation escaped outside code.
+def markdown_outside_fences(text: str) -> Iterator[tuple[int, str]]:
+    """Yield (line number, line) for every line outside a fenced code block.
 
-    A WYSIWYG editor escapes every character it thinks is markup, and both
-    independent review archives arrived with several hundred of them: headings
-    read `## 1\. Executive assessment`, module names read `M\_EXCEL\_UI`, and a
-    horizontal rule read `\---`. The documents rendered as literal backslashes
-    and nobody noticed for two releases.
-
-    The check is fence-aware, and deliberately does not look inside fenced
-    blocks or inline code. A backslash there is data — a Windows path, a regular
-    expression — and flagging it would make the gate wrong about correct
-    documents. This is a deliberate boundary: the rule detects characteristic
-    escaping in prose, not every possible backslash a WYSIWYG editor can emit.
+    Fence lines themselves are not yielded.
     """
-    findings: list[str] = []
     fence: tuple[str, int] | None = None   # (character, opening length)
 
     for n, line in enumerate(text.split("\n"), 1):
@@ -876,9 +866,28 @@ def escape_findings(rel: str, text: str) -> list[str]:
                 fence = None
             continue
 
-        if fence is not None:
-            continue
+        if fence is None:
+            yield n, line
 
+
+def escape_findings(rel: str, text: str) -> list[str]:
+    r"""Report Markdown punctuation escaped outside code.
+
+    A WYSIWYG editor escapes every character it thinks is markup, and both
+    independent review archives arrived with several hundred of them: headings
+    read `## 1\. Executive assessment`, module names read `M\_EXCEL\_UI`, and a
+    horizontal rule read `\---`. The documents rendered as literal backslashes
+    and nobody noticed for two releases.
+
+    The check is fence-aware, and deliberately does not look inside fenced
+    blocks or inline code. A backslash there is data — a Windows path, a regular
+    expression — and flagging it would make the gate wrong about correct
+    documents. This is a deliberate boundary: the rule detects characteristic
+    escaping in prose, not every possible backslash a WYSIWYG editor can emit.
+    """
+    findings: list[str] = []
+
+    for n, line in markdown_outside_fences(text):
         found = ESCAPE_RE.findall(strip_inline_code(line))
         if found:
             findings.append(
@@ -1092,11 +1101,138 @@ def check_private_review_denylist_selftest() -> None:
                  f"{'denied' if denied else 'allowed'}")
 
 
+REPOSITORY_URL = "https://github.com/danielep71/VBA-EXCEL_UI"
+
+UNRELEASED = "Unreleased"
+
+# A level-two heading that starts with a bracket or a version number is a
+# version section, so "## 1.2.0 - 2026-01-01" is reported as malformed rather
+# than skipped as prose.
+VERSION_SECTION_RE = re.compile(r"^##\s+(?:\[(?P<label>[^\]]*)\]|v?[0-9])")
+
+RELEASE_HEADING_RE = re.compile(
+    r"^## \[(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.\-]+)?)\]"
+    r" - (?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$")
+
+LINK_REFERENCE_RE = re.compile(r"^ {0,3}\[(?P<label>[^\]]+)\]:\s*(?P<url>\S+)")
+
+
+def version_key(version: str) -> tuple[int, int, int, int, str]:
+    """Order release numbers; a pre-release sorts before its release."""
+    core, _, pre = version.partition("-")
+    major, minor, patch = (int(part) for part in core.split("."))
+    return major, minor, patch, 0 if pre else 1, pre
+
+
+def release_link_finding(version: str, older: str | None, url: str) -> str | None:
+    """Return a problem with one release's link reference, or None.
+
+    Two forms are accepted, the two this changelog already uses: a compare
+    view from the next older release to this one, and the tag page itself,
+    which is the only form the oldest release can have.
+    """
+    tag = f"{REPOSITORY_URL}/releases/tag/v{version}"
+    if url == tag:
+        return None
+    m = re.fullmatch(re.escape(REPOSITORY_URL) + r"/compare/v(?P<base>[^/]+)\.\.\.v(?P<head>[^/]+)", url)
+    if m and m.group("head") == version and (older is None or m.group("base") == older):
+        return None
+    expected = f"{REPOSITORY_URL}/compare/v{older}...v{version}" if older else tag
+    return f"[{version}] links to {url}; expected {expected} or {tag}"
+
+
+def changelog_findings(text: str, version: str | None) -> list[str]:  # noqa: C901
+    """Return every structural problem with CHANGELOG.md, and with VERSION against it.
+
+    The changelog and VERSION are the release authority that the wiki badges
+    and release notes derive from, so a misordered heading, an impossible
+    date, a missing or foreign link, or a VERSION that names no release would
+    otherwise pass and propagate. The rules are listed one after another in a
+    single pass over the document, which is clearer than splitting them.
+    """
+    findings: list[str] = []
+    sections: list[tuple[int, str, str]] = []
+    references: dict[str, tuple[int, str]] = {}
+
+    for n, line in markdown_outside_fences(text):
+        section = VERSION_SECTION_RE.match(line)
+        if section:
+            sections.append((n, line, section.group("label") or ""))
+        reference = LINK_REFERENCE_RE.match(line)
+        if reference:
+            label = reference.group("label")
+            if label in references:
+                findings.append(f"CHANGELOG.md:{n}: link reference [{label}] is defined twice")
+            references[label] = (n, reference.group("url"))
+
+    if not sections or sections[0][1] != f"## [{UNRELEASED}]":
+        found = f"{sections[0][1]!r} at line {sections[0][0]}" if sections else "no version section"
+        findings.append(f"CHANGELOG.md: the first version section must be '## [{UNRELEASED}]'; found {found}")
+
+    releases: list[tuple[int, str, date | None]] = []
+    for n, line, label in sections:
+        if label == UNRELEASED and line == f"## [{UNRELEASED}]":
+            if n != sections[0][0]:
+                findings.append(f"CHANGELOG.md:{n}: '## [{UNRELEASED}]' must be the first version section")
+            continue
+        heading = RELEASE_HEADING_RE.match(line)
+        if not heading:
+            findings.append(f"CHANGELOG.md:{n}: malformed release heading {line!r}; "
+                            f"expected '## [X.Y.Z] - YYYY-MM-DD'")
+            continue
+        try:
+            released: date | None = date.fromisoformat(heading.group("date"))
+        except ValueError:
+            findings.append(f"CHANGELOG.md:{n}: [{heading.group('version')}] has an invalid date "
+                            f"{heading.group('date')!r}")
+            released = None
+        releases.append((n, heading.group("version"), released))
+
+    for (_, newer, newer_date), (n, older, older_date) in zip(releases, releases[1:], strict=False):
+        if version_key(older) >= version_key(newer):
+            findings.append(f"CHANGELOG.md:{n}: [{older}] follows [{newer}]; releases must be newest first")
+        elif newer_date and older_date and older_date > newer_date:
+            findings.append(f"CHANGELOG.md:{n}: [{older}] is dated {older_date}, after the newer "
+                            f"[{newer}] ({newer_date})")
+
+    for label, (n, url) in sorted(references.items(), key=lambda item: item[1][0]):
+        if not url.startswith(REPOSITORY_URL + "/"):
+            findings.append(f"CHANGELOG.md:{n}: link reference [{label}] points outside this "
+                            f"repository: {url}")
+
+    for i, (n, release, _) in enumerate(releases):
+        link = references.get(release)
+        if link is None:
+            findings.append(f"CHANGELOG.md:{n}: release [{release}] has no link reference")
+            continue
+        previous = releases[i + 1][1] if i + 1 < len(releases) else None
+        problem = release_link_finding(release, previous, link[1])
+        if problem and link[1].startswith(REPOSITORY_URL + "/"):
+            findings.append(f"CHANGELOG.md:{link[0]}: {problem}")
+
+    unreleased = references.get(UNRELEASED)
+    if unreleased and releases:
+        expected = f"{REPOSITORY_URL}/compare/v{releases[0][1]}...HEAD"
+        if unreleased[1] != expected and unreleased[1].startswith(REPOSITORY_URL + "/"):
+            findings.append(f"CHANGELOG.md:{unreleased[0]}: [{UNRELEASED}] links to {unreleased[1]}; "
+                            f"expected {expected}")
+
+    if version is not None:
+        if not releases:
+            findings.append(f"VERSION is {version}, but CHANGELOG.md has no release heading")
+        elif version != releases[0][1]:
+            findings.append(f"VERSION is {version}, but the newest release in CHANGELOG.md is "
+                            f"[{releases[0][1]}]; bump both together")
+
+    return findings
+
+
 def check_release_state() -> None:
     """Reject known stale release markers and a malformed root VERSION.
 
     This is the check that would have caught the tagged README still carrying a
-    Release Candidate badge and an unchecked release checklist.
+    Release Candidate badge and an unchecked release checklist. It also checks
+    the structure of CHANGELOG.md and that VERSION names its newest release.
     """
     readme = read("README.md").decode("utf-8")
 
@@ -1121,10 +1257,18 @@ def check_release_state() -> None:
     # into an unhandled exception that killed the run before any finding was
     # printed.
     path = os.path.join(REPO, "VERSION")
-    if not os.path.isfile(path):
-        return
+    version: str | None = None
+    if os.path.isfile(path):
+        raw = read("VERSION").decode("utf-8")
+        problems = version_findings(raw)
+        for finding in problems:
+            fail("release-state", finding)
+        # A malformed VERSION is reported above; comparing it with the
+        # changelog as well would only restate the same finding.
+        if not problems:
+            version = raw.strip()
 
-    for finding in version_findings(read("VERSION").decode("utf-8")):
+    for finding in changelog_findings(changelog, version):
         fail("release-state", finding)
 
 

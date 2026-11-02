@@ -67,6 +67,14 @@ Use `MAJOR.MINOR.PATCH` without a leading `v` inside `VERSION`.
 
 The Git tag adds the lower-case prefix: version `1.2.3` becomes annotated tag `v1.2.3`. Do not use upper-case `V`, moving tags, or a tag that differs from `VERSION`.
 
+`python3 tools/check_repo.py` enforces the changelog structure this depends on.
+`## [Unreleased]` must be the first version section. Every release heading must
+read `## [X.Y.Z] - YYYY-MM-DD` with a real calendar date, newest release first.
+Every release needs a link reference to this repository, either
+`compare/v<previous>...v<this>` or `releases/tag/v<this>`. `VERSION` must equal
+the newest release heading, so I bump `VERSION` and date the changelog section
+in the same change.
+
 ## ✅ Readiness review
 
 - The runtime, title-bar, snapshot, and facade modules match the installation manifest.

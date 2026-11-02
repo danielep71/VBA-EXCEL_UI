@@ -295,6 +295,20 @@ class ReleaseState(GateTestCase):
         self.repo.write("VERSION", "v1.1.2\n")
         self.assertFails("VERSION does not hold a release number: 'v1.1.2'")
 
+    def test_fails_when_version_is_not_the_newest_release(self) -> None:
+        self.repo.write("VERSION", "1.1.3\n")
+        self.assertFails("VERSION is 1.1.3, but the newest release in CHANGELOG.md is [1.1.2]")
+
+    def test_fails_when_unreleased_is_not_the_first_version_section(self) -> None:
+        self.repo.replace("CHANGELOG.md", "## [Unreleased]\n", "## [Unreleased] - 2026-11-01\n")
+        self.assertFails("the first version section must be '## [Unreleased]'",
+                         "malformed release heading '## [Unreleased] - 2026-11-01'")
+
+    def test_fails_on_a_release_link_to_another_repository(self) -> None:
+        self.repo.replace("CHANGELOG.md", "[1.0.1]: https://github.com/danielep71/VBA-EXCEL_UI/",
+                          "[1.0.1]: https://github.com/example/VBA-EXCEL_UI/")
+        self.assertFails("link reference [1.0.1] points outside this repository")
+
 
 class ReleaseStateSelfTest(GateTestCase):
     check = "release state self-test"
