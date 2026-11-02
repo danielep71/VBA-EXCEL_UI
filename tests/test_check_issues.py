@@ -74,6 +74,17 @@ class TargetDateTests(unittest.TestCase):
                 self.assertEqual(rules([issue(1, target=date)]), [(1, "target-date")])
         self.assertEqual(rules([issue(1, target=None)]), [(1, "target-date")])
 
+    def test_time_zone_may_carry_a_note(self) -> None:
+        body = ("## Planning\n\n- Start date: 2026-11-02 (Europe/Rome)\n"
+                "- Target date: 2026-11-13 (Europe/Rome)\n"
+                "- Target end date: 2026-11-13 (Europe/Rome; same as Target date)\n\n" + READY)
+        self.assertEqual(check_issues.target_end_date(body), "2026-11-13")
+        self.assertEqual(rules([issue(1, target=None, body=body)]), [])
+        late = body.replace("2026-11-13 (Europe/Rome; same", "2026-12-13 (Europe/Rome; same")
+        self.assertEqual(rules([issue(1, target=None, body=late)]), [(1, "milestone-due")])
+        unclosed = body.replace("same as Target date)", "same as Target date")
+        self.assertEqual(rules([issue(1, target=None, body=unclosed)]), [(1, "target-date")])
+
     def test_crlf_bodies_are_read(self) -> None:
         planned = PLANNING.format("2026-11-04").replace("\n", "\r\n") + READY.replace("\n", "\r\n")
         self.assertEqual(check_issues.target_end_date(planned), "2026-11-04")

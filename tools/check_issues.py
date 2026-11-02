@@ -32,7 +32,7 @@ TARGET_DATE_FORMS = ("bug.yml", "enhancement.yml", "documentation.yml")
 PLANNED_TARGET = re.compile(r"^[ \t]*[-*][ \t]*Target end date:[ \t]*(.*?)[ \t]*$", re.I | re.M)
 FORM_TARGET = re.compile(
     r"^###\s+(?:🗓️\s*)?Target end date(?:\s*\(Europe/Rome\))?\s*$\n\s*(.*?)[ \t]*$", re.I | re.M)
-ROME_SUFFIX = re.compile(r"\s*\(Europe/Rome\)$", re.I)
+ROME_SUFFIX = re.compile(r"\s*\(Europe/Rome(?:;[^)]*)?\)$", re.I)
 DEPENDENCY_STATUS_WORDS = re.compile(r"block|ready|waiting|depend|on[ -]hold|prerequisite", re.I)
 HEADING = re.compile(r"^#{2,3}\s+(.*)$")
 EXTERNAL = re.compile(r"^\s*(?:[-*]\s*)?external condition:\s*\S", re.I)
