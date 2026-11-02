@@ -16,13 +16,18 @@ Exit status is 0 when every check passed, 1 otherwise.
 """
 
 import fnmatch
+import hashlib
+import html
 import json
 import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
+import unicodedata
+from collections.abc import Callable, Iterable, Iterator
+from datetime import date
 from types import ModuleType
+from urllib.parse import unquote
 
 from vba_lex import code_only
 
@@ -82,6 +87,7 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/wiki_badges.py",
     "tools/repository_policy.py",
     "tools/public_api_manifest.txt",
+    "tools/binary_allowlist.txt",
     "tools/check_issues.py",
     ".github/labels.json",
     "docs/ISSUE_LABELS.md",
@@ -836,7 +842,9 @@ ESCAPABLE = r"[\\`*_{}\[\]()#+\-.!|<>&\"'~=:;,/$%^?@]"
 
 ESCAPE_RE = re.compile(r"\\(" + ESCAPABLE + ")")
 
-FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+# A fence may be indented by at most three spaces. Four or more make the line
+# indented code, whose backticks are content and open no block.
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 
@@ -844,6 +852,36 @@ INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 def strip_inline_code(line: str) -> str:
     """Blank out inline code spans, preserving length so columns stay true."""
     return INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line)
+
+
+def fence_opener(line: str) -> tuple[str, int] | None:
+    """Return (character, length) when the line opens a fenced code block.
+
+    A backtick fence's info string cannot contain a backtick, so a line such
+    as ```Use `code` here``` is inline code, not an opener.
+    """
+    m = FENCE_RE.match(line)
+    if not m:
+        return None
+    token = m.group(1)
+    if token[0] == "`" and "`" in line[m.end():]:
+        return None
+    return token[0], len(token)
+
+
+def closes_fence(line: str, fence: tuple[str, int]) -> bool:
+    """Return whether the line closes the block that the given fence opened.
+
+    A closing fence must use the same character, be at least as long as the
+    one that opened it, and carry nothing but spaces after it. Collapsing every
+    opener to three let a ``` line close a ```` block; accepting an info string
+    let a ```python line inside a ```markdown example close it early. Either
+    way the rest of the block was read as prose and its real closing fence as a
+    new opener, hiding the headings after it.
+    """
+    m = FENCE_RE.match(line)
+    return bool(m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1]
+                and not line[m.end():].strip())
 
 
 def escape_findings(rel: str, text: str) -> list[str]:
@@ -855,32 +893,15 @@ def escape_findings(rel: str, text: str) -> list[str]:
     horizontal rule read `\---`. The documents rendered as literal backslashes
     and nobody noticed for two releases.
 
-    The check is fence-aware, and deliberately does not look inside fenced
-    blocks or inline code. A backslash there is data — a Windows path, a regular
+    The check reads only rendered lines, and deliberately does not look inside
+    fenced blocks, HTML comment blocks or inline code. A backslash there is data — a Windows path, a regular
     expression — and flagging it would make the gate wrong about correct
     documents. This is a deliberate boundary: the rule detects characteristic
     escaping in prose, not every possible backslash a WYSIWYG editor can emit.
     """
     findings: list[str] = []
-    fence: tuple[str, int] | None = None   # (character, opening length)
 
-    for n, line in enumerate(text.split("\n"), 1):
-        m = FENCE_RE.match(line)
-        if m:
-            token = m.group(1)
-            if fence is None:
-                fence = (token[0], len(token))
-            elif token[0] == fence[0] and len(token) >= fence[1]:
-                # A closing fence must use the same character and be at least
-                # as long as the one that opened it. Collapsing every opener to
-                # three let a ``` line close a ```` block, and everything after
-                # it was then read as prose that happened to look fenced.
-                fence = None
-            continue
-
-        if fence is not None:
-            continue
-
+    for n, line in rendered_markdown_lines(text):
         found = ESCAPE_RE.findall(strip_inline_code(line))
         if found:
             findings.append(
@@ -1094,11 +1115,157 @@ def check_private_review_denylist_selftest() -> None:
                  f"{'denied' if denied else 'allowed'}")
 
 
+REPOSITORY_URL = "https://github.com/danielep71/VBA-EXCEL_UI"
+
+UNRELEASED = "Unreleased"
+
+# A level-two heading that starts with a bracket or a version number is a
+# version section, so "## 1.2.0 - 2026-01-01" is reported as malformed rather
+# than skipped as prose.
+VERSION_SECTION_RE = re.compile(r"^##\s+(?:\[(?P<label>[^\]]*)\]|v?[0-9])")
+
+RELEASE_HEADING_RE = re.compile(
+    r"^## \[(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.\-]+)?(?:\+[0-9A-Za-z.\-]+)?)\]"
+    r" - (?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$")
+
+LINK_REFERENCE_RE = re.compile(r"^ {0,3}\[(?P<label>[^\]]+)\]:\s*(?P<url>\S+)")
+
+
+PreReleaseKey = tuple[tuple[int, int, str], ...]
+
+
+def version_key(version: str) -> tuple[int, int, int, int, PreReleaseKey]:
+    """Order release numbers by Semantic Versioning precedence.
+
+    A pre-release sorts before its release. Pre-release identifiers compare
+    one dot-separated field at a time: numeric fields numerically and below
+    alphanumeric ones, alphanumeric fields as text, and a shorter list first
+    when every shared field is equal, so rc.2 < rc.10 and rc < rc.1. Build
+    metadata after "+" does not affect precedence.
+    """
+    core, _, pre = version.partition("+")[0].partition("-")
+    major, minor, patch = (int(part) for part in core.split("."))
+    fields: PreReleaseKey = tuple(
+        (0, int(field), "") if field.isdigit() else (1, 0, field)
+        for field in pre.split(".")
+    ) if pre else ()
+    return major, minor, patch, 0 if pre else 1, fields
+
+
+def release_link_finding(version: str, older: str | None, url: str) -> str | None:
+    """Return a problem with one release's link reference, or None.
+
+    Two forms are accepted, the two this changelog already uses: a compare
+    view from the next older release to this one, and the tag page itself,
+    which is the only form the oldest release can have.
+    """
+    tag = f"{REPOSITORY_URL}/releases/tag/v{version}"
+    if url == tag:
+        return None
+    m = re.fullmatch(re.escape(REPOSITORY_URL) + r"/compare/v(?P<base>[^/]+)\.\.\.v(?P<head>[^/]+)", url)
+    if m and m.group("head") == version and (older is None or m.group("base") == older):
+        return None
+    expected = f"{REPOSITORY_URL}/compare/v{older}...v{version}" if older else tag
+    return f"[{version}] links to {url}; expected {expected} or {tag}"
+
+
+def changelog_findings(text: str, version: str | None) -> list[str]:  # noqa: C901
+    """Return every structural problem with CHANGELOG.md, and with VERSION against it.
+
+    The changelog and VERSION are the release authority that the wiki badges
+    and release notes derive from, so a misordered heading, an impossible
+    date, a missing or foreign link, or a VERSION that names no release would
+    otherwise pass and propagate. The rules are listed one after another in a
+    single pass over the document, which is clearer than splitting them.
+    """
+    findings: list[str] = []
+    sections: list[tuple[int, str, str]] = []
+    references: dict[str, tuple[int, str]] = {}
+
+    # Fenced examples and HTML comment blocks are not rendered, so a release
+    # heading or link reference inside one is not part of the changelog.
+    for n, line in rendered_markdown_lines(text):
+        section = VERSION_SECTION_RE.match(line)
+        if section:
+            sections.append((n, line, section.group("label") or ""))
+        reference = LINK_REFERENCE_RE.match(line)
+        if reference:
+            label = reference.group("label")
+            if label in references:
+                findings.append(f"CHANGELOG.md:{n}: link reference [{label}] is defined twice")
+            references[label] = (n, reference.group("url"))
+
+    if not sections or sections[0][1] != f"## [{UNRELEASED}]":
+        found = f"{sections[0][1]!r} at line {sections[0][0]}" if sections else "no version section"
+        findings.append(f"CHANGELOG.md: the first version section must be '## [{UNRELEASED}]'; found {found}")
+
+    releases: list[tuple[int, str, date | None]] = []
+    for n, line, label in sections:
+        if label == UNRELEASED and line == f"## [{UNRELEASED}]":
+            if n != sections[0][0]:
+                findings.append(f"CHANGELOG.md:{n}: '## [{UNRELEASED}]' must be the first version section")
+            continue
+        heading = RELEASE_HEADING_RE.match(line)
+        if not heading:
+            findings.append(f"CHANGELOG.md:{n}: malformed release heading {line!r}; "
+                            f"expected '## [X.Y.Z] - YYYY-MM-DD'")
+            continue
+        try:
+            released: date | None = date.fromisoformat(heading.group("date"))
+        except ValueError:
+            findings.append(f"CHANGELOG.md:{n}: [{heading.group('version')}] has an invalid date "
+                            f"{heading.group('date')!r}")
+            released = None
+        releases.append((n, heading.group("version"), released))
+
+    for (_, newer, newer_date), (n, older, older_date) in zip(releases, releases[1:], strict=False):
+        if version_key(older) >= version_key(newer):
+            findings.append(f"CHANGELOG.md:{n}: [{older}] follows [{newer}]; releases must be newest first")
+        elif newer_date and older_date and older_date > newer_date:
+            findings.append(f"CHANGELOG.md:{n}: [{older}] is dated {older_date}, after the newer "
+                            f"[{newer}] ({newer_date})")
+
+    for label, (n, url) in sorted(references.items(), key=lambda item: item[1][0]):
+        if not url.startswith(REPOSITORY_URL + "/"):
+            findings.append(f"CHANGELOG.md:{n}: link reference [{label}] points outside this "
+                            f"repository: {url}")
+
+    for i, (n, release, _) in enumerate(releases):
+        link = references.get(release)
+        if link is None:
+            findings.append(f"CHANGELOG.md:{n}: release [{release}] has no link reference")
+            continue
+        previous = releases[i + 1][1] if i + 1 < len(releases) else None
+        problem = release_link_finding(release, previous, link[1])
+        if problem and link[1].startswith(REPOSITORY_URL + "/"):
+            findings.append(f"CHANGELOG.md:{link[0]}: {problem}")
+
+    unreleased = references.get(UNRELEASED)
+    if releases and unreleased is None:
+        findings.append(f"CHANGELOG.md: [{UNRELEASED}] has no link reference; expected "
+                        f"[{UNRELEASED}]: {REPOSITORY_URL}/compare/v{releases[0][1]}...HEAD")
+    elif unreleased and releases:
+        expected = f"{REPOSITORY_URL}/compare/v{releases[0][1]}...HEAD"
+        if unreleased[1] != expected and unreleased[1].startswith(REPOSITORY_URL + "/"):
+            findings.append(f"CHANGELOG.md:{unreleased[0]}: [{UNRELEASED}] links to {unreleased[1]}; "
+                            f"expected {expected}")
+
+    if version is not None:
+        if not releases:
+            findings.append(f"VERSION is {version}, but CHANGELOG.md has no release heading")
+        elif version != releases[0][1]:
+            findings.append(f"VERSION is {version}, but the newest release in CHANGELOG.md is "
+                            f"[{releases[0][1]}]; bump both together")
+
+    return findings
+
+
 def check_release_state() -> None:
     """Reject known stale release markers and a malformed root VERSION.
 
     This is the check that would have caught the tagged README still carrying a
-    Release Candidate badge and an unchecked release checklist.
+    Release Candidate badge and an unchecked release checklist. It also checks
+    the structure of CHANGELOG.md and that VERSION names its newest release.
     """
     readme = read("README.md").decode("utf-8")
 
@@ -1123,10 +1290,18 @@ def check_release_state() -> None:
     # into an unhandled exception that killed the run before any finding was
     # printed.
     path = os.path.join(REPO, "VERSION")
-    if not os.path.isfile(path):
-        return
+    version: str | None = None
+    if os.path.isfile(path):
+        raw = read("VERSION").decode("utf-8")
+        problems = version_findings(raw)
+        for finding in problems:
+            fail("release-state", finding)
+        # A malformed VERSION is reported above; comparing it with the
+        # changelog as well would only restate the same finding.
+        if not problems:
+            version = raw.strip()
 
-    for finding in version_findings(read("VERSION").decode("utf-8")):
+    for finding in changelog_findings(changelog, version):
         fail("release-state", finding)
 
 
@@ -1229,8 +1404,273 @@ def check_repository_hygiene() -> None:
             fail("repository-hygiene",
                  f"{rel}: tracked file is hidden by the current .gitignore")
 
+    # The name denylist above gives the more specific message, so a path it
+    # already rejected is not reported a second time as an unapproved binary.
+    for finding in tracked_binary_findings([r for r in tracked if r not in forbidden_paths]):
+        fail("repository-hygiene", finding)
+
+
+# Binaries are allowed in exactly two ways. Anything under an approved
+# directory is documentation media by rule. Anything else must be listed in
+# BINARY_ALLOWLIST with the SHA-256 of its exact content, so replacing it later
+# fails the gate until the allowlist is updated in the same, reviewed change.
+APPROVED_BINARY_DIRECTORIES = ("images/",)
+
+BINARY_ALLOWLIST = "tools/binary_allowlist.txt"
+
+ALLOWLIST_LINE_RE = re.compile(r"^(?P<sha>[0-9a-f]{64})\s+(?P<path>\S(?:.*\S)?)\s*$")
+
+
+def git_text_attributes(paths: list[str]) -> dict[str, str] | None:
+    """Return the value of Git's text attribute for each path, or fail closed."""
+    if not paths:
+        return {}
+
+    payload = b"\0".join(os.fsencode(path) for path in paths) + b"\0"
+    try:
+        result = subprocess.run(
+            ["git", "-C", REPO, "check-attr", "-z", "--stdin", "text"],
+            input=payload,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        fail("repository-hygiene", f"cannot evaluate .gitattributes: {exc}")
+        return None
+
+    if result.returncode:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        fail("repository-hygiene",
+             f"git check-attr failed ({result.returncode}): {detail}")
+        return None
+
+    fields = [os.fsdecode(f) for f in result.stdout.split(b"\0")]
+    return {fields[i]: fields[i + 2] for i in range(0, len(fields) - 2, 3)}
+
+
+def binary_reason(attribute: str, data: bytes) -> str | None:
+    """Return why a file is binary, or None when it is text.
+
+    Either signal is enough. The attribute catches a file Git is told to treat
+    as binary whatever it contains; the NUL byte catches binary content under
+    a text extension, such as a workbook renamed notes.txt or a damaged module.
+    """
+    if attribute == "unset":
+        return "Git treats it as binary (text attribute unset)"
+    if b"\0" in data:
+        return "its content contains a NUL byte"
+    return None
+
+
+def read_binary_allowlist() -> tuple[dict[str, str], list[str]]:
+    """Return ({path: sha256}, findings) from BINARY_ALLOWLIST.
+
+    A missing allowlist is an empty one; required-files reports its absence.
+    """
+    entries: dict[str, str] = {}
+    findings: list[str] = []
+    if not os.path.isfile(os.path.join(REPO, BINARY_ALLOWLIST)):
+        return entries, findings
+
+    for n, raw in enumerate(read(BINARY_ALLOWLIST).decode("utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = ALLOWLIST_LINE_RE.match(line)
+        if not m:
+            findings.append(f"{BINARY_ALLOWLIST}:{n}: expected '<sha256>  <path>', got {line!r}")
+        elif m.group("path") in entries:
+            findings.append(f"{BINARY_ALLOWLIST}:{n}: {m.group('path')} is listed twice")
+        else:
+            entries[m.group("path")] = m.group("sha")
+    return entries, findings
+
+
+def tracked_binary_findings(tracked: list[str]) -> list[str]:
+    """Report every tracked binary that is neither in an approved directory nor allowlisted."""
+    attributes = git_text_attributes(tracked)
+    if attributes is None:
+        return []
+
+    allowlist, findings = read_binary_allowlist()
+
+    for rel in tracked:
+        path = os.path.join(REPO, rel)
+        if not os.path.isfile(path):
+            continue                 # deleted in the working tree; nothing to classify
+        data = read(rel)
+        reason = binary_reason(attributes.get(rel, "unspecified"), data)
+        if reason is None or rel.startswith(APPROVED_BINARY_DIRECTORIES):
+            continue
+        expected = allowlist.get(rel)
+        if expected is None:
+            findings.append(
+                f"{rel}: binary file outside {', '.join(APPROVED_BINARY_DIRECTORIES)} "
+                f"({reason}); move it there or list it with its SHA-256 in "
+                f"{BINARY_ALLOWLIST}")
+            continue
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != expected:
+            findings.append(
+                f"{rel}: allowlisted binary has changed (SHA-256 {actual}, "
+                f"{BINARY_ALLOWLIST} records {expected}); review the new content "
+                f"and update the allowlist in the same change")
+
+    tracked_set = set(tracked)
+    for rel in sorted(allowlist):
+        if rel not in tracked_set:
+            findings.append(f"{BINARY_ALLOWLIST}: {rel} is listed but not tracked")
+
+    return findings
+
 
 # --------------------------------------------------------------------------
+# ATX headings only: up to three spaces of indentation, one to six hashes, and
+# then a space or the end of the line. An optional closing run of hashes is not
+# part of the heading text.
+ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+(?P<text>.*?))?(?:[ \t]+#+)?[ \t]*$")
+
+CODE_SPAN_RE = re.compile(r"(?P<ticks>`+)(?P<code>.+?)(?P=ticks)")
+
+CODE_PLACEHOLDER_RE = re.compile("\ue000([0-9]+)\ue001")
+
+IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+
+LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\](?:\([^)]*\)|\[[^\]]*\])")
+
+AUTOLINK_RE = re.compile(r"<(?P<url>[A-Za-z][A-Za-z0-9+.\-]*:[^\s<>]*)>")
+
+HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>]*>")
+
+# An underscore run opens emphasis only where it is not inside a word, so
+# UI_SetExcelUI keeps its underscore while _note_ loses both.
+UNDERSCORE_EMPHASIS_RE = re.compile(r"(?<![\w\\])(?P<run>_{1,3})(?=\S)(?P<body>.+?)(?<=\S)(?P=run)(?!\w)")
+
+
+def heading_plain_text(markdown: str) -> str:
+    """Return a heading's text as GitHub renders it, without inline Markdown.
+
+    Code spans keep their content and lose their backticks. Images render no
+    text. Links keep their text. HTML tags are dropped, entities decoded, and
+    underscore emphasis delimiters removed; every other markup character is
+    punctuation and is dropped when the anchor is made.
+    """
+    # Each code span becomes a placeholder, so the markup around it is read
+    # as one piece: in _`Notes`_ the underscores still pair up as emphasis.
+    # The placeholders use private-use characters that no other rule touches,
+    # and the code content is put back only after the inline rules ran.
+    codes: list[str] = []
+
+    def hold(span: re.Match[str]) -> str:
+        code = span.group("code")
+        if len(code) > 2 and code.startswith(" ") and code.endswith(" ") and code.strip():
+            code = code[1:-1]
+        codes.append(code)
+        return f"\ue000{len(codes) - 1}\ue001"
+
+    text = _inline_text(CODE_SPAN_RE.sub(hold, markdown))
+    text = CODE_PLACEHOLDER_RE.sub(lambda m: codes[int(m.group(1))], text)
+    return text.strip()
+
+
+def _inline_text(text: str) -> str:
+    text = IMAGE_RE.sub("", text)
+    text = LINK_RE.sub(lambda m: m.group("text"), text)
+    text = AUTOLINK_RE.sub(lambda m: m.group("url"), text)
+    text = INLINE_HTML_COMMENT_RE.sub("", text)
+    text = HTML_TAG_RE.sub("", text)
+    previous = None
+    while previous != text:
+        previous = text
+        text = UNDERSCORE_EMPHASIS_RE.sub(lambda m: m.group("body"), text)
+    return html.unescape(text)
+
+
+def github_anchor(heading: str) -> str:
+    """Return the anchor GitHub generates for one heading, before de-duplication.
+
+    Lowercase the rendered text, keep Unicode letters, marks and decimal
+    digits, the underscore and other connector punctuation, hyphens and
+    spaces, drop everything else (emoji included), and turn each space into a
+    hyphen. Nothing is collapsed, so "Café — notes" becomes "café--notes".
+    """
+    kept = []
+    for ch in heading_plain_text(heading).lower():
+        category = unicodedata.category(ch)
+        if ch in " -" or category[0] in "LM" or category in ("Nd", "Pc"):
+            kept.append(ch)
+    return "".join(kept).replace(" ", "-")
+
+
+HTML_COMMENT_BLOCK_START_RE = re.compile(r"^ {0,3}<!--")
+
+INLINE_HTML_COMMENT_RE = re.compile(r"<!--.*?-->")
+
+
+def rendered_markdown_lines(text: str) -> Iterator[tuple[int, str]]:
+    """Yield (line number, line) for each line GitHub renders as Markdown.
+
+    Read in one pass over fences and comments, so it serves both the heading
+    anchors and the changelog's release headings and link references.
+
+    Two kinds of block hide their lines, and each one's delimiters are plain
+    content inside the other:
+
+    - a fenced code block, from its opening fence to a closing fence;
+    - an HTML comment block, which starts on a line that begins with <!--
+      (after at most three spaces) and ends on the line that contains -->.
+
+    A comment that opens anywhere else on a line is inline HTML. It belongs to
+    that line only and hides nothing below it, even if it is never closed,
+    because the next line's block structure is read first. So <!-- inside a
+    code span, or after other text, never changes the state.
+    """
+    fence: tuple[str, int] | None = None
+    in_comment = False
+    for n, line in enumerate(text.split("\n"), 1):
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        if fence is not None:
+            if closes_fence(line, fence):
+                fence = None
+            continue
+        fence = fence_opener(line)
+        if fence is not None:
+            continue
+        if HTML_COMMENT_BLOCK_START_RE.match(line):
+            in_comment = "-->" not in line[line.index("<!--") + 4:]
+            continue
+        yield n, line
+
+
+def heading_anchors(text: str) -> list[str]:
+    """Return every heading anchor in a document, in order, as GitHub assigns them.
+
+    A repeated anchor gets -1, -2 and so on, and a suffixed anchor that
+    collides with one already taken is suffixed again, so every anchor in the
+    document is unique and each link resolves to one heading. Headings inside
+    fenced code blocks or HTML comment blocks are not headings: GitHub renders
+    neither, so they must neither create an anchor nor shift the numbering of
+    a visible duplicate.
+    """
+    anchors: list[str] = []
+    counts: dict[str, int] = {}
+    taken: set[str] = set()
+    for _, line in rendered_markdown_lines(text):
+        m = ATX_HEADING_RE.match(line)
+        if not m:
+            continue
+        base = github_anchor(m.group("text") or "")
+        anchor = base
+        while anchor in taken:
+            counts[base] = counts.get(base, 0) + 1
+            anchor = f"{base}-{counts[base]}"
+        taken.add(anchor)
+        anchors.append(anchor)
+    return anchors
+
+
 def check_markdown_links() -> None:
     md_files: list[str] = []
     for root, dirs, files in os.walk(REPO):
@@ -1246,14 +1686,12 @@ def check_markdown_links() -> None:
         base = os.path.dirname(os.path.join(REPO, rel))
 
         anchors = set(re.findall(r'<a id="([^"]+)"></a>', text))
-        for heading in re.findall(r"^#{1,6}\s+(.+)$", text, re.M):
-            slug = re.sub(r"[^a-z0-9 -]", "", heading.lower()).replace(" ", "-")
-            anchors.add(slug)
+        anchors.update(heading_anchors(text))
 
         for target in re.findall(r"\]\((?!https?:)([^)]+)\)", text):
             path_part, _, anchor = target.partition("#")
             if not path_part:
-                if anchor and anchor not in anchors:
+                if anchor and unquote(anchor) not in anchors:
                     fail("markdown-links", f"{rel}: broken internal anchor #{anchor}")
                 continue
             if not os.path.exists(os.path.normpath(os.path.join(base, path_part))):

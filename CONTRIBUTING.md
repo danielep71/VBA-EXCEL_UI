@@ -100,10 +100,19 @@ the review artifact.
 | `test/` | Regression and release-certification source |
 | `demo/` | Demo and reproducible host setup |
 | `tools/` | Repository/static validation |
+| `tests/` | Unit tests for the static validation in `tools/` |
 | `docs/` | Architecture, API, recovery, and release guidance |
+| `images/` | Documentation images, the only approved home for binary files |
 
 The README and current tree are authoritative if a listed optional directory is
 not present.
+
+Binary files belong under `images/`. Anywhere else, `tools/check_repo.py`
+rejects a tracked file that Git treats as binary (its `text` attribute is unset
+in `.gitattributes`) or whose content contains a NUL byte, unless
+`tools/binary_allowlist.txt` lists it with the SHA-256 of its exact content. The
+digest makes the approval specific to that content: replacing the file fails
+the gate until the entry is updated in the same change.
 
 ---
 
