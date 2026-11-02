@@ -865,11 +865,15 @@ def markdown_outside_fences(text: str) -> Iterator[tuple[int, str]]:
             token = m.group(1)
             if fence is None:
                 fence = (token[0], len(token))
-            elif token[0] == fence[0] and len(token) >= fence[1]:
-                # A closing fence must use the same character and be at least
-                # as long as the one that opened it. Collapsing every opener to
-                # three let a ``` line close a ```` block, and everything after
-                # it was then read as prose that happened to look fenced.
+            elif (token[0] == fence[0] and len(token) >= fence[1]
+                  and not line[m.end():].strip()):
+                # A closing fence must use the same character, be at least as
+                # long as the one that opened it, and carry nothing but spaces
+                # after it. Collapsing every opener to three let a ``` line
+                # close a ```` block; accepting an info string let a ```python
+                # line inside a ```markdown example close it early. Either way
+                # the rest of the block was read as prose and its real closing
+                # fence as a new opener, hiding the headings after it.
                 fence = None
             continue
 

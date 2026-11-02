@@ -35,6 +35,12 @@ class GithubAnchor(unittest.TestCase):
         self.assertEqual(anchor("``a `tick` b``"), "a-tick-b")
         self.assertEqual(anchor("Run `tools/check_repo.py`"), "run-toolscheck_repopy")
 
+    def test_a_fence_with_an_info_string_does_not_close_a_block(self) -> None:
+        self.assertEqual(anchors("```markdown", "```python", "## Inside", "```", "# Install"),
+                         ["install"])
+        self.assertEqual(anchors("~~~~", "~~~", "## Inside", "~~~~", "## After"), ["after"])
+        self.assertEqual(anchors("```", "## Inside", "```   ", "## After"), ["after"])
+
     def test_emphasis_around_a_code_span_is_removed(self) -> None:
         self.assertEqual(anchor("_`Notes`_"), "notes")
         self.assertEqual(anchor("__`UI_Hide`__ member"), "ui_hide-member")
