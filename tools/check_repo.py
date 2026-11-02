@@ -16,6 +16,7 @@ Exit status is 0 when every check passed, 1 otherwise.
 """
 
 import fnmatch
+import hashlib
 import os
 import re
 import subprocess
@@ -81,6 +82,7 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/wiki_badges.py",
     "tools/repository_policy.py",
     "tools/public_api_manifest.txt",
+    "tools/binary_allowlist.txt",
 ]
 
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?$")
@@ -1224,6 +1226,125 @@ def check_repository_hygiene() -> None:
         if rel not in forbidden_paths:
             fail("repository-hygiene",
                  f"{rel}: tracked file is hidden by the current .gitignore")
+
+    # The name denylist above gives the more specific message, so a path it
+    # already rejected is not reported a second time as an unapproved binary.
+    for finding in tracked_binary_findings([r for r in tracked if r not in forbidden_paths]):
+        fail("repository-hygiene", finding)
+
+
+# Binaries are allowed in exactly two ways. Anything under an approved
+# directory is documentation media by rule. Anything else must be listed in
+# BINARY_ALLOWLIST with the SHA-256 of its exact content, so replacing it later
+# fails the gate until the allowlist is updated in the same, reviewed change.
+APPROVED_BINARY_DIRECTORIES = ("images/",)
+
+BINARY_ALLOWLIST = "tools/binary_allowlist.txt"
+
+ALLOWLIST_LINE_RE = re.compile(r"^(?P<sha>[0-9a-f]{64})\s+(?P<path>\S(?:.*\S)?)\s*$")
+
+
+def git_text_attributes(paths: list[str]) -> dict[str, str] | None:
+    """Return the value of Git's text attribute for each path, or fail closed."""
+    if not paths:
+        return {}
+
+    payload = b"\0".join(os.fsencode(path) for path in paths) + b"\0"
+    try:
+        result = subprocess.run(
+            ["git", "-C", REPO, "check-attr", "-z", "--stdin", "text"],
+            input=payload,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        fail("repository-hygiene", f"cannot evaluate .gitattributes: {exc}")
+        return None
+
+    if result.returncode:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        fail("repository-hygiene",
+             f"git check-attr failed ({result.returncode}): {detail}")
+        return None
+
+    fields = [os.fsdecode(f) for f in result.stdout.split(b"\0")]
+    return {fields[i]: fields[i + 2] for i in range(0, len(fields) - 2, 3)}
+
+
+def binary_reason(attribute: str, data: bytes) -> str | None:
+    """Return why a file is binary, or None when it is text.
+
+    Either signal is enough. The attribute catches a file Git is told to treat
+    as binary whatever it contains; the NUL byte catches binary content under
+    a text extension, such as a workbook renamed notes.txt or a damaged module.
+    """
+    if attribute == "unset":
+        return "Git treats it as binary (text attribute unset)"
+    if b"\0" in data:
+        return "its content contains a NUL byte"
+    return None
+
+
+def read_binary_allowlist() -> tuple[dict[str, str], list[str]]:
+    """Return ({path: sha256}, findings) from BINARY_ALLOWLIST.
+
+    A missing allowlist is an empty one; required-files reports its absence.
+    """
+    entries: dict[str, str] = {}
+    findings: list[str] = []
+    if not os.path.isfile(os.path.join(REPO, BINARY_ALLOWLIST)):
+        return entries, findings
+
+    for n, raw in enumerate(read(BINARY_ALLOWLIST).decode("utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = ALLOWLIST_LINE_RE.match(line)
+        if not m:
+            findings.append(f"{BINARY_ALLOWLIST}:{n}: expected '<sha256>  <path>', got {line!r}")
+        elif m.group("path") in entries:
+            findings.append(f"{BINARY_ALLOWLIST}:{n}: {m.group('path')} is listed twice")
+        else:
+            entries[m.group("path")] = m.group("sha")
+    return entries, findings
+
+
+def tracked_binary_findings(tracked: list[str]) -> list[str]:
+    """Report every tracked binary that is neither in an approved directory nor allowlisted."""
+    attributes = git_text_attributes(tracked)
+    if attributes is None:
+        return []
+
+    allowlist, findings = read_binary_allowlist()
+
+    for rel in tracked:
+        path = os.path.join(REPO, rel)
+        if not os.path.isfile(path):
+            continue                 # deleted in the working tree; nothing to classify
+        data = read(rel)
+        reason = binary_reason(attributes.get(rel, "unspecified"), data)
+        if reason is None or rel.startswith(APPROVED_BINARY_DIRECTORIES):
+            continue
+        expected = allowlist.get(rel)
+        if expected is None:
+            findings.append(
+                f"{rel}: binary file outside {', '.join(APPROVED_BINARY_DIRECTORIES)} "
+                f"({reason}); move it there or list it with its SHA-256 in "
+                f"{BINARY_ALLOWLIST}")
+            continue
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != expected:
+            findings.append(
+                f"{rel}: allowlisted binary has changed (SHA-256 {actual}, "
+                f"{BINARY_ALLOWLIST} records {expected}); review the new content "
+                f"and update the allowlist in the same change")
+
+    tracked_set = set(tracked)
+    for rel in sorted(allowlist):
+        if rel not in tracked_set:
+            findings.append(f"{BINARY_ALLOWLIST}: {rel} is listed but not tracked")
+
+    return findings
 
 
 # --------------------------------------------------------------------------

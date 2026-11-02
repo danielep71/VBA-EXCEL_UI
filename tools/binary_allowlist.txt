@@ -1,0 +1,16 @@
+# Tracked binary files allowed outside images/.
+#
+# tools/check_repo.py treats a tracked file as binary when Git reports its
+# text attribute unset (see .gitattributes) or its content contains a NUL
+# byte. Such a file passes only under images/, or when it is listed here with
+# the SHA-256 of its exact content:
+#
+#   <sha256>  <path relative to the repository root>
+#
+# The digest is what makes this an approval rather than a name list: replacing
+# the file changes its digest, and the gate fails until this entry is updated
+# in the same, reviewed change. Compute it with:
+#
+#   python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" <path>
+#
+# I keep this list empty unless a binary genuinely belongs outside images/.
