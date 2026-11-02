@@ -39,4 +39,4 @@ Describe the finding with its file and line, the evidence, why it matters, and t
 
 ## Validation
 
-Before pushing, run `python tools/check_repo.py` and fix every finding. Keep VBA modules in house-style normal form with `python tools/reformat.py --write`, and keep `tools/public_api_manifest.txt` in sync with the public `UI_*` API.
+Before pushing, run `python tools/check_repo.py` and fix every finding. Keep VBA modules in house-style normal form with `python tools/reformat.py --write <file.bas>`, and keep `tools/public_api_manifest.txt` in sync with the public `UI_*` API.
