@@ -308,8 +308,13 @@ The repository currently contains these workflows:
 ~~~text
 .github/workflows/actionlint.yml
 .github/workflows/codeql.yml
+.github/workflows/external-links.yml
+.github/workflows/issue-triage.yml
+.github/workflows/labels-drift.yml
+.github/workflows/labels-sync.yml
+.github/workflows/pr-milestones.yml
+.github/workflows/rulesets-drift.yml
 .github/workflows/static-checks.yml
-.github/workflows/sync-label-colors.yml
 .github/workflows/wiki-badges.yml
 ~~~
 
@@ -331,6 +336,20 @@ whose archive is verified by SHA-256 before it runs, with a read-only token.
 Dependabot (`.github/dependabot.yml`) proposes updates to the pinned Actions;
 nothing merges automatically.
 
+The issue workflows are documented in
+[docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md). Only **Sync issue labels** has
+`issues: write`, and it reconciles labels only from the default branch; only
+**Keep milestones issue-only** has `pull-requests: write`, runs from the base
+branch through `pull_request_target`, and never checks out or runs
+pull-request code. **Detect issue-label drift** and **Issue triage** are
+read-only.
+
+**Ruleset drift** compares the live repository rulesets with
+`.github/rulesets/` using the job's read-only token and never changes them.
+
+**External links** requests the public URLs already published in the tracked
+Markdown files, weekly and on demand, with a read-only token and no secrets.
+
 The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly
 schedule and relevant-change triggers and cannot write to the Wiki. As checked
@@ -339,11 +358,11 @@ on 2026-10-28, it is present on `release/v1.1.3` but absent from default branch
 #53 and #49 retain the requirement for a runnable final-repository/final-Wiki
 check before release readiness.
 
-The label-color workflow is the only current workflow with write permission. It
-has `issues: write` solely to apply the repository's fixed label-color map, runs
-manually or when its own workflow file changes, and neither reads nor publishes
-release artifacts. Its broader permission must not be copied into static or
-Wiki jobs.
+Three jobs hold a write permission, each confined to that job: **Sync issue
+labels** (`issues: write`, reconciling only from the default branch), **Keep
+milestones issue-only** (`pull-requests: write`), and the push and scheduled
+**CodeQL** job (`security-events: write`). None reads or publishes release
+artifacts, and their permissions must not be copied into static or Wiki jobs.
 
 This is intentionally a low-privilege automation surface.
 

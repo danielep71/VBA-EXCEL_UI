@@ -1,0 +1,56 @@
+name: Ruleset drift
+
+# Compares the live repository rulesets with the normalized copies in
+# .github/rulesets/ (tools/check_rulesets.py) and fails on any difference: a
+# weakened, disabled, deleted or unversioned ruleset. Read-only: it never
+# changes a ruleset. The rulesets of a public repository are readable with
+# the job's read-only token; bypass actors are visible only to administrators
+# and are therefore not compared.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - '.github/rulesets/**'
+      - 'tools/check_rulesets.py'
+      - '.github/workflows/rulesets-drift.yml'
+  schedule:
+    - cron: '29 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Pull requests share one group per ref, so a newer push cancels the run it
+# supersedes. Every other run gets its own group: GitHub replaces a pending
+# run when a newer one joins the same group.
+concurrency:
+  group: rulesets-drift-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  drift:
+    name: Compare live rulesets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out the exact SHA to compare
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.16'
+
+      - name: Compare live rulesets with .github/rulesets/
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 tools/check_rulesets.py
+          --repository "$GITHUB_REPOSITORY"
+          --summary "$GITHUB_STEP_SUMMARY"

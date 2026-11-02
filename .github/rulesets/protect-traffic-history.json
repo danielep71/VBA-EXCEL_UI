@@ -1,0 +1,21 @@
+{
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/heads/traffic-history"
+      ]
+    }
+  },
+  "enforcement": "active",
+  "name": "Protect traffic history",
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    }
+  ],
+  "target": "branch"
+}
