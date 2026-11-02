@@ -1,0 +1,18 @@
+{
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/heads/release/**"
+      ]
+    }
+  },
+  "enforcement": "active",
+  "name": "Prevent release branch deletion",
+  "rules": [
+    {
+      "type": "deletion"
+    }
+  ],
+  "target": "branch"
+}

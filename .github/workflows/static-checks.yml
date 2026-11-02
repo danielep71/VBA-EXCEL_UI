@@ -69,11 +69,34 @@ jobs:
       # obvious at a glance in the checks list, rather than being one finding
       # among several in a combined log.
       - name: Verify house-style normal form
+        id: format
         if: always()
         run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
 
+      # The label scripts and the issue-form check run on Node.js.
+      - name: Set up Node.js
+        if: always()
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+
+      - name: Self-test the label scripts
+        if: always()
+        run: |
+          node .github/scripts/labels-sync.mjs --self-test
+          node .github/scripts/labels-drift.mjs --self-test
+
+      - name: Check issue forms against the label catalogue
+        if: always()
+        run: python3 tools/check_issues.py --check-config
+
+      - name: Run the issue-triage unit tests
+        if: always()
+        run: python3 -m unittest discover -s tests
+
       - name: Remind how to fix formatting drift
-        if: failure()
+        if: failure() && steps.format.outcome == 'failure'
         run: |
           echo "::notice::Formatting drift is mechanical. Run:"
           echo "::notice::  python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas"

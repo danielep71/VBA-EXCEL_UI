@@ -303,11 +303,15 @@ explicit, least-privilege authorization.
 
 ### Current automation surface
 
-The repository currently contains three workflows:
+The repository currently contains these workflows:
 
 ~~~text
+.github/workflows/issue-triage.yml
+.github/workflows/labels-drift.yml
+.github/workflows/labels-sync.yml
+.github/workflows/pr-milestones.yml
+.github/workflows/rulesets-drift.yml
 .github/workflows/static-checks.yml
-.github/workflows/sync-label-colors.yml
 .github/workflows/wiki-badges.yml
 ~~~
 
@@ -321,6 +325,17 @@ The static workflow:
 - does not require repository secrets;
 - does not execute Excel or VBA;
 - does not package or publish a release workbook.
+
+The issue workflows are documented in
+[docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md). Only **Sync issue labels** has
+`issues: write`, and it reconciles labels only from the default branch; only
+**Keep milestones issue-only** has `pull-requests: write`, runs from the base
+branch through `pull_request_target`, and never checks out or runs
+pull-request code. **Detect issue-label drift** and **Issue triage** are
+read-only.
+
+**Ruleset drift** compares the live repository rulesets with
+`.github/rulesets/` using the job's read-only token and never changes them.
 
 The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly

@@ -53,7 +53,9 @@ Before opening work:
    [Security Policy](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md).
 2. Search open and closed issues and pull requests for related work.
 3. Open an issue before a non-trivial feature, public-API change, dependency,
-   architectural change, compatibility break, or broad refactor.
+   architectural change, compatibility break, or broad refactor. Use the issue
+   forms; [Issue labels & automation](docs/ISSUE_LABELS.md) explains
+   priorities, labels, milestones, and dependency status.
 4. Agree the observable contract and validation approach before implementation.
 5. Keep credentials, personal/client data, proprietary workbooks, and restricted
    reference material out of the repository.
@@ -123,9 +125,15 @@ not present.
 8. Update documentation and release notes required by the change.
 9. Push the branch and open a pull request with evidence and limitations.
 
-Repository maintainers may use the repository's configured direct-push workflow
-where permitted. External contributions and reviewable portfolio changes should
-use branches and pull requests.
+Every change to `main` and `release/**` goes through a pull request, including
+mine. Repository rulesets enforce it: on `main` and `release/**` a pull request
+must pass **Repository and module checks** on an up-to-date branch with every
+review thread resolved, and force-pushes and deletion are blocked; `v*` tags
+cannot be moved or deleted. The rulesets are versioned in `.github/rulesets/`,
+and the **Ruleset drift** workflow fails daily if a live ruleset differs from
+its copy. To change a ruleset, change it in the repository settings, run
+`python3 tools/check_rulesets.py --repository danielep71/VBA-EXCEL_UI --export`,
+and commit the result in a pull request that explains why.
 
 ### Commit discipline
 
