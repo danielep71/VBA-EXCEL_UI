@@ -100,6 +100,12 @@ Use only the categories needed by a release.
 
 > 🩹 **Planned patch** · v1.1.3 correctness and hardening · not yet certified
 
+> [!NOTE]
+> This section describes the work merged into `release/v1.1.3`. `main` already
+> carries that branch's repository tooling, workflows and documentation; the
+> VBA corrections listed here reach `main` only when v1.1.3 is certified and
+> released.
+
 ### 🧭 Release intent
 
 Development toward **v1.1.3 — correctness & hardening**.
