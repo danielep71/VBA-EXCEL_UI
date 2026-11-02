@@ -45,7 +45,7 @@ the release notes before installation.
 
 ### Current release boundaries
 
-Known defects and their correction state on this branch. A row marked
+Known defects and their correction state on `release/v1.1.3`. A row marked
 *corrected on branch* is not certified: certification requires a real
 Windows Excel host and is tracked on the linked issue.
 
