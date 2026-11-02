@@ -53,7 +53,9 @@ Before opening work:
    [Security Policy](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md).
 2. Search open and closed issues and pull requests for related work.
 3. Open an issue before a non-trivial feature, public-API change, dependency,
-   architectural change, compatibility break, or broad refactor.
+   architectural change, compatibility break, or broad refactor. Use the issue
+   forms; [Issue labels & automation](docs/ISSUE_LABELS.md) explains
+   priorities, labels, milestones, and dependency status.
 4. Agree the observable contract and validation approach before implementation.
 5. Keep credentials, personal/client data, proprietary workbooks, and restricted
    reference material out of the repository.
@@ -132,9 +134,15 @@ the gate until the entry is updated in the same change.
 8. Update documentation and release notes required by the change.
 9. Push the branch and open a pull request with evidence and limitations.
 
-Repository maintainers may use the repository's configured direct-push workflow
-where permitted. External contributions and reviewable portfolio changes should
-use branches and pull requests.
+Every change to `main` and `release/**` goes through a pull request, including
+mine. Repository rulesets enforce it: on `main` and `release/**` a pull request
+must pass **Repository and module checks** on an up-to-date branch with every
+review thread resolved, and force-pushes and deletion are blocked; `v*` tags
+cannot be moved or deleted. The rulesets are versioned in `.github/rulesets/`,
+and the **Ruleset drift** workflow fails daily if a live ruleset differs from
+its copy. To change a ruleset, change it in the repository settings, run
+`python3 tools/check_rulesets.py --repository danielep71/VBA-EXCEL_UI --export`,
+and commit the result in a pull request that explains why.
 
 ### Commit discipline
 
@@ -572,6 +580,22 @@ Do not edit a released version or tag merely to describe unreleased work. Releas
 numbers, artifacts, hashes, and dates belong to the repository's release
 workflow.
 
+### External links
+
+The static gate checks links inside the repository on every pull request. The
+**External links** workflow checks every external link in the tracked Markdown
+files each Monday, and on demand, with `tools/check_external_links.py`. It is not
+a required check: another host can be down for reasons unrelated to your change.
+A `404` or `410`, or a link that still fails after retries, fails the run; `401`,
+`403` and `429` are reported as unverified. To run it locally:
+
+```text
+python3 tools/check_external_links.py
+```
+
+Add a prefix to `tools/external_link_exclusions.txt` only for a host that
+refuses automated requests, with a comment saying why.
+
 ---
 
 ### The wiki and the VERSION file
@@ -769,9 +793,164 @@ Reviews may request changes to scope, tests, contracts, compatibility,
 documentation, or evidence. Discussion must remain technical and respectful
 under the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+<a id="pull-request-reference"></a>
+
+### Pull request reference
+
+The pull request template asks for the classification and the affected
+surface in one line each. Choose from these lists.
+
+#### Change classification
+
+- Defect correction
+- Backward-compatible capability
+- Breaking API, behavior, deployment, or migration change
+- Internal refactor with no intended supported-behavior change
+- Test, fixture, reference-data, or validation change
+- Performance change
+- Security or trust-boundary hardening
+- Documentation-only change
+- Repository tooling, workflow, or governance change
+- Packaging or release preparation
+- Excel-state ownership or recovery change
+- Window identity, title-bar, Ribbon, or WinAPI change
+- Snapshot, diagnostic, or structured-result change
+
+#### Affected surface
+
+- Public `UI_*` facade
+- Runtime and application-level UI state
+- Snapshot capture and restoration
+- Title-bar and native-window integration
+- Multi-window targeting and identity
+- Diagnostics and recovery
+- No runtime or supported surface — documentation/repository-only
+
+<a id="documentation-and-release-hygiene"></a>
+
+### Documentation and release hygiene
+
+Before you request review, check each document your change can affect:
+
+- `README.md` reflects supported behavior and examples.
+- `INSTALLATION.md` reflects paths, dependencies, import order, validation, upgrades, and removal.
+- `CONTRIBUTING.md` reflects development and evidence requirements.
+- `CHANGELOG.md` records material change under `[Unreleased]`.
+- `SECURITY.md` reflects supported versions or trust boundaries.
+- `RELEASING.md` reflects certification, package, provenance, or recovery changes.
+- Source headers, API references, demos, Wiki pages, and counts remain synchronized.
+- Version markers remain unchanged unless this is the deliberate release-stamp change.
+- No documentation change is required — state the reason in the pull request.
+
+<a id="regression-coverage"></a>
+
+### Regression coverage
+
+State in the pull request which of these hold, and why any other does not:
+
+- Existing tests cover the changed success path.
+- New or amended tests cover each corrected defect.
+- Boundary, invalid-input, failure, fallback, and cleanup paths are covered as applicable.
+- Test entry points and inventory/count metadata remain synchronized.
+- Expected results come from the contract or an independent reference.
+- No regression change is needed — state the rationale in the pull request.
+
+<a id="security-and-provenance-review"></a>
+
+### Security and provenance review
+
+Every pull request must satisfy these, or state the exception:
+
+- No credential, secret, signing material, internal URL, or personal path is included.
+- No client, employer, counterparty, student, personal, or restricted production data is included.
+- Test data is synthetic, anonymized, or explicitly redistributable.
+- External algorithms, code, datasets, and market/vendor data have attributable provenance and compatible licensing.
+- Formula, command, path, callback, deserialization, and external-content injection surfaces were assessed.
+- No security-sensitive detail belongs in private disclosure instead of this pull request.
+- Generated evidence identifies its inputs, tool/runtime version, candidate SHA, and limitations.
+
+<a id="risk-levels"></a>
+
+### Risk levels
+
+- **Low** — documentation, metadata, or mechanically verified change.
+- **Medium** — bounded runtime, tooling, or compatibility impact.
+- **High** — numerical integrity, shared Excel state, native API, security,
+  release, or breaking impact.
+
+<a id="project-specific-review-profiles"></a>
+
+### Project-specific review profiles
+
+Apply every profile your change touches, and list in the pull request any item
+it does not meet.
+
+#### 🧱 Module ownership and API manifest
+
+Apply when module boundaries or supported surface can change.
+
+- `M_EXCEL_UI` remains the public facade.
+- Runtime and title-bar modules retain their allowed dependency boundary.
+- Snapshot state exists only in `M_EXCEL_UI_SNAPSHOT`.
+- Title-bar mutable state exists only in `M_EXCEL_UI_TITLEBAR`.
+- No circular dependency or duplicated mutable state is introduced.
+- Internal modules retain `Option Private Module`.
+- `tools/public_api_manifest.txt` intentionally reflects every public-surface change.
+
+> [!IMPORTANT]
+> Any change to a Public declaration under src requires an intentional update to
+> tools/public_api_manifest.txt, which records the full normalised signature:
+> parameter order and names, ByVal/ByRef, types, Optional status, defaults,
+> return types and enum values. Regenerate it with tools/vba_api.py --write.
+>
+> Passing the manifest gate proves the declared contract matches that file. It
+> does not prove behavior. A procedure whose signature is untouched can still
+> change what it does, and that belongs under Verification.
+>
+> A change under [supported] is a Semantic Versioning event for external
+> callers and must be declared as one in the pull request and in CHANGELOG.md. The gate
+> enforces that: the manifest carries the facade as it stood at the last
+> release in its [baseline] section, and when the two differ the CHANGELOG
+> Supported API contract row has to name the release type or the build fails.
+> Regenerating the manifest alone does not clear it.
+>
+> A change under [project-public] only has to be deliberate. Neither is the
+> same as the deployment rule that all four src modules are replaced together.
+
+#### 📸 Snapshot, identity, and recovery
+
+Apply when capture, restoration, targeting, or reset behavior changes.
+
+- Per-window restoration never relies on collection index.
+- Object identity and recycled-window-handle risks are addressed.
+- New, missing, closed, and recreated windows have explicit behavior.
+- Reset without a valid snapshot is controlled.
+- State is never applied to a window that cannot be proven to be the captured target.
+- `UI_ShowExcelUI` remains an emergency show-all recovery route.
+
+#### 🪟 Ribbon and WinAPI
+
+Apply for Ribbon, title-bar, or native-frame changes.
+
+- Only owned style bits are changed and unrelated bits are preserved.
+- 32-bit and 64-bit declarations are correct.
+- Valid zero returns are distinguished from native failures.
+- Required frame refresh is performed and failures remain observable.
+- Multi-window behavior is tested with more than one workbook open.
+
+#### 🧾 Diagnostics and cleanup
+
+Apply when failure ordering, results, or Excel state can change.
+
+- Structured diagnostics preserve insertion order and real post-operation state.
+- Error handlers cannot replace the original failure.
+- `ScreenUpdating` and other caller-owned state are restored.
+- Best-effort continuation is deliberate and failures are not discarded.
+- Certification reports complete, failed, skipped, and cleanup counters.
+
 ---
 
-## 🤝 Review and maintainer decisions
+## 🤝 Review and decisions
 
 Reviewers evaluate correctness, safety, maintainability, compatibility,
 evidence, documentation, and fit with the project's direction. Approval of an
@@ -792,9 +971,9 @@ material.
 
 ---
 
-## 👤 Maintainer
+## 👤 Contact
 
-Maintained by **Daniele Penza**.
+I, **Daniele Penza**, maintain this repository.
 
 For ordinary contributions, use GitHub issues and pull requests. For sensitive
 security matters, use the private channel in [SECURITY.md](SECURITY.md).

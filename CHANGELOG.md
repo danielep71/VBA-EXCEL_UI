@@ -393,6 +393,18 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- Replaced the Markdown issue templates with issue forms (bug, enhancement,
+  documentation, private security contact) that require the exact commit, the
+  Excel build and bitness, expected and observed behaviour, and the recovery
+  result, and that set a default priority, the assignee, a target end date and
+  a dependency section (#86). The issue labels are now a versioned catalogue
+  (`.github/labels.json`, 27 labels) that **Sync issue labels** applies from
+  the default branch and **Detect issue-label drift** checks daily; it replaces
+  the colour-only `sync-label-colors.yml`. **Issue triage** reports open issues
+  without exactly one priority, an assignee, an open milestone, a target end
+  date before the milestone's due date, or a dependency section. The rules are
+  in [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md).
+
 - Corrected demo template/reset cleanup (#71) so saved errors do not re-enter
   their own handlers. Reset re-protects only after an owned successful
   unprotect, reuses captured protection options, and reports cleanup failures.
@@ -621,6 +633,20 @@ measured against that baseline.
 
 ### 📖 Documentation
 
+- Added a weekly, non-blocking check of every external link in the tracked
+  Markdown files (#85). Broken links fail the scheduled run and are listed in
+  its summary; links inside the repository remain part of the required gate.
+- Shortened the pull-request template from 348 to 199 lines (#89). Every
+  verification table, including the Excel-execution table and its
+  `INCOMPLETE` state, is unchanged; the classification and surface lists, the
+  documentation, regression, security and risk lists, and the four
+  project-specific review profiles moved to the new pull request reference in
+  `CONTRIBUTING.md`.
+- Wrote my decisions and responsibilities in first person in
+  `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `RELEASING.md` and `INSTALLATION.md`,
+  and replaced the `.gitattributes` renormalization recipe, whose `--dry-run`
+  listed every tracked file, with one that stages, inspects and can undo the
+  change (#88).
 - Corrected the pull-request template, which told reviewers the manifest gate
   proved only that exported names matched the file. It now proves parameter
   order and names, passing mode, types, `Optional` status, defaults, return
@@ -730,6 +756,10 @@ measured against that baseline.
   the minimum supported Python 3.11. Dependabot proposes updates to the pinned
   Actions, CodeQL scans the Python tooling and the workflows, and actionlint
   lints every workflow after proving it rejects an invalid one.
+- Versioned the repository rulesets in `.github/rulesets/` and added a daily,
+  read-only **Ruleset drift** check that fails when a live ruleset is weakened,
+  disabled, deleted or not versioned (#87). `CONTRIBUTING.md` no longer
+  describes a direct-push route that the `main` ruleset forbids.
 
 ### ✅ Validation
 

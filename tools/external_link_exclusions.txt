@@ -1,0 +1,2 @@
+# URL prefixes the external link check does not request, one per line.
+# Add a prefix only for a host that refuses automated requests, and say why.

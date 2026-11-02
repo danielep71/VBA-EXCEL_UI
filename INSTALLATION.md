@@ -287,7 +287,7 @@ owns and document anything intentionally retained.
 - [README.md](README.md) — capabilities, requirements, and public API
 - [CHANGELOG.md](CHANGELOG.md) — version history and compatibility
 - [CONTRIBUTING.md](CONTRIBUTING.md) — source and validation standards
-- [RELEASING.md](RELEASING.md) — maintainer release and provenance procedure
+- [RELEASING.md](RELEASING.md) — release and provenance procedure
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting
 - [LICENSE](LICENSE) — MIT licence terms
 

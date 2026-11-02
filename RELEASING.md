@@ -6,7 +6,7 @@
 [![Security policy](https://img.shields.io/badge/security-policy-success)](SECURITY.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-This maintainer guide turns a reviewed commit into a traceable VBA Excel UI release. Source identity, validation, packaging, provenance, and publication must describe the same candidate.
+This guide describes how I turn a reviewed commit into a traceable VBA Excel UI release. Source identity, validation, packaging, provenance, and publication must describe the same candidate.
 
 > [!IMPORTANT]
 > Certification must run in interactive Windows desktop Excel. Static checks alone cannot validate multi-window identity, title-bar integration, or restoration behavior.
@@ -83,7 +83,7 @@ in the same change.
 - Compatibility and migration consequences are understood.
 - Security-sensitive work has completed private handling where necessary.
 - The working tree and exported VBA sources are reproducible.
-- Maintainers and required reviewers are available.
+- I am available for the release, together with any required reviewers.
 
 Record which Windows and Office-bitness combinations were exercised; do not generalize beyond the tested matrix.
 
@@ -303,7 +303,7 @@ Do not silently replace assets or move the tag.
 - Use [SECURITY.md](SECURITY.md) for vulnerabilities.
 - Preserve evidence explaining what users received.
 
-## ☑️ Final maintainer checklist
+## ☑️ Final release checklist
 
 | # | Gate | Done |
 | ---: | --- | :---: |

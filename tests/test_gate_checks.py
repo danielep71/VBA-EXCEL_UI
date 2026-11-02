@@ -421,6 +421,21 @@ class MarkdownEscapeSelfTest(GateTestCase):
             self.assertFails("an escaped underscore is reported")
 
 
+class LabelCatalogue(GateTestCase):
+    check = "label catalogue"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_a_documented_colour_differs(self) -> None:
+        self.repo.replace("docs/ISSUE_LABELS.md", "| `ribbon` | `#D4C5F9` |", "| `ribbon` | `#D4C5FA` |")
+        self.assertFails("docs/ISSUE_LABELS.md catalogue table: missing or different: ribbon")
+
+    def test_fails_when_the_documented_count_differs(self) -> None:
+        self.repo.replace("docs/ISSUE_LABELS.md", "defines 27 issue labels", "defines 26 issue labels")
+        self.assertFails("docs/ISSUE_LABELS.md does not state 27 labels")
+
+
 class PrivateReviewDenylist(GateTestCase):
     check = "private review denylist"
     REVIEW = "docs/INDEPENDENT_CODE_REVIEW_V9.9.9.md"

@@ -1,0 +1,141 @@
+{
+  "schema_version": 2,
+  "prune": true,
+  "labels": [
+    {
+      "name": "api",
+      "color": "0052CC",
+      "description": "Supported VBA API, signatures, parameters, enums, or compatibility contract"
+    },
+    {
+      "name": "behavior-change",
+      "color": "C24E00",
+      "description": "Intentional externally observable behavior change"
+    },
+    {
+      "name": "blocked",
+      "color": "B60205",
+      "description": "Cannot proceed until a named dependency is complete"
+    },
+    {
+      "name": "bug",
+      "color": "D73A4A",
+      "description": "Confirmed defect in behavior, correctness, error handling, or a documented contract"
+    },
+    {
+      "name": "ci",
+      "color": "24292F",
+      "description": "Automated quality checks, workflow maintenance, or dependency updates"
+    },
+    {
+      "name": "demo",
+      "color": "F9D0C4",
+      "description": "Demo VBA source, demo builder, or distributed demo workbook"
+    },
+    {
+      "name": "documentation",
+      "color": "0075CA",
+      "description": "Documentation for users or for my repository maintenance"
+    },
+    {
+      "name": "duplicate",
+      "color": "CFD3D7",
+      "description": "An existing issue or pull request already covers this work"
+    },
+    {
+      "name": "enhancement",
+      "color": "A2EEEF",
+      "description": "New capability or meaningful improvement to supported behavior"
+    },
+    {
+      "name": "good first issue",
+      "color": "7057FF",
+      "description": "Well-scoped task suitable for a first contribution"
+    },
+    {
+      "name": "help wanted",
+      "color": "008672",
+      "description": "I welcome external investigation, implementation, validation, or review"
+    },
+    {
+      "name": "invalid",
+      "color": "E4E669",
+      "description": "Report is incomplete, unsupported, or not actionable as submitted"
+    },
+    {
+      "name": "P1",
+      "color": "B60205",
+      "description": "Confirmed release-blocking correctness or safety defect (bugs only)"
+    },
+    {
+      "name": "P2",
+      "color": "D93F0B",
+      "description": "Material correctness, robustness, or maintainability defect"
+    },
+    {
+      "name": "P3",
+      "color": "FBCA04",
+      "description": "Non-blocking quality, testing, documentation, setup or technical-debt work"
+    },
+    {
+      "name": "question",
+      "color": "D876E3",
+      "description": "I need further information or need to make a decision"
+    },
+    {
+      "name": "refactor",
+      "color": "6F42C1",
+      "description": "Internal restructuring intended to preserve supported behavior"
+    },
+    {
+      "name": "release",
+      "color": "B60276",
+      "description": "Release preparation, certification, evidence, packaging, or publication"
+    },
+    {
+      "name": "repository",
+      "color": "1D76DB",
+      "description": "Repository structure, governance, metadata, tooling, or maintenance"
+    },
+    {
+      "name": "ribbon",
+      "color": "D4C5F9",
+      "description": "Ribbon visibility, restoration, or Ribbon-specific policy"
+    },
+    {
+      "name": "runtime",
+      "color": "2B7489",
+      "description": "Shared runtime services, diagnostics, result buffers, or host-state management"
+    },
+    {
+      "name": "sdi",
+      "color": "BFD4F2",
+      "description": "Excel SDI multi-window identity, targeting, or active-window behavior"
+    },
+    {
+      "name": "security",
+      "color": "8B0000",
+      "description": "Security boundary, vulnerability handling, supply chain, or hardening"
+    },
+    {
+      "name": "snapshots",
+      "color": "0E8A16",
+      "description": "UI snapshot capture, identity, lifecycle, or restoration"
+    },
+    {
+      "name": "tests",
+      "color": "006B75",
+      "description": "Regression coverage, test harnesses, fixtures, or manual validation"
+    },
+    {
+      "name": "titlebar",
+      "color": "5319E7",
+      "description": "WinAPI title-bar and frame state, ownership, identity, or recovery"
+    },
+    {
+      "name": "wontfix",
+      "color": "6E7781",
+      "description": "I have decided not to implement or continue this work"
+    }
+  ]
+}

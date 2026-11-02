@@ -60,7 +60,7 @@ diverse, inclusive, and healthy community.
 | 🔄 **Correction** | Acknowledge mistakes openly when better evidence changes the conclusion. |
 | 🌱 **Inclusion** | Welcome contributors with different backgrounds and levels of expertise. |
 | 🔐 **Stewardship** | Respect privacy, confidentiality, security, licensing, and intellectual-property boundaries. |
-| 🧱 **Coherence** | Accept that maintainers may adopt, revise, defer, split, or decline a contribution. |
+| 🧱 **Coherence** | Accept that I may adopt, revise, defer, split, or decline a contribution. |
 
 ### Useful disagreement
 
@@ -100,7 +100,7 @@ Unacceptable behavior includes:
 - spam, unrelated promotion, commercial solicitation, or sustained disruption;
 - public disclosure of a suspected vulnerability before reasonable coordinated
   remediation;
-- repeated disruption after a maintainer has asked participants to stop; and
+- repeated disruption after I have asked participants to stop; and
 - retaliation against a reporter, witness, or participant in an investigation.
 
 Disagreement is allowed. Abuse is not.
@@ -198,7 +198,7 @@ This Code of Conduct applies to:
 - project-related email and private communication between participants; and
 - public spaces where someone represents the project or its community.
 
-It applies to maintainers, contributors, reviewers, users, and visitors alike.
+It applies to me, contributors, reviewers, users, and visitors alike.
 
 Project representation includes using an official account, speaking on behalf
 of the project, presenting oneself as a maintainer or contributor in a
@@ -210,7 +210,7 @@ project-related forum, or moderating a project discussion.
 
 ## 📣 Reporting unacceptable behavior
 
-Report unacceptable behavior **privately** to the maintainer:
+Report unacceptable behavior **privately** to me:
 
 **danielep71@gmail.com**
 
@@ -226,8 +226,8 @@ possible. Information will be shared only as needed to understand the report,
 protect participants, enforce this policy, or comply with applicable platform
 or legal requirements.
 
-A good-faith report is not misconduct merely because the maintainer ultimately
-concludes that no violation occurred.
+A good-faith report is not misconduct merely because I ultimately conclude
+that no violation occurred.
 
 ---
 
@@ -235,8 +235,8 @@ concludes that no violation occurred.
 
 ## ⚖️ Enforcement
 
-The maintainer is responsible for clarifying and enforcing this Code of Conduct
-and may remove, edit, or reject comments, commits, code, issues, or other
+I am responsible for clarifying and enforcing this Code of Conduct, and I
+may remove, edit, or reject comments, commits, code, issues, or other
 contributions that are inconsistent with it.
 
 Responses depend on seriousness, frequency, context, prior behavior, and risk.
@@ -290,7 +290,7 @@ source provenance, reproducibility, or execution correctness.
 
 ## 🧱 Maintainer decisions
 
-A maintainer may decline a contribution even when it is technically valid.
+I may decline a contribution even when it is technically valid.
 Reasons may include scope, compatibility, maintenance burden, testability,
 platform risk, API stability, duplication, architecture, or release timing.
 
