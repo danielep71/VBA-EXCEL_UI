@@ -8,6 +8,11 @@
 # - The hash-locked Python quality tools in tools/requirements-quality-ci.txt
 #   lint and type-check the gate in CI. The gate itself uses only the standard
 #   library and has nothing to update. A tool upgrade can add findings.
+#
+# Each ecosystem is listed twice: once for main and once for the open release
+# branch, so both branches receive the same updates without porting them by
+# hand. Dependabot reads this file from main only. When the release branch is
+# merged and deleted, remove its two entries.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -29,8 +34,46 @@ updates:
     commit-message:
       prefix: ci
 
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: release/v1.1.3
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:23"
+      timezone: Europe/Rome
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - ci
+      - P3
+    assignees:
+      - danielep71
+    commit-message:
+      prefix: ci
+
   - package-ecosystem: pip
     directory: /tools
+    schedule:
+      interval: monthly
+    groups:
+      python-quality-tools:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    labels:
+      - ci
+      - P3
+    assignees:
+      - danielep71
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: pip
+    directory: /tools
+    target-branch: release/v1.1.3
     schedule:
       interval: monthly
     groups:
