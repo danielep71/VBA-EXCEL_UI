@@ -303,9 +303,10 @@ explicit, least-privilege authorization.
 
 ### Current automation surface
 
-The repository currently contains three workflows:
+The repository currently contains these workflows:
 
 ~~~text
+.github/workflows/external-links.yml
 .github/workflows/static-checks.yml
 .github/workflows/sync-label-colors.yml
 .github/workflows/wiki-badges.yml
@@ -321,6 +322,9 @@ The static workflow:
 - does not require repository secrets;
 - does not execute Excel or VBA;
 - does not package or publish a release workbook.
+
+**External links** requests the public URLs already published in the tracked
+Markdown files, weekly and on demand, with a read-only token and no secrets.
 
 The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly
