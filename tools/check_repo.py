@@ -1122,7 +1122,7 @@ UNRELEASED = "Unreleased"
 VERSION_SECTION_RE = re.compile(r"^##\s+(?:\[(?P<label>[^\]]*)\]|v?[0-9])")
 
 RELEASE_HEADING_RE = re.compile(
-    r"^## \[(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.\-]+)?)\]"
+    r"^## \[(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.\-]+)?(?:\+[0-9A-Za-z.\-]+)?)\]"
     r" - (?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$")
 
 LINK_REFERENCE_RE = re.compile(r"^ {0,3}\[(?P<label>[^\]]+)\]:\s*(?P<url>\S+)")
@@ -1137,9 +1137,10 @@ def version_key(version: str) -> tuple[int, int, int, int, PreReleaseKey]:
     A pre-release sorts before its release. Pre-release identifiers compare
     one dot-separated field at a time: numeric fields numerically and below
     alphanumeric ones, alphanumeric fields as text, and a shorter list first
-    when every shared field is equal, so rc.2 < rc.10 and rc < rc.1.
+    when every shared field is equal, so rc.2 < rc.10 and rc < rc.1. Build
+    metadata after "+" does not affect precedence.
     """
-    core, _, pre = version.partition("-")
+    core, _, pre = version.partition("+")[0].partition("-")
     major, minor, patch = (int(part) for part in core.split("."))
     fields: PreReleaseKey = tuple(
         (0, int(field), "") if field.isdigit() else (1, 0, field)
@@ -1595,18 +1596,47 @@ def github_anchor(heading: str) -> str:
     return "".join(kept).replace(" ", "-")
 
 
+def without_html_comments(line: str, in_comment: bool) -> tuple[str, bool]:
+    """Remove HTML comment text from one line; report whether a comment stays open.
+
+    A comment may span lines, so the caller passes back the returned state.
+    """
+    out: list[str] = []
+    pos = 0
+    while pos < len(line):
+        if in_comment:
+            end = line.find("-->", pos)
+            if end < 0:
+                return "".join(out), True
+            pos = end + 3
+            in_comment = False
+        else:
+            start = line.find("<!--", pos)
+            if start < 0:
+                out.append(line[pos:])
+                break
+            out.append(line[pos:start])
+            pos = start + 4
+            in_comment = True
+    return "".join(out), in_comment
+
+
 def heading_anchors(text: str) -> list[str]:
     """Return every heading anchor in a document, in order, as GitHub assigns them.
 
     A repeated anchor gets -1, -2 and so on, and a suffixed anchor that
     collides with one already taken is suffixed again, so every anchor in the
     document is unique and each link resolves to one heading. Headings inside
-    fenced code blocks are not headings.
+    fenced code blocks or HTML comments are not headings: GitHub renders
+    neither, so they must neither create an anchor nor shift the numbering of
+    a visible duplicate.
     """
     anchors: list[str] = []
     counts: dict[str, int] = {}
     taken: set[str] = set()
-    for _, line in markdown_outside_fences(text):
+    in_comment = False
+    for _, raw in markdown_outside_fences(text):
+        line, in_comment = without_html_comments(raw, in_comment)
         m = ATX_HEADING_RE.match(line)
         if not m:
             continue

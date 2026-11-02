@@ -147,6 +147,16 @@ class ChangelogStructure(unittest.TestCase):
         self.assertFinding(findings(swapped, "1.2.0-rc.2"),
                            "[1.2.0-rc.10] follows [1.2.0-rc.2]; releases must be newest first")
 
+    def test_build_metadata_is_accepted_and_ignored_for_precedence(self) -> None:
+        key = check_repo.version_key
+        self.assertEqual(key("1.2.3+build.1"), key("1.2.3+build.2"))
+        self.assertLess(key("1.2.3-rc.1+b"), key("1.2.3+b"))
+        text = changed("## [1.1.0] - 2026-08-19", "## [1.1.0+build.1] - 2026-08-19")
+        text = text.replace(f"[1.1.0]: {URL}/compare/v1.0.1...v1.1.0",
+                            f"[1.1.0+build.1]: {URL}/compare/v1.0.1...v1.1.0+build.1")
+        text = text.replace(f"{URL}/compare/v1.1.0...HEAD", f"{URL}/compare/v1.1.0+build.1...HEAD")
+        self.assertEqual(findings(text, "1.1.0+build.1"), [])
+
     # Link references -----------------------------------------------------
     def test_a_missing_unreleased_link_reference_fails(self) -> None:
         self.assertFinding(findings(changed(f"[Unreleased]: {URL}/compare/v1.1.0...HEAD\n", "")),

@@ -41,6 +41,11 @@ class GithubAnchor(unittest.TestCase):
         self.assertEqual(anchors("~~~~", "~~~", "## Inside", "~~~~", "## After"), ["after"])
         self.assertEqual(anchors("```", "## Inside", "```   ", "## After"), ["after"])
 
+    def test_headings_inside_html_comments_are_not_headings(self) -> None:
+        self.assertEqual(anchors("<!--", "# Notes", "-->", "# Notes"), ["notes"])
+        self.assertEqual(anchors("<!-- # Notes -->", "# Notes"), ["notes"])
+        self.assertEqual(anchors("<!-- a --> text", "# Notes", "# Notes"), ["notes", "notes-1"])
+
     def test_emphasis_around_a_code_span_is_removed(self) -> None:
         self.assertEqual(anchor("_`Notes`_"), "notes")
         self.assertEqual(anchor("__`UI_Hide`__ member"), "ui_hide-member")
