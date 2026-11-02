@@ -41,6 +41,11 @@ class GithubAnchor(unittest.TestCase):
         self.assertEqual(anchors("~~~~", "~~~", "## Inside", "~~~~", "## After"), ["after"])
         self.assertEqual(anchors("```", "## Inside", "```   ", "## After"), ["after"])
 
+    def test_indented_code_backticks_do_not_open_a_fence(self) -> None:
+        self.assertEqual(anchors("    ```", "", "## Install"), ["install"])
+        self.assertEqual(anchors("\t~~~", "", "## Install"), ["install"])
+        self.assertEqual(anchors("   ```", "## Inside", "   ```", "## After"), ["after"])
+
     def test_headings_inside_html_comments_are_not_headings(self) -> None:
         self.assertEqual(anchors("<!--", "# Notes", "-->", "# Notes"), ["notes"])
         self.assertEqual(anchors("<!-- # Notes -->", "# Notes"), ["notes"])

@@ -842,7 +842,9 @@ ESCAPABLE = r"[\\`*_{}\[\]()#+\-.!|<>&\"'~=:;,/$%^?@]"
 
 ESCAPE_RE = re.compile(r"\\(" + ESCAPABLE + ")")
 
-FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+# A fence may be indented by at most three spaces. Four or more make the line
+# indented code, whose backticks are content and open no block.
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 
