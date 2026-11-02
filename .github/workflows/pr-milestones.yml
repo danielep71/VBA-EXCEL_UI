@@ -1,0 +1,102 @@
+name: Keep milestones issue-only
+
+# Milestones belong to issues only (docs/ISSUE_LABELS.md).
+# Removes any milestone set on a pull request: on each pull-request event, and
+# for every pull request on a daily scan, a manual run, or a change to this
+# file on the default branch. pull_request_target runs this file from the
+# base branch; the job never checks out or runs pull-request code.
+
+on:
+  push:
+    paths: [.github/workflows/pr-milestones.yml]
+  pull_request_target:
+    types: [opened, reopened, edited, milestoned]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+# One group per pull request: a group keeps only one pending run, so a
+# shared group would cancel the events of other pull requests.
+concurrency:
+  group: pr-milestones-${{ github.event.pull_request.number || 'scan' }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Remove PR milestone assignments
+    # Pushes and manual runs use only the default branch's reviewed copy.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      github.event_name == 'schedule' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # The script reads each pull request through the issues endpoint, which
+      # needs issues: read on a private repository.
+      issues: read
+      pull-requests: write
+    steps:
+      # Trusted inline code only: never check out or execute a PR's contents.
+      - name: Reconcile PR metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          def reconcile(request, repository, event):
+              def clear(number):
+                  # Verify the live object before mutating the issues endpoint.
+                  item = request("GET", f"/repos/{repository}/issues/{number}")
+                  if "pull_request" not in item:
+                      raise ValueError("Refusing to change an issue")
+                  if item.get("milestone") is not None:
+                      result = request("PATCH", f"/repos/{repository}/issues/{number}", {"milestone": None})
+                      if result.get("milestone") is not None:
+                          raise ValueError(f"PR #{number} still has a milestone")
+                      print(f"Removed milestone from PR #{number}")
+
+              if "pull_request" in event:
+                  clear(int(event["number"]))
+                  return
+              # Traverse the full unfiltered PR collection so mutations cannot
+              # shift pagination. This includes closed and merged PRs and bots.
+              for page in range(1, 101):
+                  items = request("GET", f"/repos/{repository}/pulls?state=all&sort=created&direction=asc&per_page=100&page={page}")
+                  if not isinstance(items, list):
+                      raise ValueError("Malformed PR collection")
+                  for item in items:
+                      if item.get("milestone") is not None:
+                          clear(int(item["number"]))
+                  if len(items) < 100:
+                      print("PR milestone reconciliation complete")
+                      return
+              raise ValueError("PR pagination exceeded 100 pages")
+
+          def main():
+              repository = os.environ["GITHUB_REPOSITORY"]
+              event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+
+              def request(method, path, data=None):
+                  headers = {
+                      "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  }
+                  payload = None if data is None else json.dumps(data).encode()
+                  req = Request(os.environ["GITHUB_API_URL"] + path, data=payload, headers=headers, method=method)
+                  with urlopen(req, timeout=30) as response:
+                      return json.load(response)
+
+              reconcile(request, repository, event)
+
+          if __name__ == "__main__":
+              main()
+          PY

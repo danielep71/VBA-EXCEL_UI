@@ -16,6 +16,7 @@ Exit status is 0 when every check passed, 1 otherwise.
 """
 
 import fnmatch
+import json
 import os
 import re
 import subprocess
@@ -62,6 +63,9 @@ REQUIRED_FILES = ALL_MODULES + [
     "tools/wiki_badges.py",
     "tools/repository_policy.py",
     "tools/public_api_manifest.txt",
+    "tools/check_issues.py",
+    ".github/labels.json",
+    "docs/ISSUE_LABELS.md",
 ]
 
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?$")
@@ -1207,6 +1211,34 @@ def check_repository_policy_selftest():
         fail('repository policy self-test', finding)
 
 
+def check_label_catalogue():
+    """docs/ISSUE_LABELS.md must state the catalogue in .github/labels.json."""
+    try:
+        labels = json.loads(read(".github/labels.json").decode("utf-8"))["labels"]
+        guide = read("docs/ISSUE_LABELS.md").decode("utf-8")
+    except (OSError, ValueError, KeyError) as exc:
+        fail("label-catalogue", f"cannot read the catalogue: {exc}")
+        return
+
+    count = len(labels)
+    if f"badge/labels-{count}-" not in guide:
+        fail("label-catalogue", f"docs/ISSUE_LABELS.md badge does not show {count} labels")
+    if f"defines {count} issue labels" not in guide:
+        fail("label-catalogue", f"docs/ISSUE_LABELS.md does not state {count} labels")
+
+    rows = re.findall(r"^\| `([^`]+)` \| `#([0-9A-F]{6})` \| (.+?) \|$", guide, re.M)
+    expected = [(l["name"], l["color"], l["description"]) for l in labels]
+    if rows != expected:
+        missing = sorted(set(expected) - set(rows))
+        extra = sorted(set(rows) - set(expected))
+        detail = "; ".join(
+            [f"missing or different: {m[0]}" for m in missing]
+            + [f"not in labels.json: {e[0]}" for e in extra]
+        ) or "rows are out of order"
+        fail("label-catalogue", f"docs/ISSUE_LABELS.md catalogue table: {detail}")
+
+
+
 CHECKS = [
     ("repository policy", check_repository_policy),
     ("repository policy self-test", check_repository_policy_selftest),
@@ -1232,6 +1264,7 @@ CHECKS = [
     ("markdown links", check_markdown_links),
     ("markdown escapes", check_markdown_escapes),
     ("markdown escape self-test", check_markdown_escape_selftest),
+    ("label catalogue", check_label_catalogue),
     ("private review denylist", check_private_review_denylist),
     ("private review denylist self-test", check_private_review_denylist_selftest),
     ("house-style formatter", check_formatter),

@@ -1,0 +1,38 @@
+name: "🔒 Private security contact"
+description: "Ask for a private channel to report a vulnerability. Never describe the vulnerability here."
+title: "[Security contact]: "
+labels: ["security", "P2"]
+assignees: ["danielep71"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form only when **Security → Report a vulnerability** is unavailable, for example on a private repository. I reply with a private channel; send the details there, as `SECURITY.md` describes.
+
+        > [!CAUTION]
+        > Everyone who can read this repository's issues can read this one. Do not include the vulnerability, affected files, exploit steps, logs or screenshots.
+
+  - type: input
+    id: contact
+    attributes:
+      label: "📨 How should I reach you privately?"
+      description: "A channel you accept, such as an email address. It is visible to everyone who can read this issue."
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: "🔗 Dependencies and blocking status"
+      description: Leave "None" unless something must happen before I can reply.
+      value: None
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: "☑️ Submission checks"
+      options:
+        - label: This issue contains no vulnerability details.
+          required: true
