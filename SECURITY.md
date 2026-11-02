@@ -352,9 +352,9 @@ Markdown files, weekly and on demand, with a read-only token and no secrets.
 
 The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly
-schedule and relevant-change triggers and cannot write to the Wiki. As checked
-on 2026-10-28, it is present on `release/v1.1.3` but absent from default branch
-`main` at `45dc93c`; the schedule/manual route is not operational there.
+schedule and relevant-change triggers and cannot write to the Wiki. It is
+present on both `main` and `release/v1.1.3`, so its scheduled and manual runs
+operate from the default branch.
 #53 and #49 retain the requirement for a runnable final-repository/final-Wiki
 check before release readiness.
 
