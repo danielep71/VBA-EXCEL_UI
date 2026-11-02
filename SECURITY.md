@@ -306,6 +306,8 @@ explicit, least-privilege authorization.
 The repository currently contains these workflows:
 
 ~~~text
+.github/workflows/actionlint.yml
+.github/workflows/codeql.yml
 .github/workflows/issue-triage.yml
 .github/workflows/labels-drift.yml
 .github/workflows/labels-sync.yml
@@ -326,6 +328,13 @@ The static workflow:
 - does not execute Excel or VBA;
 - does not package or publish a release workbook.
 
+**CodeQL** analyses the Python tooling and the workflows. Its pull-request job
+is read-only and uploads nothing; only the push and scheduled job has
+`security-events: write`. **Workflow lint** runs a pinned actionlint release
+whose archive is verified by SHA-256 before it runs, with a read-only token.
+Dependabot (`.github/dependabot.yml`) proposes updates to the pinned Actions;
+nothing merges automatically.
+
 The issue workflows are documented in
 [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md). Only **Sync issue labels** has
 `issues: write`, and it reconciles labels only from the default branch; only
@@ -345,11 +354,11 @@ on 2026-10-28, it is present on `release/v1.1.3` but absent from default branch
 #53 and #49 retain the requirement for a runnable final-repository/final-Wiki
 check before release readiness.
 
-The label-color workflow is the only current workflow with write permission. It
-has `issues: write` solely to apply the repository's fixed label-color map, runs
-manually or when its own workflow file changes, and neither reads nor publishes
-release artifacts. Its broader permission must not be copied into static or
-Wiki jobs.
+Three jobs hold a write permission, each confined to that job: **Sync issue
+labels** (`issues: write`, reconciling only from the default branch), **Keep
+milestones issue-only** (`pull-requests: write`), and the push and scheduled
+**CodeQL** job (`security-events: write`). None reads or publishes release
+artifacts, and their permissions must not be copied into static or Wiki jobs.
 
 This is intentionally a low-privilege automation surface.
 

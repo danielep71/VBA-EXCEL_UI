@@ -424,6 +424,19 @@ CI runs the static gate on every pull request. It cannot execute VBA — a hoste
 runner has no Excel — so certification remains a manual step on a real host, and
 the two are complementary rather than alternatives.
 
+The Python tools under `tools/` need **Python 3.11 or later** and only the
+standard library. The required check runs them on an exact Python 3.12 release;
+a second, non-required job runs the same gate on Python 3.11 so that a change
+needing a newer interpreter is reported before it reaches your machine.
+
+Other workflows run alongside the gate and are not required checks:
+
+- **CodeQL** analyses the Python tooling and the workflows with the
+  `security-extended` queries. On a pull request it runs read-only and uploads
+  nothing.
+- **Workflow lint** runs a checksum-verified actionlint release on every
+  workflow, after proving that it rejects `.github/actionlint/invalid-workflow.yml`.
+
 Record only environments actually tested.
 
 ### Evidence principles
@@ -680,6 +693,10 @@ To move a pin:
    updated without its comment, or a comment updated without its SHA, is worse
    than no pin: it is a false statement a reviewer will believe.
 4. Run `python3 tools/check_repo.py`.
+
+Dependabot (`.github/dependabot.yml`) opens a weekly grouped pull request when a
+pinned Action has a newer release. It changes the SHA and the version comment
+together; review it with the steps above before merging.
 
 A repository-local action — `uses: ./…` — is versioned by this repository's own
 history and is exempt. Nothing else is.
