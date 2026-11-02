@@ -38,7 +38,7 @@ Every open issue also needs a target end date: an ISO `YYYY-MM-DD` calendar date
 - Target end date: YYYY-MM-DD (Europe/Rome)
 ```
 
-When both are present, that line takes precedence over the form field, so edit the line to reschedule. Triage reports a missing or invalid date (`target-date`), and a milestone without a due date or a target end date on or after it (`milestone-due`).
+A note may follow the time zone after a semicolon, as in `(Europe/Rome; same as Target date)`. When both are present, that line takes precedence over the form field, so edit the line to reschedule. Triage reports a missing or invalid date (`target-date`), and a milestone without a due date or a target end date on or after it (`milestone-due`).
 
 Every open issue also needs a section whose heading contains "Dependencies". Name each prerequisite there as an issue link (`#12`) or on a line starting `External condition:`, or write "None".
 
