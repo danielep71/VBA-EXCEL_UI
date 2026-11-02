@@ -17,8 +17,10 @@ on:
 permissions:
   contents: read
 
+# Each run has a group of its own: GitHub replaces a pending run when a newer
+# one joins the same group, so a shared group could drop a queued check.
 concurrency:
-  group: external-links-${{ github.ref }}
+  group: external-links-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
