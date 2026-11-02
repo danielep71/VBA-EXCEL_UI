@@ -27,7 +27,8 @@ name: Static checks
 # mutable: v4 has moved between commits, and an upstream account compromise
 # would otherwise reach this repository silently. The trailing comment names
 # the release that SHA was, so a reader can audit the pin without resolving it
-# by hand. Dependabot proposes updates to the pins (.github/dependabot.yml).
+# by hand. tools/check_repo.py enforces both, and Dependabot proposes updates
+# to the pins (.github/dependabot.yml).
 #
 # The required job pins an exact Python release on a fixed runner image, so a
 # new interpreter or image cannot change the gate's result between two runs of
@@ -117,11 +118,32 @@ jobs:
           echo "::notice::  python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas"
           echo "::notice::then re-import the affected modules into the VBE before committing."
 
-      # Unit tests for the repository tooling: issue triage, ruleset drift
-      # and the external link check.
-      - name: Run the tooling unit tests
+      # The gate is only as good as its checks. Each check has a fixture it
+      # must pass and one it must reject; a check that silently stopped
+      # detecting its defect would otherwise still print ok above.
+      - name: Run the gate's unit tests
         if: always()
         run: python3 -m unittest discover -s tests
+
+      # Lint and type-check the gate's own Python code. These are the only
+      # third-party tools in this workflow, and they never run the gate: the
+      # steps above still need nothing but the standard library. Every wheel is
+      # hash-locked and source builds are refused, so an upstream file replaced
+      # under the same version fails here instead of executing.
+      - name: Install the hash-locked Python quality tools
+        if: always()
+        run: >-
+          python3 -m pip install --disable-pip-version-check
+          --require-hashes --only-binary=:all:
+          -r tools/requirements-quality-ci.txt
+
+      - name: Lint the gate's Python code with Ruff
+        if: always()
+        run: ruff check tools tests
+
+      - name: Type-check the gate's Python code with mypy --strict
+        if: always()
+        run: mypy --strict tools
 
   minimum-python:
     # Not a required check: it reports when the tools stop running on the
@@ -155,6 +177,6 @@ jobs:
         if: always()
         run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
 
-      - name: Run the tooling unit tests
+      - name: Run the gate's unit tests
         if: always()
         run: python3 -m unittest discover -s tests
