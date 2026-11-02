@@ -17,13 +17,16 @@ Exit status is 0 when every check passed, 1 otherwise.
 
 import fnmatch
 import hashlib
+import html
 import os
 import re
 import subprocess
 import sys
+import unicodedata
 from collections.abc import Callable, Iterable, Iterator
 from datetime import date
 from types import ModuleType
+from urllib.parse import unquote
 
 from vba_lex import code_only
 
@@ -1492,6 +1495,100 @@ def tracked_binary_findings(tracked: list[str]) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# ATX headings only: up to three spaces of indentation, one to six hashes, and
+# then a space or the end of the line. An optional closing run of hashes is not
+# part of the heading text.
+ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+(?P<text>.*?))?(?:[ \t]+#+)?[ \t]*$")
+
+CODE_SPAN_RE = re.compile(r"(?P<ticks>`+)(?P<code>.+?)(?P=ticks)")
+
+IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+
+LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\](?:\([^)]*\)|\[[^\]]*\])")
+
+AUTOLINK_RE = re.compile(r"<(?P<url>[A-Za-z][A-Za-z0-9+.\-]*:[^\s<>]*)>")
+
+HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>]*>")
+
+# An underscore run opens emphasis only where it is not inside a word, so
+# UI_SetExcelUI keeps its underscore while _note_ loses both.
+UNDERSCORE_EMPHASIS_RE = re.compile(r"(?<![\w\\])(?P<run>_{1,3})(?=\S)(?P<body>.+?)(?<=\S)(?P=run)(?!\w)")
+
+
+def heading_plain_text(markdown: str) -> str:
+    """Return a heading's text as GitHub renders it, without inline Markdown.
+
+    Code spans keep their content and lose their backticks. Images render no
+    text. Links keep their text. HTML tags are dropped, entities decoded, and
+    underscore emphasis delimiters removed; every other markup character is
+    punctuation and is dropped when the anchor is made.
+    """
+    out = []
+    last = 0
+    for span in CODE_SPAN_RE.finditer(markdown):
+        out.append(_inline_text(markdown[last:span.start()]))
+        code = span.group("code")
+        if len(code) > 2 and code.startswith(" ") and code.endswith(" ") and code.strip():
+            code = code[1:-1]
+        out.append(code)
+        last = span.end()
+    out.append(_inline_text(markdown[last:]))
+    return "".join(out).strip()
+
+
+def _inline_text(text: str) -> str:
+    text = IMAGE_RE.sub("", text)
+    text = LINK_RE.sub(lambda m: m.group("text"), text)
+    text = AUTOLINK_RE.sub(lambda m: m.group("url"), text)
+    text = HTML_TAG_RE.sub("", text)
+    previous = None
+    while previous != text:
+        previous = text
+        text = UNDERSCORE_EMPHASIS_RE.sub(lambda m: m.group("body"), text)
+    return html.unescape(text)
+
+
+def github_anchor(heading: str) -> str:
+    """Return the anchor GitHub generates for one heading, before de-duplication.
+
+    Lowercase the rendered text, keep Unicode letters, marks and decimal
+    digits, the underscore and other connector punctuation, hyphens and
+    spaces, drop everything else (emoji included), and turn each space into a
+    hyphen. Nothing is collapsed, so "Café — notes" becomes "café--notes".
+    """
+    kept = []
+    for ch in heading_plain_text(heading).lower():
+        category = unicodedata.category(ch)
+        if ch in " -" or category[0] in "LM" or category in ("Nd", "Pc"):
+            kept.append(ch)
+    return "".join(kept).replace(" ", "-")
+
+
+def heading_anchors(text: str) -> list[str]:
+    """Return every heading anchor in a document, in order, as GitHub assigns them.
+
+    A repeated anchor gets -1, -2 and so on, and a suffixed anchor that
+    collides with one already taken is suffixed again, so every anchor in the
+    document is unique and each link resolves to one heading. Headings inside
+    fenced code blocks are not headings.
+    """
+    anchors: list[str] = []
+    counts: dict[str, int] = {}
+    taken: set[str] = set()
+    for _, line in markdown_outside_fences(text):
+        m = ATX_HEADING_RE.match(line)
+        if not m:
+            continue
+        base = github_anchor(m.group("text") or "")
+        anchor = base
+        while anchor in taken:
+            counts[base] = counts.get(base, 0) + 1
+            anchor = f"{base}-{counts[base]}"
+        taken.add(anchor)
+        anchors.append(anchor)
+    return anchors
+
+
 def check_markdown_links() -> None:
     md_files: list[str] = []
     for root, dirs, files in os.walk(REPO):
@@ -1507,14 +1604,12 @@ def check_markdown_links() -> None:
         base = os.path.dirname(os.path.join(REPO, rel))
 
         anchors = set(re.findall(r'<a id="([^"]+)"></a>', text))
-        for heading in re.findall(r"^#{1,6}\s+(.+)$", text, re.M):
-            slug = re.sub(r"[^a-z0-9 -]", "", heading.lower()).replace(" ", "-")
-            anchors.add(slug)
+        anchors.update(heading_anchors(text))
 
         for target in re.findall(r"\]\((?!https?:)([^)]+)\)", text):
             path_part, _, anchor = target.partition("#")
             if not path_part:
-                if anchor and anchor not in anchors:
+                if anchor and unquote(anchor) not in anchors:
                     fail("markdown-links", f"{rel}: broken internal anchor #{anchor}")
                 continue
             if not os.path.exists(os.path.normpath(os.path.join(base, path_part))):
