@@ -884,23 +884,6 @@ def closes_fence(line: str, fence: tuple[str, int]) -> bool:
                 and not line[m.end():].strip())
 
 
-def markdown_outside_fences(text: str) -> Iterator[tuple[int, str]]:
-    """Yield (line number, line) for every line outside a fenced code block.
-
-    Fence lines themselves are not yielded.
-    """
-    fence: tuple[str, int] | None = None   # (character, opening length)
-
-    for n, line in enumerate(text.split("\n"), 1):
-        if fence is not None:
-            if closes_fence(line, fence):
-                fence = None
-            continue
-        fence = fence_opener(line)
-        if fence is None:
-            yield n, line
-
-
 def escape_findings(rel: str, text: str) -> list[str]:
     r"""Report Markdown punctuation escaped outside code.
 
@@ -910,15 +893,15 @@ def escape_findings(rel: str, text: str) -> list[str]:
     horizontal rule read `\---`. The documents rendered as literal backslashes
     and nobody noticed for two releases.
 
-    The check is fence-aware, and deliberately does not look inside fenced
-    blocks or inline code. A backslash there is data — a Windows path, a regular
+    The check reads only rendered lines, and deliberately does not look inside
+    fenced blocks, HTML comment blocks or inline code. A backslash there is data — a Windows path, a regular
     expression — and flagging it would make the gate wrong about correct
     documents. This is a deliberate boundary: the rule detects characteristic
     escaping in prose, not every possible backslash a WYSIWYG editor can emit.
     """
     findings: list[str] = []
 
-    for n, line in markdown_outside_fences(text):
+    for n, line in rendered_markdown_lines(text):
         found = ESCAPE_RE.findall(strip_inline_code(line))
         if found:
             findings.append(
@@ -1199,7 +1182,9 @@ def changelog_findings(text: str, version: str | None) -> list[str]:  # noqa: C9
     sections: list[tuple[int, str, str]] = []
     references: dict[str, tuple[int, str]] = {}
 
-    for n, line in markdown_outside_fences(text):
+    # Fenced examples and HTML comment blocks are not rendered, so a release
+    # heading or link reference inside one is not part of the changelog.
+    for n, line in rendered_markdown_lines(text):
         section = VERSION_SECTION_RE.match(line)
         if section:
             sections.append((n, line, section.group("label") or ""))
@@ -1622,8 +1607,11 @@ HTML_COMMENT_BLOCK_START_RE = re.compile(r"^ {0,3}<!--")
 INLINE_HTML_COMMENT_RE = re.compile(r"<!--.*?-->")
 
 
-def heading_candidate_lines(text: str) -> Iterator[str]:
-    """Yield each line that can hold a heading, in one pass over fences and comments.
+def rendered_markdown_lines(text: str) -> Iterator[tuple[int, str]]:
+    """Yield (line number, line) for each line GitHub renders as Markdown.
+
+    Read in one pass over fences and comments, so it serves both the heading
+    anchors and the changelog's release headings and link references.
 
     Two kinds of block hide their lines, and each one's delimiters are plain
     content inside the other:
@@ -1639,7 +1627,7 @@ def heading_candidate_lines(text: str) -> Iterator[str]:
     """
     fence: tuple[str, int] | None = None
     in_comment = False
-    for line in text.split("\n"):
+    for n, line in enumerate(text.split("\n"), 1):
         if in_comment:
             in_comment = "-->" not in line
             continue
@@ -1653,7 +1641,7 @@ def heading_candidate_lines(text: str) -> Iterator[str]:
         if HTML_COMMENT_BLOCK_START_RE.match(line):
             in_comment = "-->" not in line[line.index("<!--") + 4:]
             continue
-        yield line
+        yield n, line
 
 
 def heading_anchors(text: str) -> list[str]:
@@ -1669,7 +1657,7 @@ def heading_anchors(text: str) -> list[str]:
     anchors: list[str] = []
     counts: dict[str, int] = {}
     taken: set[str] = set()
-    for line in heading_candidate_lines(text):
+    for _, line in rendered_markdown_lines(text):
         m = ATX_HEADING_RE.match(line)
         if not m:
             continue

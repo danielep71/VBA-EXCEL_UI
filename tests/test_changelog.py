@@ -157,6 +157,14 @@ class ChangelogStructure(unittest.TestCase):
         text = text.replace(f"{URL}/compare/v1.1.0...HEAD", f"{URL}/compare/v1.1.0+build.1...HEAD")
         self.assertEqual(findings(text, "1.1.0+build.1"), [])
 
+    def test_commented_out_releases_and_links_are_ignored(self) -> None:
+        hidden = ("<!--\n## [9.9.9] - 2026-01-01\n\n- Draft.\n\n"
+                  f"[9.9.9]: {URL}/releases/tag/v9.9.9\n-->\n")
+        text = changed("## [Unreleased]\n", hidden + "## [Unreleased]\n")
+        self.assertEqual(findings(text), [])
+        fenced = "```markdown\n## [9.9.9] - 2026-01-01\n```\n"
+        self.assertEqual(findings(changed("## [Unreleased]\n", fenced + "## [Unreleased]\n")), [])
+
     # Link references -----------------------------------------------------
     def test_a_missing_unreleased_link_reference_fails(self) -> None:
         self.assertFinding(findings(changed(f"[Unreleased]: {URL}/compare/v1.1.0...HEAD\n", "")),
