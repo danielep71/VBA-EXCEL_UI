@@ -723,6 +723,13 @@ measured against that baseline.
 - Added least-privilege and isolation requirements for any future self-hosted
   Windows/Excel runner. Static testing, runtime execution, signing and release
   publication remain separate trust stages.
+- Hardened continuous integration further (#76, #77, #78). The static-checks
+  checkout no longer leaves its token in the working copy, jobs have time
+  limits, superseded pull-request runs are cancelled, and the required job pins
+  an exact Python release on a fixed runner image, with a non-required job on
+  the minimum supported Python 3.11. Dependabot proposes updates to the pinned
+  Actions, CodeQL scans the Python tooling and the workflows, and actionlint
+  lints every workflow after proving it rejects an invalid one.
 
 ### ✅ Validation
 
