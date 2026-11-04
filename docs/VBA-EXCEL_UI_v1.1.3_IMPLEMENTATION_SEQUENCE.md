@@ -7,8 +7,16 @@
 **Planning basis:** `3d8fcdcf38ee9c4166ec10bf63f23a106b033bac`
 **Status date:** 2026-09-03
 
-This is the authoritative execution sequence for v1.1.3. GitHub issue bodies
-remain the acceptance-contract authority. This document records ordering,
+> [!IMPORTANT]
+> This is a historical planning snapshot as of 2026-09-03, not the current
+> plan. Its counts, issue set and ordering are out of date: it predates
+> #66, #70, #71, #73, #74 and #90 and the dependency and planning sections now
+> in each issue. The current sources are the
+> [v1.1.3 milestone](https://github.com/danielep71/VBA-EXCEL_UI/milestone/4) and
+> each issue's *Planning* and *Dependencies and blocking status* sections.
+
+This was the execution sequence for v1.1.3 as planned on its status date. GitHub
+issue bodies remain the acceptance-contract authority. This document records ordering,
 dependencies, closure discipline, and a point-in-time copy of every open issue
 body without relying on predicted issue numbers or withdrawn review archives.
 
