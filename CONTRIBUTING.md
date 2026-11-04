@@ -426,8 +426,9 @@ RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
 A run reporting `INCOMPLETE`, any `skipped` count above zero, or
 `cleanup=FAILED` is not a pass, whatever the assertions that did execute
 reported. The narrower runners remain useful while iterating, but do not
-substitute for certification: `Test_EXCEL_UI_RunAll` executes no multi-window
-case and produces no machine-readable evidence.
+substitute for certification: `Test_EXCEL_UI_RunAll` does not run the
+snapshot-identity and SDI identity units, and produces no machine-readable
+evidence. It still opens and closes temporary windows and workbooks.
 
 CI runs the static gate on every pull request. It cannot execute VBA — a hosted
 runner has no Excel — so certification remains a manual step on a real host, and
@@ -616,9 +617,9 @@ Two things about that arrangement are deliberate. The expected version comes
 from this repository and not from the wiki, because deriving it from the first
 page read would make the check circular: fourteen pages agreeing on a stale
 release would pass. The workflow declares scheduled and push triggers because a Wiki edit does
-not touch this repository. As checked on 2026-10-28, the workflow exists on
-`release/v1.1.3` but is absent from `main` at `45dc93c`; its default-branch
-schedule/manual route is not operational yet. Do not treat a declared trigger
+not touch this repository. The workflow is on both `main` and
+`release/v1.1.3`, so its scheduled and manual runs operate from the default
+branch. Do not treat a declared trigger
 or the historical badge run as a fresh Wiki check. #53 and #49 require a runnable
 check bound to the final repository and Wiki SHAs before release readiness.
 
