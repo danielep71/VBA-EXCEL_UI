@@ -573,9 +573,10 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   complete/incomplete and pass/fail verdict with machine-readable evidence.
 '
 ' WHY THIS EXISTS
-'   The existing runners cannot certify a release. Test_EXCEL_UI_RunAll executes
-'   no multi-window case, silently skips the snapshot cases when a snapshot
-'   already exists, and reports its outcome only as Immediate Window prose. A
+'   The existing runners cannot certify a release. Test_EXCEL_UI_RunAll does
+'   not run the snapshot-identity and SDI identity units, silently skips the
+'   snapshot cases when a snapshot already exists, and reports its outcome
+'   only as Immediate Window prose. A
 '   reader of that output cannot distinguish
 '
 '       a complete pass
@@ -2537,10 +2538,10 @@ Public Sub Test_EXCEL_UI_RunAll()
 '   - TST_RunRegressionPack
 '
 ' NOTES
-'   This is NOT the release gate. It runs no multi-window case, it can skip
-'   snapshot cases silently when a snapshot already exists, and it produces no
-'   machine-readable evidence. Use Test_EXCEL_UI_RunReleaseCertification to
-'   certify a release.
+'   This is NOT the release gate. It does not run the snapshot-identity and SDI
+'   identity units, it can skip snapshot cases silently when a snapshot
+'   already exists, and it produces no machine-readable evidence. Use
+'   Test_EXCEL_UI_RunReleaseCertification to certify a release.
 '
 ' UPDATED
 '   2026-08-19
@@ -2992,8 +2993,10 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '
 ' NOTES
 '   Destructive: creates and closes temporary workbooks. It is deliberately a
-'   separate runner rather than part of Test_EXCEL_UI_RunAll, because RunAll is
-'   currently non-destructive. Folding every mandatory case into one runner is
+'   separate runner rather than part of Test_EXCEL_UI_RunAll. RunAll also opens
+'   and closes temporary windows and workbooks for its targeting and
+'   handle-reuse cases, but it does not run these SDI identity cases. Folding
+'   every mandatory case into one runner is
 '   tracked separately as the release-certification work.
 '
 ' UPDATED

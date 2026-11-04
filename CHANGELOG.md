@@ -145,7 +145,7 @@ measured against that baseline.
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
 | Static validation | Twenty-six checks; the release branch passes |
-| Wiki | Last recorded track is v1.1.2; path-filtered badge workflow exists on the release branch, with default-branch scheduling and final evidence still pending under #53 |
+| Wiki | Last recorded track is v1.1.2; the badge workflow runs from the default branch, with final evidence still pending under #53 |
 | Excel runtime certification | Not yet run for v1.1.3 |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
@@ -1003,7 +1003,12 @@ practical closure status of any item that has since been reopened.
 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | Ribbon wrong-target restoration fails closed | Open |
 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | Pair Excel Window and native hWnd identity defensibly | Open |
 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened |
-| [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Open |
+| [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Reopened |
+| [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) | Bounded title-bar mutation control that fails instead of hanging | Open |
+| [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Open |
+| [#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71) | Demo template and sheet-reset handlers do not recatch their own re-raised errors | Open |
+| [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Open |
+| [#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74) | Demo template validates its layout inputs before resetting the worksheet | Open |
 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | Preserve caller-owned snapshots across all destructive-runner refusals | Closed; implementation, regression and mutation evidence verified |
 
 #### Certification and release assurance
