@@ -69,6 +69,8 @@ Option Private Module
 '     - lifecycle cases are skipped when an explicit EXCEL_UI snapshot already
 '       existed before the run because the harness cannot reconstruct that prior
 '       module-level snapshot object
+'     - a certification unit that fails after a capture reports the failure
+'       list it asserted on and leaves no snapshot for the next unit
 '
 '   Environment-preservation tests
 '     - ScreenUpdating restored to prior state
@@ -99,6 +101,10 @@ Option Private Module
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
+'   2026-11-06 - Structured-result assertions report the failure count and
+'                list they rejected, and certification releases a snapshot a
+'                unit left behind before the next unit runs, reporting it as
+'                a cleanup failure (#135).
 '   2026-11-06 - Header and comments aligned with the code (#114).
 '   2026-08-21 - Registered every frame-state case in the pack certification
 '                runs, added the stale-frame-entry and certification-cleanup
@@ -256,6 +262,12 @@ Private m_CertUnitDetail()              As String
 
 Private m_CertSkipCount                 As Long
 Private m_CertSkipDetail()              As String
+
+'Snapshots that units left behind, named by unit. Each one is released before
+'the next unit runs, so that one failure cannot fail every unit after it. The
+'exit state therefore no longer shows the leak, and the cleanup verdict reads
+'it from here instead.
+Private m_CertLeakDetail                As String
 
 'Ribbon characterization observations, accumulated during a probe run. Rows are
 'plain text for reading and JSON for comparison between hosts.
@@ -607,8 +619,11 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   - Runs the full regression pack, the snapshot-identity runner and the SDI
 '     title-bar identity runner, each under its own error boundary so one
 '     failing unit does not conceal the rest.
-'   - Verifies cleanup: no snapshot left behind, ScreenUpdating restored, the
-'     workbook count back to its starting value, the anchor window still usable.
+'   - Releases a snapshot a unit left behind before the next unit runs, so the
+'     next unit is not refused because of it, and records the leak.
+'   - Verifies cleanup: no snapshot left behind by any unit, ScreenUpdating
+'     restored, the workbook count back to its starting value, the anchor
+'     window still usable.
 '   - Emits a JSON evidence document and a text summary, and writes both to the
 '     temporary folder on a best-effort basis.
 '   - Raises when the verdict is anything other than a complete pass.
@@ -629,6 +644,8 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   managed UI element. Save unsaved work before running it.
 '
 ' UPDATED
+'   2026-11-06 - A snapshot a unit left behind fails cleanup, although it is
+'                released before the next unit runs (#135).
 '   2026-08-19
 '==============================================================================
 '
@@ -750,6 +767,14 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
             AnchorWindow:=AnchorWindow, _
             CleanupDetail:=CleanupDetail)
 
+    'A snapshot a unit left behind was released before the next unit ran, so
+    'the exit state cannot show it. It is still a cleanup failure: the release
+    'stops one defect from failing every later unit, it does not excuse it.
+        If Len(m_CertLeakDetail) > 0 Then
+            CleanupOK = False
+            CleanupDetail = TST_CertAppendDetail(CleanupDetail, m_CertLeakDetail)
+        End If
+
 '------------------------------------------------------------------------------
 ' DETERMINE VERDICT
 '------------------------------------------------------------------------------
@@ -869,6 +894,7 @@ Private Sub TST_CertResetCounters()
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
 ' UPDATED
+'   2026-11-06 - Clears the record of snapshots units left behind (#135).
 '   2026-08-19
 '==============================================================================
 '
@@ -881,6 +907,7 @@ Private Sub TST_CertResetCounters()
 
         m_CertUnitCount = 0
         m_CertSkipCount = 0
+        m_CertLeakDetail = vbNullString
 
         Erase m_CertUnitNames
         Erase m_CertUnitPassed
@@ -972,10 +999,6 @@ Private Sub TST_CertRunUnit( _
 '   conceals the state of everything after it. Trapping per unit means a single
 '   run tells you everything that is broken, not merely the first thing.
 '
-'   Dispatch is an explicit Select Case rather than Application.Run because the
-'   units are private to this module and a name-based call would fail silently
-'   or bind to the wrong project. A compile-time reference cannot rot.
-'
 ' INPUTS
 '   UnitName
 '     Identifier of the unit to execute.
@@ -983,34 +1006,171 @@ Private Sub TST_CertRunUnit( _
 ' RETURNS
 '   None.
 '
+' BEHAVIOR
+'   - Executes the unit through TST_CertExecuteUnit, which traps its failure
+'     and releases any snapshot it left behind.
+'   - Records the outcome and, when the unit left a snapshot, names the unit in
+'     the leak record that the cleanup verdict reads.
+'
 ' ERROR POLICY
 '   - Does not raise. A failing unit is recorded and the run continues.
 '
 ' DEPENDENCIES
-'   - TST_RunRegressionPack
-'   - Test_EXCEL_UI_RunSnapshotIdentity
-'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'   - TST_CertExecuteUnit
 '   - TST_CertRecordUnit
+'   - TST_CertAppendDetail
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
 ' UPDATED
+'   2026-11-06 - Execution moved to TST_CertExecuteUnit; a snapshot the unit
+'                left behind is recorded for the cleanup verdict (#135).
 '   2026-08-19
 '==============================================================================
 '
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Passed              As Boolean         'TRUE when the unit completed
+    Dim Detail              As String          'Failure and release detail
+    Dim LeftSnapshot        As Boolean         'TRUE when the unit left one
+
+'------------------------------------------------------------------------------
+' EXECUTE UNIT
+'------------------------------------------------------------------------------
+        TST_Log "TST_CertRunUnit", "UNIT", "Running " & UnitName
+
+        TST_CertExecuteUnit _
+            UnitName:=UnitName, _
+            Passed:=Passed, _
+            Detail:=Detail, _
+            LeftSnapshot:=LeftSnapshot
+
+'------------------------------------------------------------------------------
+' RECORD OUTCOME
+'------------------------------------------------------------------------------
+    'Recording must never be the thing that breaks a run
+        On Error Resume Next
+
+        TST_CertRecordUnit UnitName, Passed, Detail
+
+    'The release hid the leak from the exit state, so it is named here for the
+    'cleanup verdict
+        If LeftSnapshot Then
+            m_CertLeakDetail = TST_CertAppendDetail( _
+                m_CertLeakDetail, _
+                UnitName & " left an EXCEL_UI snapshot behind")
+        End If
+
+End Sub
+
+
+Private Sub TST_CertExecuteUnit( _
+    ByVal UnitName As String, _
+    ByRef Passed As Boolean, _
+    ByRef Detail As String, _
+    ByRef LeftSnapshot As Boolean)
+
+'
+'==============================================================================
+' TST_CertExecuteUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Run one unit under its own error boundary and release any snapshot it left
+'   behind, without recording anything.
+'
+' WHY THIS EXISTS
+'   A unit that fails after a capture can leave the snapshot behind. Every later
+'   destructive unit then refuses to run over it, so one defect was reported as
+'   every unit after it failing, plus a cleanup failure.
+'
+'   The release belongs here rather than in each case. Only this level knows
+'   that the snapshot is the unit's own: certification refuses to start over a
+'   snapshot and every earlier unit is released here, so the slot is empty
+'   when a unit starts. A case-level release would need an error handler in
+'   every case that captures, and would still not cover the identity runners.
+'
+'   Recording is left to the caller so that a regression case can drive the
+'   same boundary without adding units to the certification run executing it.
+'
+' INPUTS
+'   UnitName
+'     Identifier of the unit to execute.
+'
+'   Passed
+'     ByRef. Receives TRUE when the unit completed without raising.
+'
+'   Detail
+'     ByRef. Receives the failure text, followed by the release, if any.
+'     Empty when the unit passed and left nothing behind.
+'
+'   LeftSnapshot
+'     ByRef. Receives TRUE when the unit left a snapshot behind.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Records whether a snapshot existed before the unit ran. When one did, it
+'     is not the unit's, and it is left alone whatever happens.
+'   - Dispatches the unit. An unknown identifier is a failure, not a pass.
+'   - Releases a snapshot that exists after the unit when none existed before,
+'     whether the unit passed or failed, and says so in Detail.
+'
+' ERROR POLICY
+'   - Does not raise. A failing unit is reported through Passed and Detail.
+'
+' DEPENDENCIES
+'   - TST_RunRegressionPack
+'   - Test_EXCEL_UI_RunSnapshotIdentity
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'   - TST_CertSelfTestCaptureFailureUnit
+'   - TST_CertSelfTestFollowingUnit
+'   - TST_CertAppendDetail
+'
+' CALLED FROM
+'   - TST_CertRunUnit
+'   - TST_Case_CertUnitIsolatesCaptureFailure
+'
+' NOTES
+'   Dispatch is an explicit Select Case rather than Application.Run because the
+'   units are private to this module and a name-based call would fail silently
+'   or bind to the wrong project. A compile-time reference cannot rot.
+'
+'   The SelfTest units are dispatched only by
+'   TST_Case_CertUnitIsolatesCaptureFailure. Certification never runs them.
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim HadSnapshot         As Boolean         'TRUE when the slot was occupied
+
+'------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
+        Passed = False
+        Detail = vbNullString
+        LeftSnapshot = False
+
+    'Assume the slot is not this unit's until it has been read as empty. A read
+    'that failed must never license clearing a snapshot someone else owns.
+        HadSnapshot = True
+
         On Error GoTo Err_Handler
 
-        TST_Log "TST_CertRunUnit", "UNIT", "Running " & UnitName
+        HadSnapshot = UI_HasExcelUIStateSnapshot
 
 '------------------------------------------------------------------------------
 ' DISPATCH UNIT
 '------------------------------------------------------------------------------
-    'An unknown identifier is a defect in the registry above, not a pass
+    'An unknown identifier is a defect in the registry, not a pass
         Select Case UnitName
 
             Case "RegressionPack"
@@ -1024,10 +1184,16 @@ Private Sub TST_CertRunUnit( _
             Case "TitleBarSdiIdentity"
                 Test_EXCEL_UI_RunTitleBarSdiIdentity
 
+            Case "SelfTest.CaptureFailure"
+                TST_CertSelfTestCaptureFailureUnit
+
+            Case "SelfTest.FollowingUnit"
+                TST_CertSelfTestFollowingUnit
+
             Case Else
                 Err.Raise _
                     TEST_CERT_ERR_BASE + 10, _
-                    "TST_CertRunUnit", _
+                    "TST_CertExecuteUnit", _
                     "unknown certification unit: " & UnitName
 
         End Select
@@ -1036,24 +1202,167 @@ Private Sub TST_CertRunUnit( _
 ' RECORD PASS
 '------------------------------------------------------------------------------
     'The unit completed without raising
-        TST_CertRecordUnit UnitName, True, vbNullString
+        Passed = True
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
 Safe_Exit:
-    'Exit before the error-handler block
+    'Release a snapshot this unit created, on every path. The next unit would
+    'otherwise refuse to run over it, and its failure would be this unit's.
+        On Error Resume Next
+
+        If Not HadSnapshot Then
+
+            If UI_HasExcelUIStateSnapshot Then
+
+                LeftSnapshot = True
+
+                UI_ClearExcelUIStateSnapshot
+
+                Detail = TST_CertAppendDetail(Detail, _
+                    "left an EXCEL_UI snapshot behind; " & _
+                    IIf(UI_HasExcelUIStateSnapshot, _
+                        "it could not be released", _
+                        "released before the next unit"))
+
+            End If
+
+        End If
+
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 Err_Handler:
-    'Record the failure and continue; the verdict is assembled by the caller
-        TST_CertRecordUnit UnitName, False, _
-            CStr(Err.Number) & ": " & Err.Description
+    'Capture the failure before anything else can clear Err
+        Detail = CStr(Err.Number) & ": " & Err.Description
 
         Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_CertSelfTestCaptureFailureUnit()
+
+'
+'==============================================================================
+' TST_CertSelfTestCaptureFailureUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Fail the way the first real-host certification run failed: an assertion
+'   on a capture that reported failure, after that capture had created a
+'   snapshot, with nothing on the path to release it.
+'
+' WHY THIS EXISTS
+'   TST_Case_CertUnitIsolatesCaptureFailure needs a unit that fails in that
+'   shape on demand. A capture fails only when the host refuses a read, which
+'   cannot be provoked, so the active-frame pair seam forces the TitleBar
+'   element to fail. The capture still completes and still leaves a snapshot,
+'   exactly as a host refusal does.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises the TST_AssertResultSuccess failure, on purpose.
+'   - Leaves the snapshot behind, on purpose. Releasing it is the job of the
+'     boundary under test.
+'
+' DEPENDENCIES
+'   - UI_InternalInjectFramePairFault
+'   - UI_CaptureExcelUIState_WithResult
+'   - TST_AssertResultSuccess
+'
+' CALLED FROM
+'   - TST_CertExecuteUnit
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean         'Structured capture result
+    Dim FailureCount        As Long            'Structured failure count
+    Dim FailureList         As Variant         'Structured failure list
+
+    Const PROC As String = "TST_CertSelfTestCaptureFailureUnit"
+
+'------------------------------------------------------------------------------
+' CAPTURE WITH AN INJECTED FAILURE
+'------------------------------------------------------------------------------
+    'The seam is one-shot and the capture resolves the frame pair once, so
+    'exactly the TitleBar element fails
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_MISMATCH
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+    'Disarm in case the capture never reached the resolution
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
+
+'------------------------------------------------------------------------------
+' ASSERT AS THE CLEAN-SUCCESS CASE DOES
+'------------------------------------------------------------------------------
+    'Raises, carrying the failure list the capture returned
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".Result"
+
+End Sub
+
+
+Private Sub TST_CertSelfTestFollowingUnit()
+
+'
+'==============================================================================
+' TST_CertSelfTestFollowingUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stand in for the unit that runs after a failed one.
+'
+' WHY THIS EXISTS
+'   The snapshot-identity and SDI identity units begin by refusing to run over
+'   an existing snapshot, and that refusal is what turned one failed unit into
+'   three. This unit applies the same refusal and nothing else, so it passes
+'   exactly when a real following unit would get past its precondition,
+'   without running a full destructive unit a second time.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises when an explicit EXCEL_UI snapshot exists.
+'
+' CALLED FROM
+'   - TST_CertExecuteUnit
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' VALIDATE PRECONDITIONS
+'------------------------------------------------------------------------------
+    'The refusal the destructive units apply before anything else
+        If UI_HasExcelUIStateSnapshot Then
+            Err.Raise _
+                TEST_CERT_ERR_BASE + 30, _
+                "TST_CertSelfTestFollowingUnit", _
+                "an explicit EXCEL_UI snapshot already exists; clear or " & _
+                "restore it before running this destructive test"
+        End If
+
+        TST_Log "TST_CertSelfTestFollowingUnit", "PASS", _
+            "No snapshot was left for this unit to refuse"
 
 End Sub
 
@@ -1328,8 +1637,12 @@ Private Function TST_CertAppendDetail( _
 '
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
+'   - TST_CertExecuteUnit
+'   - TST_CertRunUnit
+'   - Test_EXCEL_UI_RunReleaseCertification
 '
 ' UPDATED
+'   2026-11-06 - Also joins unit release detail and the leak record (#135).
 '   2026-08-21
 '   2026-08-19
 '==============================================================================
@@ -3181,6 +3494,7 @@ Private Sub TST_RunRegressionPack( _
 '     release is tagged on. Every frame-state case is registered here as well.
 '
 ' UPDATED
+'   2026-11-06 - Registered the certification unit-isolation case (#135).
 '   2026-08-21 - Registered the frame-refresh-debt and stale-frame-entry cases,
 '                which certification did not reach.
 '   2026-07-29
@@ -3322,6 +3636,9 @@ Private Sub TST_RunRegressionPack( _
 
             'Run the destructive-runner snapshot-ownership case
                 TST_Case_DestructiveRunnersPreserveCallerSnapshot
+
+            'Run the certification unit-isolation case for a failed capture
+                TST_Case_CertUnitIsolatesCaptureFailure
 
         End If
 
@@ -4639,6 +4956,7 @@ Private Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarT
 '   - Raises on assertion failure
 '
 ' UPDATED
+'   2026-11-06 - Failure messages carry the structured result (#135).
 '   2026-07-25
 '==============================================================================
 '
@@ -4681,7 +4999,9 @@ Private Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarT
         If Not OK Then
             Err.Raise TEST_ERR_BASE + 30, _
                       "WithResult.NoFailureList.Result", _
-                      "WithResult.NoFailureList.Result expected=True actual=False"
+                      "WithResult.NoFailureList.Result expected=True actual=False" & _
+                      " | FailureCount=" & CStr(FailureCount) & _
+                      " | FailureList=not requested"
         End If
 
     'Assert that no failures were recorded
@@ -4758,6 +5078,7 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
 '   - Raises on assertion failure
 '
 ' UPDATED
+'   2026-11-06 - Failure messages carry the structured result (#135).
 '   2026-07-25
 '==============================================================================
 '
@@ -4790,21 +5111,24 @@ Private Sub TST_Case_WithResult_InvalidVisibility()
         If OK Then
             Err.Raise TEST_ERR_BASE + 40, _
                       "WithResult.InvalidVisibility", _
-                      "WithResult.InvalidVisibility expected=False actual=True"
+                      "WithResult.InvalidVisibility expected=False actual=True | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
     'Assert that one or more failures were recorded
         If FailureCount < 1 Then
             Err.Raise TEST_ERR_BASE + 41, _
                       "WithResult.InvalidVisibility", _
-                      "WithResult.InvalidVisibility expected FailureCount>=1 actual=" & CStr(FailureCount)
+                      "WithResult.InvalidVisibility expected FailureCount>=1 actual=" & CStr(FailureCount) & _
+                      " | " & TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
     'Assert that FailureList was populated
         If IsEmpty(FailureList) Then
             Err.Raise TEST_ERR_BASE + 42, _
                       "WithResult.InvalidVisibility", _
-                      "WithResult.InvalidVisibility expected FailureList to be populated"
+                      "WithResult.InvalidVisibility expected FailureList to be populated | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
 '------------------------------------------------------------------------------
@@ -6321,6 +6645,176 @@ Safe_Exit:
         On Error GoTo 0
 
     'Raise the captured failure after restoration when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        HasFailure = True
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
+
+'
+'==============================================================================
+' TST_Case_CertUnitIsolatesCaptureFailure
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a certification unit which fails after a capture reports the
+'   failure list the capture returned, leaves no snapshot behind, and does not
+'   stop the next unit from running.
+'
+' WHY THIS EXISTS
+'   The first real-host certification run reported three failed units and a
+'   cleanup failure for one defect. A capture failed, the assertion on it
+'   raised "expected=True actual=False" without the failure list that named
+'   the element and the reason, and the snapshot that capture had created was
+'   left behind. Both later units then refused to run over it.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   1  failing unit      fails; its detail carries the failure count and the
+'                        injected TitleBar entry; the snapshot it left behind
+'                        is released and reported
+'   2  following unit    passes; nothing is left behind
+'
+' ERROR POLICY
+'   - Raises on assertion failure, after disarming the seam and releasing any
+'     snapshot this case created.
+'
+' DEPENDENCIES
+'   - TST_CertExecuteUnit
+'   - TST_AssertBooleanEquals
+'   - TST_AssertTrue
+'   - TST_AssertSnapshotAvailability
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' NOTES
+'   The case drives TST_CertExecuteUnit, not TST_CertRunUnit. Recording would
+'   add these two units to the certification run executing this case, and
+'   their deliberate failure would become that run's verdict.
+'
+'   The detail is the text certification writes to its report and its JSON
+'   evidence, so asserting it here asserts what reaches the evidence.
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Passed              As Boolean         'Unit outcome
+    Dim Detail              As String          'Unit failure and release detail
+    Dim LeftSnapshot        As Boolean         'TRUE when the unit left one
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_CertUnitIsolatesCaptureFailure"
+    Const INJECTED_ENTRY As String = _
+        "TitleBar | the active Excel Window is not the active native frame"
+
+'------------------------------------------------------------------------------
+' VALIDATE PRECONDITIONS
+'------------------------------------------------------------------------------
+    'Every snapshot below is this case's only if the slot is empty now. This is
+    'asserted before the handler is armed, so a failure here cannot reach the
+    'release below and clear a snapshot this case never owned.
+        TST_AssertSnapshotAvailability False, PROC & ".NoSnapshotOnEntry"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a unit failing after a capture is reported and isolated"
+
+'------------------------------------------------------------------------------
+' A UNIT THAT FAILS AFTER A CAPTURE
+'------------------------------------------------------------------------------
+        TST_CertExecuteUnit _
+            UnitName:="SelfTest.CaptureFailure", _
+            Passed:=Passed, _
+            Detail:=Detail, _
+            LeftSnapshot:=LeftSnapshot
+
+    'Logged before it is asserted, so a failing assertion keeps what was seen
+        TST_Log PROC, "OBSERVED", Detail
+
+        TST_AssertBooleanEquals False, Passed, PROC & ".Failing.Failed"
+
+    'The count and the entry that names the element are what the host run lost
+        TST_AssertTrue _
+            (InStr(1, Detail, "| FailureCount=", vbBinaryCompare) > 0), _
+            PROC & ".Failing.DetailCarriesCount"
+
+        TST_AssertTrue _
+            (InStr(1, Detail, INJECTED_ENTRY, vbBinaryCompare) > 0), _
+            PROC & ".Failing.DetailCarriesFailureList"
+
+    'The leak is released, and said to be, rather than hidden
+        TST_AssertBooleanEquals True, LeftSnapshot, PROC & ".Failing.LeakReported"
+
+        TST_AssertTrue _
+            (InStr(1, Detail, "released before the next unit", vbBinaryCompare) > 0), _
+            PROC & ".Failing.ReleaseRecorded"
+
+        TST_AssertSnapshotAvailability False, PROC & ".Failing.SnapshotReleased"
+
+'------------------------------------------------------------------------------
+' THE NEXT UNIT STILL RUNS
+'------------------------------------------------------------------------------
+        TST_CertExecuteUnit _
+            UnitName:="SelfTest.FollowingUnit", _
+            Passed:=Passed, _
+            Detail:=Detail, _
+            LeftSnapshot:=LeftSnapshot
+
+        TST_AssertBooleanEquals True, Passed, PROC & ".Following.Ran"
+
+        TST_AssertTrue (Len(Detail) = 0), PROC & ".Following.NoDetail"
+
+        TST_AssertBooleanEquals False, LeftSnapshot, PROC & ".Following.NothingLeft"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "The failed unit reported its failure list and left nothing for the next unit"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Disarm the seam and release anything left. The slot was empty on entry,
+    'so any snapshot here was created by this case.
+        On Error Resume Next
+            UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
+            UI_ClearExcelUIStateSnapshot
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
         If HasFailure Then
             Err.Raise FailNumber, FailSource, FailDescription
         End If
@@ -8887,9 +9381,15 @@ Private Sub TST_AssertResultSuccess( _
 '   None
 '
 ' ERROR POLICY
-'   - Raises on mismatch
+'   - Raises on mismatch, with the failure count and list the call returned
+'
+' NOTES
+'   The failure list is the only record of which element failed and why.
+'   Certification writes this message to its report and its JSON evidence,
+'   so a message without the list leaves a failed run undiagnosable.
 '
 ' UPDATED
+'   2026-11-06 - Messages carry the failure count and list (#135).
 '   2026-07-25
 '==============================================================================
 '
@@ -8900,7 +9400,8 @@ Private Sub TST_AssertResultSuccess( _
         If Not Succeeded Then
             Err.Raise TEST_ERR_BASE + 20, _
                       AssertionName, _
-                      AssertionName & " expected=True actual=False"
+                      AssertionName & " expected=True actual=False | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
 '------------------------------------------------------------------------------
@@ -8910,7 +9411,8 @@ Private Sub TST_AssertResultSuccess( _
         If FailureCount <> 0 Then
             Err.Raise TEST_ERR_BASE + 21, _
                       AssertionName, _
-                      AssertionName & " expected FailureCount=0 actual=" & CStr(FailureCount)
+                      AssertionName & " expected FailureCount=0 actual=" & CStr(FailureCount) & _
+                      " | " & TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
 '------------------------------------------------------------------------------
@@ -8921,7 +9423,8 @@ Private Sub TST_AssertResultSuccess( _
         If Not IsEmpty(FailureList) Then
             Err.Raise TEST_ERR_BASE + 22, _
                       AssertionName, _
-                      AssertionName & " expected FailureList=Empty for clean success path"
+                      AssertionName & " expected FailureList=Empty for clean success path | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
 End Sub
@@ -8958,9 +9461,10 @@ Private Sub TST_AssertSingleFailurePrefix( _
 '   None.
 '
 ' ERROR POLICY
-'   - Raises on mismatch.
+'   - Raises on mismatch, with the failure count and list the call returned.
 '
 ' UPDATED
+'   2026-11-06 - Messages carry the failure count and list (#135).
 '   2026-07-29
 '==============================================================================
 '
@@ -8971,14 +9475,16 @@ Private Sub TST_AssertSingleFailurePrefix( _
         If Succeeded Then
             Err.Raise TEST_ERR_BASE + 60, _
                       AssertionName, _
-                      AssertionName & " expected=False actual=True"
+                      AssertionName & " expected=False actual=True | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
         If FailureCount <> 1 Then
             Err.Raise TEST_ERR_BASE + 61, _
                       AssertionName, _
                       AssertionName & " expected FailureCount=1 actual=" & _
-                      CStr(FailureCount)
+                      CStr(FailureCount) & " | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
 '------------------------------------------------------------------------------
@@ -8987,13 +9493,15 @@ Private Sub TST_AssertSingleFailurePrefix( _
         If Not IsArray(FailureList) Then
             Err.Raise TEST_ERR_BASE + 62, _
                       AssertionName, _
-                      AssertionName & " expected FailureList array"
+                      AssertionName & " expected FailureList array | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
         If LBound(FailureList) <> 1 Or UBound(FailureList) <> 1 Then
             Err.Raise TEST_ERR_BASE + 63, _
                       AssertionName, _
-                      AssertionName & " expected one 1-based failure entry"
+                      AssertionName & " expected one 1-based failure entry | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
         If Left$(CStr(FailureList(1)), Len(ExpectedPrefix)) <> ExpectedPrefix Then
@@ -9004,6 +9512,201 @@ Private Sub TST_AssertSingleFailurePrefix( _
         End If
 
 End Sub
+
+
+Private Function TST_DescribeResultBuffers( _
+    ByVal FailureCount As Long, _
+    ByRef FailureList As Variant) _
+    As String
+
+'
+'==============================================================================
+' TST_DescribeResultBuffers
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Render a structured result's failure count and failure list as one bounded
+'   line of diagnostic text.
+'
+' WHY THIS EXISTS
+'   An assertion on a structured result used to report only that the flag or
+'   the count was wrong. The list, which names each failed element and the
+'   reason, was discarded, so a failed certification could not be diagnosed
+'   from its evidence.
+'
+' INPUTS
+'   FailureCount
+'     Failure count the call returned.
+'
+'   FailureList
+'     Failure list the call returned. May be Empty, a non-array, an array
+'     without bounds, or hold entries that are not text.
+'
+' RETURNS
+'   String
+'     "FailureCount=<n> | FailureList=<list>", where <list> is Empty, a
+'     description of a value that is not a usable array, or the entries in
+'     brackets joined by " || ". Entries are cut off after
+'     TST_RESULT_LIST_MAX_CHARS characters and the cut is marked.
+'
+' ERROR POLICY
+'   - Does not raise. It runs while an assertion is being raised, and must not
+'     replace the failure it describes.
+'
+' DEPENDENCIES
+'   - TST_DescribeListEntry
+'
+' CALLED FROM
+'   - TST_AssertResultSuccess
+'   - TST_AssertSingleFailurePrefix
+'   - TST_AssertFailureListContainsPrefix
+'   - TST_Case_WithResult_InvalidVisibility
+'
+' NOTES
+'   Entries are joined with " || " because each entry already uses " | "
+'   between its element and its reason.
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ListText            As String          'Rendered failure list
+    Dim EntryText           As String          'One rendered entry
+    Dim FirstIdx            As Long            'Lower bound of the list
+    Dim LastIdx             As Long            'Upper bound of the list
+    Dim ScanIdx             As Long            'Cursor over the entries
+
+    Const TST_RESULT_LIST_MAX_CHARS As Long = 1000  'Cap on rendered entries
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A diagnostic must never replace the failure it describes
+        On Error Resume Next
+
+        TST_DescribeResultBuffers = _
+            "FailureCount=" & CStr(FailureCount) & " | FailureList=<unreadable>"
+
+'------------------------------------------------------------------------------
+' RENDER THE LIST
+'------------------------------------------------------------------------------
+        If IsEmpty(FailureList) Then
+
+            ListText = "Empty"
+
+        ElseIf Not IsArray(FailureList) Then
+
+            ListText = "<" & TypeName(FailureList) & ", not an array>"
+
+        Else
+
+            'An array that was declared but never sized has no bounds
+                Err.Clear
+
+                FirstIdx = LBound(FailureList)
+                LastIdx = UBound(FailureList)
+
+                If Err.Number <> 0 Then
+
+                    Err.Clear
+                    ListText = "<array without bounds>"
+
+                Else
+
+                    For ScanIdx = FirstIdx To LastIdx
+
+                        'An entry that cannot be read keeps this placeholder
+                            EntryText = "<unreadable entry>"
+                            EntryText = TST_DescribeListEntry(FailureList(ScanIdx))
+
+                            If ScanIdx > FirstIdx Then
+                                ListText = ListText & " || "
+                            End If
+
+                            ListText = ListText & EntryText
+
+                        'Bound the text, so a long list cannot swamp the report
+                            If Len(ListText) > TST_RESULT_LIST_MAX_CHARS Then
+                                ListText = Left$(ListText, TST_RESULT_LIST_MAX_CHARS) & _
+                                    " ... (truncated)"
+                                Exit For
+                            End If
+
+                    Next ScanIdx
+
+                    ListText = "[" & ListText & "]"
+
+                End If
+
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN TEXT
+'------------------------------------------------------------------------------
+        TST_DescribeResultBuffers = _
+            "FailureCount=" & CStr(FailureCount) & " | FailureList=" & ListText
+
+End Function
+
+
+Private Function TST_DescribeListEntry( _
+    ByVal Entry As Variant) _
+    As String
+
+'
+'==============================================================================
+' TST_DescribeListEntry
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Render one failure-list entry as text, whatever it holds.
+'
+' WHY THIS EXISTS
+'   CStr raises on an object without a default member, on Null and on an
+'   array. The entry is taken ByVal as a Variant, so an object arrives as a
+'   reference and is never evaluated through its default member.
+'
+' INPUTS
+'   Entry
+'     One element of a failure list.
+'
+' RETURNS
+'   String
+'     The entry as text, or a bracketed description when it is not text.
+'
+' ERROR POLICY
+'   - Does not raise. An entry that cannot be converted is reported as
+'     unreadable.
+'
+' CALLED FROM
+'   - TST_DescribeResultBuffers
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' RENDER ENTRY
+'------------------------------------------------------------------------------
+    'The tests below cannot raise, so no branch is entered on an error
+        On Error Resume Next
+
+        TST_DescribeListEntry = "<unreadable entry>"
+
+        If IsObject(Entry) Then
+            TST_DescribeListEntry = "<" & TypeName(Entry) & ">"
+        ElseIf IsArray(Entry) Then
+            TST_DescribeListEntry = "<array>"
+        ElseIf IsNull(Entry) Then
+            TST_DescribeListEntry = "<Null>"
+        Else
+            TST_DescribeListEntry = CStr(Entry)
+        End If
+
+End Function
 
 
 Private Sub TST_AssertSnapshotAvailability( _
@@ -10012,13 +10715,15 @@ Private Sub TST_AssertFailureListContainsPrefix( _
 '   None.
 '
 ' ERROR POLICY
-'   - Raises a descriptive assertion failure.
+'   - Raises a descriptive assertion failure, with the failure count and list
+'     the call returned.
 '
 ' CALLED FROM
 '   - TST_Case_TitleBarCapturedFrameClosedIsReported
 '   - TST_Case_RibbonRestoreRefusesClosedWindow
 '
 ' UPDATED
+'   2026-11-06 - Messages carry the failure count and list (#135).
 '   2026-08-19
 '==============================================================================
 '
@@ -10038,7 +10743,8 @@ Private Sub TST_AssertFailureListContainsPrefix( _
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 50, _
                 AssertionName, _
-                "expected a structured failure but the operation reported success"
+                "expected a structured failure but the operation reported success | " & _
+                TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
         If FailureCount < 1 Then
@@ -10046,14 +10752,16 @@ Private Sub TST_AssertFailureListContainsPrefix( _
                 TEST_TITLEBAR_SDI_ERR_BASE + 51, _
                 AssertionName, _
                 "expected at least one ordered failure entry but " & _
-                "FailureCount was " & CStr(FailureCount)
+                "FailureCount was " & CStr(FailureCount) & " | " & _
+                TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
         If Not IsArray(FailureList) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 52, _
                 AssertionName, _
-                "expected an ordered failure list but no array was returned"
+                "expected an ordered failure list but no array was returned | " & _
+                TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
 '------------------------------------------------------------------------------
@@ -10076,7 +10784,8 @@ Private Sub TST_AssertFailureListContainsPrefix( _
                 TEST_TITLEBAR_SDI_ERR_BASE + 53, _
                 AssertionName, _
                 "no ordered failure entry began with the expected stage " & _
-                "prefix " & ExpectedPrefix
+                "prefix " & ExpectedPrefix & " | " & _
+                TST_DescribeResultBuffers(FailureCount, FailureList)
         End If
 
 End Sub
