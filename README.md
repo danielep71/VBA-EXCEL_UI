@@ -573,6 +573,9 @@ Test_EXCEL_UI_RunCertificationSelfTest    ' standalone: a failed certification m
 Test_EXCEL_UI_RunOwnershipCleanupChecks   ' standalone: runner-owned snapshots are always released
 ```
 
+`Test_EXCEL_UI_RunOwnershipCleanupChecks` exists only on `release/v1.1.3` until
+v1.1.3 is released; the regression module on `main` does not define it.
+
 To certify a release, run one command:
 
 ```text
