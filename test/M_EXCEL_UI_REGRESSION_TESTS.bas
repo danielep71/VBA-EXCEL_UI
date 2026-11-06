@@ -2521,6 +2521,9 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
         BookB.Windows(1).Activate
         TST_WaitUI TEST_WAIT_SECONDS
 
+    'Since #23 restore refuses the Ribbon while another window is active, so
+    'the rows below record the refusal: neither window's Ribbon changes. The
+    'fire-and-forget restore logs the Ribbon failure.
         UI_ResetExcelUIToSnapshot
         TST_WaitUI TEST_WAIT_SECONDS
 
@@ -3195,6 +3198,16 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 '------------------------------------------------------------------------------
 ' RESTORE AND ASSERT STRUCTURED FAILURE
 '------------------------------------------------------------------------------
+    'ThisWorkbook.NewWindow activated the replacement. The Ribbon is restored
+    'only while the window it was captured from is active (#23), so restoring
+    'with the replacement active would add a correct Ribbon failure to the
+    'WindowIdentity failure this case exists to assert. Reactivating the anchor
+    'keeps the case about window identity; the Ribbon refusal has its own case,
+    'TST_Case_RibbonRestoreRefusesOtherActiveWindow.
+        AnchorWindow.Activate
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
         FailureCount = 99
         FailureList = Array("stale restore failure")
 
@@ -3303,7 +3316,8 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '
 ' BEHAVIOR
 '   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
-'   - Runs the redirect case and the closed-frame case.
+'   - Runs the redirect case and the closed-frame case for the title bar, and
+'     the other-active-window and closed-window cases for the Ribbon.
 '   - Clears any snapshot and restores the title bar before returning.
 '
 ' ERROR POLICY
@@ -3313,6 +3327,8 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 ' DEPENDENCIES
 '   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
 '   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'   - TST_Case_RibbonRestoreRefusesOtherActiveWindow
+'   - TST_Case_RibbonRestoreRefusesClosedWindow
 '
 ' NOTES
 '   Destructive: creates and closes temporary workbooks. It is deliberately a
@@ -3380,6 +3396,11 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 
     'A captured frame that has closed must be reported, never redirected
         TST_Case_TitleBarCapturedFrameClosedIsReported
+
+    'The Ribbon acts only on the active window, so restore must refuse it when
+    'its captured window is not active, and when that window has closed
+        TST_Case_RibbonRestoreRefusesOtherActiveWindow
+        TST_Case_RibbonRestoreRefusesClosedWindow
 
     'Log successful completion before cleanup
         TST_Log PROC, "PASS", _
@@ -7601,8 +7622,16 @@ Private Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 
         TST_WaitUI TEST_WAIT_SECONDS
 
-        TST_AssertResultSuccess OK, FailureCount, FailureList, _
-            "SdiRestoreTargetsCapturedFrame.Restore"
+    'The title bar is written through the captured frame, so it is restored
+    'while the second window is active. The Ribbon is not: it acts only on the
+    'active window, so restore refuses it and reports exactly one Ribbon
+    'failure instead of applying the anchor's value to the second window (#23).
+        TST_AssertSingleFailurePrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="Ribbon | captured Ribbon window is not the active window", _
+            AssertionName:="SdiRestoreTargetsCapturedFrame.Restore"
 
 '------------------------------------------------------------------------------
 ' ASSERT THE CAPTURED FRAME WAS RESTORED
@@ -7839,6 +7868,380 @@ Safe_Exit:
 
             If Not AnchorWindow Is Nothing Then
                 AnchorWindow.Activate
+            End If
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_RibbonRestoreRefusesOtherActiveWindow()
+
+'
+'==============================================================================
+' TST_Case_RibbonRestoreRefusesOtherActiveWindow
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that restoring a snapshot while a different window is active
+'   refuses the Ribbon, reports it, changes neither window's Ribbon and
+'   activates nothing.
+'
+' WHY THIS EXISTS
+'   Under SDI each window has its own Ribbon and every Ribbon write acts on the
+'   active window. Before #23 a value captured on window A was written to
+'   whichever window was active at restore time and reported as a success,
+'   while A stayed unrestored (ICR-UI-112-P1-01).
+'
+'   The second window is hidden before restore, so a wrongful write of A's
+'   captured visible state would be observable on it.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Captures with the anchor active and its Ribbon visible.
+'   - Hides the anchor's Ribbon, activates a second window and hides its
+'     Ribbon too.
+'   - Restores and asserts exactly one Ribbon failure.
+'   - Asserts the second window is still active and its Ribbon still hidden.
+'   - Asserts the anchor's Ribbon is still hidden: nothing was restored to it.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup of the temporary workbook.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window the Ribbon is captured on
+    Dim SecondWorkbook      As Workbook        'Temporary second workbook
+    Dim SecondWindow        As Window          'Window active at restore time
+
+    Dim RibbonVisible       As Boolean         'Ribbon read for assertions
+    Dim ReadMsg             As String          'Diagnostic from the Ribbon read
+
+    Dim OK                  As Boolean         'Structured result flag
+    Dim FailureCount        As Long            'Structured result failure count
+    Dim FailureList         As Variant         'Structured result failure list
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_RibbonRestoreRefusesOtherActiveWindow"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that the Ribbon is not restored to another active window"
+
+'------------------------------------------------------------------------------
+' CAPTURE ON THE ANCHOR
+'------------------------------------------------------------------------------
+    'Hold the window the Ribbon is captured from
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 110, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+    'Open the second window first, so it already exists at capture time and
+    'its own window-level state restores cleanly
+        Set SecondWorkbook = Workbooks.Add
+        Set SecondWindow = SecondWorkbook.Windows(1)
+
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_SetExcelUI Ribbon:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess OK, FailureCount, FailureList, _
+            "RibbonRestoreOtherActiveWindow.Capture"
+
+'------------------------------------------------------------------------------
+' CHANGE BOTH RIBBONS AND SWITCH WINDOWS
+'------------------------------------------------------------------------------
+    'Hide the anchor's Ribbon, so a correct restore would have to show it
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'Hide the second window's Ribbon, so a wrongful write would show it
+        SecondWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' RESTORE WITH THE SECOND WINDOW ACTIVE
+'------------------------------------------------------------------------------
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'The Ribbon is the only element that cannot be restored from here
+        TST_AssertSingleFailurePrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="Ribbon | captured Ribbon window is not the active window", _
+            AssertionName:="RibbonRestoreOtherActiveWindow.Refused"
+
+'------------------------------------------------------------------------------
+' ASSERT NOTHING WAS ACTIVATED OR WRITTEN
+'------------------------------------------------------------------------------
+    'Restore must not have moved focus to the captured window
+        TST_AssertTrue _
+            ActualValue:=(ActiveWindow.hWnd = SecondWindow.hWnd), _
+            AssertionName:="RibbonRestoreOtherActiveWindow.FocusUnchanged"
+
+    'The active window must not have received the anchor's captured value
+        If Not TST_TryGetRibbonVisible(RibbonVisible, ReadMsg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 111, _
+                PROC, _
+                "second window Ribbon read failed | " & ReadMsg
+        End If
+
+        TST_AssertBooleanEquals _
+            False, _
+            RibbonVisible, _
+            "RibbonRestoreOtherActiveWindow.SecondUnchanged"
+
+    'Nothing was restored to the anchor either
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertRibbonVisible _
+            False, _
+            "RibbonRestoreOtherActiveWindow.AnchorNotRestored"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Ribbon restore was refused; neither window changed and none was activated"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Release the snapshot and the temporary workbook, and leave the anchor's
+    'Ribbon visible
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+            TST_SafeCloseWorkbook SecondWorkbook
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+                UI_SetExcelUI Ribbon:=UI_Show
+            End If
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_RibbonRestoreRefusesClosedWindow()
+
+'
+'==============================================================================
+' TST_Case_RibbonRestoreRefusesClosedWindow
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that restoring a snapshot whose Ribbon window has closed reports a
+'   Ribbon failure and does not write the captured value to the surviving
+'   window.
+'
+' WHY THIS EXISTS
+'   A closed captured window is the second route to the same misdirection: the
+'   only window left to write to is one the value was never read from.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Captures with a temporary window active and its Ribbon visible.
+'   - Closes that window and hides the surviving anchor's Ribbon.
+'   - Restores and asserts a Ribbon failure is reported.
+'   - Asserts the anchor's Ribbon is still hidden.
+'
+' ERROR POLICY
+'   - Raises after best-effort cleanup of the temporary workbook.
+'
+' NOTES
+'   Closing the captured window also invalidates its title-bar frame and its
+'   Window entry, so the result carries more than one failure. The assertion
+'   looks for the Ribbon entry within the list.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window that survives the case
+    Dim DoomedWorkbook      As Workbook        'Temporary workbook to be closed
+    Dim DoomedWindow        As Window          'Window the Ribbon is captured on
+
+    Dim OK                  As Boolean         'Structured result flag
+    Dim FailureCount        As Long            'Structured result failure count
+    Dim FailureList         As Variant         'Structured result failure list
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_RibbonRestoreRefusesClosedWindow"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a closed Ribbon window is reported"
+
+'------------------------------------------------------------------------------
+' CAPTURE ON THE WINDOW THAT WILL CLOSE
+'------------------------------------------------------------------------------
+    'Hold the window that must remain untouched
+        Set AnchorWindow = ActiveWindow
+
+        If AnchorWindow Is Nothing Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 120, _
+                PROC, _
+                "no active Excel window is available"
+        End If
+
+        Set DoomedWorkbook = Workbooks.Add
+        Set DoomedWindow = DoomedWorkbook.Windows(1)
+
+        DoomedWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_SetExcelUI Ribbon:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        OK = UI_CaptureExcelUIState_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess OK, FailureCount, FailureList, _
+            "RibbonRestoreClosedWindow.Capture"
+
+'------------------------------------------------------------------------------
+' CLOSE THE CAPTURED WINDOW
+'------------------------------------------------------------------------------
+        TST_SafeCloseWorkbook DoomedWorkbook
+
+        Set DoomedWindow = Nothing
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'Hide the survivor's Ribbon, so a wrongful write would show it
+        AnchorWindow.Activate
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_SetExcelUI Ribbon:=UI_Hide
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+        OK = UI_ResetExcelUIToSnapshot_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+    'A Ribbon entry must appear in the ordered failure list
+        TST_AssertFailureListContainsPrefix _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedPrefix:="Ribbon | captured Ribbon window is no longer open or usable", _
+            AssertionName:="RibbonRestoreClosedWindow.Reported"
+
+    'The survivor must not have received the closed window's captured value
+        TST_AssertRibbonVisible _
+            False, _
+            "RibbonRestoreClosedWindow.SurvivorUnchanged"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Closed Ribbon window was reported and no state was applied"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Release the snapshot and any surviving temporary workbook, and leave the
+    'anchor's Ribbon visible
+        On Error Resume Next
+            UI_ClearExcelUIStateSnapshot
+            TST_SafeCloseWorkbook DoomedWorkbook
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+                UI_SetExcelUI Ribbon:=UI_Show
             End If
         On Error GoTo 0
 
@@ -10317,6 +10720,7 @@ Private Sub TST_AssertFailureListContainsPrefix( _
 '
 ' CALLED FROM
 '   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'   - TST_Case_RibbonRestoreRefusesClosedWindow
 '
 ' UPDATED
 '   2026-11-06 - Messages carry the failure count and list (#135).

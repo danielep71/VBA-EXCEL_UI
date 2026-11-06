@@ -72,6 +72,27 @@ Option Private Module
 '   live pair the host agrees is active, it records a title-bar failure and
 '   leaves both cleared, so restore refuses the title bar.
 '
+' RIBBON IDENTITY MODEL
+'   Under the Single Document Interface each workbook window has its own
+'   Ribbon, and every mechanism this component can use to read or write it acts
+'   on the ACTIVE window and accepts no target. The Ribbon value is therefore
+'   captured with the Window it was read from and that Window's frame handle,
+'   Window.hWnd, both read from Application.ActiveWindow before the read. The
+'   active window's handle is read again after it and must be the same.
+'
+'   Windows are compared by handle, not with Is. Excel returns a new COM
+'   wrapper from every read of Application.ActiveWindow, so even
+'   "Application.ActiveWindow Is Application.ActiveWindow" is False on a real
+'   host (Excel 16.0 build 20430, measured 2026-11-06). As for the title bar,
+'   the retained Window object proves that the handle still names the captured
+'   window: its Window.hWnd must still equal the captured handle.
+'
+'   Restore applies the value only while the active window's handle is the
+'   captured one. When the captured window has closed, or another window is active,
+'   restore reports a Ribbon failure and writes nothing. It never activates the
+'   captured window to complete the restore: activation moves focus and fires
+'   workbook events, which is a separate, opt-in behavior (#44).
+'
 ' DESIGN PRINCIPLES
 '   - Capture replaces any prior snapshot outright; snapshots do not merge.
 '   - Capture and restore are both best effort and continue after an
@@ -114,6 +135,9 @@ Option Private Module
 '
 ' UPDATED
 '   2026-11-06 - Header and comments aligned with the code (#114).
+'   2026-11-03 - Ribbon captured with the Window it was read from; restore
+'                refuses, without activating anything, unless that Window is
+'                still open and active. Fixes ICR-UI-112-P1-01 (#23).
 '   2026-09-03 - Title-bar pair resolved through UI_TryGetActiveFramePair. A
 '                capture without a live, agreed pair is a failure, and restore
 '                requires the retained Window.hWnd to equal the captured
@@ -142,6 +166,19 @@ Private m_HasExcelUIStateSnapshot       As Boolean
 'read the host refused is never replayed as a False value on restore.
 Private m_SnapshotRibbonKnown           As Boolean
 Private m_SnapshotRibbonVisible         As Boolean
+
+'Window the Ribbon value was read from, and its frame handle at capture.
+'Every Ribbon mechanism acts on the active window, so restore applies the value
+'only while the active window's handle is this one and the retained Window
+'still reports it. The label is diagnostic only.
+Private m_SnapshotRibbonWindow          As Object
+Private m_SnapshotRibbonLabel           As String
+
+#If VBA7 Then
+    Private m_SnapshotRibbonHwnd        As LongPtr
+#Else
+    Private m_SnapshotRibbonHwnd        As Long
+#End If
 
 Private m_SnapshotStatusBarKnown        As Boolean
 Private m_SnapshotStatusBarVisible      As Boolean
@@ -233,6 +270,8 @@ Public Function UI_SnapshotCaptureCore( _
 '   - Clears any prior snapshot before capturing.
 '   - Captures every application-level element, the Ribbon and the title bar on
 '     a best-effort basis, recording a Known flag for each.
+'   - Captures the Ribbon with the Window it was read from; the value is Known
+'     only when both were captured.
 '   - Captures each window's retained object identity, its diagnostic label and
 '     its managed properties.
 '   - Records failures in deterministic capture order.
@@ -252,7 +291,7 @@ Public Function UI_SnapshotCaptureCore( _
 '   - UI_RuntimeBuildWindowLabel
 '   - UI_RuntimeClearResultBuffer
 '   - UI_RuntimeHandleFailure
-'   - UI_RuntimeTryGetRibbonVisible
+'   - UI_SnapshotTryCaptureRibbon
 '   - UI_RuntimeTryGetBooleanProperty
 '   - UI_RuntimeBuildErrorText
 '   - UI_TryGetActiveFramePair
@@ -343,12 +382,10 @@ Public Function UI_SnapshotCaptureCore( _
 '------------------------------------------------------------------------------
 ' CAPTURE: RIBBON AND TITLE BAR
 '------------------------------------------------------------------------------
-    'Capture Ribbon visibility, recording whether it could be read at all
-        m_SnapshotRibbonKnown = UI_RuntimeTryGetRibbonVisible( _
-            IsVisible:=m_SnapshotRibbonVisible, _
-            FailMsg:=Msg)
-
-        If Not m_SnapshotRibbonKnown Then
+    'Capture Ribbon visibility together with the Window it belongs to. The
+    'value is Known only when both were captured; a value without its owner
+    'could later be applied to whichever window happens to be active.
+        If Not UI_SnapshotTryCaptureRibbon(Msg) Then
             UI_RuntimeHandleFailure _
                 ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
                 CaptureFailureList, "Ribbon", Msg
@@ -600,6 +637,9 @@ Public Function UI_SnapshotRestoreCore( _
 '   - Reports a NoSnapshot failure and exits when nothing was captured.
 '   - Restores title bar, Ribbon and every application-level property only
 '     when their captured states were readable.
+'   - Restores the Ribbon only while its captured Window is open and active;
+'     otherwise reports a Ribbon failure, writes nothing and activates
+'     nothing.
 '   - Resolves each captured Window by retained object identity.
 '   - Restores state only to matching, still-usable windows.
 '   - Leaves newly opened windows unchanged, because nothing was captured for
@@ -614,6 +654,7 @@ Public Function UI_SnapshotRestoreCore( _
 '
 ' DEPENDENCIES
 '   - UI_SnapshotTryResolveWindow
+'   - UI_SnapshotTryResolveRibbonWindow
 '   - UI_RuntimeClearResultBuffer
 '   - UI_RuntimeHandleFailure
 '   - UI_RuntimeBeginQuietUpdate
@@ -719,9 +760,18 @@ Public Function UI_SnapshotRestoreCore( _
 '------------------------------------------------------------------------------
 ' RESTORE: RIBBON
 '------------------------------------------------------------------------------
-    'Restore the Ribbon only when its captured state was readable
+    'Restore the Ribbon only when its captured state was readable, and only
+    'while the window it was read from is still the active one. The Ribbon
+    'write acts on the active window, so any other window would receive the
+    'captured value in place of its owner. Nothing is activated here.
         If m_SnapshotRibbonKnown Then
-            If Not UI_RuntimeTrySetRibbonVisibleIfNeeded( _
+            If Not UI_SnapshotTryResolveRibbonWindow(Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, "Ribbon", Msg
+
+            ElseIf Not UI_RuntimeTrySetRibbonVisibleIfNeeded( _
                 IsVisible:=m_SnapshotRibbonVisible, _
                 FailMsg:=Msg) Then
 
@@ -941,6 +991,11 @@ Public Sub UI_SnapshotClear()
         m_SnapshotFormulaBarVisible = False
         m_SnapshotTitleBarVisible = False
 
+    'Release the captured Ribbon owner
+        Set m_SnapshotRibbonWindow = Nothing
+        m_SnapshotRibbonLabel = vbNullString
+        m_SnapshotRibbonHwnd = 0
+
     'Release the captured frame identity. The Window reference is dropped here
     'and only here, on the same terms as the per-window references below.
         m_SnapshotTitleBarHwnd = 0
@@ -1155,6 +1210,365 @@ Err_Handler:
         UI_SnapshotTryResolveTitleBarFrame = False
         FailMsg = _
             "captured title-bar frame could not be verified; no state was " & _
+            "applied | " & UI_RuntimeBuildErrorText
+
+    Resume Safe_Exit
+
+End Function
+
+
+Private Function UI_SnapshotTryCaptureRibbon( _
+    ByRef FailMsg As String) _
+    As Boolean
+'
+'==============================================================================
+' UI_SnapshotTryCaptureRibbon
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Captures Ribbon visibility together with the Excel Window it was read from.
+'
+' WHY THIS EXISTS
+'   Under the Single Document Interface each workbook window has its own
+'   Ribbon, and the Ribbon read acts on the active window without naming it. A
+'   Boolean stored on its own could later be restored to whichever window is
+'   active then, and reported as a success.
+'
+'   The owning Window is resolved before the read and confirmed still active
+'   after it, so the value and its owner describe the same window. A capture
+'   that cannot prove that is reported, and the value is not kept.
+'
+' INPUTS
+'   FailMsg
+'     ByRef diagnostic reason on failure. Empty on success.
+'
+' RETURNS
+'   Boolean
+'     True  => the value and its owning Window were both captured.
+'     False => nothing was captured; the Ribbon stays unknown.
+'
+' BEHAVIOR
+'   - Clears any previously captured Ribbon value and owner first.
+'   - Resolves Application.ActiveWindow and its Window.hWnd, reads the
+'     Ribbon, and reads the active window's Window.hWnd again.
+'   - Publishes the value, the Window, its handle and its diagnostic label
+'     only when both handles are the same. Windows are never compared with
+'     Is: Excel returns a new wrapper from every read of ActiveWindow.
+'
+' ERROR POLICY
+'   - Does not raise to callers.
+'   - Returns False and populates FailMsg.
+'
+' DEPENDENCIES
+'   - UI_RuntimeTryGetRibbonVisible
+'   - UI_RuntimeBuildWindowLabel
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - UI_SnapshotCaptureCore
+'
+' UPDATED
+'   2026-11-06 - Windows compared by Window.hWnd: Is rejects the same
+'                window on a real host.
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OwnerWindow         As Object          'Active window before the read
+    Dim ActiveAfterRead     As Object          'Active window after the read
+    Dim RibbonVisible       As Boolean         'Value read from the host
+    Dim ReadMsg             As String          'Diagnostic returned by the read
+#If VBA7 Then
+    Dim OwnerHwnd           As LongPtr         'Frame of the owner before the read
+#Else
+    Dim OwnerHwnd           As Long            'Frame of the owner before the read
+#End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Assume failure until both the value and its owner are captured
+        UI_SnapshotTryCaptureRibbon = False
+        FailMsg = vbNullString
+
+    'Start from a cleared value and owner, so a failed capture cannot leave a
+    'previous owner in place for restore to trust
+        m_SnapshotRibbonKnown = False
+        m_SnapshotRibbonVisible = False
+        Set m_SnapshotRibbonWindow = Nothing
+        m_SnapshotRibbonLabel = vbNullString
+        m_SnapshotRibbonHwnd = 0
+
+'------------------------------------------------------------------------------
+' RESOLVE OWNER AND READ
+'------------------------------------------------------------------------------
+    'The Ribbon read acts on the active window, so that window is the owner
+        Set OwnerWindow = Application.ActiveWindow
+
+        If OwnerWindow Is Nothing Then
+            FailMsg = _
+                "no active Excel Window owns the Ribbon; its state was not " & _
+                "captured"
+            GoTo Safe_Exit
+        End If
+
+    'The handle identifies the owner; a later wrapper of the same window is a
+    'different object, so Is cannot be used
+        OwnerHwnd = OwnerWindow.hWnd
+
+        If OwnerHwnd = 0 Then
+            FailMsg = _
+                "the active Excel Window reported no frame handle; the " & _
+                "Ribbon state was not captured"
+            GoTo Safe_Exit
+        End If
+
+        If Not UI_RuntimeTryGetRibbonVisible( _
+            IsVisible:=RibbonVisible, _
+            FailMsg:=ReadMsg) Then
+
+            FailMsg = ReadMsg
+            GoTo Safe_Exit
+        End If
+
+    'A window activated during the read would make the value describe a
+    'different window from the one recorded as its owner
+        Set ActiveAfterRead = Application.ActiveWindow
+
+        If ActiveAfterRead Is Nothing Then
+            FailMsg = _
+                "the active Excel Window changed while the Ribbon was read; " & _
+                "its state was not captured"
+            GoTo Safe_Exit
+        End If
+
+        If ActiveAfterRead.hWnd <> OwnerHwnd Then
+            FailMsg = _
+                "the active Excel Window changed while the Ribbon was read; " & _
+                "its state was not captured"
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' PUBLISH
+'------------------------------------------------------------------------------
+    'Keep the value only together with its owner
+        m_SnapshotRibbonVisible = RibbonVisible
+        Set m_SnapshotRibbonWindow = OwnerWindow
+        m_SnapshotRibbonHwnd = OwnerHwnd
+        m_SnapshotRibbonLabel = UI_RuntimeBuildWindowLabel(OwnerWindow)
+        m_SnapshotRibbonKnown = True
+
+        UI_SnapshotTryCaptureRibbon = True
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'An owner that could not be proven means the value is not kept
+        m_SnapshotRibbonKnown = False
+        m_SnapshotRibbonVisible = False
+        Set m_SnapshotRibbonWindow = Nothing
+        m_SnapshotRibbonLabel = vbNullString
+        m_SnapshotRibbonHwnd = 0
+
+        UI_SnapshotTryCaptureRibbon = False
+        FailMsg = UI_RuntimeBuildErrorText
+
+    Resume Safe_Exit
+
+End Function
+
+
+Private Function UI_SnapshotTryResolveRibbonWindow( _
+    ByRef FailMsg As String) _
+    As Boolean
+'
+'==============================================================================
+' UI_SnapshotTryResolveRibbonWindow
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Confirms that the Window the Ribbon value was captured from is still open
+'   and is the active window, before the Ribbon is written.
+'
+' WHY THIS EXISTS
+'   Every Ribbon write available to this component acts on the active window
+'   and accepts no target. Writing while any other window is active would
+'   apply the captured value to that window and leave its owner unrestored,
+'   while reporting success. Refusing is the only accurate outcome; activating
+'   the captured window would move focus and fire workbook events, which a
+'   restore must not do on its own (#44).
+'
+' INPUTS
+'   FailMsg
+'     ByRef diagnostic reason on failure. Empty on success.
+'
+' RETURNS
+'   Boolean
+'     True  => the captured owner is open and active; the Ribbon may be
+'              written.
+'     False => the owner is gone, unverifiable or not active; nothing must be
+'              written.
+'
+' BEHAVIOR
+'   - Requires the retained Window object and its captured handle.
+'   - Requires that object to still respond to a non-mutating read and to
+'     still report the captured Window.hWnd, so a reissued handle cannot pass.
+'   - Requires Application.ActiveWindow to report that same handle. Never
+'     compares windows with Is, and never by caption, workbook name or
+'     collection index.
+'   - Names the captured window in every failure message.
+'   - Never activates a window.
+'
+' ERROR POLICY
+'   - Does not raise to callers.
+'   - Returns False and populates FailMsg.
+'
+' DEPENDENCIES
+'   - UI_RuntimeTryGetBooleanProperty
+'   - UI_RuntimeBuildErrorText
+'
+' CALLED FROM
+'   - UI_SnapshotRestoreCore
+'
+' NOTES
+'   Excel returns a new COM wrapper from every read of
+'   Application.ActiveWindow, so Is rejects even the same window; the handle
+'   is the comparison that holds. The liveness probe reads DisplayHeadings,
+'   matching the other resolvers in this module.
+'
+' UPDATED
+'   2026-11-06 - Windows compared by Window.hWnd: Is rejects the same
+'                window on a real host.
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ActiveNow           As Object          'Active window at restore time
+    Dim ProbeValue          As Boolean         'Non-mutating probe output
+    Dim ProbeMsg            As String          'Diagnostic returned by the probe
+    Dim OwnerLabel          As String          'Captured window, for diagnostics
+#If VBA7 Then
+    Dim CurrentHwnd         As LongPtr         'Handle the retained Window reports
+#Else
+    Dim CurrentHwnd         As Long            'Handle the retained Window reports
+#End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Assume the owner is unusable until every check has passed
+        UI_SnapshotTryResolveRibbonWindow = False
+        FailMsg = vbNullString
+
+    'Name the captured window in whatever is reported below
+        OwnerLabel = m_SnapshotRibbonLabel
+
+        If Len(OwnerLabel) = 0 Then
+            OwnerLabel = "captured window"
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE OWNER
+'------------------------------------------------------------------------------
+    'A value without its owner is never safe to restore
+        If m_SnapshotRibbonWindow Is Nothing Or m_SnapshotRibbonHwnd = 0 Then
+            FailMsg = _
+                "captured Ribbon Window identity is unavailable; no state " & _
+                "was applied | " & OwnerLabel
+            GoTo Safe_Exit
+        End If
+
+    'Confirm the retained object still works using a non-mutating read of an
+    'existing managed property
+        If Not UI_RuntimeTryGetBooleanProperty( _
+            Target:=m_SnapshotRibbonWindow, _
+            PropertyName:="DisplayHeadings", _
+            ValueOut:=ProbeValue, _
+            FailMsg:=ProbeMsg) Then
+
+            FailMsg = _
+                "captured Ribbon window is no longer open or usable; no " & _
+                "state was applied | " & OwnerLabel
+
+            'Append the underlying probe reason when one is available
+                If Len(ProbeMsg) > 0 Then
+                    FailMsg = FailMsg & " | " & ProbeMsg
+                End If
+
+            GoTo Safe_Exit
+        End If
+
+    'The retained Window must still own the captured frame, so a handle that
+    'Windows reissued to another window cannot pass for the owner
+        CurrentHwnd = m_SnapshotRibbonWindow.hWnd
+
+        If CurrentHwnd <> m_SnapshotRibbonHwnd Then
+            FailMsg = _
+                "captured Ribbon window is no longer open or usable; its " & _
+                "frame handle changed, so no state was applied | " & OwnerLabel
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE ACTIVE WINDOW
+'------------------------------------------------------------------------------
+    'The Ribbon write acts on the active window, so the owner must be that
+    'window. Excel returns a new wrapper from every read of ActiveWindow, so
+    'the frame handle, not Is, is the comparison that holds.
+        Set ActiveNow = Application.ActiveWindow
+
+        If ActiveNow Is Nothing Then
+            FailMsg = _
+                "no Excel Window is active; the Ribbon was not restored and " & _
+                "no window was activated | " & OwnerLabel
+            GoTo Safe_Exit
+        End If
+
+        If ActiveNow.hWnd <> m_SnapshotRibbonHwnd Then
+            FailMsg = _
+                "captured Ribbon window is not the active window; the " & _
+                "Ribbon acts only on the active window, so no state was " & _
+                "applied and no window was activated | " & OwnerLabel
+            GoTo Safe_Exit
+        End If
+
+    'The captured owner is open and active
+        UI_SnapshotTryResolveRibbonWindow = True
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'An unverifiable owner must never receive the captured value
+        UI_SnapshotTryResolveRibbonWindow = False
+        FailMsg = _
+            "captured Ribbon window could not be verified; no state was " & _
             "applied | " & UI_RuntimeBuildErrorText
 
     Resume Safe_Exit

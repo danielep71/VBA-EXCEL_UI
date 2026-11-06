@@ -1,6 +1,6 @@
 # Ribbon behaviour under the Single Document Interface
 
-> **Status:** measured on one host. Model determined: **active-window only.**
+> **Status:** measured on two hosts. Model determined: **active-window only.**
 > **Characterization:** [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21)
 > (`ICR-UI-P2-01`) is complete.
 > **Corrective work:** fail-closed restore is tracked by
@@ -112,6 +112,28 @@ scenario              window  CommandBars.Visible  Height  XLM
 5-RestoredFromB       A       False                178     False
 ```
 
+### Host 2 — Excel 16.0 build 20430, Windows (64-bit) NT 10.00, x64, VBA7
+
+Recorded 2026-11-06 15:00:47, with the fail-closed Ribbon restore of #23
+(`fix/ribbon-restore-fail-closed`). The probe also logged:
+
+```text
+UI_ResetExcelUIToSnapshot failed @ Ribbon | captured Ribbon window is not the active window; the Ribbon acts only on the active window, so no state was applied and no window was activated | EXCEL_UI_Development.xlsm :: EXCEL_UI_Development.xlsm
+```
+
+```text
+scenario              window  CommandBars.Visible  Height  XLM
+1-Baseline            A       True                 178     True
+2-HiddenOnA           A       False                178     False
+2-HiddenOnA           B       True                 178     True
+3-ShownOnB            B       True                 178     True
+3-ShownOnB            A       False                178     False
+4-NewWindowAfterHide  C       False                178     False
+4-NewWindowAfterHide  A       False                178     False
+5-RestoredFromB       B       True                 178     True
+5-RestoredFromB       A       False                178     False
+```
+
 ---
 
 ## 5. Interpretation
@@ -154,6 +176,12 @@ That is the same defect as `ICR-UI-P1-01`, in the same snapshot, on a different
 element. It was invisible before this probe because no test ever activated a
 second window across a Ribbon capture and restore.
 
+With the fail-closed restore (#23), host 2 reads the same values in scenario 5,
+but the restore now reports the failure instead of success: the captured window
+A is not active, so nothing is written and no window is activated. The values
+cannot show the difference, because applying A's visible value to B, which was
+already visible, changed nothing; the reported result does.
+
 ### The `Height` column is inert on this host
 
 `CommandBars("Ribbon").Height` reported **178 in all nine observations**,
@@ -175,7 +203,7 @@ risk that needs designing around.
 | Application-wide | **Ruled out** by scenarios 2 and 3. |
 | **Active-window only** | **Selected.** Every write affects the active window alone. |
 | Cached and propagated | **Partly true** — new windows inherit at creation (scenario 4) — but this is a property of window creation, not of the write scope. |
-| Host-dependent | Not ruled out. One host is one data point. |
+| Host-dependent | Not ruled out. Two hosts (builds 20131 and 20430) gave the same nine readings. |
 
 ## 6. Decision and consequences
 
@@ -205,10 +233,12 @@ in a corrective patch release.
 
 ### Required for `1.1.3`
 
-- [ ] The snapshot **reports** the Ribbon as unrestorable when the captured
+- [x] The snapshot **reports** the Ribbon as unrestorable when the captured
       window is not active, rather than applying the captured value to whichever
       window is. This fail-closed correction is #23. It activates no window and
-      therefore introduces no new focus or event side effect.
+      therefore introduces no new focus or event side effect. Release
+      certification passed on host 2 on 2026-11-06, and scenario 5 of the probe
+      recorded the refused restore (section 4).
 
 ### Deferred to `1.2.0`
 
@@ -227,8 +257,9 @@ in a corrective patch release.
   host measured, `Height` proved inert and could not have detected a collapsed
   Ribbon; if a future host reports differently, that column becomes meaningful
   again.
-- One host is one data point. Ribbon behaviour can vary by Office channel,
-  update ring and administrative policy; a single green block does not establish
-  behaviour for the supported range.
+- Two hosts, both 64-bit, are two data points. Ribbon behaviour can vary by
+  Office channel, update ring and administrative policy; two matching blocks do
+  not establish behaviour for the supported range, and 32-bit Office is not
+  measured (#51).
 - Any add-in that manipulates the Ribbon can influence these readings. Prefer a
   clean Excel session with other add-ins disabled.
