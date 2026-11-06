@@ -6,7 +6,8 @@ A copy of the real tree is the passing fixture; one deliberate defect is the
 failing fixture. Building fixtures from the real tree means a test cannot pass
 merely because its fixture is unrealistically small.
 
-Only the standard library is used, like the gate itself.
+Only the standard library is used, like the gate itself. The issue-form tests
+in test_check_issues.py also need Node.js.
 """
 
 from __future__ import annotations

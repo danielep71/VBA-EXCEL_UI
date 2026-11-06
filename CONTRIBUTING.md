@@ -101,7 +101,7 @@ the review artifact.
 | `demo/` | Demo and reproducible host setup |
 | `tools/` | Repository/static validation |
 | `tests/` | Unit tests for the static validation in `tools/` |
-| `docs/` | Architecture, API, recovery, and release guidance |
+| `docs/` | Issue and label rules, measured Ribbon SDI behaviour, and the v1.1.3 implementation sequence |
 | `images/` | Documentation images, the only approved home for binary files |
 
 The README and current tree are authoritative if a listed optional directory is
@@ -120,10 +120,11 @@ the gate until the entry is updated in the same change.
 
 ## 🌿 Development workflow
 
-1. Fork or clone the repository and start from the current `main`.
+1. Fork or clone the repository and start from the base branch described
+   below.
 2. Create a short, focused branch such as `fix/clear-description`,
-   `feat/clear-description`, `docs/clear-description`, or
-   `test/clear-description`.
+   `feat/clear-description`, `docs/clear-description`,
+   `test/clear-description`, or `chore/clear-description`.
 3. Reproduce the existing behavior before changing it.
 4. Define the intended contract, affected callers, compatibility impact, and
    evidence plan.
@@ -133,6 +134,15 @@ the gate until the entry is updated in the same change.
 7. Re-export changed VBA components and review the complete text/binary diff.
 8. Update documentation and release notes required by the change.
 9. Push the branch and open a pull request with evidence and limitations.
+
+<a id="base-branch"></a>
+
+### Base branch
+
+Start everyday work and governance changes from the current `main`. While a
+release branch `release/vX.Y.Z` is open, VBA corrections for that release
+target the release branch and reach `main` with the release; non-VBA repository
+changes are made on the release branch and mirrored to `main`.
 
 Every change to `main` and `release/**` goes through a pull request, including
 mine. Repository rulesets enforce it: on `main` and `release/**` a pull request
@@ -434,18 +444,29 @@ CI runs the static gate on every pull request. It cannot execute VBA — a hoste
 runner has no Excel — so certification remains a manual step on a real host, and
 the two are complementary rather than alternatives.
 
-The Python tools under `tools/` need **Python 3.11 or later** and only the
-standard library. The required check runs them on an exact Python 3.12 release;
-a second, non-required job runs the same gate on Python 3.11 so that a change
-needing a newer interpreter is reported before it reaches your machine.
+The Python tools under `tools/` need **Python 3.11 or later**, and the static
+gate needs only the standard library. The issue-form check
+(`python3 tools/check_issues.py --check-config`) and its tests in
+`tests/test_check_issues.py` also need Node.js, because they run
+`.github/scripts/labels-sync.mjs`; CI provides it. The required check runs the
+gate on an exact Python 3.12 release; a second, non-required job runs the same
+gate on Python 3.11 so that a change needing a newer interpreter is reported
+before it reaches your machine.
 
 Other workflows run alongside the gate and are not required checks:
 
-- **CodeQL** analyses the Python tooling and the workflows with the
-  `security-extended` queries. On a pull request it runs read-only and uploads
+- **CodeQL** analyses the Python tooling, the label scripts and the workflows
+  with the `security-extended` queries. On a pull request it runs read-only and uploads
   nothing.
 - **Workflow lint** runs a checksum-verified actionlint release on every
   workflow, after proving that it rejects `.github/actionlint/invalid-workflow.yml`.
+- **Ruleset drift** compares the live rulesets with `.github/rulesets/`.
+- **External links** checks the public URLs in the tracked Markdown weekly and
+  on demand.
+- **Wiki badges** checks the Wiki against `VERSION`.
+- **Sync issue labels**, **Detect issue-label drift**, **Issue triage** and
+  **Keep milestones issue-only** manage issues and labels, as
+  [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md) describes.
 
 Record only environments actually tested.
 
@@ -463,19 +484,24 @@ Every entry in `CHECKS` in `tools/check_repo.py` has a passing fixture (the
 current tree) and at least one failing fixture (a named defect).
 `tests/test_coverage.py` fails when a check has no test in either direction, so
 a new check needs a `GateTestCase` subclass in `tests/test_gate_checks.py`
-before it can merge. Like the gate, the tests use only the standard library.
-`test/` is a different directory: it holds the VBA regression suite.
+before it can merge. Like the gate, the tests use only the standard library,
+except that `tests/test_check_issues.py` also needs Node.js. The Python tools
+run their self-tests with `--selftest`; the Node.js label scripts under
+`.github/scripts/` use `--self-test`. `test/` is a different directory: it
+holds the VBA regression suite.
 
 The Python code under `tools/` and `tests/` must also be clean under Ruff and
-`mypy --strict`, configured in `pyproject.toml` against Python 3.11, the oldest
-interpreter I support for the gate. CI installs both from
-`tools/requirements-quality-ci.txt`, where every wheel is hash-locked. To run
+`mypy --strict`, both configured in `pyproject.toml` against Python 3.11, the
+oldest interpreter I support for the gate. CI runs both on `tools/` and
+`tests/` and installs them from `tools/requirements-quality-ci.txt`, where
+every wheel is hash-locked. To run
 them locally, install them into a virtual environment the same way:
 
 ```text
 python3 -m pip install --require-hashes --only-binary=:all: -r tools/requirements-quality-ci.txt
 ruff check tools tests
 mypy --strict tools
+mypy --strict tests
 ```
 
 A finding is fixed in the code, not silenced, unless the fix would change what
@@ -762,6 +788,11 @@ quality tools. It changes the SHA and the version comment together; review it
 with the steps above before merging. While a release branch is open, Dependabot
 opens the same updates against it too, so neither branch falls behind; remove
 those entries when the release branch is merged.
+
+The actionlint release that **Workflow lint** downloads is neither an Action nor
+a Python package, so Dependabot does not update it. Update
+`ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` in
+`.github/workflows/actionlint.yml` by hand, together, in one edit.
 
 A repository-local action — `uses: ./…` — is versioned by this repository's own
 history and is exempt. Nothing else is.

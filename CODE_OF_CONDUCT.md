@@ -288,7 +288,7 @@ source provenance, reproducibility, or execution correctness.
 
 ---
 
-## 🧱 Maintainer decisions
+## 🧱 My decisions
 
 I may decline a contribution even when it is technically valid.
 Reasons may include scope, compatibility, maintenance burden, testability,

@@ -351,11 +351,16 @@ def run_selftest() -> int:
 USAGE = """usage:
   wiki_badges.py <wiki-path>   check a wiki working copy against VERSION
   wiki_badges.py --selftest    verify the rules against their own fixtures
+  wiki_badges.py --help        print this message and exit
 """
 
 
-def main() -> int:
-    args = sys.argv[1:]
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+
+    if args in (["-h"], ["--help"]):
+        print(USAGE, end="")
+        return 0
 
     if args and args[0] == "--selftest":
         return run_selftest()

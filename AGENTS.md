@@ -43,7 +43,9 @@ Before pushing, run these and fix every finding:
 
 - `python3 tools/check_repo.py`
 - `python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas` (fix drift with `--write`)
+- `node .github/scripts/labels-sync.mjs --self-test` and `node .github/scripts/labels-drift.mjs --self-test`
+- `python3 tools/check_issues.py --check-config`
 - `python3 -m unittest discover -s tests`
-- `ruff check tools tests` and `mypy --strict tools`, installed from `tools/requirements-quality-ci.txt`
+- `ruff check tools tests`, `mypy --strict tools` and `mypy --strict tests`, installed from `tools/requirements-quality-ci.txt`
 
 Keep `tools/public_api_manifest.txt` in sync with the public `UI_*` API (`python3 tools/vba_api.py --write`). Code that changes VBA behaviour also needs `Test_EXCEL_UI_RunReleaseCertification` on a real Excel host; static checks cannot replace it.

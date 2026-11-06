@@ -61,6 +61,16 @@ tab_width = 2
 insert_final_newline = true
 trim_trailing_whitespace = true
 
+# Node.js label scripts under .github/scripts/.
+[*.mjs]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+tab_width = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
 # Documentation. Preserve intentional Markdown hard line breaks.
 [*.md]
 charset = utf-8

@@ -27,10 +27,10 @@ Every issue has exactly one priority, the type labels that fit the work, and the
 | Label | Use |
 | --- | --- |
 | `P1` | Reserved for a confirmed release-blocking correctness or safety defect, such as a failure that leaves Excel unrecoverable or applies state to the wrong window. Only together with `bug`; never for setup, documentation, or tooling work. |
-| `P2` | Material correctness, robustness, or maintainability defect. Default of the bug and private security contact forms. |
+| `P2` | Material correctness, robustness, or maintainability defect; also blocks the release milestone it is in. Default of the bug and private security contact forms. |
 | `P3` | Non-blocking quality, testing, documentation, setup, or technical-debt work. Default of the enhancement and documentation forms. |
 
-A form sets the default priority; triage confirms or changes it. Raise a bug to `P1` only once the defect is confirmed.
+P1 and P2 issues in a release milestone block that release; P3 issues do not. A form sets the default priority; triage confirms or changes it. Raise a bug to `P1` only once the defect is confirmed.
 
 Every open issue also needs a target end date: an ISO `YYYY-MM-DD` calendar date (Europe/Rome) earlier than the due date of its milestone. The bug, enhancement, and documentation forms ask for it in the *Target end date* field. On other issues, including private security contacts, add it during triage as a line in the issue body:
 
