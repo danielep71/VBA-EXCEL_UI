@@ -543,6 +543,8 @@ class RepositoryTests(unittest.TestCase):
     # Defects the checker finds in the current source, by (configuration, code, path, line, target).
     # The demo builder's fallback OnAction target names a macro that no module declares. Remove the
     # entry once the source is fixed, so that the checker's verdict on this repository is "no defect".
+    # The OnAction placeholder of the demo builder is tracked in #129; remove
+    # the entry when that issue is fixed.
     KNOWN_DEFECTS = {
         ("demo", "VBA-CALL-030", "demo/M_DEMO_BUILDER.bas", 2291, "DEMO_DEMOButton_NotAssigned"),
     }

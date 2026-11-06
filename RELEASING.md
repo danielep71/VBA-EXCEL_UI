@@ -152,6 +152,10 @@ Capture commands, tool versions, timestamps, and complete results. Rerun affecte
 
 - Run **Debug → Compile VBAProject** on the exact candidate.
 - Run `Test_EXCEL_UI_RunReleaseCertification`.
+- Preferably run both with `tools\Certify-EXCEL_UI.cmd` from a clean checkout
+  of the candidate, and validate the evidence folder it writes with
+  `python3 tools/check_excel_evidence.py <folder> --commit <sha>`
+  ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
 - Exercise hide/show, snapshot/restore, multi-window identity, and title-bar behavior.
 - Confirm cleanup restores host UI state after success and error paths.
 
