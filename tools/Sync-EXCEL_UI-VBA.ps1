@@ -483,11 +483,12 @@ function Assert-SheetSnapshotUnchanged {
     )
 
     if ($Before.Count -ne $After.Count) {
-        throw "Workbook sheet count changed. Save aborted."
+        throw ("Workbook sheet count changed from {0} to {1}. Save aborted." -f $Before.Count, $After.Count)
     }
     for ($i = 0; $i -lt $Before.Count; $i++) {
         if ($Before[$i] -cne $After[$i]) {
-            throw "Workbook sheet structure changed. Save aborted."
+            throw ("Workbook sheet structure changed: sheet {0} was '{1}' (name|CodeName) and is now '{2}'. Save aborted." -f
+                ($i + 1), $Before[$i], $After[$i])
         }
     }
 }
@@ -701,8 +702,6 @@ try {
     $excel.Calculation = $xlCalculationManual
     $excel.CalculateBeforeSave = $false
 
-    $before = Get-SheetSnapshot -Workbook $workbook
-
     try {
         $vbProject = $workbook.VBProject
         $null = $vbProject.VBComponents.Count
@@ -714,6 +713,14 @@ try {
             "project is not password-locked. The workbook was not changed."
         )
     }
+
+    # The sheets are recorded only now. Excel leaves the CodeName of the
+    # sheets of a new workbook empty until its VBA project has been read, so a
+    # snapshot taken earlier would differ from the one after the import even
+    # though no sheet changed. Reading every component's name first makes
+    # Excel assign the CodeNames.
+    foreach ($component in $vbProject.VBComponents) { $null = [string]$component.Name }
+    $before = Get-SheetSnapshot -Workbook $workbook
 
     # Refuse before the first change when a name to import belongs to a
     # component that is not a standard module, such as a sheet or a class.
