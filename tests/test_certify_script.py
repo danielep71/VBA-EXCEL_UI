@@ -103,12 +103,17 @@ class StopQuitProcessTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
             return json.loads(result.read_text(encoding="utf-8-sig"))
 
-    SLEEPER = "$p = Start-Process -FilePath (Get-Command sleep).Source -ArgumentList '60' -PassThru\n"
+    # The helper processes are child PowerShell processes, so the tests run on
+    # Windows, where the certification runs, as well as on Linux and macOS.
+    HELPER = ("$name = (Get-Process -Id $PID).ProcessName\n"
+              "$p = Start-Process -FilePath (Get-Process -Id $PID).Path -PassThru "
+              "-ArgumentList '-NoProfile', '-NonInteractive', '-Command', '{command}'\n")
+    SLEEPER = HELPER.format(command="Start-Sleep -Seconds 60")
     WRITE = " | ConvertTo-Json | Set-Content -LiteralPath $env:RESULT -Encoding utf8"
 
     def test_a_process_still_running_after_the_wait_is_ended(self) -> None:
         result = self.run_body(self.SLEEPER + "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 300 "
-                               "-ExpectedName $p.ProcessName\n$p.Refresh()\n"
+                               "-ExpectedName $name\n$p.Refresh()\n"
                                "@{ result = $r; exited = $p.HasExited }" + self.WRITE)
         self.assertEqual(result, {"result": "stopped", "exited": True})
 
@@ -120,11 +125,12 @@ class StopQuitProcessTests(unittest.TestCase):
 
     def test_a_process_that_exits_or_is_gone_is_left_alone(self) -> None:
         result = self.run_body(
-            "$p = Start-Process -FilePath (Get-Command true).Source -PassThru\n"
-            "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 5000 -ExpectedName $p.ProcessName\n"
+            self.HELPER.format(command="exit")
+            + "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 5000 -ExpectedName $name\n"
             "$gone = Stop-QuitProcess -ProcessId 999999 -WaitMilliseconds 100\n"
             "@{ result = $r; gone = $gone }" + self.WRITE)
         self.assertEqual(result, {"result": "exited", "gone": "exited"})
+
 
 if __name__ == "__main__":
     unittest.main()
