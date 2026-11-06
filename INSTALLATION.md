@@ -51,7 +51,7 @@ Windows Excel host and is tracked on the linked issue.
 
 | Area | v1.1.2 boundary | v1.1.3 branch state |
 |---|---|---|
-| Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Open: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
+| Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Fail-closed restore merged and certified on Excel 16.0 build 20430 (64-bit); README and Wiki follow at release: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
 | Title-bar identity | The retained Window and native handle were proved independently, without proving that they still form the captured pair. | Pairing correction merged; public-path no-write evidence and final documentation remain open: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45). |
 | Recycled hWnd | Equal owned style bits could let a recycled numeric handle retrieve stale registry state. | Retained-Window identity merged; the current test changes the stored numeric handle and does not prove unchanged-hWnd generation reuse: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32). |
 | Captionless baseline | A non-zero captionless baseline could bypass the all-zero recovery fallback. | Partial correction merged; any-bit tests still accept incomplete composite WS_CAPTION masks. Complete-mask correction and bounded negative-control evidence remain open: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6), [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66). |
