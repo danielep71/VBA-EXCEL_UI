@@ -151,6 +151,14 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added the demo cleanup harness `Demo_Test_RunCleanupChecks` in the new
+  **M_DEMO_CLEANUP_TESTS** module of the demo workbook, with a cleanup probe
+  and one-shot fault seams in **M_DEMO_BUILDER**
+  ([#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71)). Its fourteen
+  scenarios cover reset success with protection readback, ordinary errors,
+  wrong and missing passwords, reprotection and selection-restoration
+  failures, and template errors. **Not yet certified.** No Excel run is
+  recorded yet. The supported API is unchanged.
 - Added `UI_TryGetActiveFramePair` and `UI_InternalInjectFramePairFault` to
   **M_EXCEL_UI_TITLEBAR**, and the four-branch
   `TST_Case_ActiveFramePairRefusesMismatch` case registered in both

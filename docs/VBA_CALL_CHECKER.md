@@ -71,7 +71,7 @@ and never combines modules from different configurations:
 | --- | --- |
 | `production` | the four modules of `src/` |
 | `development` | `src/` and `test/M_EXCEL_UI_REGRESSION_TESTS.bas` |
-| `demo` | `src/` and the two modules of `demo/` |
+| `demo` | `src/` and the modules of `demo/` |
 
 A call or macro target that resolves only to a module outside a configuration
 is a defect in that configuration, because that workbook cannot reach it.

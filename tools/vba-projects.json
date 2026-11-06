@@ -33,7 +33,7 @@
       ]
     },
     "demo": {
-      "description": "The demo workbook: the production modules and the two demo modules.",
+      "description": "The demo workbook: the production modules, the two demo modules and the demo cleanup harness.",
       "gating": true,
       "modules": [
         "src/M_EXCEL_UI.bas",
@@ -41,6 +41,7 @@
         "src/M_EXCEL_UI_SNAPSHOT.bas",
         "src/M_EXCEL_UI_TITLEBAR.bas",
         "demo/M_DEMO_BUILDER.bas",
+        "demo/M_DEMO_CLEANUP_TESTS.bas",
         "demo/M_EXCEL_UI_DEMO.bas"
       ]
     }

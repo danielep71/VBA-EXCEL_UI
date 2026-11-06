@@ -332,6 +332,26 @@ Before closure, use disposable worksheets and a bounded host harness to test
 ordinary failure, missing/wrong password, reprotection and selection failure,
 and read back every captured option at the exact tested commit.
 
+`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook from
+the commit under test:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath "C:\work\EXCEL_UI_Demo.xlsm" -Mode Demo -NewWorkbook
+```
+
+Open it, run **Debug → Compile VBAProject**, and run
+`Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
+creates a temporary workbook, runs fourteen scenarios on sheets of its own,
+closes the workbook without saving and prints one `PASS` or `FAIL` line per
+scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
+`DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
+operation error after a successful unprotect, a failed Protect and a failed
+`EnableSelection` restoration have no worksheet cause that can be produced on
+demand, so the harness injects them through the one-shot
+`DEMO_InternalCleanupProbe*` seams of `M_DEMO_BUILDER`. Those seams stay inert
+unless the harness arms them. Record the commit, Excel build and bitness with
+the Immediate window output.
+
 Treat documented procedures, functions, classes, enums, parameters, defaults,
 return values, errors, side effects, workbook formats, and supported platforms
 as contracts.
