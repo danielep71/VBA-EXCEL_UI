@@ -38,6 +38,7 @@ Option Private Module
 '   - UI_InternalIsFrameRefreshPending
 '   - UI_InternalInjectFrameRefreshFailure
 '   - UI_InternalInjectFramePairFault
+'   - UI_InternalInjectWindowStyleFault
 '   - UI_InternalSimulateFrameHandleReuse
 '
 ' OWNERSHIP MODEL
@@ -112,6 +113,27 @@ Option Private Module
 '     reported.
 '   - No user-interface message is displayed.
 '
+' WINAPI ERROR CAPTURE
+'   Err.LastDllError is the only source of a native error code here. VBA sets
+'   it after every Declare call, the next Declare call replaces it, and
+'   Err.Clear or any On Error statement resets it. Every native call whose
+'   error is reported therefore follows one sequence, with nothing between
+'   its three statements:
+'
+'       SetLastError 0                  clear the thread last-error
+'       Result = <API>(...)             call, result copied to a local
+'       DllError = Err.LastDllError     capture, the very next statement
+'
+'   No other call, formatting or logging helper, or On Error statement may sit
+'   inside that sequence. GetWindowLong[Ptr] and SetWindowLong[Ptr] can return
+'   zero legitimately, so a zero result with a captured error of zero is a
+'   valid value and a zero result with a non-zero captured error is a failure.
+'   A non-zero result is success, whatever error the thread still holds. The
+'   failure text names the exported API, the operation, the captured error and
+'   the target hWnd. GetLastError is not declared: a second route to the same
+'   state is a second place for the ordering rule to drift. The static gate
+'   checks the sequence in every compilation.
+'
 ' DEPENDENCIES
 '   None. This module deliberately has no project-module dependency, which is
 '   why it carries its own error-text builder rather than calling the one in
@@ -157,6 +179,11 @@ Option Private Module
 '     drift apart.
 '
 ' UPDATED
+'   2026-11-06 - Captured the native error through Err.LastDllError straight
+'                after each WinAPI call and removed the GetLastError
+'                declarations. A failure now names the API, operation, error
+'                and hWnd. Added the UI_InternalInjectWindowStyleFault seam
+'                (#27).
 '   2026-11-06 - Header and comments aligned with the code (#114).
 '   2026-09-03 - Bound each frame-state entry to the retained Excel Window
 '                that owns its handle and applied the full ownership test
@@ -226,10 +253,8 @@ Option Private Module
     Private Declare PtrSafe Function IsWindow Lib "user32" ( _
         ByVal hWnd As LongPtr) As Long
 
-    Private Declare PtrSafe Function GetLastError Lib "kernel32" () As Long
-
-    Private Declare PtrSafe Sub SetLastError Lib "kernel32" ( _
-        ByVal dwErrCode As Long)
+    Private Declare PtrSafe Sub SetLastError Lib "kernel32" Alias _
+        "SetLastError" (ByVal dwErrCode As Long)
 
 #Else
 
@@ -254,9 +279,7 @@ Option Private Module
     Private Declare Function IsWindow Lib "user32" ( _
         ByVal hWnd As Long) As Long
 
-    Private Declare Function GetLastError Lib "kernel32" () As Long
-
-    Private Declare Sub SetLastError Lib "kernel32" ( _
+    Private Declare Sub SetLastError Lib "kernel32" Alias "SetLastError" ( _
         ByVal dwErrCode As Long)
 
 #End If
@@ -267,6 +290,21 @@ Option Private Module
 
 'Window-style index passed to the GetWindowLong / SetWindowLong family.
 Private Const GWL_STYLE                 As Long = -16
+
+'Exported names of the GWL_STYLE read and write in this compilation. Failure
+'text quotes them, so a report names the function that actually ran.
+#If VBA7 Then
+    #If Win64 Then
+Private Const API_GET_WINDOW_STYLE      As String = "GetWindowLongPtrA"
+Private Const API_SET_WINDOW_STYLE      As String = "SetWindowLongPtrA"
+    #Else
+Private Const API_GET_WINDOW_STYLE      As String = "GetWindowLongA"
+Private Const API_SET_WINDOW_STYLE      As String = "SetWindowLongA"
+    #End If
+#Else
+Private Const API_GET_WINDOW_STYLE      As String = "GetWindowLongA"
+Private Const API_SET_WINDOW_STYLE      As String = "SetWindowLongA"
+#End If
 
 'The five frame bits this module claims. Nothing outside this set is written.
 Private Const WS_CAPTION                As Long = &HC00000
@@ -345,6 +383,33 @@ Private Const FRAME_PAIR_FAULT_NONE     As Long = 0
 Private Const FRAME_PAIR_FAULT_MISMATCH As Long = 1
 
 Private m_InjectFramePairFault          As Long
+
+'Regression seam for the GWL_STYLE read and write. Windows cannot be made to
+'return a valid zero, fail with a chosen error or leave a stale last-error on
+'demand, so each of those branches is reached by replacing what the capture
+'took, after it took it. Operations and kinds are private Longs, mirrored in
+'the regression module.
+'
+'   Operation   0  none   1  GWL_STYLE read   2  GWL_STYLE write
+'   Kind        0  no fault
+'               1  valid zero: the captured result becomes zero
+'               2  DLL error: the captured result becomes zero and the
+'                  captured error becomes the armed error
+'               3  stale error: the armed error is left in the thread
+'                  last-error before the clear, and the captured result
+'                  becomes zero
+Private Const WINDOW_STYLE_OP_NONE          As Long = 0
+Private Const WINDOW_STYLE_OP_READ          As Long = 1
+Private Const WINDOW_STYLE_OP_WRITE         As Long = 2
+
+Private Const WINDOW_STYLE_FAULT_NONE       As Long = 0
+Private Const WINDOW_STYLE_FAULT_VALID_ZERO As Long = 1
+Private Const WINDOW_STYLE_FAULT_DLL_ERROR  As Long = 2
+Private Const WINDOW_STYLE_FAULT_STALE_ERROR As Long = 3
+
+Private m_InjectWindowStyleOperation    As Long
+Private m_InjectWindowStyleFault        As Long
+Private m_InjectWindowStyleError        As Long
 
 
 #If VBA7 Then
@@ -1244,6 +1309,7 @@ Public Sub UI_InternalResetTitleBarBaseline()
 '     doing so discards the frame every pending show would restore.
 '
 ' UPDATED
+'   2026-11-06 - Also disarms the window-style seam (#27).
 '   2026-08-19
 '==============================================================================
 '
@@ -1258,6 +1324,9 @@ Public Sub UI_InternalResetTitleBarBaseline()
 
     'Drop any armed regression seam so one test cannot leak into the next
         m_InjectFrameRefreshFailure = False
+        m_InjectWindowStyleOperation = WINDOW_STYLE_OP_NONE
+        m_InjectWindowStyleFault = WINDOW_STYLE_FAULT_NONE
+        m_InjectWindowStyleError = 0
 
 End Sub
 
@@ -1409,6 +1478,89 @@ Public Sub UI_InternalInjectFrameRefreshFailure( _
 '------------------------------------------------------------------------------
     'Record the armed state for the next refresh attempt to consume
         m_InjectFrameRefreshFailure = FailNextRefresh
+
+End Sub
+
+
+Public Sub UI_InternalInjectWindowStyleFault( _
+    ByVal Operation As Long, _
+    ByVal FaultKind As Long, _
+    ByVal DllError As Long)
+'
+'==============================================================================
+' UI_InternalInjectWindowStyleFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arm a one-shot fault for the next GWL_STYLE read or write.
+'
+' WHY THIS EXISTS
+'   GetWindowLong[Ptr] and SetWindowLong[Ptr] return zero both for a valid
+'   zero and for a failure, and only the captured Err.LastDllError tells them
+'   apart. Windows cannot be asked for a valid zero, a chosen error or a stale
+'   last-error on demand, so without a seam none of the three branches would
+'   ever execute, and a reversed test or a missing clear would ship unseen.
+'
+' INPUTS
+'   Operation
+'     0  none
+'     1  the next GWL_STYLE read
+'     2  the next GWL_STYLE write
+'
+'   FaultKind
+'     0  no fault
+'     1  valid zero: the captured result is replaced with zero and the
+'        captured error is kept
+'     2  DLL error: the captured result is replaced with zero and the
+'        captured error with DllError
+'     3  stale error: DllError is left in the thread last-error before the
+'        clear, and the captured result is replaced with zero
+'
+'   DllError
+'     The error kinds 2 and 3 use. Ignored by kind 1.
+'
+'     Values are plain Longs so this seam adds one procedure and no type. The
+'     mapping is mirrored by private constants here and in the regression
+'     module; neither is exported.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Records the fault for the next call of the named operation.
+'   - That call consumes it whether or not it fires, so a test that forgets to
+'     disarm cannot fault every later call in the session. A call of the other
+'     operation leaves it armed.
+'   - The real API call still runs. Only the values the capture took are
+'     replaced, and only after it took them, so the capture sequence itself is
+'     never altered. A faulted write has therefore really written the style.
+'   - An unrecognised operation or kind behaves as no fault.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     keeps it off the external facade, so this is project-public surface.
+'   - Production code must never call it.
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' SET SEAM
+'------------------------------------------------------------------------------
+    'Record the armed state for the next call of that operation to consume
+        m_InjectWindowStyleOperation = Operation
+        m_InjectWindowStyleFault = FaultKind
+        m_InjectWindowStyleError = DllError
 
 End Sub
 
@@ -2612,14 +2764,21 @@ Private Function UI_TryGetWindowStyle( _
 '
 ' BEHAVIOR
 '   - Rejects a zero handle explicitly.
-'   - Clears the thread last-error before the call so that a zero return can be
-'     told apart from a genuine failure.
+'   - Clears the thread last-error immediately before the call, copies the
+'     result and Err.LastDllError to locals immediately after it, and runs
+'     nothing in between.
+'   - A zero result with a captured error of zero is a valid style.
+'   - A zero result with a non-zero captured error is a failure.
+'   - StyleOut receives the value only once it is known to be valid.
 '
 ' ERROR POLICY
 '   - Does not raise.
-'   - Uses GetLastError to distinguish a valid zero from a failure.
+'   - Reports a native failure as the exported API name, the operation, the
+'     captured Err.LastDllError and the target hWnd.
 '
 ' DEPENDENCIES
+'   - UI_TakeWindowStyleFault
+'   - UI_TitleBarBuildApiFailureText
 '   - UI_TitleBarBuildRuntimeErrorText
 '
 ' CALLED FROM
@@ -2628,6 +2787,9 @@ Private Function UI_TryGetWindowStyle( _
 '   - UI_FrameStateEntryHolds
 '
 ' UPDATED
+'   2026-11-06 - Captured Err.LastDllError immediately after the call in
+'                place of GetLastError, and named the API, operation, error
+'                and hWnd in the failure text (#27).
 '   2026-08-21 - Recorded the two callers the list had never named.
 '   2026-08-18
 '==============================================================================
@@ -2636,7 +2798,15 @@ Private Function UI_TryGetWindowStyle( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LastErr             As Long            'Win32 last-error after the read
+#If VBA7 Then
+    Dim ApiResult           As LongPtr         'Value the read API returned
+#Else
+    Dim ApiResult           As Long            'Value the read API returned
+#End If
+
+    Dim DllError            As Long            'Err.LastDllError after the read
+    Dim Fault               As Long            'Armed regression fault, if any
+    Dim FaultError          As Long            'Error the armed fault supplies
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2661,35 +2831,59 @@ Private Function UI_TryGetWindowStyle( _
         End If
 
 '------------------------------------------------------------------------------
+' CONSUME REGRESSION SEAM
+'------------------------------------------------------------------------------
+    'Take any armed fault now, before the capture sequence, so the seam never
+    'runs between the call and its capture
+        Fault = UI_TakeWindowStyleFault(WINDOW_STYLE_OP_READ, FaultError)
+
+    'A stale-error fault leaves an error behind that the clear must remove
+        If Fault = WINDOW_STYLE_FAULT_STALE_ERROR Then
+            SetLastError FaultError
+        End If
+
+'------------------------------------------------------------------------------
 ' READ STYLE
 '------------------------------------------------------------------------------
-    'Clear the thread last-error so a zero return can be disambiguated
+    'Clear, call the API matching the host bitness and capture, with nothing
+    'in between. The next Declare call or On Error would replace the error.
         SetLastError 0
-
-    'Read GWL_STYLE using the API matching the host bitness
 #If VBA7 Then
     #If Win64 Then
-        StyleOut = GetWindowLongPtr(hWnd, GWL_STYLE)
+        ApiResult = GetWindowLongPtr(hWnd, GWL_STYLE)
     #Else
-        StyleOut = GetWindowLong(hWnd, GWL_STYLE)
+        ApiResult = GetWindowLong(hWnd, GWL_STYLE)
     #End If
 #Else
-        StyleOut = GetWindowLong(hWnd, GWL_STYLE)
+        ApiResult = GetWindowLong(hWnd, GWL_STYLE)
 #End If
+        DllError = Err.LastDllError
 
-    'Capture the last-error immediately after the call
-        LastErr = GetLastError
+    'An armed fault replaces only what the capture already took
+        If Fault <> WINDOW_STYLE_FAULT_NONE Then
+            ApiResult = 0
+        End If
 
-    'A zero return is only a failure when the last-error also reports one
-        If StyleOut = 0 And LastErr <> 0 Then
-            FailMsg = _
-                "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
-                CStr(LastErr)
+        If Fault = WINDOW_STYLE_FAULT_DLL_ERROR Then
+            DllError = FaultError
+        End If
+
+'------------------------------------------------------------------------------
+' INTERPRET RESULT
+'------------------------------------------------------------------------------
+    'A zero style is valid unless the captured error says the call failed
+        If ApiResult = 0 And DllError <> 0 Then
+            FailMsg = UI_TitleBarBuildApiFailureText( _
+                ApiName:=API_GET_WINDOW_STYLE, _
+                Operation:="read GWL_STYLE", _
+                DllError:=DllError, _
+                TargetHwnd:=hWnd)
 
             GoTo Safe_Exit
         End If
 
-    'Report success
+    'Publish the value only once it is known to be valid
+        StyleOut = ApiResult
         UI_TryGetWindowStyle = True
 
 '------------------------------------------------------------------------------
@@ -2732,7 +2926,8 @@ Private Function UI_TrySetWindowStyle( _
 ' WHY THIS EXISTS
 '   SetWindowLong returns the PREVIOUS style, so zero is an ambiguous result:
 '   it means either "the previous style was zero" or "the call failed". The
-'   last-error is cleared beforehand so the two can be told apart.
+'   last-error is cleared beforehand and Err.LastDllError captured afterwards
+'   so the two can be told apart.
 '
 ' INPUTS
 '   hWnd
@@ -2751,20 +2946,28 @@ Private Function UI_TrySetWindowStyle( _
 '
 ' BEHAVIOR
 '   - Rejects a zero handle explicitly.
-'   - Clears the thread last-error before the call.
-'   - Treats a zero return as a failure only when the last-error agrees.
+'   - Clears the thread last-error immediately before the call, copies the
+'     result and Err.LastDllError to locals immediately after it, and runs
+'     nothing in between.
+'   - Treats a zero return as a failure only when the captured error agrees.
 '
 ' ERROR POLICY
 '   - Does not raise.
-'   - Uses GetLastError to distinguish a valid zero from a failure.
+'   - Reports a native failure as the exported API name, the operation, the
+'     captured Err.LastDllError and the target hWnd.
 '
 ' DEPENDENCIES
+'   - UI_TakeWindowStyleFault
+'   - UI_TitleBarBuildApiFailureText
 '   - UI_TitleBarBuildRuntimeErrorText
 '
 ' CALLED FROM
 '   - UI_TrySetTitleBarVisibleForHwndWorker
 '
 ' UPDATED
+'   2026-11-06 - Captured Err.LastDllError immediately after the call in
+'                place of GetLastError, and named the API, operation, error
+'                and hWnd in the failure text (#27).
 '   2026-08-18
 '==============================================================================
 '
@@ -2773,12 +2976,14 @@ Private Function UI_TrySetWindowStyle( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim PrevStyle           As LongPtr         'Style value replaced by the write
+    Dim ApiResult           As LongPtr         'Style value replaced by the write
 #Else
-    Dim PrevStyle           As Long            'Style value replaced by the write
+    Dim ApiResult           As Long            'Style value replaced by the write
 #End If
 
-    Dim LastErr             As Long            'Win32 last-error after the write
+    Dim DllError            As Long            'Err.LastDllError after the write
+    Dim Fault               As Long            'Armed regression fault, if any
+    Dim FaultError          As Long            'Error the armed fault supplies
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2802,30 +3007,54 @@ Private Function UI_TrySetWindowStyle( _
         End If
 
 '------------------------------------------------------------------------------
+' CONSUME REGRESSION SEAM
+'------------------------------------------------------------------------------
+    'Take any armed fault now, before the capture sequence, so the seam never
+    'runs between the call and its capture
+        Fault = UI_TakeWindowStyleFault(WINDOW_STYLE_OP_WRITE, FaultError)
+
+    'A stale-error fault leaves an error behind that the clear must remove
+        If Fault = WINDOW_STYLE_FAULT_STALE_ERROR Then
+            SetLastError FaultError
+        End If
+
+'------------------------------------------------------------------------------
 ' WRITE STYLE
 '------------------------------------------------------------------------------
-    'Clear the thread last-error so a zero return can be disambiguated
+    'Clear, call the API matching the host bitness and capture, with nothing
+    'in between. The next Declare call or On Error would replace the error.
         SetLastError 0
-
-    'Write GWL_STYLE using the API matching the host bitness
 #If VBA7 Then
     #If Win64 Then
-        PrevStyle = SetWindowLongPtr(hWnd, GWL_STYLE, NewStyle)
+        ApiResult = SetWindowLongPtr(hWnd, GWL_STYLE, NewStyle)
     #Else
-        PrevStyle = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
+        ApiResult = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
     #End If
 #Else
-        PrevStyle = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
+        ApiResult = SetWindowLong(hWnd, GWL_STYLE, NewStyle)
 #End If
+        DllError = Err.LastDllError
 
-    'Capture the last-error immediately after the call
-        LastErr = GetLastError
+    'An armed fault replaces only what the capture already took
+        If Fault <> WINDOW_STYLE_FAULT_NONE Then
+            ApiResult = 0
+        End If
 
-    'A zero previous style is only a failure when the last-error agrees
-        If PrevStyle = 0 And LastErr <> 0 Then
-            FailMsg = _
-                "SetWindowLong/SetWindowLongPtr failed; GetLastError=" & _
-                CStr(LastErr)
+        If Fault = WINDOW_STYLE_FAULT_DLL_ERROR Then
+            DllError = FaultError
+        End If
+
+'------------------------------------------------------------------------------
+' INTERPRET RESULT
+'------------------------------------------------------------------------------
+    'A zero previous style is valid unless the captured error says the call
+    'failed
+        If ApiResult = 0 And DllError <> 0 Then
+            FailMsg = UI_TitleBarBuildApiFailureText( _
+                ApiName:=API_SET_WINDOW_STYLE, _
+                Operation:="write GWL_STYLE", _
+                DllError:=DllError, _
+                TargetHwnd:=hWnd)
 
             GoTo Safe_Exit
         End If
@@ -2902,9 +3131,13 @@ Private Function UI_TryRefreshWindowFrame( _
 '
 ' NOTES
 '   SetWindowPos returns a BOOL, so zero is unambiguously a failure here and no
-'   last-error disambiguation is required.
+'   zero disambiguation is required. The capture sequence still applies: the
+'   error the failure text reports must be the one this call left.
 '
 ' UPDATED
+'   2026-11-06 - Captured Err.LastDllError immediately after the call in
+'                place of GetLastError, and named the API, operation, error
+'                and hWnd in the failure text (#27).
 '   2026-08-18
 '==============================================================================
 '
@@ -2913,7 +3146,7 @@ Private Function UI_TryRefreshWindowFrame( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim ApiOK               As Long            'SetWindowPos BOOL result
-    Dim LastErr             As Long            'Win32 last-error after the call
+    Dim DllError            As Long            'Err.LastDllError after the call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2951,10 +3184,9 @@ Private Function UI_TryRefreshWindowFrame( _
 '------------------------------------------------------------------------------
 ' REFRESH FRAME
 '------------------------------------------------------------------------------
-    'Clear the thread last-error so the diagnostic reports this call
+    'Clear, request a frame change only and capture, with nothing in between.
+    'Position, size and Z-order are untouched.
         SetLastError 0
-
-    'Request a frame change only; position, size and Z-order are untouched
         ApiOK = SetWindowPos( _
             hWnd, _
             0, _
@@ -2964,13 +3196,16 @@ Private Function UI_TryRefreshWindowFrame( _
             0, _
             SWP_NOMOVE Or SWP_NOSIZE Or SWP_NOZORDER Or _
                 SWP_NOOWNERZORDER Or SWP_FRAMECHANGED)
-
-    'Capture the last-error immediately after the call
-        LastErr = GetLastError
+        DllError = Err.LastDllError
 
     'SetWindowPos returns a BOOL, so zero is unambiguously a failure
         If ApiOK = 0 Then
-            FailMsg = "SetWindowPos failed; GetLastError=" & CStr(LastErr)
+            FailMsg = UI_TitleBarBuildApiFailureText( _
+                ApiName:="SetWindowPos", _
+                Operation:="refresh the non-client frame", _
+                DllError:=DllError, _
+                TargetHwnd:=hWnd)
+
             GoTo Safe_Exit
         End If
 
@@ -2990,6 +3225,161 @@ Safe_Exit:
 Err_Handler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
+
+End Function
+
+
+Private Function UI_TakeWindowStyleFault( _
+    ByVal Operation As Long, _
+    ByRef FaultErrorOut As Long) _
+    As Long
+'
+'==============================================================================
+' UI_TakeWindowStyleFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Consumes the window-style fault armed for one operation.
+'
+' WHY THIS EXISTS
+'   The two style wrappers must take the armed fault before their capture
+'   sequence starts. Reading and clearing the seam in one place keeps that
+'   step to a single call ahead of SetLastError 0.
+'
+' INPUTS
+'   Operation
+'     The operation about to run: 1 read, 2 write.
+'
+'   FaultErrorOut
+'     ByRef. Receives the armed error, or zero when no fault applies.
+'
+' RETURNS
+'   Long
+'     The armed fault kind when it targets Operation and is recognised;
+'     otherwise zero.
+'
+' BEHAVIOR
+'   - A fault armed for the other operation is left in place.
+'   - A fault armed for this operation is cleared whether or not its kind is
+'     recognised, so it fires at most once.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_TryGetWindowStyle
+'   - UI_TrySetWindowStyle
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Assume no fault applies
+        UI_TakeWindowStyleFault = WINDOW_STYLE_FAULT_NONE
+        FaultErrorOut = 0
+
+'------------------------------------------------------------------------------
+' CONSUME SEAM
+'------------------------------------------------------------------------------
+    'Only the operation the fault was armed for may consume it
+        If m_InjectWindowStyleOperation = Operation _
+           And Operation <> WINDOW_STYLE_OP_NONE Then
+
+            If m_InjectWindowStyleFault = WINDOW_STYLE_FAULT_VALID_ZERO _
+               Or m_InjectWindowStyleFault = WINDOW_STYLE_FAULT_DLL_ERROR _
+               Or m_InjectWindowStyleFault = WINDOW_STYLE_FAULT_STALE_ERROR Then
+
+                UI_TakeWindowStyleFault = m_InjectWindowStyleFault
+                FaultErrorOut = m_InjectWindowStyleError
+            End If
+
+            m_InjectWindowStyleOperation = WINDOW_STYLE_OP_NONE
+            m_InjectWindowStyleFault = WINDOW_STYLE_FAULT_NONE
+            m_InjectWindowStyleError = 0
+        End If
+
+End Function
+
+
+#If VBA7 Then
+Private Function UI_TitleBarBuildApiFailureText( _
+    ByVal ApiName As String, _
+    ByVal Operation As String, _
+    ByVal DllError As Long, _
+    ByVal TargetHwnd As LongPtr) _
+    As String
+#Else
+Private Function UI_TitleBarBuildApiFailureText( _
+    ByVal ApiName As String, _
+    ByVal Operation As String, _
+    ByVal DllError As Long, _
+    ByVal TargetHwnd As Long) _
+    As String
+#End If
+'
+'==============================================================================
+' UI_TitleBarBuildApiFailureText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds the failure text for a native call that reported an error.
+'
+' WHY THIS EXISTS
+'   A report that says only "failed" cannot be acted on. Every native failure
+'   is described by the same four facts, so one builder keeps them in the
+'   same order and wording wherever they are reported.
+'
+' INPUTS
+'   ApiName
+'     Exported name of the function that ran.
+'
+'   Operation
+'     What the call was doing, for example "read GWL_STYLE".
+'
+'   DllError
+'     The Err.LastDllError value the caller captured immediately after the
+'     call. This builder never reads Err itself: by the time it runs, the
+'     value would no longer belong to that call.
+'
+'   TargetHwnd
+'     The window handle the call addressed.
+'
+' RETURNS
+'   String
+'     "<API> failed; operation=<operation>; LastDllError=<n>; hWnd=<h>"
+'
+' ERROR POLICY
+'   - Suppresses formatting errors locally.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_TryGetWindowStyle
+'   - UI_TrySetWindowStyle
+'   - UI_TryRefreshWindowFrame
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' BUILD DIAGNOSTIC TEXT
+'------------------------------------------------------------------------------
+    'Never let diagnostic formatting raise into a failure path
+        On Error Resume Next
+
+    'Compose the API, operation, captured error and handle
+        UI_TitleBarBuildApiFailureText = _
+            ApiName & " failed; operation=" & Operation & _
+            "; LastDllError=" & CStr(DllError) & _
+            "; hWnd=" & CStr(TargetHwnd)
 
 End Function
 
