@@ -242,6 +242,9 @@ images/**        linguist-documentation
 .editorconfig   export-ignore
 .github         export-ignore
 .github/**      export-ignore
+# Instructions for automated assistants working in the repository; they are
+# not needed by anyone who installs the modules from an archive.
+AGENTS.md       export-ignore
 
 
 #==============================================================================

@@ -573,12 +573,20 @@ Test_EXCEL_UI_RunCertificationSelfTest    ' standalone: a failed certification m
 Test_EXCEL_UI_RunOwnershipCleanupChecks   ' standalone: runner-owned snapshots are always released
 ```
 
+`Test_EXCEL_UI_RunOwnershipCleanupChecks` exists only on `release/v1.1.3` until
+v1.1.3 is released; the regression module on `main` does not define it.
+
 To certify a release, run one command:
 
 ```text
 Debug → Compile VBAProject
 Test_EXCEL_UI_RunReleaseCertification
 ```
+
+On Windows, `tools\Certify-EXCEL_UI.cmd` does the same from a clean checkout:
+it builds a development workbook from the commit, compiles it, runs the
+certification and collects the evidence in a folder bound to the commit
+([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
 
 It executes every mandatory unit, counts units, failures, skips and cleanup
 separately, verifies afterwards that no snapshot, stray workbook or suppressed
@@ -685,9 +693,12 @@ VBA-EXCEL_UI/
 │  ├─ M_DEMO_BUILDER.bas
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ docs/
+│  ├─ EXCEL_CERTIFICATION.md
 │  ├─ ISSUE_LABELS.md
 │  ├─ RIBBON_SDI_BEHAVIOR.md
-│  └─ VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md
+│  ├─ VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md
+│  ├─ VBA_CALL_CHECKER.md
+│  └─ WORKBOOK_SYNC.md
 ├─ images/
 ├─ src/
 │  ├─ M_EXCEL_UI.bas
@@ -711,8 +722,9 @@ VBA-EXCEL_UI/
 └─ pyproject.toml
 ```
 
-`tools/` holds the Python static gate and its helpers, `tests/` the unit tests
-for that gate, and `images/` the documentation images.
+`tools/` holds the Python static gate and its helpers and the Windows workbook
+tools (synchronization, export and certification), `tests/` the unit tests for
+those tools, and `images/` the documentation images.
 
 The source repository intentionally contains no versioned demo `.xlsm`. Release binaries are attached to tagged GitHub Releases.
 
@@ -729,6 +741,9 @@ The source repository intentionally contains no versioned demo `.xlsm`. Release 
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Expected conduct and how it is enforced |
 | [AGENTS.md](AGENTS.md) | Instructions for automated coding assistants working in this repository |
 | [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md) | Issue labels, priorities, milestones, target dates and the issue workflows |
+| [docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md) | Importing the modules into a workbook from the command line, and checking a workbook's VBA against a commit |
+| [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) | One-command release certification in Excel and its evidence folder |
+| [docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md) | The advisory check of calls across modules |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
 | [v1.1.3 implementation sequence](docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md) | Ordered issue dependencies, release gates, and the milestone issue snapshot |
 | [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |

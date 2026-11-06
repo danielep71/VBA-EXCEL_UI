@@ -147,8 +147,9 @@ changes are made on the release branch and mirrored to `main`.
 Every change to `main` and `release/**` goes through a pull request, including
 mine. Repository rulesets enforce it: on `main` and `release/**` a pull request
 must pass **Repository and module checks** on an up-to-date branch with every
-review thread resolved, and force-pushes and deletion are blocked; `v*` tags
-cannot be moved or deleted. The rulesets are versioned in `.github/rulesets/`,
+review thread resolved, and is merged with a merge commit; a push to the pull
+request dismisses earlier approvals. Force-pushes and deletion are blocked, and
+`v*` tags cannot be moved or deleted. The rulesets are versioned in `.github/rulesets/`,
 and the **Ruleset drift** workflow fails daily if a live ruleset differs from
 its copy. To change a ruleset, change it in the repository settings, run
 `python3 tools/check_rulesets.py --repository danielep71/VBA-EXCEL_UI --export`,
@@ -443,6 +444,23 @@ evidence. It still opens and closes temporary windows and workbooks.
 CI runs the static gate on every pull request. It cannot execute VBA — a hosted
 runner has no Excel — so certification remains a manual step on a real host, and
 the two are complementary rather than alternatives.
+
+On Windows, the workbook tools shorten that step:
+
+- `tools\Sync-EXCEL_UI-VBA.cmd` imports the modules of a configuration from
+  `tools/vba-projects.json` into a workbook ([docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md));
+- `tools\Export-EXCEL_UI-VBA.ps1` and `tools/compare_vba_export.py` check that a
+  workbook holds exactly the VBA of a commit;
+- `tools\Certify-EXCEL_UI.cmd` builds, compiles and certifies a development
+  workbook from the checked-out commit and writes an evidence folder that
+  `tools/check_excel_evidence.py` validates
+  ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
+
+The required job also runs `tools/check_vba_calls.py`, which resolves calls
+across the modules of each configuration
+([docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md)). It is advisory: its
+result appears in the job summary and never blocks a merge, because compiling
+in Excel remains the authoritative check.
 
 The Python tools under `tools/` need **Python 3.11 or later**, and the static
 gate needs only the standard library. The issue-form check

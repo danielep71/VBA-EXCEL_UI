@@ -392,6 +392,22 @@ measured against that baseline.
   two-space structured-data indentation, LF for cross-platform repository text,
   CRLF for Windows-native and exported VBA formats, final-newline rules, and
   format-specific whitespace handling.
+- Added Windows workbook tools (#128):
+  - `tools/Sync-EXCEL_UI-VBA.ps1` with drag-and-drop launchers, which import
+    the modules of one configuration of the new `tools/vba-projects.json`
+    (production, development or demo) into a workbook;
+  - `tools/Export-EXCEL_UI-VBA.ps1` and `tools/compare_vba_export.py`, which
+    check that a workbook holds exactly the VBA of a commit;
+  - `tools/Certify-EXCEL_UI.ps1`, which builds, compiles and certifies a
+    development workbook and writes an evidence folder bound to the commit,
+    and `tools/check_excel_evidence.py`, which validates it;
+  - `tools/check_vba_calls.py`, an advisory check of calls across modules that
+    runs in CI without blocking.
+
+  The static gate gained a **VBA project manifest** check: every module of
+  `src/`, `test/` and `demo/` must be listed in the right configurations. None
+  of these tools changes VBA, and none replaces compiling and certifying in
+  Excel.
 - Kept VBA source encoding deliberately unspecified in **.editorconfig**.
   Visual Basic Editor exports can use the Windows system code page, so forcing
   UTF-8 at editor level would make the editor policy conflict with the actual
@@ -793,6 +809,7 @@ python3 tools/check_repo.py
   ok    repository policy
   ok    repository policy self-test
   ok    module inventory
+  ok    VBA project manifest
   ok    required files
   ok    module names
   ok    option policy
@@ -947,8 +964,9 @@ the repository maps here to exactly one issue. Identifiers without a version
 come from the v1.1.0 review, `ICR-UI-111-*` from the v1.1.1 review, and
 `ICR-UI-112-*` from the v1.1.2 review. The v1.1.2 backlog renumbered several
 v1.1.1 findings; the *Current identifier* column gives the new number. The
-static gate fails if a cited identifier is missing from this table or appears
-in it twice.
+v1.1.2 review never assigned P2 numbers 09 and 10, so its P2 rows run from 01
+to 08 and then 11 and 12. The static gate fails if a cited identifier is
+missing from this table or appears in it twice.
 
 The v1.1.2 and v1.1.1 entries below still name the withdrawn review documents
 (`docs/INDEPENDENT_CODE_REVIEW_V1.1.*.md`) as published. Those paths no longer

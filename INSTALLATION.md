@@ -126,6 +126,12 @@ Do not paste source into arbitrarily named modules when an exported component is
 available. VBE attributes, component identity, form resources, and line endings
 are part of a reproducible source installation.
 
+From a clone of the repository on Windows, `tools\Sync-EXCEL_UI-VBA.cmd`
+imports the modules of one configuration (production, development or demo)
+into a closed `.xlsm` instead of steps 1–4, and keeps a backup until it has
+saved. Compile afterwards as in step 5. See
+[docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md).
+
 ---
 
 <a id="validation"></a>
