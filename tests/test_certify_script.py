@@ -112,22 +112,34 @@ class StopQuitProcessTests(unittest.TestCase):
     WRITE = " | ConvertTo-Json | Set-Content -LiteralPath $env:RESULT -Encoding utf8"
 
     def test_a_process_still_running_after_the_wait_is_ended(self) -> None:
-        result = self.run_body(self.SLEEPER + "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 300 "
+        result = self.run_body(self.SLEEPER + "$r = Stop-QuitProcess -ProcessId $p.Id "
+                               "-ExpectedStartTime $p.StartTime -WaitMilliseconds 300 "
                                "-ExpectedName $name\n$p.Refresh()\n"
                                "@{ result = $r; exited = $p.HasExited }" + self.WRITE)
         self.assertEqual(result, {"result": "stopped", "exited": True})
 
     def test_a_process_with_another_name_is_never_ended(self) -> None:
-        result = self.run_body(self.SLEEPER + "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 300\n"
+        result = self.run_body(self.SLEEPER + "$r = Stop-QuitProcess -ProcessId $p.Id "
+                               "-ExpectedStartTime $p.StartTime -WaitMilliseconds 300\n"
                                "$p.Refresh()\n$alive = -not $p.HasExited\n$p.Kill()\n"
+                               "@{ result = $r; alive = $alive }" + self.WRITE)
+        self.assertEqual(result, {"result": "exited", "alive": True})
+
+    def test_a_process_whose_id_was_reused_is_never_ended(self) -> None:
+        # Same id and name, but not the instance that was started: its start
+        # time differs from the one recorded.
+        result = self.run_body(self.SLEEPER + "$r = Stop-QuitProcess -ProcessId $p.Id "
+                               "-ExpectedStartTime $p.StartTime.AddSeconds(-5) -WaitMilliseconds 300 "
+                               "-ExpectedName $name\n$p.Refresh()\n$alive = -not $p.HasExited\n$p.Kill()\n"
                                "@{ result = $r; alive = $alive }" + self.WRITE)
         self.assertEqual(result, {"result": "exited", "alive": True})
 
     def test_a_process_that_exits_or_is_gone_is_left_alone(self) -> None:
         result = self.run_body(
             self.HELPER.format(command="exit")
-            + "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 5000 -ExpectedName $name\n"
-            "$gone = Stop-QuitProcess -ProcessId 999999 -WaitMilliseconds 100\n"
+            + "$r = Stop-QuitProcess -ProcessId $p.Id -ExpectedStartTime (Get-Date) -WaitMilliseconds 5000 "
+            "-ExpectedName $name\n"
+            "$gone = Stop-QuitProcess -ProcessId 999999 -ExpectedStartTime (Get-Date) -WaitMilliseconds 100\n"
             "@{ result = $r; gone = $gone }" + self.WRITE)
         self.assertEqual(result, {"result": "exited", "gone": "exited"})
 

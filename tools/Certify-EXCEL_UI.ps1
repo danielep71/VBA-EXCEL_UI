@@ -446,10 +446,13 @@ function Stop-QuitProcess {
     # quit. Intermediate COM wrappers (Workbooks, VBProject, CommandBars...)
     # can keep that instance alive after Quit until .NET finalizes them, so a
     # process still running after the wait is ended. Only a process with the
-    # expected name is touched, so a reused process id is never ended.
+    # expected name and the start time recorded when the instance was started
+    # is touched: if that instance exited and Windows reused its id for another
+    # Excel, the start time differs and that Excel is never ended.
     # Returns 'exited', 'stopped' or 'running'.
     param(
         [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][datetime]$ExpectedStartTime,
         [int]$WaitMilliseconds = 15000,
         [string]$ExpectedName = 'EXCEL'
     )
@@ -459,6 +462,14 @@ function Stop-QuitProcess {
     }
     if ($process.ProcessName -ne $ExpectedName) {
         return 'exited'
+    }
+    try {
+        if ($process.StartTime -ne $ExpectedStartTime) {
+            return 'exited'
+        }
+    }
+    catch {
+        return 'running'
     }
     try {
         $process.Kill()
@@ -565,6 +576,7 @@ $excel = $null
 $workbook = $null
 $vbe = $null
 $excelProcessId = $null
+$excelProcessStart = $null
 $cancelled = $false
 $certificationPassed = $false
 
@@ -622,6 +634,11 @@ try {
         throw 'Excel returned an instance that already has workbooks open; close Excel and run again.'
     }
     $excelProcessId = Get-ExcelProcessId $excel
+    if ($null -ne $excelProcessId) {
+        # Recorded so that the close step can tell this instance from a later
+        # process that reuses its id.
+        $excelProcessStart = (Get-Process -Id $excelProcessId -ErrorAction SilentlyContinue).StartTime
+    }
     Invoke-Excel { $excel.Visible = $true }
     Invoke-Excel { $excel.AutomationSecurity = $MsoAutomationSecurityByUI }
     $workbook = Invoke-Excel { $excel.Workbooks.Open($workbookPath) }
@@ -810,8 +827,8 @@ finally {
         [GC]::WaitForPendingFinalizers()
         [GC]::Collect()
         $closeDetail = 'Workbook closed without saving; Excel quit'
-        if ($null -ne $excelProcessId) {
-            switch (Stop-QuitProcess -ProcessId $excelProcessId) {
+        if ($null -ne $excelProcessId -and $null -ne $excelProcessStart) {
+            switch (Stop-QuitProcess -ProcessId $excelProcessId -ExpectedStartTime $excelProcessStart) {
                 'stopped' { $closeDetail += "; process $excelProcessId did not exit after Quit and was ended" }
                 'running' { $closeDetail += "; process $excelProcessId is still running, close it yourself" }
             }
