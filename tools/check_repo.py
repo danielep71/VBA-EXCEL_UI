@@ -90,6 +90,7 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/public_api_manifest.txt",
     "tools/binary_allowlist.txt",
     "tools/check_issues.py",
+    "tools/vba-projects.json",
     ".github/labels.json",
     "docs/ISSUE_LABELS.md",
 ]
@@ -262,6 +263,104 @@ def check_module_inventory() -> None:
         fail("module-inventory",
              f"{rel}: production module in no public API section of "
              f"tools/vba_api.py; its declarations would never be recorded")
+
+
+# --------------------------------------------------------------------------
+VBA_PROJECT_MANIFEST = "tools/vba-projects.json"
+
+
+def expected_configurations() -> dict[str, set[str]]:
+    """The standard modules each configuration of the manifest must list.
+
+    production is src/; development adds test/; demo adds demo/. A workbook
+    tool imports exactly what a configuration lists, so a module the manifest
+    forgets is missing from every workbook built from it.
+    """
+    production = {rel for rel in PRODUCTION_MODULES if is_standard_module(rel)}
+    return {
+        "production": production,
+        "development": production | {rel for rel in TEST_MODULES if is_standard_module(rel)},
+        "demo": production | {rel for rel in DEMO_MODULES if is_standard_module(rel)},
+    }
+
+
+def load_vba_project_manifest() -> dict[str, object] | None:
+    """Parse the manifest, or record why it cannot be read and return None."""
+    check = "vba-project-manifest"
+    path = os.path.join(REPO, VBA_PROJECT_MANIFEST)
+    if not os.path.isfile(path):
+        fail(check, f"{VBA_PROJECT_MANIFEST} is missing")
+        return None
+    try:
+        manifest = json.loads(read(VBA_PROJECT_MANIFEST).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        fail(check, f"{VBA_PROJECT_MANIFEST} is not valid JSON: {exc}")
+        return None
+    if not isinstance(manifest, dict):
+        fail(check, f"{VBA_PROJECT_MANIFEST} is not a JSON object")
+        return None
+    return manifest
+
+
+def configuration_modules(manifest: dict[str, object], name: str) -> list[str] | None:
+    """The module list of one configuration, or None after recording why not."""
+    configurations = manifest.get("configurations")
+    entry = configurations.get(name) if isinstance(configurations, dict) else None
+    modules = entry.get("modules") if isinstance(entry, dict) else None
+    if not isinstance(modules, list) or not all(isinstance(rel, str) for rel in modules):
+        fail("vba-project-manifest",
+             f"{VBA_PROJECT_MANIFEST}: configuration {name!r} has no list of module paths")
+        return None
+    return modules
+
+
+def check_vba_project_manifest() -> None:
+    """Keep tools/vba-projects.json equal to the tracked modules.
+
+    The workbook synchronizer, the export comparison and the call checker all
+    read their module sets from this manifest. It must parse; each tracked
+    standard module of src/, test/ and demo/ must be in a configuration; each
+    listed path must be tracked; the three configurations must hold exactly
+    the sets of expected_configurations(), each path once; and it must list
+    no document modules, since this repository has none.
+    """
+    check = "vba-project-manifest"
+    manifest = load_vba_project_manifest()
+    if manifest is None:
+        return
+
+    if manifest.get("document_modules") != []:
+        fail(check, f"{VBA_PROJECT_MANIFEST}: document_modules must be an empty list; "
+                    f"this repository has no document modules")
+    patterns = manifest.get("project_name_patterns", [])
+    for pattern in patterns if isinstance(patterns, list) else [patterns]:
+        try:
+            re.compile(str(pattern))
+        except re.error as exc:
+            fail(check, f"{VBA_PROJECT_MANIFEST}: project name pattern {pattern!r} is invalid: {exc}")
+
+    tracked = set(git_tracked_files() or [])
+    expected = expected_configurations()
+    listed: set[str] = set()
+    for name, wanted in expected.items():
+        modules = configuration_modules(manifest, name)
+        if modules is None:
+            continue
+        listed.update(modules)
+        for rel in sorted({rel for rel in modules if modules.count(rel) > 1}):
+            fail(check, f"{VBA_PROJECT_MANIFEST}: {name} lists {rel} more than once")
+        for rel in sorted(set(modules) - wanted):
+            if not os.path.isfile(os.path.join(REPO, rel)):
+                fail(check, f"{VBA_PROJECT_MANIFEST}: {name} lists {rel}, which does not exist")
+            elif rel not in tracked:
+                fail(check, f"{VBA_PROJECT_MANIFEST}: {name} lists {rel}, which Git does not track")
+            else:
+                fail(check, f"{VBA_PROJECT_MANIFEST}: {name} lists {rel}, which does not belong to it")
+        for rel in sorted(wanted - set(modules)):
+            fail(check, f"{VBA_PROJECT_MANIFEST}: {name} does not list {rel}")
+
+    for rel in sorted(set().union(*expected.values()) - listed):
+        fail(check, f"{rel}: tracked module is in no configuration of {VBA_PROJECT_MANIFEST}")
 
 
 # --------------------------------------------------------------------------
@@ -1872,6 +1971,7 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("repository policy", check_repository_policy),
     ("repository policy self-test", check_repository_policy_selftest),
     ("module inventory", check_module_inventory),
+    ("VBA project manifest", check_vba_project_manifest),
     ("required files", check_required_files),
     ("module names", check_module_names),
     ("option policy", check_option_policy),

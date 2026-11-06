@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "description": "The VBA projects a workbook built from this repository can hold. Each configuration is one VBA project; modules from different configurations are never combined. tools/Sync-EXCEL_UI-VBA.ps1 imports a configuration, tools/compare_vba_export.py checks an export against one, and tools/check_vba_calls.py analyses each.",
+  "project_name_patterns": [
+    "^M_",
+    "^UI_",
+    "^TST_",
+    "^Test_EXCEL_UI_",
+    "^Demo_"
+  ],
+  "macro_name_functions": [],
+  "document_modules": [],
+  "configurations": {
+    "production": {
+      "description": "The production package of INSTALLATION.md: the four modules of src/.",
+      "gating": true,
+      "modules": [
+        "src/M_EXCEL_UI.bas",
+        "src/M_EXCEL_UI_RUNTIME.bas",
+        "src/M_EXCEL_UI_SNAPSHOT.bas",
+        "src/M_EXCEL_UI_TITLEBAR.bas"
+      ]
+    },
+    "development": {
+      "description": "A workbook that runs the regression suite and release certification: the production modules and the regression module.",
+      "gating": true,
+      "modules": [
+        "src/M_EXCEL_UI.bas",
+        "src/M_EXCEL_UI_RUNTIME.bas",
+        "src/M_EXCEL_UI_SNAPSHOT.bas",
+        "src/M_EXCEL_UI_TITLEBAR.bas",
+        "test/M_EXCEL_UI_REGRESSION_TESTS.bas"
+      ]
+    },
+    "demo": {
+      "description": "The demo workbook: the production modules and the two demo modules.",
+      "gating": true,
+      "modules": [
+        "src/M_EXCEL_UI.bas",
+        "src/M_EXCEL_UI_RUNTIME.bas",
+        "src/M_EXCEL_UI_SNAPSHOT.bas",
+        "src/M_EXCEL_UI_TITLEBAR.bas",
+        "demo/M_DEMO_BUILDER.bas",
+        "demo/M_EXCEL_UI_DEMO.bas"
+      ]
+    }
+  }
+}
