@@ -538,6 +538,24 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- Fixed release certification hiding why a structured-result assertion failed,
+  and reporting one failed case as every later unit failing
+  ([#135](https://github.com/danielep71/VBA-EXCEL_UI/issues/135)).
+  **Not yet certified.** An assertion on a `_WithResult` call raised
+  `expected=True actual=False` without the failure count and failure list the
+  call returned, so the report and the JSON evidence did not name the element
+  that failed or the reason. The message now carries
+  `FailureCount=<n> | FailureList=[<entry> || <entry>]`, bounded in length.
+
+  A case that failed after capturing a snapshot also left that snapshot
+  behind, and the next units refused to run over it: one defect read as three
+  failed units and a cleanup failure. Certification now releases a snapshot a
+  unit left behind before the next unit runs and says so in that unit's
+  detail. The leak still fails cleanup, naming the unit. A snapshot that existed
+  before certification started is still refused, never cleared. A new
+  regression case forces a capture failure through the active-frame pair seam
+  and checks both the failure list in the unit detail and that the next unit
+  runs.
 - **Not yet certified.** A demo button created without a macro no longer
   points `OnAction` at `DEMO_DEMOButton_NotAssigned`, which no module declares
   ([#129](https://github.com/danielep71/VBA-EXCEL_UI/issues/129)). Such a button

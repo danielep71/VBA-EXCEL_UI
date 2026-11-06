@@ -93,6 +93,11 @@ The script prints each step as it runs and records it in `session.log` and
    originals stay in `%TEMP%`.
 8. **Close.** Closes the workbook without saving, closes without saving any
    workbook a failed run left open, and quits the Excel instance it started.
+   COM references that PowerShell has not yet released can keep that instance
+   in memory after it quits, so a process of that instance still running 15
+   seconds later is ended. A process is ended only when its id, its name and
+   the start time recorded when the instance was started all match, so no
+   other Excel process is touched, even one that reuses the id.
 
 Finally it writes `session.json` and runs the validator.
 
