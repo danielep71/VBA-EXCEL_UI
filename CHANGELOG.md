@@ -937,8 +937,9 @@ the repository maps here to exactly one issue. Identifiers without a version
 come from the v1.1.0 review, `ICR-UI-111-*` from the v1.1.1 review, and
 `ICR-UI-112-*` from the v1.1.2 review. The v1.1.2 backlog renumbered several
 v1.1.1 findings; the *Current identifier* column gives the new number. The
-static gate fails if a cited identifier is missing from this table or appears
-in it twice.
+v1.1.2 review never assigned P2 numbers 09 and 10, so its P2 rows run from 01
+to 08 and then 11 and 12. The static gate fails if a cited identifier is
+missing from this table or appears in it twice.
 
 The v1.1.2 and v1.1.1 entries below still name the withdrawn review documents
 (`docs/INDEPENDENT_CODE_REVIEW_V1.1.*.md`) as published. Those paths no longer
