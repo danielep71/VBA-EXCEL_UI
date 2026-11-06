@@ -441,6 +441,47 @@ function Find-Python {
     return $null
 }
 
+function Stop-QuitProcess {
+    # Waits for the process of the Excel instance this script started and
+    # quit. Intermediate COM wrappers (Workbooks, VBProject, CommandBars...)
+    # can keep that instance alive after Quit until .NET finalizes them, so a
+    # process still running after the wait is ended. Only a process with the
+    # expected name and the start time recorded when the instance was started
+    # is touched: if that instance exited and Windows reused its id for another
+    # Excel, the start time differs and that Excel is never ended.
+    # Returns 'exited', 'stopped' or 'running'.
+    param(
+        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][datetime]$ExpectedStartTime,
+        [int]$WaitMilliseconds = 15000,
+        [string]$ExpectedName = 'EXCEL'
+    )
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $process -or $process.WaitForExit($WaitMilliseconds)) {
+        return 'exited'
+    }
+    if ($process.ProcessName -ne $ExpectedName) {
+        return 'exited'
+    }
+    try {
+        if ($process.StartTime -ne $ExpectedStartTime) {
+            return 'exited'
+        }
+    }
+    catch {
+        return 'running'
+    }
+    try {
+        $process.Kill()
+        if ($process.WaitForExit(10000)) {
+            return 'stopped'
+        }
+    }
+    catch {
+    }
+    return 'running'
+}
+
 function Release-Com($Object) {
     if ($null -ne $Object) {
         try {
@@ -535,6 +576,7 @@ $excel = $null
 $workbook = $null
 $vbe = $null
 $excelProcessId = $null
+$excelProcessStart = $null
 $cancelled = $false
 $certificationPassed = $false
 
@@ -592,6 +634,11 @@ try {
         throw 'Excel returned an instance that already has workbooks open; close Excel and run again.'
     }
     $excelProcessId = Get-ExcelProcessId $excel
+    if ($null -ne $excelProcessId) {
+        # Recorded so that the close step can tell this instance from a later
+        # process that reuses its id.
+        $excelProcessStart = (Get-Process -Id $excelProcessId -ErrorAction SilentlyContinue).StartTime
+    }
     Invoke-Excel { $excel.Visible = $true }
     Invoke-Excel { $excel.AutomationSecurity = $MsoAutomationSecurityByUI }
     $workbook = Invoke-Excel { $excel.Workbooks.Open($workbookPath) }
@@ -780,10 +827,10 @@ finally {
         [GC]::WaitForPendingFinalizers()
         [GC]::Collect()
         $closeDetail = 'Workbook closed without saving; Excel quit'
-        if ($null -ne $excelProcessId) {
-            $process = Get-Process -Id $excelProcessId -ErrorAction SilentlyContinue
-            if ($null -ne $process -and -not $process.WaitForExit(30000)) {
-                $closeDetail += "; process $excelProcessId is still running, close it yourself"
+        if ($null -ne $excelProcessId -and $null -ne $excelProcessStart) {
+            switch (Stop-QuitProcess -ProcessId $excelProcessId -ExpectedStartTime $excelProcessStart) {
+                'stopped' { $closeDetail += "; process $excelProcessId did not exit after Quit and was ended" }
+                'running' { $closeDetail += "; process $excelProcessId is still running, close it yourself" }
             }
         }
         if ($closeProblems.Count -gt 0) {
