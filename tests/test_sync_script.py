@@ -88,6 +88,16 @@ class SyncScriptTests(unittest.TestCase):
                                      "development": [*production, "test/M_T.bas"],
                                      "demo": [*production, "demo/M_D.bas"]}, extra)
 
+    # Sheet snapshot -----------------------------------------------------------
+
+    def test_a_changed_sheet_is_named_in_the_refusal(self) -> None:
+        unchanged = self.failure("Assert-SheetSnapshotUnchanged -Before @('Sheet1|Sheet1') -After @('Sheet1|Sheet1')")
+        self.assertEqual(unchanged, "")
+        changed = self.failure("Assert-SheetSnapshotUnchanged -Before @('Sheet1|') -After @('Sheet1|Sheet1')")
+        self.assertIn("sheet 1 was 'Sheet1|' (name|CodeName) and is now 'Sheet1|Sheet1'", changed)
+        count = self.failure("Assert-SheetSnapshotUnchanged -Before @('A|A') -After @('A|A', 'B|B')")
+        self.assertIn("sheet count changed from 1 to 2", count)
+
     # Mode question and component sets ---------------------------------------
 
     def mode(self, answer: str) -> Any:
@@ -343,6 +353,21 @@ class ScriptSyntaxTests(unittest.TestCase):
                     capture_output=True, text=True, timeout=120, check=False)
                 self.assertEqual(completed.returncode, 0, completed.stderr)
                 self.assertEqual(completed.stdout.strip(), "", completed.stdout)
+
+
+class SheetSnapshotOrderTests(unittest.TestCase):
+    """Excel assigns a new workbook's sheet CodeNames only once its VBA project is read."""
+
+    def test_the_first_snapshot_follows_reading_the_vba_components(self) -> None:
+        text = SCRIPT.read_bytes().decode("ascii")
+        read_project = text.index("$null = $vbProject.VBComponents.Count")
+        read_names = text.index("foreach ($component in $vbProject.VBComponents) { $null = [string]$component.Name }")
+        before = text.index("$before = Get-SheetSnapshot -Workbook $workbook")
+        first_import = text.index("Import-StandardModule -VBProject $vbProject")
+        self.assertLess(read_project, read_names)
+        self.assertLess(read_names, before)
+        self.assertLess(before, first_import)
+        self.assertEqual(text.count("$before = Get-SheetSnapshot"), 1)
 
 
 class LauncherTests(unittest.TestCase):
