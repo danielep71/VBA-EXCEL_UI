@@ -82,6 +82,7 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/vba_analyze.py",
     "tools/vba_analyze_fixtures.py",
     "tools/titlebar_control_fixtures.py",
+    "tools/winapi_capture_fixtures.py",
     "tools/demo_cleanup_fixtures.py",
     "tools/reformat_fixtures.py",
     "tools/vba_api.py",
@@ -477,6 +478,17 @@ def check_titlebar_control() -> None:
     from titlebar_control_fixtures import selftest
     for finding in selftest(REPO):
         fail('title-bar control regression', finding)
+
+
+def check_winapi_error_capture() -> None:
+    """Hold every WinAPI call in src/ and test/ to the #27 capture sequence."""
+    from winapi_capture_fixtures import run, selftest
+    errors, count = selftest()
+    for finding in errors:
+        fail('WinAPI error capture', finding)
+    for finding in run(REPO, ALL_MODULES):
+        fail('WinAPI error capture', finding)
+    print(f'  {count} WinAPI error-capture fixtures')
 
 
 def check_demo_cleanup() -> None:
@@ -1981,6 +1993,7 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("VBA analyzer", check_vba_analyzer),
     ("VBA analyzer self-test", check_vba_analyzer_selftest),
     ("title-bar control regression", check_titlebar_control),
+    ("WinAPI error capture", check_winapi_error_capture),
     ("demo cleanup regression", check_demo_cleanup),
     ("public API manifest", check_public_api),
     ("public API self-test", check_public_api_selftest),

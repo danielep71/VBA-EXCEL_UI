@@ -89,6 +89,7 @@ M_EXCEL_UI_TITLEBAR	Function	UI_TrySetTitleBarVisibleForHwndIfNeeded(ByVal Targe
 M_EXCEL_UI_TITLEBAR	Function	UI_TrySetTitleBarVisibleIfNeeded(ByVal IsVisible As Boolean, ByRef FailMsg As String) As Boolean
 M_EXCEL_UI_TITLEBAR	Sub	UI_InternalInjectFramePairFault(ByVal FaultKind As Long)
 M_EXCEL_UI_TITLEBAR	Sub	UI_InternalInjectFrameRefreshFailure(ByVal FailNextRefresh As Boolean)
+M_EXCEL_UI_TITLEBAR	Sub	UI_InternalInjectWindowStyleFault(ByVal Operation As Long, ByVal FaultKind As Long, ByVal DllError As Long)
 M_EXCEL_UI_TITLEBAR	Sub	UI_InternalResetTitleBarBaseline()
 
 [baseline v1.1.2]

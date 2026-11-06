@@ -248,6 +248,51 @@ class TitleBarControlRegression(GateTestCase):
         self.assertFails("cleanup re-raise must disable its handler")
 
 
+class WinApiErrorCapture(GateTestCase):
+    check = "WinAPI error capture"
+    TITLEBAR = "src/M_EXCEL_UI_TITLEBAR.bas"
+    CAPTURE = "        DllError = Err.LastDllError\r\n"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_a_call_runs_between_the_api_and_the_capture(self) -> None:
+        text = self.repo.read_bytes(self.TITLEBAR).decode("ascii")
+        start = text.index("Private Function UI_TrySetWindowStyle(")
+        capture = text.index(self.CAPTURE, start)
+        text = (text[:capture] + "        FailMsg = UI_TitleBarBuildRuntimeErrorText\r\n"
+                + text[capture:])
+        self.repo.write(self.TITLEBAR, text.encode("ascii"))
+        self.assertFails("UI_TrySetWindowStyle: Err.LastDllError read after an intervening statement",
+                         "SetWindowLongPtr is not immediately followed by its Err.LastDllError capture")
+
+    def test_fails_when_on_error_runs_between_the_api_and_the_capture(self) -> None:
+        text = self.repo.read_bytes(TESTS).decode("ascii")
+        start = text.index("Private Function TST_TryRefreshWindowFrame(")
+        capture = text.index(self.CAPTURE, start)
+        text = text[:capture] + "        On Error Resume Next\r\n" + text[capture:]
+        self.repo.write(TESTS, text.encode("ascii"))
+        self.assertFails("TST_TryRefreshWindowFrame: Err.LastDllError read after an On Error statement")
+
+    def test_fails_when_only_the_legacy_arm_loses_its_clear(self) -> None:
+        call = "        ApiResult = GetWindowLong(hWnd, GWL_STYLE)\r\n"
+        self.repo.replace(self.TITLEBAR, f"\r\n#Else\r\n{call}#End If\r\n",
+                          f"\r\n#Else\r\n        FaultError = 0\r\n{call}#End If\r\n")
+        found = self.assertFails("legacy-x86: UI_TryGetWindowStyle: GetWindowLong is not immediately "
+                                 "preceded by SetLastError 0")
+        self.assertFalse([f for f in found if "vba7-" in f], found)
+
+    def test_fails_when_get_last_error_is_declared_again(self) -> None:
+        clear = '        Private Declare Sub TST_SetLastError Lib "kernel32"'
+        declare = '        Private Declare Function TST_GetLastError Lib "kernel32" Alias "GetLastError" () As Long'
+        self.repo.replace(TESTS, clear, declare + "\r\n" + clear)
+        self.assertFails("legacy-x86: declares TST_GetLastError; capture Err.LastDllError instead")
+
+    def test_fails_when_the_fixtures_stop_detecting_a_late_capture(self) -> None:
+        with patch("winapi_capture_fixtures.procedure_findings", return_value=iter(())):
+            self.assertFails("#27 fixture a helper call between the call and the capture is rejected")
+
+
 class DemoCleanupRegression(GateTestCase):
     check = "demo cleanup regression"
 
