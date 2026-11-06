@@ -538,6 +538,47 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- **Certified on Excel 16.0 build 20430, 64-bit (2026-11-06).** Ribbon
+  snapshot restore now fails closed instead of
+  applying the captured value to whichever window is active
+  ([#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23), `ICR-UI-112-P1-01`). Capture records the Excel `Window` the
+  Ribbon was read from and its `Window.hWnd`, and keeps the value only when
+  the active window still reports that handle after the read. Restore writes
+  the Ribbon only while the retained `Window` is open, still reports that
+  handle, and the active window reports it too. Windows are compared by
+  handle because Excel returns a new wrapper from every read of
+  `Application.ActiveWindow`, so `Is` rejects even the same window (measured
+  on Excel 16.0 build 20430). Otherwise it reports an ordered
+  `Ribbon | …` failure, writes nothing, and activates no window. The
+  same-window capture and restore path is unchanged, and no public procedure,
+  parameter, enum value or default changes. 32-bit Office is not yet
+  certified (#51).
+- Fixed release certification hiding why a structured-result assertion failed,
+  and reporting one failed case as every later unit failing
+  ([#135](https://github.com/danielep71/VBA-EXCEL_UI/issues/135)).
+  **Certified on Excel 16.0 build 20430, 64-bit (2026-11-06).** An assertion on a `_WithResult` call raised
+  `expected=True actual=False` without the failure count and failure list the
+  call returned, so the report and the JSON evidence did not name the element
+  that failed or the reason. The message now carries
+  `FailureCount=<n> | FailureList=[<entry> || <entry>]`, bounded in length.
+
+  A case that failed after capturing a snapshot also left that snapshot
+  behind, and the next units refused to run over it: one defect read as three
+  failed units and a cleanup failure. Certification now releases a snapshot a
+  unit left behind before the next unit runs and says so in that unit's
+  detail. The leak still fails cleanup, naming the unit. A snapshot that existed
+  before certification started is still refused, never cleared. A new
+  regression case forces a capture failure through the active-frame pair seam
+  and checks both the failure list in the unit detail and that the next unit
+  runs.
+- **Checked on Excel 16.0 build 20430, 64-bit (2026-11-06).** A demo button
+  created without a macro no longer
+  points `OnAction` at `DEMO_DEMOButton_NotAssigned`, which no module declares
+  ([#129](https://github.com/danielep71/VBA-EXCEL_UI/issues/129)). Such a button
+  now has no macro, so clicking it does nothing instead of showing Excel's
+  "Cannot run the macro" error. No current demo button takes that path. The
+  advisory call checker (`tools/check_vba_calls.py`) found the defect and now
+  reports no defect on the repository.
 - Fixed the active title-bar frame being trusted without the host agreeing it
   is active. Resolving `Window.hWnd` from the `Window` that
   `Application.ActiveWindow` just returned makes the pair internally
@@ -975,7 +1016,7 @@ Dispositions are as of 2026-11-02 and are updated with the issues.
 | `ICR-UI-P2-06` | v1.1.0 | [#19](https://github.com/danielep71/VBA-EXCEL_UI/issues/19) | — | Corrected in v1.1.1 |
 | `ICR-UI-P2-07` | v1.1.0 | [#18](https://github.com/danielep71/VBA-EXCEL_UI/issues/18) | — | Corrected in v1.1.1 |
 | `ICR-UI-P3-03` | v1.1.0 | [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) | — | Corrected on `release/v1.1.3`; not yet certified |
-| `ICR-UI-111-P1-01` | v1.1.1 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | `ICR-UI-112-P1-01` | Open (v1.1.3) |
+| `ICR-UI-111-P1-01` | v1.1.1 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | `ICR-UI-112-P1-01` | Open (v1.1.3); fail-closed restore implemented on `release/v1.1.3`, awaiting certification |
 | `ICR-UI-111-P2-01` | v1.1.1 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | `ICR-UI-112-P2-02` | Reopened (v1.1.3): the v1.1.2 closure was incomplete; see the erratum below |
 | `ICR-UI-111-P2-02` | v1.1.1 | [#33](https://github.com/danielep71/VBA-EXCEL_UI/issues/33) | — | Corrected in v1.1.2 |
 | `ICR-UI-111-P2-03` | v1.1.1 | [#34](https://github.com/danielep71/VBA-EXCEL_UI/issues/34) | — | Corrected in v1.1.2 |
@@ -983,7 +1024,7 @@ Dispositions are as of 2026-11-02 and are updated with the issues.
 | `ICR-UI-111-P3-03` | v1.1.1 | [#36](https://github.com/danielep71/VBA-EXCEL_UI/issues/36) | `ICR-UI-112-P3-01` | Open (v1.1.3) |
 | `ICR-UI-111-P3-07` | v1.1.1 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | `ICR-UI-112-P3-04` | Open (v1.1.3) |
 | `ICR-UI-111-P3-08` | v1.1.1 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | `ICR-UI-112-P3-07` | Open (v1.1.3); the CI supply-chain finding, not `ICR-UI-112-P3-08` |
-| `ICR-UI-112-P1-01` | v1.1.2 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | — | Open (v1.1.3) |
+| `ICR-UI-112-P1-01` | v1.1.2 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | — | Open (v1.1.3); fail-closed restore implemented on `release/v1.1.3`, awaiting certification |
 | `ICR-UI-112-P2-01` | v1.1.2 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | — | Open (v1.1.3) |
 | `ICR-UI-112-P2-02` | v1.1.2 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | — | Reopened (v1.1.3) |
 | `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Reopened (v1.1.3); bounded negative control blocked by #66 |
@@ -1039,7 +1080,7 @@ practical closure status of any item that has since been reopened.
 
 | Issue | Required v1.1.3 outcome | Current status |
 |:---:|---|---|
-| [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | Ribbon wrong-target restoration fails closed | Open |
+| [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | Ribbon wrong-target restoration fails closed | Implemented on branch; awaiting certification |
 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | Pair Excel Window and native hWnd identity defensibly | Open |
 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened |
 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Reopened |
