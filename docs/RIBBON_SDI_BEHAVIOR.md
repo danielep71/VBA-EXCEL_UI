@@ -233,12 +233,12 @@ in a corrective patch release.
 
 ### Required for `1.1.3`
 
-- [ ] The snapshot **reports** the Ribbon as unrestorable when the captured
+- [x] The snapshot **reports** the Ribbon as unrestorable when the captured
       window is not active, rather than applying the captured value to whichever
       window is. This fail-closed correction is #23. It activates no window and
-      therefore introduces no new focus or event side effect. It is implemented
-      on `release/v1.1.3` and is checked here once real-host certification
-      passes; after it, scenario 5 of the probe records a refused restore.
+      therefore introduces no new focus or event side effect. Release
+      certification passed on host 2 on 2026-11-06, and scenario 5 of the probe
+      recorded the refused restore (section 4).
 
 ### Deferred to `1.2.0`
 

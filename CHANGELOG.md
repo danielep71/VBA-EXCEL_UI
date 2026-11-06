@@ -538,7 +538,8 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
-- **Not yet certified.** Ribbon snapshot restore now fails closed instead of
+- **Certified on Excel 16.0 build 20430, 64-bit (2026-11-06).** Ribbon
+  snapshot restore now fails closed instead of
   applying the captured value to whichever window is active
   ([#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23), `ICR-UI-112-P1-01`). Capture records the Excel `Window` the
   Ribbon was read from and its `Window.hWnd`, and keeps the value only when
@@ -550,12 +551,12 @@ measured against that baseline.
   on Excel 16.0 build 20430). Otherwise it reports an ordered
   `Ribbon | …` failure, writes nothing, and activates no window. The
   same-window capture and restore path is unchanged, and no public procedure,
-  parameter, enum value or default changes. Real-host certification is still
-  required before this closes.
+  parameter, enum value or default changes. 32-bit Office is not yet
+  certified (#51).
 - Fixed release certification hiding why a structured-result assertion failed,
   and reporting one failed case as every later unit failing
   ([#135](https://github.com/danielep71/VBA-EXCEL_UI/issues/135)).
-  **Not yet certified.** An assertion on a `_WithResult` call raised
+  **Certified on Excel 16.0 build 20430, 64-bit (2026-11-06).** An assertion on a `_WithResult` call raised
   `expected=True actual=False` without the failure count and failure list the
   call returned, so the report and the JSON evidence did not name the element
   that failed or the reason. The message now carries
@@ -570,7 +571,8 @@ measured against that baseline.
   regression case forces a capture failure through the active-frame pair seam
   and checks both the failure list in the unit detail and that the next unit
   runs.
-- **Not yet certified.** A demo button created without a macro no longer
+- **Checked on Excel 16.0 build 20430, 64-bit (2026-11-06).** A demo button
+  created without a macro no longer
   points `OnAction` at `DEMO_DEMOButton_NotAssigned`, which no module declares
   ([#129](https://github.com/danielep71/VBA-EXCEL_UI/issues/129)). Such a button
   now has no macro, so clicking it does nothing instead of showing Excel's
