@@ -538,6 +538,13 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- **Not yet certified.** A demo button created without a macro no longer
+  points `OnAction` at `DEMO_DEMOButton_NotAssigned`, which no module declares
+  ([#129](https://github.com/danielep71/VBA-EXCEL_UI/issues/129)). Such a button
+  now has no macro, so clicking it does nothing instead of showing Excel's
+  "Cannot run the macro" error. No current demo button takes that path. The
+  advisory call checker (`tools/check_vba_calls.py`) found the defect and now
+  reports no defect on the repository.
 - Fixed the active title-bar frame being trusted without the host agreeing it
   is active. Resolving `Window.hWnd` from the `Window` that
   `Application.ActiveWindow` just returned makes the pair internally
