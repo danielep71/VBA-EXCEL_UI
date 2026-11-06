@@ -89,8 +89,12 @@ Record which Windows and Office-bitness combinations were exercised; do not gene
 
 ## 1. Freeze and identify the candidate
 
-1. Update refs and start from current protected `main`.
-2. Create the release-preparation branch required by repository policy.
+1. Update refs. If the release branch `release/vX.Y.Z` is not open yet, create
+   it from current protected `main`; otherwise use the open branch.
+2. While the release branch is open, VBA corrections for the release target it
+   and reach `main` with the release; non-VBA repository changes are made on
+   it and mirrored to `main`. Everyday work and governance changes start from
+   `main`, as [CONTRIBUTING.md](CONTRIBUTING.md#base-branch) describes.
 3. Record the base and candidate full commit SHAs.
 4. Stop feature work on that branch.
 5. Review the complete diff from the previous release tag.
