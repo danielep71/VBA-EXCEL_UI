@@ -2185,7 +2185,7 @@ Public Sub DEMO_Btn_Add( _
     ByVal TopPos As Double, _
     ByVal ShapeWidth As Double, _
     ByVal ShapeHeight As Double, _
-    Optional ByVal ActionMacro As String = "DEMO_DEMOButton_NotAssigned", _
+    Optional ByVal ActionMacro As String = "", _
     Optional ByVal FillColor As Long = COLOR_BUTTON)
 '
 '==============================================================================
@@ -2196,7 +2196,7 @@ Public Sub DEMO_Btn_Add( _
 '
 ' WHY THIS EXISTS
 '   Shape-based buttons are portable, easy to style, and easy to assign to a
-'   placeholder or real macro during workbook-layout generation
+'   macro during workbook-layout generation
 '
 ' INPUTS
 '   WS
@@ -2221,7 +2221,8 @@ Public Sub DEMO_Btn_Add( _
 '     Button height
 '
 '   ActionMacro (optional)
-'     Macro name to assign to the shape's OnAction property
+'     Macro name to assign to the shape's OnAction property. Blank, the
+'     default, leaves the button without a macro.
 '
 '   FillColor (optional)
 '     Fill color to apply to the button shape
@@ -2234,12 +2235,16 @@ Public Sub DEMO_Btn_Add( _
 '   - Applies button styling
 '   - Uses FillColor when provided, otherwise defaults to COLOR_BUTTON
 '   - Writes the requested caption
-'   - Assigns the requested action macro
+'   - Assigns the requested action macro; a blank ActionMacro leaves OnAction
+'     empty, so clicking the button does nothing instead of raising "Cannot
+'     run the macro" for a procedure that does not exist
 '
 ' ERROR POLICY
 '   Raises errors normally
 '
 ' UPDATED
+'   2026-11-06 - A blank ActionMacro leaves OnAction empty instead of naming
+'                the undeclared DEMO_DEMOButton_NotAssigned (#129).
 '   2026-04-22
 '==============================================================================
 
@@ -2288,7 +2293,7 @@ Public Sub DEMO_Btn_Add( _
         Shp.Name = ShapeName
     'Assign the requested action macro
         If Len(Trim$(ActionMacro)) = 0 Then
-            Shp.OnAction = "'" & ThisWorkbook.Name & "'!DEMO_DEMOButton_NotAssigned"
+            Shp.OnAction = vbNullString
         ElseIf InStr(1, ActionMacro, "!", vbTextCompare) > 0 Then
             Shp.OnAction = ActionMacro
         Else
@@ -2861,6 +2866,7 @@ Public Sub DEMO_Btn_AddGrid( _
 '
 '     Notes
 '       - When the 3rd element is text, it is treated as ActionMacro
+'       - Without an ActionMacro the button has no macro
 '       - When the 3rd element is numeric, it is treated as FillColor
 '       - When the 4th element is present, it is treated as FillColor
 '
@@ -2901,6 +2907,7 @@ Public Sub DEMO_Btn_AddGrid( _
 '   - DEMO_Btn_Add
 '
 ' UPDATED
+'   2026-11-06 - A button without an ActionMacro gets no macro (#129).
 '   2026-04-22
 '==============================================================================
 
@@ -2996,8 +3003,8 @@ Public Sub DEMO_Btn_AddGrid( _
 '------------------------------------------------------------------------------
 ' RESOLVE OPTIONAL ACTION MACRO / FILL COLOR
 '------------------------------------------------------------------------------
-            'Initialize the default action macro
-                ActionMacro = "DEMO_DEMOButton_NotAssigned"
+            'Initialize the default action macro: none
+                ActionMacro = vbNullString
 
             'Initialize the default fill color
                 FillColor = COLOR_BUTTON

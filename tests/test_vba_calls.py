@@ -592,13 +592,9 @@ class RepositoryTests(unittest.TestCase):
     """The checker on this repository's own modules and manifest."""
 
     # Defects the checker finds in the current source, by (configuration, code, path, target). The
-    # line is left out so that the same entry holds on every branch, whose sources differ.
-    # The demo builder's fallback OnAction target names a macro that no module declares (#129).
-    # Remove the entry when that issue is fixed, so that the checker's verdict on this repository is
-    # "no defect".
-    KNOWN_DEFECTS = {
-        ("demo", "VBA-CALL-030", "demo/M_DEMO_BUILDER.bas", "DEMO_DEMOButton_NotAssigned"),
-    }
+    # line is left out so that the same entry holds on every branch, whose sources differ. Add an
+    # entry only for a defect recorded as an issue, and remove it when that issue is fixed.
+    KNOWN_DEFECTS: set[tuple[str, str, str, str]] = set()
 
     def test_repository_has_no_defect_beyond_the_known_ones(self) -> None:
         report = calls.run_check(REPO)
