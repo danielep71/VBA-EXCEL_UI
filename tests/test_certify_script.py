@@ -88,5 +88,43 @@ class InvokeGitTests(unittest.TestCase):
         self.assertIn("git show no-such-ref:x failed", result["failed"])
 
 
+
+@unittest.skipUnless(PWSH, "PowerShell 7 (pwsh) is not installed")
+class StopQuitProcessTests(unittest.TestCase):
+    """The close step ends only the instance it started, and only after the wait."""
+
+    def run_body(self, body: str) -> Any:
+        with tempfile.TemporaryDirectory() as temp:
+            result = Path(temp) / "result.json"
+            completed = subprocess.run(
+                [str(PWSH), "-NoProfile", "-NonInteractive", "-Command", LOADER + body],
+                env={**os.environ, "CERTIFY_SCRIPT": str(SCRIPT), "REPO": temp, "RESULT": str(result)},
+                capture_output=True, text=True, timeout=120, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
+            return json.loads(result.read_text(encoding="utf-8-sig"))
+
+    SLEEPER = "$p = Start-Process -FilePath (Get-Command sleep).Source -ArgumentList '60' -PassThru\n"
+    WRITE = " | ConvertTo-Json | Set-Content -LiteralPath $env:RESULT -Encoding utf8"
+
+    def test_a_process_still_running_after_the_wait_is_ended(self) -> None:
+        result = self.run_body(self.SLEEPER + "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 300 "
+                               "-ExpectedName $p.ProcessName\n$p.Refresh()\n"
+                               "@{ result = $r; exited = $p.HasExited }" + self.WRITE)
+        self.assertEqual(result, {"result": "stopped", "exited": True})
+
+    def test_a_process_with_another_name_is_never_ended(self) -> None:
+        result = self.run_body(self.SLEEPER + "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 300\n"
+                               "$p.Refresh()\n$alive = -not $p.HasExited\n$p.Kill()\n"
+                               "@{ result = $r; alive = $alive }" + self.WRITE)
+        self.assertEqual(result, {"result": "exited", "alive": True})
+
+    def test_a_process_that_exits_or_is_gone_is_left_alone(self) -> None:
+        result = self.run_body(
+            "$p = Start-Process -FilePath (Get-Command true).Source -PassThru\n"
+            "$r = Stop-QuitProcess -ProcessId $p.Id -WaitMilliseconds 5000 -ExpectedName $p.ProcessName\n"
+            "$gone = Stop-QuitProcess -ProcessId 999999 -WaitMilliseconds 100\n"
+            "@{ result = $r; gone = $gone }" + self.WRITE)
+        self.assertEqual(result, {"result": "exited", "gone": "exited"})
+
 if __name__ == "__main__":
     unittest.main()
