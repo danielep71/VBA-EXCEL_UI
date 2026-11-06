@@ -79,7 +79,8 @@ class DiscoverModules(unittest.TestCase):
                              sorted(check_repo.EXPECTED_PRODUCTION_MODULES))
             self.assertEqual(check_repo.TEST_MODULES, ["test/M_EXCEL_UI_REGRESSION_TESTS.bas"])
             self.assertEqual(check_repo.DEMO_MODULES,
-                             ["demo/M_DEMO_BUILDER.bas", "demo/M_EXCEL_UI_DEMO.bas"])
+                             ["demo/M_DEMO_BUILDER.bas", "demo/M_DEMO_CLEANUP_TESTS.bas",
+                              "demo/M_EXCEL_UI_DEMO.bas"])
 
 
 class ExtraModuleReachesEveryModuleCheck(unittest.TestCase):

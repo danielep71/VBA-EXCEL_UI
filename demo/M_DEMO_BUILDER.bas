@@ -38,8 +38,12 @@ Option Private Module
 '     hard-wired to one single placeholder routine.
 '   - Fast-mode helpers centralize temporary Application-state changes used
 '     during sheet-building operations.
+'   - DEMO_Sheet_BuildTemplate and DEMO_Sheet_Reset carry a cleanup probe and
+'     one-shot fault seams. They are inert until M_DEMO_CLEANUP_TESTS arms
+'     them through DEMO_InternalCleanupProbeBegin.
 '
 ' UPDATED
+'   2026-11-06 - Cleanup probe and one-shot fault seams for the #71 harness.
 '   2026-09-10 - Single-pass demo cleanup and owned protection restoration.
 '
 ' AUTHOR
@@ -77,12 +81,30 @@ Option Private Module
     Private Const DEFAULT_BOOL_WS       As String = "DEMO"
     Private Const DEFAULT_BOOLLIST_NAME As String = "BoolList"
 
+    'Cleanup probe sites; mirrored by M_DEMO_CLEANUP_TESTS
+    Private Const DEMO_PROBE_RESET_HANDLER   As Long = 1    'Reset Clean_Fail entries
+    Private Const DEMO_PROBE_RESET_CLEANUP   As Long = 2    'Reset Clean_Exit passes
+    Private Const DEMO_PROBE_RESET_PROTECT   As Long = 3    'Reset Protect statements reached
+    Private Const DEMO_PROBE_RESET_SELECTION As Long = 4    'Reset EnableSelection restores reached
+    Private Const DEMO_PROBE_BUILD_HANDLER   As Long = 5    'BuildTemplate Clean_Fail entries
+    Private Const DEMO_PROBE_BUILD_CLEANUP   As Long = 6    'BuildTemplate Clean_Exit passes
+    Private Const DEMO_PROBE_SITE_COUNT      As Long = 6    'Highest probe site
+
+    'One-shot cleanup fault bits; mirrored by M_DEMO_CLEANUP_TESTS
+    Private Const DEMO_FAULT_RESET_BODY      As Long = 1    'Operation error after unprotect
+    Private Const DEMO_FAULT_RESET_PROTECT   As Long = 2    'Reprotect statement fails
+    Private Const DEMO_FAULT_RESET_SELECTION As Long = 4    'EnableSelection restore fails
+
 '------------------------------------------------------------------------------
 ' PRIVATE VARIABLES
 '------------------------------------------------------------------------------
     Private mResetWorkbookName As String
     Private mResetSheetName    As String
     Private mResetShapeName    As String
+
+    Private mCleanupProbeArmed As Boolean                              'Count probe sites
+    Private mCleanupProbeCounts(1 To DEMO_PROBE_SITE_COUNT) As Long    'Hits per probe site
+    Private mCleanupFaults     As Long                                 'Armed one-shot fault bits
 
 '------------------------------------------------------------------------------
 ' PUBLIC TYPES
@@ -245,14 +267,17 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   - DEMO_Sheet_Reset
 '   - DEMO_Write_BandHeader
 '   - DEMO_ColumnLetter
+'   - DEMO_CleanupProbeHit
 '
 ' NOTES
 '   - Window-level settings can only be applied safely through the active window
 '   - SeparatorColumns and HideColumnsFrom are retained in the signature only
 '     for backward compatibility
+'   - The cleanup probe counts handler entries and cleanup passes only while
+'     M_DEMO_CLEANUP_TESTS has armed it
 '
 ' UPDATED
-'   2026-09-10
+'   2026-11-06
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -608,6 +633,7 @@ Clean_Exit:
 '------------------------------------------------------------------------------
     'Re-raise the captured error after cleanup when needed
         On Error GoTo 0
+        DEMO_CleanupProbeHit DEMO_PROBE_BUILD_CLEANUP
         If SavedErrNum <> 0 Then
             Err.Raise SavedErrNum, SavedErrSrc, SavedErrDesc
         End If
@@ -622,6 +648,9 @@ Clean_Fail:
         SavedErrNum = Err.Number
         SavedErrSrc = Err.Source
         SavedErrDesc = Err.Description
+
+    'Count the handler entry for the regression probe
+        DEMO_CleanupProbeHit DEMO_PROBE_BUILD_HANDLER
 
     'Continue through the centralized cleanup path
         Resume Clean_Exit
@@ -1134,8 +1163,16 @@ Public Sub DEMO_Sheet_Reset( _
 '   a separate cleanup diagnostic is appended. Otherwise cleanup failure is
 '   raised directly. There is no retry or watchdog for a blocked Excel call.
 '
+' REGRESSION SEAMS
+'   While M_DEMO_CLEANUP_TESTS has armed the cleanup probe, handler entries,
+'   cleanup passes and restoration attempts are counted, and an armed one-shot
+'   fault can raise an operation error after the protection steps, fail the
+'   Protect statement while its arguments are evaluated, or fail the
+'   EnableSelection restoration the same way. Disarmed, every seam is inert:
+'   the password and selection values pass through unchanged.
+'
 ' UPDATED
-'   2026-09-10
+'   2026-11-06
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1365,15 +1402,22 @@ Public Sub DEMO_Sheet_Reset( _
             On Error GoTo Clean_Fail
         End If
 
+'------------------------------------------------------------------------------
+' REGRESSION FAULT SEAM
+'------------------------------------------------------------------------------
+    'Raise the armed one-shot operation fault; inert unless a harness armed it
+        DEMO_CleanupOperationFault
+
 Clean_Exit:
 '------------------------------------------------------------------------------
 ' OPTIONAL RE-PROTECT
 '------------------------------------------------------------------------------
     'Cleanup is single-pass and only restores an unprotect owned by this call.
         On Error Resume Next
+        DEMO_CleanupProbeHit DEMO_PROBE_RESET_CLEANUP
         If DidUnprotect And ReProtectAtEnd Then
             Err.Clear
-            WS.Protect Password:=ProtectPassword, _
+            WS.Protect Password:=DEMO_CleanupProtectPassword(ProtectPassword), _
                 DrawingObjects:=EntryProtection.DrawingObjects, _
                 Contents:=EntryProtection.Contents, _
                 Scenarios:=EntryProtection.Scenarios, _
@@ -1394,7 +1438,7 @@ Clean_Exit:
             CleanupErrDescription = Err.Description
 
             Err.Clear
-            WS.EnableSelection = EntryProtection.EnableSelection
+            WS.EnableSelection = DEMO_CleanupSelectionValue(EntryProtection.EnableSelection)
             SelectionErrNumber = Err.Number
             SelectionErrSource = Err.Source
             SelectionErrDescription = Err.Description
@@ -1444,10 +1488,347 @@ Clean_Fail:
         SavedErrSource = Err.Source
         SavedErrDescription = Err.Description
 
+    'Count the handler entry for the regression probe
+        DEMO_CleanupProbeHit DEMO_PROBE_RESET_HANDLER
+
     'Continue through the centralized cleanup path
         Resume Clean_Exit
 
 End Sub
+
+
+Public Sub DEMO_InternalCleanupProbeBegin( _
+    ByVal FaultMask As Long)
+'
+'==============================================================================
+' DEMO_InternalCleanupProbeBegin
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Zeroes the cleanup probe counters, starts counting and arms one-shot
+'   cleanup faults for the next DEMO_Sheet_Reset / DEMO_Sheet_BuildTemplate
+'   calls.
+'
+' WHY THIS EXISTS
+'   The single-pass cleanup of both procedures is only observable from inside
+'   them: a caller cannot tell how often a handler ran, and no worksheet
+'   condition makes Protect or the EnableSelection restoration fail on demand.
+'   Without this seam the #71 failure paths could be reasoned about but never
+'   executed in Excel.
+'
+' INPUTS
+'   FaultMask
+'     Sum of the fault bits to arm, or 0 for counting only
+'       1  DEMO_Sheet_Reset raises an operation error after its protection
+'          steps, inside its guarded body
+'       2  The cleanup Protect statement fails while its arguments are
+'          evaluated, so Excel's Protect is not called
+'       4  The cleanup EnableSelection restoration fails the same way
+'     Unrecognised bits are stored and never fire.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Each armed fault fires once and is then cleared
+'   - Counting continues until DEMO_InternalCleanupProbeEnd
+'
+' ERROR POLICY
+'   Does not raise
+'
+' CALLED FROM
+'   - M_DEMO_CLEANUP_TESTS
+'
+' NOTES
+'   - Public only so another module of the demo project can reach it. Option
+'     Private Module keeps it out of other VBA projects. Demo code must never
+'     call it.
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Site                As Long            'Probe-site iterator
+
+'------------------------------------------------------------------------------
+' SET SEAM
+'------------------------------------------------------------------------------
+    'Zero every probe counter
+        For Site = 1 To DEMO_PROBE_SITE_COUNT
+            mCleanupProbeCounts(Site) = 0
+        Next Site
+
+    'Arm counting and the requested one-shot faults
+        mCleanupFaults = FaultMask
+        mCleanupProbeArmed = True
+
+End Sub
+
+
+Public Function DEMO_InternalCleanupProbeCount( _
+    ByVal Site As Long) _
+    As Long
+'
+'==============================================================================
+' DEMO_InternalCleanupProbeCount
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns how often one cleanup probe site was reached since the last
+'   DEMO_InternalCleanupProbeBegin.
+'
+' INPUTS
+'   Site
+'     1  DEMO_Sheet_Reset handler entries
+'     2  DEMO_Sheet_Reset cleanup passes
+'     3  DEMO_Sheet_Reset cleanup Protect statements reached
+'     4  DEMO_Sheet_Reset cleanup EnableSelection restorations reached
+'     5  DEMO_Sheet_BuildTemplate handler entries
+'     6  DEMO_Sheet_BuildTemplate cleanup passes
+'
+' RETURNS
+'   Long
+'     The count, or -1 for an unknown site
+'
+' ERROR POLICY
+'   Does not raise
+'
+' CALLED FROM
+'   - M_DEMO_CLEANUP_TESTS
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Return the counter of a known site; report an unknown site as -1
+        If Site >= 1 And Site <= DEMO_PROBE_SITE_COUNT Then
+            DEMO_InternalCleanupProbeCount = mCleanupProbeCounts(Site)
+        Else
+            DEMO_InternalCleanupProbeCount = -1
+        End If
+
+End Function
+
+
+Public Sub DEMO_InternalCleanupProbeEnd()
+'
+'==============================================================================
+' DEMO_InternalCleanupProbeEnd
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stops counting and disarms every cleanup fault that has not fired.
+'
+' WHY THIS EXISTS
+'   A fault left armed would fire inside an unrelated demo build later in the
+'   same session. The counters are kept so the last run can still be read.
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   Does not raise
+'
+' CALLED FROM
+'   - M_DEMO_CLEANUP_TESTS
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CLEAR SEAM
+'------------------------------------------------------------------------------
+    'Disarm counting and every pending fault
+        mCleanupProbeArmed = False
+        mCleanupFaults = 0
+
+End Sub
+
+
+Private Sub DEMO_CleanupProbeHit( _
+    ByVal Site As Long)
+'
+'==============================================================================
+' DEMO_CleanupProbeHit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Counts one pass through a cleanup probe site while the probe is armed.
+'
+' INPUTS
+'   Site
+'     One of the DEMO_PROBE_* sites
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   Does not raise and does not touch Err, so it is safe inside handlers and
+'   cleanup scopes
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' COUNT
+'------------------------------------------------------------------------------
+    'Count only while armed and only for a known site
+        If mCleanupProbeArmed Then
+            If Site >= 1 And Site <= DEMO_PROBE_SITE_COUNT Then
+                mCleanupProbeCounts(Site) = mCleanupProbeCounts(Site) + 1
+            End If
+        End If
+
+End Sub
+
+
+Private Sub DEMO_CleanupOperationFault()
+'
+'==============================================================================
+' DEMO_CleanupOperationFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Raises the armed DEMO_Sheet_Reset operation fault once, and disarms it.
+'
+' WHY THIS EXISTS
+'   Once the sheet is unprotected, no worksheet condition makes the reset body
+'   fail on demand. This point stands in for any such failure inside the
+'   guarded body.
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2190 once when the operation fault is armed;
+'   otherwise does nothing. The caller's handler receives it as an ordinary
+'   operation failure.
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Consume the fault before raising so it fires exactly once
+        If (mCleanupFaults And DEMO_FAULT_RESET_BODY) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not DEMO_FAULT_RESET_BODY
+            Err.Raise vbObjectError + 2190, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedOperationFault", _
+                      "Injected operation fault after the protection steps."
+        End If
+
+End Sub
+
+
+Private Function DEMO_CleanupProtectPassword( _
+    ByVal Password As String) _
+    As String
+'
+'==============================================================================
+' DEMO_CleanupProtectPassword
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supplies the Password argument of the cleanup Protect statement.
+'
+' WHY THIS EXISTS
+'   No worksheet condition makes the reprotection fail on demand. Raising
+'   while the Protect arguments are evaluated fails that exact statement, so
+'   its immediate error capture runs unchanged and Excel's Protect is not
+'   called.
+'
+' INPUTS
+'   Password
+'     The password supplied to DEMO_Sheet_Reset
+'
+' RETURNS
+'   String
+'     Password, unchanged
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2191 once when the reprotect fault is armed
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' COUNT AND RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Count the Protect statement and fail it once when armed
+        DEMO_CleanupProbeHit DEMO_PROBE_RESET_PROTECT
+
+        If (mCleanupFaults And DEMO_FAULT_RESET_PROTECT) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not DEMO_FAULT_RESET_PROTECT
+            Err.Raise vbObjectError + 2191, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedProtectFault", _
+                      "Injected reprotection fault."
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Pass the password through unchanged
+        DEMO_CleanupProtectPassword = Password
+
+End Function
+
+
+Private Function DEMO_CleanupSelectionValue( _
+    ByVal SelectionPolicy As Long) _
+    As Long
+'
+'==============================================================================
+' DEMO_CleanupSelectionValue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supplies the value of the cleanup EnableSelection restoration.
+'
+' WHY THIS EXISTS
+'   As for DEMO_CleanupProtectPassword: raising while the value is evaluated
+'   fails that exact assignment without a worksheet condition.
+'
+' INPUTS
+'   SelectionPolicy
+'     The EnableSelection value captured on entry
+'
+' RETURNS
+'   Long
+'     SelectionPolicy, unchanged
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2192 once when the selection fault is armed
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' COUNT AND RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Count the restoration and fail it once when armed
+        DEMO_CleanupProbeHit DEMO_PROBE_RESET_SELECTION
+
+        If (mCleanupFaults And DEMO_FAULT_RESET_SELECTION) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not DEMO_FAULT_RESET_SELECTION
+            Err.Raise vbObjectError + 2192, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedSelectionFault", _
+                      "Injected EnableSelection restoration fault."
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Pass the selection policy through unchanged
+        DEMO_CleanupSelectionValue = SelectionPolicy
+
+End Function
+
+
 Public Sub DEMO_Format_Labels( _
     ByVal TargetRange As Range)
 '

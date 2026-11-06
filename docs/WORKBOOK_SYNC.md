@@ -81,7 +81,7 @@ A full synchronization imports the modules that one configuration of
 | --- | --- | --- |
 | Production | The four modules of `src/` | The package of [INSTALLATION.md](../INSTALLATION.md) |
 | Development | `src/` and `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | Running the regression suite and the release certification |
-| Demo | `src/` and the two modules of `demo/` | Building the demo workbook |
+| Demo | `src/` and the modules of `demo/` | Building the demo workbook and running the demo cleanup harness |
 
 When `-Mode` is omitted, the script asks; answer `1`, `P` or `production`,
 `2`, `D` or `development`, `3` or `demo`. Any other answer cancels with exit
