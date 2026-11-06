@@ -464,6 +464,28 @@ measured against that baseline.
   The reported mutant hang still requires controlled Excel confirmation;
   native-call timeouts and verified host restoration are not established.
 
+- **Not yet certified.** The title-bar cases now restore the frame they hide
+  through the harness on every exit and fail when they cannot
+  ([#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66)).
+  `TST_RestoreTitleBarStyle` returns whether it wrote the entry style,
+  refreshed the frame and read the owned bits back, with the failing step in
+  its message, and never raises. Every caller checks it, and a failed
+  restoration is reported as the case's failure, after any failure it
+  follows. The round-trip, no-baseline, captionless-baseline, frame-refresh,
+  stale-entry, same-style, SDI redirect, WinAPI error-capture and refusal
+  cases capture the entry style before they change anything; none restores
+  through `UI_SetExcelUI`. Each disables its handler before cleanup or before
+  re-raising. Both packs and the SDI identity runner put the entry frame back
+  the same way. `TST_WaitUI`, the harness's only wait, is a fixed delay capped
+  at five seconds. The captionless case now fails at `.Precondition` when
+  Windows does not keep the captionless frame, and the static gate rejects a
+  discarded restoration result. `tools/make_titlebar_mutant.py` writes the
+  #6 negative control into `/.mutation-scratch/`, and
+  [CONTRIBUTING.md](CONTRIBUTING.md) describes how to run it in a dedicated
+  Excel instance, the expected `CaptionlessBaseline.ShowReportsSuccess`
+  failure and the recovery if Excel stops responding. That run has not been
+  performed.
+
 - Strengthened static VBA analysis (#31): project reference and assignment
   resolution, procedure-local labels, exact procedure-end kinds, conditional
   declarations, known WinAPI contracts and bounded Err-preservation checks now
