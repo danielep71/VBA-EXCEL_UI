@@ -57,18 +57,20 @@ Option Private Module
 '       Window  the Excel Window that owned that frame at capture time
 '       Label   diagnostic text only, never used for matching
 '
-'   Excel exposes no handle on a Window and no Window on a handle, so the two
-'   can only be paired at the instant of capture, while they are known to agree.
-'   Restore requires both to still hold: the handle must still name a live
-'   window, and the retained Window object must still respond. Either check
-'   failing is reported as a title-bar failure. Nothing is written.
+'   Capture resolves Application.ActiveWindow and reads the handle from that
+'   same object's Window.hWnd, through UI_TryGetActiveFramePair, which also
+'   refuses the pair when Application.Hwnd names a different frame. Restore
+'   requires the pair to still hold: the handle must still name a live window,
+'   the retained Window object must still respond, and its Window.hWnd must
+'   still equal the captured handle. Any check failing is reported as a
+'   title-bar failure. Nothing is written.
 '
 '   The Window object is what makes the check meaningful. Windows may reuse a
 '   handle value once the original window is destroyed, so a handle that passes
 '   IsWindow does not by itself prove the frame is the one that was captured.
-'   A Window object cannot be recycled that way. When Excel exposed no active
-'   Window at capture time the handle is retained alone, and the weaker
-'   guarantee is stated in the failure text rather than assumed away.
+'   A Window object cannot be recycled that way. When capture cannot resolve a
+'   live pair the host agrees is active, it records a title-bar failure and
+'   leaves both cleared, so restore refuses the title bar.
 '
 ' DESIGN PRINCIPLES
 '   - Capture replaces any prior snapshot outright; snapshots do not merge.
@@ -111,6 +113,11 @@ Option Private Module
 '     they visibly settle.
 '
 ' UPDATED
+'   2026-11-06 - Header and comments aligned with the code (#114).
+'   2026-09-03 - Title-bar pair resolved through UI_TryGetActiveFramePair. A
+'                capture without a live, agreed pair is a failure, and restore
+'                requires the retained Window.hWnd to equal the captured
+'                handle.
 '   2026-08-19 - Title bar captured and restored through its own retained
 '                window identity instead of the host's current active window.
 '                Fixes ICR-UI-P1-01.
@@ -255,6 +262,10 @@ Public Function UI_SnapshotCaptureCore( _
 '   - M_EXCEL_UI
 '
 ' UPDATED
+'   2026-09-03 - Title-bar Window and handle resolved as one pair through
+'                UI_TryGetActiveFramePair; a failed resolution records a
+'                TitleBar failure and leaves the identity cleared.
+'   2026-08-19 - Title bar captured with its own window identity.
 '   2026-08-18
 '==============================================================================
 '
@@ -351,9 +362,9 @@ Public Function UI_SnapshotCaptureCore( _
         Set m_SnapshotTitleBarWindow = Nothing
         m_SnapshotTitleBarLabel = vbNullString
 
-    'Resolve the Excel Window first and obtain hWnd from that same object. This
-    'forms one atomic identity pair under SDI; Application.hWnd and a separately
-    'resolved ActiveWindow can describe different windows during activation.
+    'Resolve the Excel Window first and obtain hWnd from that same object. The
+    'helper also refuses the pair when Application.hWnd disagrees, which
+    'narrows the SDI activation race without closing it.
         If Not UI_TryGetActiveFramePair( _
             m_SnapshotTitleBarWindow, m_SnapshotTitleBarHwnd, Msg) Then
 
@@ -997,10 +1008,10 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
 ' BEHAVIOR
 '   - Rejects a cleared handle.
 '   - Requires the handle to still name a live window.
-'   - Requires the retained Window object to still respond, when one was
-'     captured.
-'   - Accepts a handle captured without a Window object, and says so in the
-'     failure text if the weaker check is all that was available.
+'   - Rejects a handle captured without a Window object.
+'   - Requires the retained Window object to still respond.
+'   - Requires the retained Window's current Window.hWnd to equal the
+'     captured handle, so a reissued handle cannot redirect the restore.
 '   - Names the captured window in every failure message.
 '
 ' ERROR POLICY
@@ -1021,6 +1032,8 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
 '   wrapper, which is exactly the signal required.
 '
 ' UPDATED
+'   2026-09-03 - Rejected a handle without its Window and required the
+'                retained Window.hWnd to equal the captured handle.
 '   2026-08-19
 '==============================================================================
 '

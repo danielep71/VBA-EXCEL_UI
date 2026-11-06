@@ -21,13 +21,14 @@ Option Private Module
 '   as pure arithmetic, with no window and no host required.
 '
 ' INTERNAL SURFACE
-'   Explicit-target entry points, used by the snapshot engine:
-'   - UI_TryGetActiveTitleBarHwnd
+'   Entry points used by the snapshot engine:
+'   - UI_TryGetActiveFramePair
 '   - UI_TryGetTitleBarVisibleForHwnd
 '   - UI_TrySetTitleBarVisibleForHwndIfNeeded
 '   - UI_InternalIsTitleBarFrameAlive
 '
 '   Active-window wrappers, kept for callers that have no target of their own:
+'   - UI_TryGetActiveTitleBarHwnd
 '   - UI_TryGetTitleBarVisible
 '   - UI_TrySetTitleBarVisibleIfNeeded
 '
@@ -36,6 +37,8 @@ Option Private Module
 '   - UI_InternalResetTitleBarBaseline
 '   - UI_InternalIsFrameRefreshPending
 '   - UI_InternalInjectFrameRefreshFailure
+'   - UI_InternalInjectFramePairFault
+'   - UI_InternalSimulateFrameHandleReuse
 '
 ' OWNERSHIP MODEL
 '   This module claims exactly five GWL_STYLE bits and nothing else:
@@ -132,27 +135,44 @@ Option Private Module
 '     itself survives, because the style belongs to the running Excel process.
 '   - Windows reissues window handles once the window that held one has
 '     closed, and IsWindow cannot tell a reissued handle from the original: it
-'     answers for whatever window holds the handle now. That is why an entry
-'     that claims the frame is proved against the live owned bits rather than
-'     trusted on a handle match alone. The deliberate cost is that a frame
-'     change made by Excel or another add-in while this component holds the
-'     frame hidden also discards the entry. The baseline is then recaptured
-'     from the live bits, which is the same self-healing rule that already
-'     applies while the component owns nothing.
+'     answers for whatever window holds the handle now. An entry is therefore
+'     reused only while its retained Window object still reports the stored
+'     handle. An entry that also claims the frame, by having hidden it or by
+'     owing a repaint, must in addition find the live owned bits equal to
+'     LastWrittenBits; that comparison checks state consistency, not
+'     identity. The deliberate cost is that a frame change made by Excel or
+'     another add-in while this component holds the frame hidden also discards
+'     the entry. The baseline is then recaptured from the live bits, which is
+'     the same self-healing rule that already applies while the component
+'     owns nothing. No regression yet reuses an unchanged handle value for a
+'     new window generation, and ICR-UI-112-P2-02 (#32) remains open.
 '   - The frame-state registry is bounded by compaction, not by growth alone.
-'     Entries whose handle no longer passes IsWindow are reclaimed before the
-'     registry is extended, so a long session that opens and closes many
-'     workbook windows does not accumulate dead entries.
+'     Before the registry is extended, every entry that fails the ownership
+'     test in UI_FrameStateEntryHolds is reclaimed, which includes every entry
+'     whose handle no longer passes IsWindow, so a long session that opens and
+'     closes many workbook windows does not accumulate dead entries.
 '   - Conditional compilation appears inside the frame-state Type so that one
 '     declaration serves both handle widths. The alternative, declaring the
 '     whole Type twice, duplicates the member list and lets the two copies
 '     drift apart.
 '
 ' UPDATED
+'   2026-11-06 - Header and comments aligned with the code (#114).
+'   2026-09-03 - Bound each frame-state entry to the retained Excel Window
+'                that owns its handle and applied the full ownership test
+'                during compaction. Added UI_TryGetActiveFramePair, which
+'                refuses an active pair the host does not agree on, and a
+'                WS_CAPTION readback before a show reports success. Added the
+'                UI_InternalInjectFramePairFault and
+'                UI_InternalSimulateFrameHandleReuse seams.
+'                ICR-UI-112-P2-02 (#32) and ICR-UI-112-P2-03 (#6) remain
+'                open.
 '   2026-08-21 - Recorded the owned bits each write leaves behind and made the
 '                registry prove an entry before reusing it, so a reissued
-'                handle can no longer inherit the state of the window that
-'                used to hold it. Fixes ICR-UI-111-P2-01.
+'                handle that carries different owned bits no longer inherits
+'                the state of the window that used to hold it. Addressed
+'                ICR-UI-111-P2-01; the equal-bits case was reopened as
+'                ICR-UI-112-P2-02 (#32).
 '   2026-08-19 - Removed the unused per-handle baseline-reset seam.
 '   2026-08-19 - Replaced the singleton frame baseline with a per-handle
 '                registry, added the explicit-target entry points, and made a
@@ -389,6 +409,7 @@ Public Function UI_TryGetActiveFramePair( _
 '
 ' DEPENDENCIES
 '   - UI_InternalIsTitleBarFrameAlive
+'   - UI_TitleBarBuildRuntimeErrorText
 '
 ' CALLED FROM
 '   - UI_TryGetActiveTitleBarHwnd
@@ -592,9 +613,11 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 '   back later has to resolve the handle ONCE and keep it, or the two ends of
 '   the operation can address different windows.
 '
-'   Exposing the resolution step is what lets the snapshot engine do exactly
-'   that. It is deliberately separate from the read and write helpers so that
-'   the caller, not this module, owns the decision about which frame is meant.
+'   The snapshot engine needs the Window as well and calls
+'   UI_TryGetActiveFramePair directly. This wrapper serves the active-window
+'   entry points, which need only the handle. It is deliberately separate from
+'   the read and write helpers so that the caller, not this module, owns the
+'   decision about which frame is meant.
 '
 ' INPUTS
 '   HwndOut
@@ -606,30 +629,33 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 ' RETURNS
 '   Boolean
 '     True  => HwndOut holds a handle that currently passes IsWindow.
-'     False => Excel reported no usable handle.
+'     False => no usable active handle; see UI_TryGetActiveFramePair.
 '
 ' BEHAVIOR
-'   - Resolves Application.ActiveWindow once and reads Window.hWnd from it.
-'   - Rejects a zero handle and a handle that is not a live window.
+'   - Delegates to UI_TryGetActiveFramePair and releases the Window it
+'     returns.
+'   - Fails when no active Window is available, when Application.Hwnd names
+'     a different frame, or when the handle is not a live window.
 '
 ' ERROR POLICY
 '   - Does not raise.
 '   - Returns False and populates FailMsg on failure.
 '
 ' DEPENDENCIES
-'   - UI_InternalIsTitleBarFrameAlive
-'   - UI_TitleBarBuildRuntimeErrorText
+'   - UI_TryGetActiveFramePair
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_SNAPSHOT
-'   - This module
+'   - UI_TryGetTitleBarVisible
+'   - UI_TrySetTitleBarVisibleIfNeeded
+'   - M_EXCEL_UI_REGRESSION_TESTS
 '
 ' NOTES
 '   The handle is valid only for as long as that window is open. Callers that
 '   retain it must re-probe with UI_InternalIsTitleBarFrameAlive before use.
 '
 ' UPDATED
-'   2026-09-03 - Paired the active Excel Window with its own hWnd.
+'   2026-09-03 - Paired the active Excel Window with its own hWnd, then
+'                delegated to UI_TryGetActiveFramePair.
 '   2026-08-19
 '==============================================================================
 '
@@ -824,7 +850,7 @@ Public Function UI_TryGetTitleBarVisible( _
 '   - UI_TryGetTitleBarVisibleForHwnd
 '
 ' CALLED FROM
-'   - M_EXCEL_UI
+'   None. No procedure in this project calls it.
 '
 ' NOTES
 '   The value describes the active window at the instant of the call and must
@@ -1119,11 +1145,14 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
 ' NOTES
 '   Handle reuse means a True result proves a window exists, not that it is the
 '   same window. Every caller therefore pairs this probe with something a handle
-'   cannot carry: the snapshot engine holds a retained Window object, which
-'   cannot be reissued, and the frame registry checks an entry's claim against
-'   the live owned bits before reusing it.
+'   cannot carry: the snapshot engine and the frame registry each hold a
+'   retained Window object, which cannot be reissued, and require its
+'   Window.hWnd to equal the stored handle. The registry's comparison of the
+'   live owned bits with LastWrittenBits checks state consistency, not
+'   identity.
 '
 ' UPDATED
+'   2026-09-03 - Both pairings now rest on a retained Window object.
 '   2026-08-21 - Recorded the second pairing, added with the frame-registry
 '                proof.
 '   2026-08-19
@@ -1407,6 +1436,12 @@ Public Function UI_InternalSimulateFrameHandleReuse( _
 '
 ' CONTRACT
 '   Same-project regression seam only. Production code must never call it.
+'
+' DEPENDENCIES
+'   - UI_FrameStateSlotForHwnd
+'
+' CALLED FROM
+'   - M_EXCEL_UI_REGRESSION_TESTS
 '
 ' UPDATED
 '   2026-09-03
@@ -1837,6 +1872,12 @@ Private Function UI_TryResolveWindowForHwnd( _
 '   Fails closed. A handle without a provable Excel Window is never given a
 '   persistent frame-state slot.
 '
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - UI_FrameStateIndexForHwnd
+'
 ' UPDATED
 '   2026-09-03
 '==============================================================================
@@ -1904,16 +1945,20 @@ Private Function UI_FrameStateIndexForHwnd( _
 '
 ' RETURNS
 '   Long
-'     1-based registry index, or -1 when the handle is unknown and was not
-'     created, or when allocation failed.
+'     1-based registry index, or -1 when the handle is zero, when no Excel
+'     Window in Application.Windows reports the handle, when the handle is
+'     unknown and was not created, or when allocation failed.
 '
 ' BEHAVIOR
+'   - Returns -1 without touching the registry for a zero handle, and for a
+'     handle that no Excel Window reports.
 '   - Scans the live entries for a matching handle.
 '   - Discards a matched entry that can no longer be proved to describe the
 '     window its handle names, and reports the handle as unknown instead.
 '   - Reclaims entries whose window no longer exists before extending the
 '     registry, so a long session cannot accumulate dead slots.
-'   - Initializes a new entry with no baseline, no ownership and no debt.
+'   - Initializes a new entry with no baseline, no ownership and no debt, and
+'     retains the Excel Window that owns the handle.
 '
 ' ERROR POLICY
 '   - Does not raise. Any unexpected error is reported as -1.
@@ -1923,12 +1968,20 @@ Private Function UI_FrameStateIndexForHwnd( _
 '   - UI_DiscardFrameStateEntry
 '   - UI_FrameStateEntryHolds
 '   - UI_FrameStateSlotForHwnd
+'   - UI_TryResolveWindowForHwnd
 '
 ' CALLED FROM
 '   - UI_TrySetTitleBarVisibleForHwndWorker
 '   - UI_InternalIsFrameRefreshPending
 '
+' NOTES
+'   - UI_TrySetTitleBarVisibleForHwndWorker reports every -1 as "unable to
+'     allocate title-bar frame state", so its message does not distinguish a
+'     handle no Excel Window reports from an allocation failure (#114).
+'
 ' UPDATED
+'   2026-09-03 - Returns -1 when no Excel Window reports the handle, and
+'                retains that Window with each new entry.
 '   2026-08-21
 '==============================================================================
 '
@@ -2093,8 +2146,10 @@ Private Function UI_FrameStateSlotForHwnd( _
 '
 ' CALLED FROM
 '   - UI_FrameStateIndexForHwnd
+'   - UI_InternalSimulateFrameHandleReuse
 '
 ' UPDATED
+'   2026-09-03
 '   2026-08-21
 '==============================================================================
 '
@@ -2191,6 +2246,7 @@ Private Function UI_FrameStateEntryHolds( _
 '
 ' CALLED FROM
 '   - UI_FrameStateIndexForHwnd
+'   - UI_CompactFrameStates
 '
 ' NOTES
 '   - A frame change made by Excel or another add-in while this component
@@ -2200,7 +2256,8 @@ Private Function UI_FrameStateEntryHolds( _
 '     self-healing rule that applies while it owns nothing.
 '
 ' UPDATED
-'   2026-09-03 - Required retained Window/hWnd generation identity.
+'   2026-09-03 - Required retained Window/hWnd generation identity; also
+'                applied by UI_CompactFrameStates.
 '   2026-08-21
 '==============================================================================
 '
@@ -2320,10 +2377,10 @@ Private Sub UI_DiscardFrameStateEntry( _
 '   Removes one registry entry and closes the gap it leaves behind.
 '
 ' WHY THIS EXISTS
-'   Compaction reclaims entries whose window has closed, which is a liveness
-'   test and cannot recognise a handle that now names a different window. An
-'   entry disproved by UI_FrameStateEntryHolds has to go immediately: leaving
-'   it in place would let the very next call match it again.
+'   Compaction runs only when a new entry is about to be appended, so it
+'   cannot be relied on to remove a disproved entry in time. An entry
+'   disproved by UI_FrameStateEntryHolds has to go immediately: leaving it in
+'   place would let the very next call match it again.
 '
 ' INPUTS
 '   Slot
@@ -2347,6 +2404,7 @@ Private Sub UI_DiscardFrameStateEntry( _
 '   - UI_FrameStateIndexForHwnd
 '
 ' UPDATED
+'   2026-09-03
 '   2026-08-21
 '==============================================================================
 '
@@ -2409,7 +2467,9 @@ Private Sub UI_CompactFrameStates()
 ' UI_CompactFrameStates
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Removes registry entries whose window no longer exists.
+'   Removes registry entries that fail the ownership test in
+'   UI_FrameStateEntryHolds, which includes every entry whose window no longer
+'   exists.
 '
 ' WHY THIS EXISTS
 '   Keying state by handle trades one stale singleton for a collection that
@@ -2422,22 +2482,27 @@ Private Sub UI_CompactFrameStates()
 '   None.
 '
 ' BEHAVIOR
+'   - Keeps only entries that pass UI_FrameStateEntryHolds: the retained
+'     Window still reports the stored handle, the handle names a live window,
+'     and an entry that claims the frame still finds its LastWrittenBits.
 '   - Compacts survivors toward the front of the array, preserving order.
 '   - Reduces the live count; the allocated capacity is deliberately kept, so
 '     a session that repeatedly opens and closes windows does not reallocate.
-'   - Discards any refresh debt held for a window that has closed, which is
-'     correct: there is no longer a frame to repaint.
+'   - Discards any refresh debt held by a removed entry, which is correct:
+'     its window has closed or can no longer be shown to be the same window.
 '
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
-'   - UI_InternalIsTitleBarFrameAlive
+'   - UI_FrameStateEntryHolds
 '
 ' CALLED FROM
 '   - UI_FrameStateIndexForHwnd
 '
 ' UPDATED
+'   2026-09-03 - Applies the full ownership test in UI_FrameStateEntryHolds
+'                instead of a liveness probe.
 '   2026-08-19
 '==============================================================================
 '
@@ -2464,7 +2529,7 @@ Private Sub UI_CompactFrameStates()
 '------------------------------------------------------------------------------
 ' COMPACT SURVIVORS
 '------------------------------------------------------------------------------
-    'Copy every entry whose window still exists toward the front of the array
+    'Copy every entry that still passes the ownership test toward the front
         For ReadIdx = 1 To m_FrameStateCount
 
             If UI_FrameStateEntryHolds(ReadIdx) Then
