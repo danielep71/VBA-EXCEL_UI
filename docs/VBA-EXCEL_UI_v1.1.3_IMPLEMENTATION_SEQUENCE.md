@@ -14,6 +14,8 @@
 > in each issue. The current sources are the
 > [v1.1.3 milestone](https://github.com/danielep71/VBA-EXCEL_UI/milestone/4) and
 > each issue's *Planning* and *Dependencies and blocking status* sections.
+> Check counts in the dated updates below were true on those dates; the gate
+> has grown since, and `python3 tools/check_repo.py` lists its current checks.
 
 This was the execution sequence for v1.1.3 as planned on its status date. GitHub
 issue bodies remain the acceptance-contract authority. This document records ordering,

@@ -3,9 +3,10 @@
 #
 # There is no package here, and nothing is built or installed from this file.
 # tools/check_repo.py and the tests under tests/ use only the standard
-# library and run with a bare interpreter. Ruff and mypy are continuous-
-# integration tools only; their exact versions and wheel hashes are locked in
-# tools/requirements-quality-ci.txt.
+# library and run with a bare interpreter; the issue-form check
+# (tools/check_issues.py) and its tests also need Node.js. Ruff and mypy are
+# continuous-integration tools only; their exact versions and wheel hashes are
+# locked in tools/requirements-quality-ci.txt.
 #
 # Python 3.11 is the oldest interpreter I support for the gate, so both tools
 # check against it: a construct that only a newer interpreter accepts would

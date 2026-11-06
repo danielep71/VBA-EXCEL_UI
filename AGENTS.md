@@ -43,6 +43,8 @@ Before pushing, run these and fix every finding:
 
 - `python3 tools/check_repo.py`
 - `python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas` (fix drift with `--write`)
+- `node .github/scripts/labels-sync.mjs --self-test` and `node .github/scripts/labels-drift.mjs --self-test`
+- `python3 tools/check_issues.py --check-config`
 - `python3 -m unittest discover -s tests`
 - `ruff check tools tests`, `mypy --strict tools` and `mypy --strict tests`, installed from `tools/requirements-quality-ci.txt`
 
