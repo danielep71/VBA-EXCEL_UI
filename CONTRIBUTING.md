@@ -313,6 +313,36 @@ Passing static analysis does not produce runtime evidence. The mandatory
 certification-manifest registration check remains dependent on #42's manifest;
 the current analyzer does not certify case completeness or execution.
 
+### WinAPI error capture (#27)
+
+In `src/` and `test/`, read a native error code only through
+`Err.LastDllError`, and do not declare `GetLastError`. VBA sets
+`Err.LastDllError` after every `Declare` call, the next `Declare` call replaces
+it, and `Err.Clear` or any `On Error` statement resets it. Write every native
+call whose error you report as three adjacent statements:
+
+```vba
+SetLastError 0                                  ' immediately before the call
+ApiResult = GetWindowLongPtr(hWnd, GWL_STYLE)   ' result copied to a local
+DllError = Err.LastDllError                     ' the very next statement
+```
+
+Put nothing between them: no other call, no formatting or logging helper and
+no `On Error` statement. Take a regression seam before `SetLastError 0`, and
+replace captured values only after the capture. `GetWindowLong[Ptr]` and
+`SetWindowLong[Ptr]` can return zero legitimately, so treat zero with a
+captured error of zero as a valid value, zero with a non-zero captured error as
+a failure, and any non-zero result as success. Report a failure with the
+exported API name, the operation, the captured error and the target hWnd.
+
+The gate's `WinAPI error capture` check
+(`tools/winapi_capture_fixtures.py`) enforces this sequence separately for VBA7
+x64, VBA7 x86 and legacy x86, and proves itself against passing and failing
+fixtures first. It reads statement order only: it does not follow `GoTo` and
+cannot observe the error a call leaves, so
+`TST_Case_TitleBarApiErrorCapture` must still pass on a real Excel host. The
+demo modules in `demo/` are not yet held to this rule.
+
 ### Public contracts and compatibility
 
 Demo cleanup (#71) is single-pass, not a host watchdog. With
@@ -331,6 +361,27 @@ across workbook reopening. Source fixtures do not establish Excel outcomes.
 Before closure, use disposable worksheets and a bounded host harness to test
 ordinary failure, missing/wrong password, reprotection and selection failure,
 and read back every captured option at the exact tested commit.
+
+`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness; it exists only on
+`release/v1.1.3` until v1.1.3 is released. Build a new demo workbook from the
+commit under test:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath "C:\work\EXCEL_UI_Demo.xlsm" -Mode Demo -NewWorkbook
+```
+
+Open it, run **Debug → Compile VBAProject**, and run
+`Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
+creates a temporary workbook, runs fourteen scenarios on sheets of its own,
+closes the workbook without saving and prints one `PASS` or `FAIL` line per
+scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
+`DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
+operation error after a successful unprotect, a failed Protect and a failed
+`EnableSelection` restoration have no worksheet cause that can be produced on
+demand, so the harness injects them through the one-shot
+`DEMO_InternalCleanupProbe*` seams of `M_DEMO_BUILDER`. Those seams stay inert
+unless the harness arms them. Record the commit, Excel build and bitness with
+the Immediate window output.
 
 Treat documented procedures, functions, classes, enums, parameters, defaults,
 return values, errors, side effects, workbook formats, and supported platforms
@@ -395,7 +446,7 @@ changed and still owns. Cleanup must not conceal the original failure.
 | **Module boundaries** | Preserve the UI, runtime, snapshot, and title-bar dependency direction. |
 | **Window identity** | Never restore per-window state by collection index; handle closed, recreated, and newly opened windows explicitly. |
 | **Snapshot lifecycle** | Document partial capture, failure ordering, reset behavior, and emergency recovery. |
-| **Title-bar ownership** | Restore only the style bits owned; handle `GetLastError`, valid zero returns, handle changes, and frame refresh. |
+| **Title-bar ownership** | Restore only the style bits owned; capture `Err.LastDllError` immediately after each WinAPI call; handle valid zero returns, handle changes, and frame refresh. |
 | **Failure behavior** | Production entry points are fail-soft unless documented otherwise; never silently discard failures or leave screen updating suppressed. |
 | **Platform support** | Validate affected 32-bit and 64-bit declarations on a real Windows Excel host. |
 
@@ -991,6 +1042,8 @@ Apply for Ribbon, title-bar, or native-frame changes.
 - Only owned style bits are changed and unrelated bits are preserved.
 - 32-bit and 64-bit declarations are correct.
 - Valid zero returns are distinguished from native failures.
+- `SetLastError 0` directly precedes each ambiguous-zero call, and
+  `Err.LastDllError` is copied to a local in the statement directly after it.
 - Required frame refresh is performed and failures remain observable.
 - Multi-window behavior is tested with more than one workbook open.
 

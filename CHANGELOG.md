@@ -151,6 +151,14 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added the demo cleanup harness `Demo_Test_RunCleanupChecks` in the new
+  **M_DEMO_CLEANUP_TESTS** module of the demo workbook, with a cleanup probe
+  and one-shot fault seams in **M_DEMO_BUILDER**
+  ([#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71)). Its fourteen
+  scenarios cover reset success with protection readback, ordinary errors,
+  wrong and missing passwords, reprotection and selection-restoration
+  failures, and template errors. **Not yet certified.** No Excel run is
+  recorded yet. The supported API is unchanged.
 - Added `UI_TryGetActiveFramePair` and `UI_InternalInjectFramePairFault` to
   **M_EXCEL_UI_TITLEBAR**, and the four-branch
   `TST_Case_ActiveFramePairRefusesMismatch` case registered in both
@@ -695,6 +703,28 @@ measured against that baseline.
   forbidden artifact entering version control.
 - Fixed the opposite policy gap by detecting tracked files that the current
   ignore rules would hide from an ordinary working-tree review.
+- **Not yet certified.** Title-bar WinAPI failures now report the error their
+  own call left, captured before anything else could replace it
+  ([#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27),
+  `ICR-UI-112-P3-05`). **M_EXCEL_UI_TITLEBAR** and the regression helpers
+  clear the thread last-error immediately before each `GetWindowLong[Ptr]`,
+  `SetWindowLong[Ptr]` and `SetWindowPos` call and copy the result and
+  `Err.LastDllError` to locals in the next statement. The `GetLastError`
+  declarations are removed. A zero style with no captured error is a valid
+  value; with one, the call fails with text naming the exported API, the
+  operation, the error and the hWnd, for example
+  `GetWindowLongPtrA failed; operation=read GWL_STYLE; LastDllError=1400; hWnd=<h>`,
+  where it used to read `GetWindowLong/GetWindowLongPtr failed; GetLastError=<n>`.
+
+  The new `UI_InternalInjectWindowStyleFault` seam adds one
+  `[project-public]` manifest line; `[supported]` is unchanged and no public
+  procedure, parameter, enum value or default changes. It drives the
+  eight-branch `TST_Case_TitleBarApiErrorCapture` case through a valid zero,
+  an injected DLL error and an error left by an earlier call, on the read and
+  the write; both title-bar runs register it. The static gate's new
+  `WinAPI error capture` check rejects, in each compilation, a capture that
+  follows another statement or an `On Error`, an ambiguous-zero call without
+  an adjacent `SetLastError 0`, and a `GetLastError` declaration.
 
 ### 📖 Documentation
 
@@ -1039,7 +1069,7 @@ Dispositions are as of 2026-11-02 and are updated with the issues.
 | `ICR-UI-112-P3-02` | v1.1.2 | [#31](https://github.com/danielep71/VBA-EXCEL_UI/issues/31) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-03` | v1.1.2 | [#50](https://github.com/danielep71/VBA-EXCEL_UI/issues/50) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-04` | v1.1.2 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | — | Open (v1.1.3) |
-| `ICR-UI-112-P3-05` | v1.1.2 | [#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-05` | v1.1.2 | [#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27) | — | Corrected on `release/v1.1.3`; not yet certified |
 | `ICR-UI-112-P3-06` | v1.1.2 | [#28](https://github.com/danielep71/VBA-EXCEL_UI/issues/28) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-07` | v1.1.2 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-08` | v1.1.2 | [#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51) | — | Open (v1.1.3); the x86 and second-build finding, not `ICR-UI-111-P3-08` |

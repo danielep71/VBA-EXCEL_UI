@@ -640,7 +640,11 @@ Version-controlled demo source:
 ```text
 demo/M_EXCEL_UI_DEMO.bas
 demo/M_DEMO_BUILDER.bas
+demo/M_DEMO_CLEANUP_TESTS.bas
 ```
+
+`demo/M_DEMO_CLEANUP_TESTS.bas` exists only on `release/v1.1.3` until v1.1.3 is
+released; `main` does not have it yet.
 
 The macro-enabled demo workbook is intentionally **not committed to Git**.
 
@@ -691,6 +695,7 @@ VBA-EXCEL_UI/
 ├─ .github/
 ├─ demo/
 │  ├─ M_DEMO_BUILDER.bas
+│  ├─ M_DEMO_CLEANUP_TESTS.bas
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ docs/
 │  ├─ EXCEL_CERTIFICATION.md
