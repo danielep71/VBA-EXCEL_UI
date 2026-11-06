@@ -137,9 +137,10 @@ captured from. Measurements and the planned fix are in
 > procedure and enum member from `1.0.1` keeps its name, parameter order and
 > defaults; `1.1.0` only added members (`UIWindowTargetScope`, an optional
 > trailing `TargetScope` argument and the two snapshot `_WithResult`
-> functions), so no call site needs editing. Upgrading nonetheless means replacing **all four** `src/` modules
-> together: the internal boundaries between them changed at `1.1.0`, and a
-> project holding a mixture of versions will not compile.
+> functions), so no call site needs editing. Upgrading nonetheless means
+> replacing **all four** `src/` modules together: the internal boundaries
+> between them changed at `1.1.0`, and a project holding a mixture of versions
+> will not compile.
 
 ### 1. Import the complete production package
 

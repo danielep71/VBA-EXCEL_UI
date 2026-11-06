@@ -71,8 +71,8 @@ Security fixes follow the
 that while a release branch `release/vX.Y.Z` is open, a VBA correction for that
 release targets the release branch and reaches **main** with the release, and a
 non-VBA repository change is made on the release branch and mirrored to
-**main**. Each fix is included in a new tagged release. Older releases are not normally patched in place unless I
-state otherwise.
+**main**. Each fix is included in a new tagged release. Older releases are not
+normally patched in place unless I state otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such
 as “latest” or “yesterday's main” are insufficient because branches change.
