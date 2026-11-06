@@ -149,6 +149,30 @@ jobs:
         if: always()
         run: mypy --strict tests
 
+      # Advisory, not part of the gate: the call checker resolves calls across
+      # the modules of each VBA project in tools/vba-projects.json and reports
+      # only what it can resolve with certainty (docs/VBA_CALL_CHECKER.md). It
+      # is not a compiler, so its verdict goes to the job summary and the JSON
+      # report without blocking a merge. Its fixtures are among the unit tests
+      # above, so a checker that stopped detecting a defect still fails the job.
+      - name: Check VBA calls across modules (advisory)
+        if: always()
+        continue-on-error: true
+        run: >-
+          python3 tools/check_vba_calls.py
+          --output test-results/check_vba_calls.json
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the VBA call report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-vba-calls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/check_vba_calls.json
+          if-no-files-found: warn
+          retention-days: 30
+
   minimum-python:
     # Not a required check: it reports when the tools stop running on the
     # oldest supported Python version, without blocking a merge on it.
