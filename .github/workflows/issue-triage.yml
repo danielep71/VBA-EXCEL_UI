@@ -35,11 +35,13 @@ on:
 permissions:
   contents: read
 
-# One global group: each run re-audits every open issue, so when a burst of
-# issue events queues several runs, only the latest needs to finish.
+# Every run gets a group of its own (its run id). GitHub replaces a pending run
+# when a newer one joins the same group, even without cancel-in-progress, and
+# each run is the triage evidence for the event that started it. The audit is
+# read-only, so concurrent runs cannot interfere with one another.
 concurrency:
-  group: issue-triage
-  cancel-in-progress: true
+  group: issue-triage-${{ github.run_id }}
+  cancel-in-progress: false
 
 defaults:
   run:
