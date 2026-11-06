@@ -19,10 +19,9 @@
     {
       "parameters": {
         "allowed_merge_methods": [
-          "merge",
-          "squash"
+          "merge"
         ],
-        "dismiss_stale_reviews_on_push": false,
+        "dismiss_stale_reviews_on_push": true,
         "require_code_owner_review": false,
         "require_extra_approval_for_unattributed_changes": true,
         "require_last_push_approval": false,
@@ -34,7 +33,7 @@
     },
     {
       "parameters": {
-        "do_not_enforce_on_create": true,
+        "do_not_enforce_on_create": false,
         "required_status_checks": [
           {
             "context": "Repository and module checks",
