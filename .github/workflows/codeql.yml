@@ -1,7 +1,8 @@
 name: CodeQL
 
-# Code scanning for the Python tooling under tools/ and for the workflows
-# themselves, with the security-extended query suite.
+# Code scanning for the Python tooling under tools/, the label scripts under
+# .github/scripts/ and the workflows themselves, with the security-extended
+# query suite.
 #
 # Pull requests run a read-only analysis: the job has no write permission and
 # does not upload results, so a pull request from a fork never receives a
@@ -50,6 +51,7 @@ jobs:
       matrix:
         language:
           - actions
+          - javascript-typescript
           - python
 
     steps:
@@ -84,6 +86,7 @@ jobs:
       matrix:
         language:
           - actions
+          - javascript-typescript
           - python
 
     steps:

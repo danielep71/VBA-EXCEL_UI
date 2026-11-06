@@ -35,9 +35,13 @@ on:
 permissions:
   contents: read
 
+# Every run gets a group of its own (its run id). GitHub replaces a pending run
+# when a newer one joins the same group, even without cancel-in-progress, and
+# each run is the triage evidence for the event that started it. The audit is
+# read-only, so concurrent runs cannot interfere with one another.
 concurrency:
-  group: issue-triage
-  cancel-in-progress: true
+  group: issue-triage-${{ github.run_id }}
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -67,7 +71,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.13.18"
+          python-version: "3.12.16"
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -79,7 +83,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
-          python tools/check_issues.py
+          python3 tools/check_issues.py
           --repository "$GITHUB_REPOSITORY"
           --output test-results/issue-triage.json
           --summary "$GITHUB_STEP_SUMMARY"
