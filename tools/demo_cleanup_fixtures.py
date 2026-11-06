@@ -7,6 +7,8 @@ from vba_analyze import logical_lines
 from vba_lex import code_only
 
 PROCEDURES = ('DEMO_Sheet_BuildTemplate', 'DEMO_Sheet_Reset')
+# The restored value passes through the harness seam, which is inert unless armed.
+SELECTION = 'WS.EnableSelection = DEMO_CleanupSelectionValue(EntryProtection.EnableSelection)'
 ALLOW_OPTIONS = ('AllowFormattingCells', 'AllowFormattingColumns',
                  'AllowFormattingRows', 'AllowInsertingColumns',
                  'AllowInsertingRows', 'AllowInsertingHyperlinks',
@@ -34,7 +36,7 @@ def reset_findings(source: str) -> list[str]:
     if len(protects) != 1:
         return errors + ['expected one Protect attempt']
     for operation, prefix in [(protects[0], 'cleanuperr'),
-                              ('ws.enableselection = entryprotection.enableselection', 'selectionerr')]:
+                              (SELECTION.lower(), 'selectionerr')]:
         captures = [f'{prefix}{field} = err.{field}' for field in ('number', 'source', 'description')]
         if operation not in cleanup:
             errors.append(f'{prefix}: cleanup operation missing')
@@ -52,7 +54,7 @@ def reset_findings(source: str) -> list[str]:
         if (capture not in lines or binding not in protects[0]
                 or (unprotect in lines and lines.index(capture) > lines.index(unprotect))):
             errors.append(f'protection option {name} is not captured before unprotect and rebound')
-    if 'ws.enableselection = entryprotection.enableselection' not in cleanup:
+    if SELECTION.lower() not in cleanup:
         errors.append('selection policy restoration missing')
     return errors
 
@@ -82,7 +84,8 @@ End Sub'''
     mutations = [
         ('DidUnprotect And ReProtectAtEnd', 'WasProtected And ReProtectAtEnd'),
         ('DidUnprotect = True', 'DidUnprotect = False'),
-        ('WS.EnableSelection = EntryProtection.EnableSelection', 'Debug.Print 0'),
+        (SELECTION, 'Debug.Print 0'),
+        (SELECTION, 'WS.EnableSelection = DEMO_CleanupSelectionValue(0)'),
     ] + [(f'{name}:=EntryProtection.{name}', f'{name}:=False') for name in ALLOW_OPTIONS]
     mutations += [(f'{prefix}{field} = Err.{field}', f'{prefix}{field} = 0')
                   for prefix in ('CleanupErr', 'SelectionErr')

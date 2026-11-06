@@ -232,9 +232,10 @@ class VbaAnalyzerSelfTest(GateTestCase):
             self.assertFails("unresolved direct call")
 
 
-# TitleBarControlRegression and DemoCleanupRegression are not on main: their
-# checks guard VBA corrections that exist only on release/v1.1.3 (#66, #70,
-# #71). They return with those checks when the release merges.
+# TitleBarControlRegression, WinApiErrorCapture and DemoCleanupRegression are
+# not on main: their checks guard VBA corrections that exist only on
+# release/v1.1.3 (#66, #27, #70, #71). They return with those checks when the
+# release merges.
 
 
 class PublicApiManifest(GateTestCase):
