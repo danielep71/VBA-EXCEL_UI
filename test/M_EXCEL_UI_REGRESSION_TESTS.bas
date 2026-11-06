@@ -78,6 +78,8 @@ Option Private Module
 '   Title-bar tests
 '     - hide / show round-trip
 '     - preservation of unrelated GWL_STYLE bits across hide / show
+'     - WinAPI error capture: a valid zero, an injected DLL error and an
+'       error left by an earlier call, for the GWL_STYLE read and write
 '
 ' STATE MANAGEMENT
 '   - The harness snapshots the current managed Excel UI state before testing
@@ -101,6 +103,10 @@ Option Private Module
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
+'   2026-11-06 - The title-bar WinAPI helpers capture Err.LastDllError
+'                immediately after each call and no longer declare
+'                GetLastError. Added the WinAPI error-capture case to both
+'                title-bar runs (#27).
 '   2026-11-06 - Structured-result assertions report the failure count and
 '                list they rejected, and certification releases a snapshot a
 '                unit left behind before the next unit runs, reporting it as
@@ -141,6 +147,14 @@ Option Private Module
     Private Const TEST_QUIET_FAULT_ENTRY As Long = 1  'Quiet scope: entry read fails
     Private Const TEST_QUIET_FAULT_WRITE As Long = 2  'Quiet scope: write ineffective
     Private Const TEST_QUIET_FAULT_READBACK As Long = 3  'Quiet scope: readback fails
+
+    Private Const TEST_STYLE_OP_NONE As Long = 0  'Window-style seam: no operation
+    Private Const TEST_STYLE_OP_READ As Long = 1  'Window-style seam: GWL_STYLE read
+    Private Const TEST_STYLE_OP_WRITE As Long = 2  'Window-style seam: GWL_STYLE write
+    Private Const TEST_STYLE_FAULT_NONE As Long = 0  'Window-style seam: no fault
+    Private Const TEST_STYLE_FAULT_VALID_ZERO As Long = 1  'Zero result, captured error kept
+    Private Const TEST_STYLE_FAULT_DLL_ERROR As Long = 2  'Zero result, armed error captured
+    Private Const TEST_STYLE_FAULT_STALE_ERROR As Long = 3  'Armed error left before the clear
 
     Private Const TEST_FAULT_NONE As Long = 0  'No post-capture fault armed
     Private Const TEST_FAULT_ASSERTION As Long = 1  'Fail an assertion after capture
@@ -187,7 +201,6 @@ Option Private Module
             ByVal uFlags As Long) _
             As Long
 
-        Private Declare PtrSafe Function TST_GetLastError Lib "kernel32" Alias "GetLastError" () As Long
         Private Declare PtrSafe Sub TST_SetLastError Lib "kernel32" Alias "SetLastError" ( _
             ByVal dwErrCode As Long)
     #Else
@@ -212,7 +225,6 @@ Option Private Module
             ByVal uFlags As Long) _
             As Long
 
-        Private Declare Function TST_GetLastError Lib "kernel32" Alias "GetLastError" () As Long
         Private Declare Sub TST_SetLastError Lib "kernel32" Alias "SetLastError" ( _
             ByVal dwErrCode As Long)
     #End If
@@ -236,6 +248,28 @@ Option Private Module
     Private Const TST_SWP_NOZORDER          As Long = &H4
     Private Const TST_SWP_FRAMECHANGED      As Long = &H20
     Private Const TST_SWP_NOOWNERZORDER     As Long = &H200
+
+    'Exported names of the GWL_STYLE read and write in this compilation. The
+    'harness quotes them in its own failure text, and the error-capture case
+    'expects the title-bar module to quote the same names.
+    #If VBA7 Then
+        #If Win64 Then
+            Private Const TST_API_GET_WINDOW_STYLE As String = "GetWindowLongPtrA"
+            Private Const TST_API_SET_WINDOW_STYLE As String = "SetWindowLongPtrA"
+        #Else
+            Private Const TST_API_GET_WINDOW_STYLE As String = "GetWindowLongA"
+            Private Const TST_API_SET_WINDOW_STYLE As String = "SetWindowLongA"
+        #End If
+    #Else
+        Private Const TST_API_GET_WINDOW_STYLE As String = "GetWindowLongA"
+        Private Const TST_API_SET_WINDOW_STYLE As String = "SetWindowLongA"
+    #End If
+
+    'Win32 error codes the error-capture case injects. Any non-zero value would
+    'do; real codes keep the expected failure text recognisable.
+    Private Const TST_ERROR_FILE_NOT_FOUND  As Long = 2
+    Private Const TST_ERROR_ACCESS_DENIED   As Long = 5
+    Private Const TST_ERROR_INVALID_WINDOW_HANDLE As Long = 1400
 
 
 '
@@ -3494,6 +3528,7 @@ Private Sub TST_RunRegressionPack( _
 '     release is tagged on. Every frame-state case is registered here as well.
 '
 ' UPDATED
+'   2026-11-06 - Registered the WinAPI error-capture case (#27).
 '   2026-11-06 - Registered the certification unit-isolation case (#135).
 '   2026-08-21 - Registered the frame-refresh-debt and stale-frame-entry cases,
 '                which certification did not reach.
@@ -3671,6 +3706,7 @@ Private Sub TST_RunRegressionPack( _
             TST_Case_TitleBarStaleFrameEntryNotReused
             TST_Case_TitleBarSameStyleHandleReuse
             TST_Case_ActiveFramePairRefusesMismatch
+            TST_Case_TitleBarApiErrorCapture
         End If
 
 '------------------------------------------------------------------------------
@@ -3762,8 +3798,10 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
 '   - TST_Case_TitleBarFrameRefreshDebtRetried
 '   - TST_Case_TitleBarStaleFrameEntryNotReused
+'   - TST_Case_TitleBarApiErrorCapture
 '
 ' UPDATED
+'   2026-11-06 - Registered the WinAPI error-capture case (#27).
 '   2026-08-21
 '==============================================================================
 '
@@ -3845,6 +3883,9 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 
     'Verify that a disagreed active-frame pair is refused by both callers
         TST_Case_ActiveFramePairRefusesMismatch
+
+    'Verify how a zero GWL_STYLE result and its captured DLL error are read
+        TST_Case_TitleBarApiErrorCapture
 
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
@@ -8742,8 +8783,10 @@ Private Sub TST_RestoreTitleBarStyle( _
 '
 ' CALLED FROM
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
+'   - TST_Case_TitleBarApiErrorCapture
 '
 ' UPDATED
+'   2026-11-06 - Recorded the error-capture case as a caller (#27).
 '   2026-08-18
 '==============================================================================
 '
@@ -10141,9 +10184,14 @@ Private Function TST_TryGetWindowStyle( _
 '   TRUE on success.
 '
 ' ERROR POLICY
-'   Uses GetLastError to distinguish a valid zero return from failure.
+'   Clears the thread last-error immediately before the call and copies the
+'   result and Err.LastDllError to locals immediately after it, with nothing
+'   in between. A zero result is a failure only when the captured error is
+'   non-zero.
 '
 ' UPDATED
+'   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
+'                named the API, operation, error and hWnd on failure (#27).
 '   2026-07-29
 '==============================================================================
 '
@@ -10151,7 +10199,13 @@ Private Function TST_TryGetWindowStyle( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LastErr             As Long
+#If VBA7 Then
+    Dim ApiResult           As LongPtr         'Value the read API returned
+#Else
+    Dim ApiResult           As Long            'Value the read API returned
+#End If
+
+    Dim DllError            As Long            'Err.LastDllError after the read
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10170,28 +10224,27 @@ Private Function TST_TryGetWindowStyle( _
 '------------------------------------------------------------------------------
 ' READ
 '------------------------------------------------------------------------------
+    'Clear, call and capture, with nothing in between
         TST_SetLastError 0
-
 #If VBA7 Then
     #If Win64 Then
-        StyleOut = TST_GetWindowLongPtr(hWnd, TST_GWL_STYLE)
+        ApiResult = TST_GetWindowLongPtr(hWnd, TST_GWL_STYLE)
     #Else
-        StyleOut = TST_GetWindowLong(hWnd, TST_GWL_STYLE)
+        ApiResult = TST_GetWindowLong(hWnd, TST_GWL_STYLE)
     #End If
 #Else
-        StyleOut = TST_GetWindowLong(hWnd, TST_GWL_STYLE)
+        ApiResult = TST_GetWindowLong(hWnd, TST_GWL_STYLE)
 #End If
+        DllError = Err.LastDllError
 
-        LastErr = TST_GetLastError
-
-        If StyleOut = 0 And LastErr <> 0 Then
-            FailMsg = _
-                "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
-                CStr(LastErr)
+        If ApiResult = 0 And DllError <> 0 Then
+            FailMsg = TST_BuildApiFailureText( _
+                TST_API_GET_WINDOW_STYLE, "read GWL_STYLE", DllError, hWnd)
 
             GoTo Safe_Exit
         End If
 
+        StyleOut = ApiResult
         TST_TryGetWindowStyle = True
 
 '------------------------------------------------------------------------------
@@ -10234,9 +10287,14 @@ Private Function TST_TrySetWindowStyle( _
 '   TRUE on success.
 '
 ' ERROR POLICY
-'   Uses GetLastError to distinguish a valid zero return from failure.
+'   Clears the thread last-error immediately before the call and copies the
+'   result and Err.LastDllError to locals immediately after it, with nothing
+'   in between. A zero previous style is a failure only when the captured
+'   error is non-zero.
 '
 ' UPDATED
+'   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
+'                named the API, operation, error and hWnd on failure (#27).
 '   2026-07-29
 '==============================================================================
 '
@@ -10245,12 +10303,12 @@ Private Function TST_TrySetWindowStyle( _
 ' DECLARE
 '------------------------------------------------------------------------------
 #If VBA7 Then
-    Dim PreviousStyle       As LongPtr
+    Dim ApiResult           As LongPtr         'Style replaced by the write
 #Else
-    Dim PreviousStyle       As Long
+    Dim ApiResult           As Long            'Style replaced by the write
 #End If
 
-    Dim LastErr             As Long
+    Dim DllError            As Long            'Err.LastDllError after the write
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10268,27 +10326,22 @@ Private Function TST_TrySetWindowStyle( _
 '------------------------------------------------------------------------------
 ' WRITE
 '------------------------------------------------------------------------------
+    'Clear, call and capture, with nothing in between
         TST_SetLastError 0
-
 #If VBA7 Then
     #If Win64 Then
-        PreviousStyle = _
-            TST_SetWindowLongPtr(hWnd, TST_GWL_STYLE, NewStyle)
+        ApiResult = TST_SetWindowLongPtr(hWnd, TST_GWL_STYLE, NewStyle)
     #Else
-        PreviousStyle = _
-            TST_SetWindowLong(hWnd, TST_GWL_STYLE, NewStyle)
+        ApiResult = TST_SetWindowLong(hWnd, TST_GWL_STYLE, NewStyle)
     #End If
 #Else
-        PreviousStyle = _
-            TST_SetWindowLong(hWnd, TST_GWL_STYLE, NewStyle)
+        ApiResult = TST_SetWindowLong(hWnd, TST_GWL_STYLE, NewStyle)
 #End If
+        DllError = Err.LastDllError
 
-        LastErr = TST_GetLastError
-
-        If PreviousStyle = 0 And LastErr <> 0 Then
-            FailMsg = _
-                "SetWindowLong/SetWindowLongPtr failed; GetLastError=" & _
-                CStr(LastErr)
+        If ApiResult = 0 And DllError <> 0 Then
+            FailMsg = TST_BuildApiFailureText( _
+                TST_API_SET_WINDOW_STYLE, "write GWL_STYLE", DllError, hWnd)
 
             GoTo Safe_Exit
         End If
@@ -10332,9 +10385,12 @@ Private Function TST_TryRefreshWindowFrame( _
 '   TRUE on success.
 '
 ' ERROR POLICY
-'   Returns FALSE and FailMsg on failure.
+'   Returns FALSE and FailMsg on failure. Err.LastDllError is captured
+'   immediately after the call, so the text reports this call's error.
 '
 ' UPDATED
+'   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
+'                named the API, operation, error and hWnd on failure (#27).
 '   2026-07-29
 '==============================================================================
 '
@@ -10342,8 +10398,8 @@ Private Function TST_TryRefreshWindowFrame( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ApiOK               As Long
-    Dim LastErr             As Long
+    Dim ApiOK               As Long            'SetWindowPos BOOL result
+    Dim DllError            As Long            'Err.LastDllError after the call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10361,8 +10417,8 @@ Private Function TST_TryRefreshWindowFrame( _
 '------------------------------------------------------------------------------
 ' REFRESH
 '------------------------------------------------------------------------------
+    'Clear, call and capture, with nothing in between
         TST_SetLastError 0
-
         ApiOK = TST_SetWindowPos( _
             hWnd, _
             0, _
@@ -10372,12 +10428,11 @@ Private Function TST_TryRefreshWindowFrame( _
             0, _
             TST_SWP_NOMOVE Or TST_SWP_NOSIZE Or TST_SWP_NOZORDER Or _
                 TST_SWP_NOOWNERZORDER Or TST_SWP_FRAMECHANGED)
-
-        LastErr = TST_GetLastError
+        DllError = Err.LastDllError
 
         If ApiOK = 0 Then
-            FailMsg = _
-                "SetWindowPos failed; GetLastError=" & CStr(LastErr)
+            FailMsg = TST_BuildApiFailureText( _
+                "SetWindowPos", "refresh the non-client frame", DllError, hWnd)
 
             GoTo Safe_Exit
         End If
@@ -10426,7 +10481,12 @@ Private Function TST_TryGetTitleBarVisible( _
 '   TRUE  => title-bar visibility was read successfully
 '   FALSE => read failed
 '
+' DEPENDENCIES
+'   - TST_TryGetWindowStyle
+'
 ' UPDATED
+'   2026-11-06 - Reads the style through TST_TryGetWindowStyle, so the
+'                harness has one GWL_STYLE read and one capture (#27).
 '   2026-07-25
 '==============================================================================
 '
@@ -10440,7 +10500,6 @@ Private Function TST_TryGetTitleBarVisible( _
     Dim xlHnd               As Long            'Excel window handle from Application.Hwnd
     Dim StyleValue          As Long            'Current window style value
 #End If
-    Dim LastErr             As Long            'Last Win32 error after API call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10464,34 +10523,8 @@ Private Function TST_TryGetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' READ WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Clear last-error state before the API call
-        TST_SetLastError 0
-
-#If VBA7 Then
-    #If Win64 Then
-
-        'Read the current window style using the 64-bit API
-            StyleValue = TST_GetWindowLongPtr(xlHnd, TST_GWL_STYLE)
-
-    #Else
-
-        'Read the current window style using the 32-bit API under VBA7
-            StyleValue = TST_GetWindowLong(xlHnd, TST_GWL_STYLE)
-
-    #End If
-#Else
-
-    'Read the current window style using the legacy 32-bit API
-        StyleValue = TST_GetWindowLong(xlHnd, TST_GWL_STYLE)
-
-#End If
-
-    'Read the Win32 last-error value immediately after the API call
-        LastErr = TST_GetLastError
-
-    'Treat zero plus nonzero last error as failure
-        If StyleValue = 0 And LastErr <> 0 Then
-            FailMsg = "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & CStr(LastErr)
+    'Read through the single harness read, which owns the error capture
+        If Not TST_TryGetWindowStyle(xlHnd, StyleValue, FailMsg) Then
             GoTo Safe_Exit
         End If
 
@@ -11183,6 +11216,355 @@ Private Sub TST_Case_ActiveFramePairRefusesMismatch()
 
         TST_Log PROC, "PASS", _
             "A disagreed active-frame pair was refused by both callers"
+
+End Sub
+
+
+Private Sub TST_Case_TitleBarApiErrorCapture()
+
+'
+'==============================================================================
+' TST_Case_TitleBarApiErrorCapture
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify how the title-bar module reads a zero GWL_STYLE result: a valid
+'   zero is accepted, a captured DLL error is reported with the API,
+'   operation, error and hWnd, and an error left by an earlier call is neither
+'   mistaken for a failure nor carried into a later report.
+'
+' WHY THIS EXISTS
+'   GetWindowLong[Ptr] and SetWindowLong[Ptr] return zero both for a valid
+'   zero and for a failure. Only Err.LastDllError, cleared before the call and
+'   captured immediately after it, tells the two apart (ICR-UI-112-P3-05,
+'   #27). Windows produces none of the three branches on demand, so they are
+'   reached through UI_InternalInjectWindowStyleFault.
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   1  read, no fault          succeeds with the caption visible
+'   2  read, valid zero        succeeds, no caption, no failure text
+'   3  seam is one-shot        the next read sees the real style again
+'   4  read, DLL error 1400    refused with the exact failure text
+'   5  read, stale error 2     the clear removes it: a valid zero again
+'   6  read, DLL error 5       a real read first, then the exact text names
+'                              5 and nothing an earlier branch left
+'   7  write, valid zero       a hide succeeds and the frame is hidden
+'   8  write, DLL error 1400   refused with the exact failure text
+'
+' ERROR POLICY
+'   - Raises after disarming the seam, restoring the entry style and
+'     discarding the frame-state registry
+'
+' DEPENDENCIES
+'   - UI_InternalInjectWindowStyleFault
+'   - UI_InternalResetTitleBarBaseline
+'   - UI_TryGetTitleBarVisibleForHwnd
+'   - UI_TrySetTitleBarVisibleForHwndIfNeeded
+'   - TST_TryGetWindowStyle
+'   - TST_RestoreTitleBarStyle
+'   - TST_TitleBarVisibleForHwndOrRaise
+'   - TST_BuildApiFailureText
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'   - TST_RunTitleBarOnlyPack
+'
+' NOTES
+'   The seam replaces only what the capture took, after it took it, so the
+'   real API call still runs. Branch 8 has therefore really hidden the frame
+'   while reporting a failure, and the registry never recorded that write.
+'   The case restores the entry style through the harness and discards the
+'   registry, and does so again on the failure path.
+'
+'   The expected text is built here from the harness's own API-name
+'   constants, so a module that quoted another function, or the wrong
+'   operation, error or handle, fails the exact comparison.
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim TargetHwnd          As LongPtr         'Frame under test
+    Dim EntryStyle          As LongPtr         'Style observed on entry
+#Else
+    Dim TargetHwnd          As Long            'Frame under test
+    Dim EntryStyle          As Long            'Style observed on entry
+#End If
+
+    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
+    Dim IsVisible           As Boolean         'Visibility the read reports
+    Dim OK                  As Boolean         'Helper verdict
+    Dim Msg                 As String          'Failure text the helper reports
+    Dim Expected            As String          'Exact failure text expected
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarApiErrorCapture"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating WinAPI error capture for the GWL_STYLE read and write"
+
+'------------------------------------------------------------------------------
+' PREPARE A KNOWN FRAME STATE
+'------------------------------------------------------------------------------
+    'Start from a visible frame, an empty registry and a disarmed seam
+        UI_SetExcelUI TitleBar:=UI_Show
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        UI_InternalResetTitleBarBaseline
+
+        TargetHwnd = Application.hWnd
+
+        If TargetHwnd = 0 Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 80, _
+                PROC, _
+                "no Excel window handle is available"
+        End If
+
+    'Retain the entry style so branch 8 can be undone exactly
+        If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 81, _
+                PROC, _
+                "could not read the entry window style | " & Msg
+        End If
+
+        StyleCaptured = True
+
+'------------------------------------------------------------------------------
+' BRANCH 1 - AN UNFAULTED READ SUCCEEDS
+'------------------------------------------------------------------------------
+        OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".Real.Read"
+        TST_AssertBooleanEquals True, IsVisible, PROC & ".Real.Visible"
+        TST_AssertBooleanEquals _
+            True, (Len(Msg) = 0), PROC & ".Real.NoFailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 2 - A ZERO STYLE WITH NO CAPTURED ERROR IS VALID
+'------------------------------------------------------------------------------
+    'Zero with a cleared last-error is a real value under the Windows contract
+        UI_InternalInjectWindowStyleFault _
+            TEST_STYLE_OP_READ, TEST_STYLE_FAULT_VALID_ZERO, 0
+
+        OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".ValidZero.Read"
+        TST_AssertBooleanEquals _
+            False, IsVisible, PROC & ".ValidZero.NoCaption"
+        TST_AssertBooleanEquals _
+            True, (Len(Msg) = 0), PROC & ".ValidZero.NoFailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 3 - THE SEAM IS ONE-SHOT
+'------------------------------------------------------------------------------
+    'A fault that survived would fail every later read in the session
+        OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".OneShot.Read"
+        TST_AssertBooleanEquals True, IsVisible, PROC & ".OneShot.Visible"
+
+'------------------------------------------------------------------------------
+' BRANCH 4 - A ZERO STYLE WITH A CAPTURED ERROR IS A FAILURE
+'------------------------------------------------------------------------------
+    'The text must name the API that ran, the operation, the error and the
+    'window, and is compared exactly
+        UI_InternalInjectWindowStyleFault _
+            TEST_STYLE_OP_READ, _
+            TEST_STYLE_FAULT_DLL_ERROR, _
+            TST_ERROR_INVALID_WINDOW_HANDLE
+
+        OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
+
+        Expected = TST_BuildApiFailureText( _
+            TST_API_GET_WINDOW_STYLE, _
+            "read GWL_STYLE", _
+            TST_ERROR_INVALID_WINDOW_HANDLE, _
+            TargetHwnd)
+
+        TST_Log PROC, "OBSERVED", "DllError.Read | " & Msg
+
+        TST_AssertBooleanEquals False, OK, PROC & ".DllError.Refused"
+        TST_AssertTrue (Msg = Expected), PROC & ".DllError.FailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 5 - AN ERROR LEFT BY AN EARLIER CALL IS CLEARED, NOT REPORTED
+'------------------------------------------------------------------------------
+    'The seam leaves the error in the thread last-error before the clear. A
+    'read that captured without clearing first would refuse this valid zero.
+        UI_InternalInjectWindowStyleFault _
+            TEST_STYLE_OP_READ, _
+            TEST_STYLE_FAULT_STALE_ERROR, _
+            TST_ERROR_FILE_NOT_FOUND
+
+        OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
+
+        TST_Log PROC, "OBSERVED", "StaleError.Read | " & Msg
+
+        TST_AssertBooleanEquals True, OK, PROC & ".StaleError.Read"
+        TST_AssertBooleanEquals _
+            False, IsVisible, PROC & ".StaleError.NoCaption"
+        TST_AssertBooleanEquals _
+            True, (Len(Msg) = 0), PROC & ".StaleError.NoFailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 6 - A LATER FAILURE REPORTS ITS OWN ERROR
+'------------------------------------------------------------------------------
+    'A real, non-zero read first: it must succeed and report nothing
+        OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".LaterFailure.RealRead"
+        TST_AssertBooleanEquals _
+            True, (Len(Msg) = 0), PROC & ".LaterFailure.NoFailureText"
+
+    'Then a failure with a different error. The exact comparison excludes the
+    'errors earlier branches supplied.
+        UI_InternalInjectWindowStyleFault _
+            TEST_STYLE_OP_READ, _
+            TEST_STYLE_FAULT_DLL_ERROR, _
+            TST_ERROR_ACCESS_DENIED
+
+        OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
+
+        Expected = TST_BuildApiFailureText( _
+            TST_API_GET_WINDOW_STYLE, _
+            "read GWL_STYLE", _
+            TST_ERROR_ACCESS_DENIED, _
+            TargetHwnd)
+
+        TST_Log PROC, "OBSERVED", "LaterFailure.Read | " & Msg
+
+        TST_AssertBooleanEquals False, OK, PROC & ".LaterFailure.Refused"
+        TST_AssertTrue (Msg = Expected), PROC & ".LaterFailure.FailureText"
+
+'------------------------------------------------------------------------------
+' BRANCH 7 - A ZERO PREVIOUS STYLE FROM A WRITE IS VALID
+'------------------------------------------------------------------------------
+    'SetWindowLong returns the previous style, and zero is a legal one. The
+    'write fault waits through the read that precedes the write.
+        UI_InternalInjectWindowStyleFault _
+            TEST_STYLE_OP_WRITE, TEST_STYLE_FAULT_VALID_ZERO, 0
+
+        OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=False, _
+            FailMsg:=Msg)
+
+        TST_Log PROC, "OBSERVED", "ValidZero.Write | " & Msg
+
+        TST_AssertBooleanEquals True, OK, PROC & ".WriteValidZero.Hide"
+        TST_AssertBooleanEquals _
+            True, (Len(Msg) = 0), PROC & ".WriteValidZero.NoFailureText"
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertBooleanEquals _
+            False, _
+            TST_TitleBarVisibleForHwndOrRaise(TargetHwnd, PROC), _
+            PROC & ".WriteValidZero.Hidden"
+
+    'Show again unfaulted, so branch 8 starts from a visible frame
+        OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=True, _
+            FailMsg:=Msg)
+
+        TST_AssertBooleanEquals True, OK, PROC & ".WriteValidZero.Show"
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' BRANCH 8 - A ZERO PREVIOUS STYLE WITH A CAPTURED ERROR IS A FAILURE
+'------------------------------------------------------------------------------
+        UI_InternalInjectWindowStyleFault _
+            TEST_STYLE_OP_WRITE, _
+            TEST_STYLE_FAULT_DLL_ERROR, _
+            TST_ERROR_INVALID_WINDOW_HANDLE
+
+        OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+            TargetHwnd:=TargetHwnd, _
+            IsVisible:=False, _
+            FailMsg:=Msg)
+
+        Expected = TST_BuildApiFailureText( _
+            TST_API_SET_WINDOW_STYLE, _
+            "write GWL_STYLE", _
+            TST_ERROR_INVALID_WINDOW_HANDLE, _
+            TargetHwnd)
+
+        TST_Log PROC, "OBSERVED", "DllError.Write | " & Msg
+
+        TST_AssertBooleanEquals False, OK, PROC & ".WriteDllError.Refused"
+        TST_AssertTrue (Msg = Expected), PROC & ".WriteDllError.FailureText"
+
+'------------------------------------------------------------------------------
+' RESTORE ENTRY STYLE
+'------------------------------------------------------------------------------
+    'The faulted write really hid the frame and the registry never recorded
+    'it. Put the entry style back and forget the registry.
+        TST_RestoreTitleBarStyle TargetHwnd, EntryStyle, StyleCaptured
+        UI_InternalResetTitleBarBaseline
+
+        TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_AssertBooleanEquals _
+            True, _
+            TST_TitleBarVisibleForHwndOrRaise(TargetHwnd, PROC), _
+            PROC & ".Restored.Visible"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Valid zero, captured DLL error and stale error were each read correctly"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Disarm the seam, put the frame back and forget the registry, whatever
+    'happened above
+        On Error Resume Next
+            UI_InternalInjectWindowStyleFault _
+                TEST_STYLE_OP_NONE, TEST_STYLE_FAULT_NONE, 0
+            TST_RestoreTitleBarStyle TargetHwnd, EntryStyle, StyleCaptured
+            UI_InternalResetTitleBarBaseline
+        On Error GoTo 0
+
+    'Raise the captured failure after restoration when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
 
 End Sub
 
@@ -11890,6 +12272,74 @@ Private Sub TST_SafeCloseWindow(ByRef TargetWindow As Window)
         Set TargetWindow = Nothing
 
 End Sub
+
+
+#If VBA7 Then
+Private Function TST_BuildApiFailureText( _
+    ByVal ApiName As String, _
+    ByVal Operation As String, _
+    ByVal DllError As Long, _
+    ByVal TargetHwnd As LongPtr) As String
+#Else
+Private Function TST_BuildApiFailureText( _
+    ByVal ApiName As String, _
+    ByVal Operation As String, _
+    ByVal DllError As Long, _
+    ByVal TargetHwnd As Long) As String
+#End If
+
+'
+'==============================================================================
+' TST_BuildApiFailureText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Build the failure text for a native call that reported an error, in the
+'   same form as M_EXCEL_UI_TITLEBAR
+'
+' WHY THIS EXISTS
+'   The harness WinAPI helpers report their own failures in this form, and
+'   the error-capture case compares the title-bar module's text with it
+'   exactly. One builder keeps both uses identical.
+'
+' INPUTS
+'   ApiName
+'     Exported name of the function that ran
+'
+'   Operation
+'     What the call was doing
+'
+'   DllError
+'     Err.LastDllError as captured immediately after the call. This builder
+'     never reads Err itself.
+'
+'   TargetHwnd
+'     The window handle the call addressed
+'
+' RETURNS
+'   "<API> failed; operation=<operation>; LastDllError=<n>; hWnd=<h>"
+'
+' ERROR POLICY
+'   - Does NOT raise
+'
+' UPDATED
+'   2026-11-06
+'==============================================================================
+'
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let diagnostic formatting raise into a failure path
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' BUILD DIAGNOSTIC TEXT
+'------------------------------------------------------------------------------
+        TST_BuildApiFailureText = _
+            ApiName & " failed; operation=" & Operation & _
+            "; LastDllError=" & CStr(DllError) & _
+            "; hWnd=" & CStr(TargetHwnd)
+
+End Function
 
 
 Private Function TST_BuildRuntimeErrorText() As String
