@@ -395,6 +395,30 @@ class MacroParameterTests(unittest.TestCase):
         self.assertEqual(codes(report), [])
         self.assertIn(("OnAction (through UI_Button argument ActionMacro)", "unknown-dynamic"), entries(report))
 
+    def test_parameters_passed_by_reference_may_change(self) -> None:
+        # A procedure that receives the parameter by reference may replace it
+        # before the sink reads it, so the literal at the call is not checked.
+        fixer = ("Public Sub UI_Fix(Macro As String)\n    Macro = \"UI_Tick\"\nEnd Sub\n")
+        exposed = self.BUTTON.replace("    If Len(", "    UI_Fix ActionMacro\n    If Len(") + fixer
+        report = self.report("    UI_Button s, \"UI_NotAMacro\"\n", button=exposed)
+        self.assertEqual(codes(report), [])
+        self.assertNotIn(("OnAction", "parameter"), entries(report))
+        called = self.BUTTON.replace("    If Len(", "    Call UI_Fix(ActionMacro)\n    If Len(") + fixer
+        self.assertEqual(codes(self.report("    UI_Button s, \"UI_NotAMacro\"\n", button=called)), [])
+        external = self.BUTTON.replace("    If Len(", "    SomeLibraryProc ActionMacro\n    If Len(")
+        self.assertEqual(codes(self.report("    UI_Button s, \"UI_NotAMacro\"\n", button=external)), [])
+
+    def test_parameters_passed_by_value_or_to_intrinsics_stay_checked(self) -> None:
+        # ByVal parameters, parenthesized arguments and VBA functions cannot
+        # change the caller's variable, so the literal is still checked.
+        reader = ("Public Sub UI_Read(ByVal Macro As String)\nEnd Sub\n"
+                  "Public Sub UI_Fix(Macro As String)\n    Macro = \"UI_Tick\"\nEnd Sub\n")
+        safe = self.BUTTON.replace(
+            "    If Len(", "    UI_Read ActionMacro\n    UI_Fix (ActionMacro)\n"
+            "    Debug.Print Trim$(ActionMacro), UCase$(ActionMacro)\n    If Len(") + reader
+        report = self.report("    UI_Button s, \"UI_NotAMacro\"\n", button=safe)
+        self.assertEqual(codes(report), ["VBA-CALL-030"])
+
     def test_target_in_a_module_of_another_configuration_is_a_defect(self) -> None:
         files = {"b.bas": mod("M_B", self.BUTTON.replace("{default}", "UI_Tick")),
                  "a.bas": mod("M_A", "Public Sub UI_Run(ByVal s As Object)\n    UI_Button s, \"UI_DemoOnly\"\n"

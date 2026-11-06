@@ -567,6 +567,16 @@ def collect_locals(proc: Proc) -> None:
 # A statement that starts with one of these may write any variable it names.
 WRITING_STATEMENTS = frozenset({"erase", "get", "input", "line", "lset", "mid", "redim", "rset"})
 
+# VBA library functions that only read their arguments. A variable passed to any
+# other procedure that the checker cannot show takes it ByVal may be changed.
+READ_ONLY_FUNCTIONS = frozenset("""
+abs asc ascb ascw cbool cbyte ccur cdate cdbl cdec chr chrb chrw cint clng clnglng clngptr csng
+cstr cvar cverr format formatcurrency formatdatetime formatnumber formatpercent hex instr instrb
+instrrev isarray isdate isempty iserror ismissing isnull isnumeric isobject join lbound lcase left
+leftb len lenb ltrim mid midb oct replace right rightb rtrim sgn space split str strcomp strconv
+string strreverse trim typename ubound ucase val vartype
+""".split())
+
 
 def assigned_names(proc: Proc) -> set[str]:
     """Names ``proc`` may assign: an over-approximation, so that a name absent from it is never written.
@@ -690,6 +700,8 @@ class Analyzer:
         self.stats: Counter[str] = Counter()
         self.unknown: Counter[str] = Counter()
         self.entry_points: list[dict[str, Any]] = []
+        # Parameter names each procedure passes by reference; see passed_by_reference().
+        self.by_reference: dict[int, set[str]] = {}
 
     # -- helpers ----------------------------------------------------------
     def report(self, code: str, module: Module, proc: Proc | None, line: int, target: str, message: str,
@@ -885,15 +897,91 @@ class Analyzer:
                 break
         return None if THIS_WORKBOOK in text else text
 
-    def stable_parameter(self, tokens: list[Tok], proc: Proc | None) -> str | None:
-        """The ByVal parameter of ``proc`` that ``tokens`` name, if the procedure never assigns it."""
+    def stable_parameter(self, tokens: list[Tok], module: Module, proc: Proc | None) -> str | None:
+        """The ByVal parameter of ``proc`` that ``tokens`` name, if nothing in the procedure can change it.
+
+        It must never be assigned, and never passed by reference to a procedure that could assign it.
+        """
         if proc is None or len(tokens) != 1 or not tokens[0].is_id():
             return None
         key = tokens[0].low
         param = next((p for p in proc.params if p.name.casefold() == key), None)
         if param is None or not param.byval or param.paramarray or proc.locals.get(key, (None, ""))[1] != "param":
             return None
-        return None if key in assigned_names(proc) else key
+        if key in assigned_names(proc) or key in self.passed_by_reference(module, proc):
+            return None
+        return key
+
+    def call_sites(self, tokens: list[Tok]) -> list[tuple[int, list[Tok]]]:
+        """The calls in one statement: the index of each callee name and the tokens of its arguments.
+
+        A statement that starts with a name or a dotted chain, without ``Call`` and without an ``=``
+        after it, is a call without parentheses: in ``Fix (x)`` the parentheses belong to the
+        argument, which VBA then passes by value. Elsewhere a name followed by ``(`` takes the
+        parenthesized list as its arguments.
+        """
+        sites: list[tuple[int, list[Tok]]] = []
+        head = tokens[0]
+        head_end = -1
+        if head.is_id() and not head.is_kw(*KEYWORDS) and head.low not in STATEMENT_KEYWORDS:
+            end = 0
+            while end + 2 < len(tokens) and tokens[end + 1].continues_chain() and tokens[end + 2].is_id():
+                end += 2
+            rest = tokens[end + 1:]
+            after = matching_paren(tokens, end + 1) + 1 if rest and rest[0].is_op("(") else end + 1
+            if rest and not rest[0].is_op("=", ".", "!", ":=") and not (
+                    after < len(tokens) and tokens[after].is_op("=")) and after > end:
+                sites.append((end, rest))
+                head_end = end
+        for index, token in enumerate(tokens[:-1]):
+            if index == head_end or not token.is_id() or token.is_kw(*KEYWORDS):
+                continue
+            if tokens[index + 1].is_op("("):
+                close = matching_paren(tokens, index + 1)
+                if close > index + 1:
+                    sites.append((index, tokens[index + 2:close]))
+        return sites
+
+    def may_write_argument(self, tokens: list[Tok], index: int, args: list[tuple[str | None, list[Tok]]],
+                           position: int, module: Module, proc: Proc) -> bool:
+        """Whether the call at ``tokens[index]`` may change the variable passed as argument ``position``."""
+        callee = tokens[index]
+        qualified = index >= 2 and tokens[index - 1].continues_chain()
+        if not qualified and callee.low in READ_ONLY_FUNCTIONS:
+            return False
+        owner: Module | None = module
+        if qualified:
+            owner = self.project.modules.get(tokens[index - 2].low) if tokens[index - 2].is_id() and (
+                index < 3 or not tokens[index - 3].continues_chain()) else None
+            member = owner.members.get(callee.low) if owner is not None else None
+        else:
+            kind, entity = self.resolve_name(callee.text, module, proc)
+            if kind == "local":
+                return False  # an array element, not a call
+            member = entity[1] if kind == "member" else None
+        target = next(iter(member.accessors.values()), None) if member is not None and member.kind == "proc" else None
+        if target is None:
+            return True
+        bound = bind_arguments(target.params, args)
+        argument = args[position][1]
+        slot = next((i for i, value in bound.items() if value is argument), None)
+        return slot is None or not target.params[slot].byval
+
+    def passed_by_reference(self, module: Module, proc: Proc) -> set[str]:
+        """Parameter names ``proc`` passes, as a bare argument, to a call that may change them."""
+        cache = self.by_reference
+        if id(proc) not in cache:
+            params = {p.name.casefold() for p in proc.params}
+            names: set[str] = set()
+            for _line, tokens in proc.statements:
+                for index, argument_tokens in self.call_sites(tokens):
+                    args = self.split_args(argument_tokens)
+                    for position, (_name, value) in enumerate(args):
+                        if (len(value) == 1 and value[0].is_id() and value[0].low in params
+                                and self.may_write_argument(tokens, index, args, position, module, proc)):
+                            names.add(value[0].low)
+            cache[id(proc)] = names
+        return cache[id(proc)]
 
     def macro_value(self, tokens: list[Tok], module: Module, proc: Proc | None) -> tuple[str, str | None]:
         """Evaluate a macro-name expression: ("literal", name), ("parameter", name) or ("unknown", None).
@@ -913,7 +1001,7 @@ class Analyzer:
             if value is not None:
                 text += value
                 continue
-            parameter = self.stable_parameter(part, proc)
+            parameter = self.stable_parameter(part, module, proc)
             if parameter is not None and position == len(parts) - 1 and self.strip_this_workbook(text) == "":
                 return "parameter", parameter
             return "unknown", None
