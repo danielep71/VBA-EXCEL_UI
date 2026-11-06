@@ -341,7 +341,13 @@ x64, VBA7 x86 and legacy x86, and proves itself against passing and failing
 fixtures first. It reads statement order only: it does not follow `GoTo` and
 cannot observe the error a call leaves, so
 `TST_Case_TitleBarApiErrorCapture` must still pass on a real Excel host. The
-demo modules in `demo/` are not yet held to this rule.
+demo modules in `demo/` are not yet held to this rule (#144).
+
+The VBA that follows this rule, the gate check and the regression case exist
+only on `release/v1.1.3` until v1.1.3 is released. On `main`, the title-bar
+module still declares `GetLastError`, the check is not registered in
+`tools/check_repo.py` and the case is absent, so a passing gate on `main` does
+not enforce this sequence.
 
 ### Public contracts and compatibility
 
@@ -362,8 +368,9 @@ Before closure, use disposable worksheets and a bounded host harness to test
 ordinary failure, missing/wrong password, reprotection and selection failure,
 and read back every captured option at the exact tested commit.
 
-`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook from
-the commit under test:
+`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness; it exists only on
+`release/v1.1.3` until v1.1.3 is released. Build a new demo workbook from the
+commit under test:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath "C:\work\EXCEL_UI_Demo.xlsm" -Mode Demo -NewWorkbook
