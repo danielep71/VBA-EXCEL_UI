@@ -36,16 +36,18 @@ Option Explicit
 '
 ' EXPECTED DEMO CHECK BOX NAMES
 '   Application-level
-'     - chkRibbon
 '     - chkStatusBar
 '     - chkScrollBars
 '     - chkFormulaBar
+'
+'   Active-window
+'     - chkRibbon
+'     - chkTitleBar
 '
 '   Window-level
 '     - chkHeadings
 '     - chkWorkbookTabs
 '     - chkGridlines
-'     - chkTitleBar
 '
 ' EXPECTED DEMO SHEET
 '   - Worksheet name: DEMO_UI
@@ -69,12 +71,16 @@ Option Explicit
 '
 ' NOTES
 '   - Window-level sync reads the current ActiveWindow state
+'   - TitleBar SHOW / HIDE acts on the active window's frame: the handle is
+'     read from ActiveWindow.hWnd and used only while Application.Hwnd names
+'     the same frame
 '   - TitleBar sync reads the Excel window represented by Application.Hwnd
 '   - Missing or misnamed controls are logged to the Immediate Window and
 '     treated conservatively
 '   - Demo_CreateDemoSheet is the canonical builder
 '
 ' UPDATED
+'   2026-11-06 - Header and comments aligned with the code (#114).
 '   2026-08-21 - Captured the Err fields before suppressing errors, so the
 '                runtime-error text describes the error it was given.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
