@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Compare the repository's live rulesets with the versioned copies.
 
-The rulesets that protect main, the release branches, the traffic-history
-branch and the release tags are configured in GitHub settings. A change there
-leaves no trace in review, so each ruleset is versioned as normalized JSON
-under .github/rulesets/, and this check reports any difference between the
-live rulesets and those files.
+The rulesets that protect main, the release branches and the release tags are
+configured in GitHub settings. A change there leaves no trace in review, so
+each ruleset is versioned as normalized JSON under .github/rulesets/, and this
+check reports any difference between the live rulesets and those files.
 
 Read-only: it never changes a ruleset. To change one, edit it in the GitHub
 settings, then run this tool with --export and commit the result in the same

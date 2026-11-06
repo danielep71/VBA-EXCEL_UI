@@ -147,8 +147,9 @@ changes are made on the release branch and mirrored to `main`.
 Every change to `main` and `release/**` goes through a pull request, including
 mine. Repository rulesets enforce it: on `main` and `release/**` a pull request
 must pass **Repository and module checks** on an up-to-date branch with every
-review thread resolved, and force-pushes and deletion are blocked; `v*` tags
-cannot be moved or deleted. The rulesets are versioned in `.github/rulesets/`,
+review thread resolved, and is merged with a merge commit; a push to the pull
+request dismisses earlier approvals. Force-pushes and deletion are blocked, and
+`v*` tags cannot be moved or deleted. The rulesets are versioned in `.github/rulesets/`,
 and the **Ruleset drift** workflow fails daily if a live ruleset differs from
 its copy. To change a ruleset, change it in the repository settings, run
 `python3 tools/check_rulesets.py --repository danielep71/VBA-EXCEL_UI --export`,
