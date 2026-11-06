@@ -100,8 +100,12 @@ The checker resolves a macro name when it is fixed in the source:
 A macro name may be a string literal, a constant, or a concatenation of them. A
 leading `"'" & ThisWorkbook.Name & "'!"` or `ThisWorkbook.Name & "!"` names the
 workbook that holds the code, so the checker removes it and resolves the rest in
-the project. A name qualified by another workbook (`'Other.xlsm'!Macro`) may be
-outside the project, so it is never reported missing.
+the project. A name qualified by another workbook (`'Other.xlsm'!Macro`) is
+outside the project: it is counted as unknown and never matched against the
+project's procedures, so it is neither reported missing nor confused with a
+local procedure of the same name. A constant concatenation names the whole
+joined text; an initializer with anything other than string literals leaves the
+constant unknown.
 
 A procedure can also pass a macro name on. When a procedure assigns one of its
 own `ByVal` parameters to `OnAction` (or hands it to another sink) and never

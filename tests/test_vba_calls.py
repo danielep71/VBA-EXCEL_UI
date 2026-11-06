@@ -303,6 +303,16 @@ class DynamicTargetTests(unittest.TestCase):
         self.assertEqual(codes(hidden), [])
         self.assertIn(("Application.Run", "unknown-dynamic"), entries(hidden))
 
+    def test_workbook_qualified_targets_stay_outside_the_project(self) -> None:
+        # A target in another workbook says nothing about this project's
+        # procedures, even when one of them has the same name.
+        report = self.report('    Application.Run "Other.xlsm!UI_Hidden"\n'
+                             '    Application.Run "\'Other Book.xlsm\'!UI_Tick"\n'
+                             '    s.OnAction = "\'Other.xlsm\'!UI_Gone"\n')
+        self.assertEqual(codes(report), [])
+        self.assertEqual(codes(report, "warning"), [])
+        self.assertEqual([status for _, status in entries(report)], ["unknown-external"] * 3)
+
     def test_literal_targets_that_do_not_resolve(self) -> None:
         bad = self.report('    Application.Run "UI_Gone"\n'
                           '    Excel.Application.OnTime EarliestTime:=Now, Procedure:="UI_Gone2"\n'

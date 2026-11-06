@@ -1064,7 +1064,15 @@ class Analyzer:
     def check_macro_target(self, channel: str, via: str, value: str, module: Module, proc: Proc | None,
                            line: int) -> None:
         """Resolve a literal macro name against the standard modules of the project."""
-        macro = value.split("!")[-1].strip("'")
+        if "!" in value:
+            # A workbook prefix that is not this workbook's own name (removed by macro_value) names
+            # another workbook, whose procedures this project cannot see: never match local ones.
+            self.stats["dynamic-literal"] += 1
+            self.unknown[f"{channel} target outside project"] += 1
+            self.entry_points.append({"channel": channel + via, "module": module.name, "line": line,
+                                      "target": value, "status": "unknown-external"})
+            return
+        macro = value.strip("'")
         parts = macro.split(".")
         name = parts[-1]
         candidates = []
@@ -1080,7 +1088,7 @@ class Analyzer:
         qualifier = self.project.modules.get(parts[-2].casefold()) if len(parts) > 1 else None
         local_module = qualifier is not None and qualifier.kind == "standard"
         if not candidates:
-            if (self.project.is_project_name(name) or local_module) and "!" not in value:
+            if self.project.is_project_name(name) or local_module:
                 status = "missing"
                 self.report("VBA-CALL-030", module, proc, line, value,
                             f"{channel} target {value!r}{via} is not a procedure of any standard module "
