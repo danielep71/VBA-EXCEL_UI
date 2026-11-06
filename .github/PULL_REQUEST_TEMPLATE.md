@@ -93,7 +93,7 @@ Evidence from another commit does not certify this candidate.
 | Check | Result / evidence |
 | --- | --- |
 | Hosted required checks | <!-- PASS / FAIL / NOT RUN + workflow URL --> |
-| Local static command | <!-- python3 tools/check_repo.py; python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas; node .github/scripts/labels-sync.mjs --self-test; node .github/scripts/labels-drift.mjs --self-test; python3 tools/check_issues.py --check-config; python3 -m unittest discover -s tests; ruff check tools tests; mypy --strict tools — PASS / FAIL / NOT RUN --> |
+| Local static command | <!-- python3 tools/check_repo.py; python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas; node .github/scripts/labels-sync.mjs --self-test; node .github/scripts/labels-drift.mjs --self-test; python3 tools/check_issues.py --check-config; python3 -m unittest discover -s tests; ruff check tools tests; mypy --strict tools; mypy --strict tests — PASS / FAIL / NOT RUN --> |
 | Formatting / `git diff --check` | <!-- PASS / FAIL --> |
 | Machine-readable artifact | <!-- Name / URL / not produced --> |
 

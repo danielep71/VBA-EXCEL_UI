@@ -455,8 +455,8 @@ before it reaches your machine.
 
 Other workflows run alongside the gate and are not required checks:
 
-- **CodeQL** analyses the Python tooling and the workflows with the
-  `security-extended` queries. On a pull request it runs read-only and uploads
+- **CodeQL** analyses the Python tooling, the label scripts and the workflows
+  with the `security-extended` queries. On a pull request it runs read-only and uploads
   nothing.
 - **Workflow lint** runs a checksum-verified actionlint release on every
   workflow, after proving that it rejects `.github/actionlint/invalid-workflow.yml`.
@@ -485,20 +485,23 @@ current tree) and at least one failing fixture (a named defect).
 `tests/test_coverage.py` fails when a check has no test in either direction, so
 a new check needs a `GateTestCase` subclass in `tests/test_gate_checks.py`
 before it can merge. Like the gate, the tests use only the standard library,
-except that `tests/test_check_issues.py` also needs Node.js. `test/` is a
-different directory: it holds the VBA regression suite.
+except that `tests/test_check_issues.py` also needs Node.js. The Python tools
+run their self-tests with `--selftest`; the Node.js label scripts under
+`.github/scripts/` use `--self-test`. `test/` is a different directory: it
+holds the VBA regression suite.
 
-The Python code under `tools/` and `tests/` must also be clean under Ruff, and
-the code under `tools/` under `mypy --strict`, both configured in
-`pyproject.toml` against Python 3.11, the oldest interpreter I support for the
-gate. CI installs both from
-`tools/requirements-quality-ci.txt`, where every wheel is hash-locked. To run
+The Python code under `tools/` and `tests/` must also be clean under Ruff and
+`mypy --strict`, both configured in `pyproject.toml` against Python 3.11, the
+oldest interpreter I support for the gate. CI runs both on `tools/` and
+`tests/` and installs them from `tools/requirements-quality-ci.txt`, where
+every wheel is hash-locked. To run
 them locally, install them into a virtual environment the same way:
 
 ```text
 python3 -m pip install --require-hashes --only-binary=:all: -r tools/requirements-quality-ci.txt
 ruff check tools tests
 mypy --strict tools
+mypy --strict tests
 ```
 
 A finding is fixed in the code, not silenced, unless the fix would change what

@@ -338,8 +338,8 @@ The static workflow:
 - does not execute Excel or VBA;
 - does not package or publish a release workbook.
 
-**CodeQL** analyses the Python tooling and the workflows. Its pull-request job
-is read-only and uploads nothing; only the push and scheduled job has
+**CodeQL** analyses the Python tooling, the label scripts and the workflows. Its
+pull-request job is read-only and uploads nothing; only the push and scheduled job has
 `security-events: write`. **Workflow lint** runs a pinned actionlint release
 whose archive is verified by SHA-256 before it runs, with a read-only token.
 Dependabot (`.github/dependabot.yml`) proposes updates to the pinned Actions and

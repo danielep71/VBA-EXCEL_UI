@@ -54,10 +54,18 @@ on:
 permissions:
   contents: read
 
+# Pull requests share one group per ref, so a newer push cancels the run it
+# supersedes. Every other run gets a group of its own (its run id), so a later
+# push or the weekly schedule never replaces a queued run and its evidence.
+concurrency:
+  group: wiki-badges-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   badges:
     name: Wiki track badges
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
       - name: Check out the exact SHA under review
@@ -71,12 +79,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: '3.12.16'
 
       - name: Clone the wiki read-only
         run: |
           git clone --depth 1 \
-            https://github.com/${{ github.repository }}.wiki.git \
+            "https://github.com/${GITHUB_REPOSITORY}.wiki.git" \
             "${RUNNER_TEMP}/wiki"
 
       - name: Verify the badge rules against their own fixtures
