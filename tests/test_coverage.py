@@ -92,6 +92,25 @@ class GateEndToEnd(unittest.TestCase):
             self.assertIn("required-files: missing LICENSE", broken.stdout)
             self.assertTrue(broken.stdout.rstrip().endswith("RESULT: FAIL"), broken.stdout)
 
+    def test_help_prints_usage_without_running_a_check(self) -> None:
+        tools = TESTS_DIR.parent / "tools"
+        for script in ("check_repo.py", "wiki_badges.py"):
+            with self.subTest(script=script):
+                result = subprocess.run([sys.executable, str(tools / script), "--help"],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertTrue(result.stdout.startswith("usage:"), result.stdout)
+                self.assertNotIn("RESULT:", result.stdout)
+                self.assertNotIn("FAIL", result.stdout + result.stderr)
+
+    def test_an_unknown_argument_is_refused_without_running_the_gate(self) -> None:
+        script = TESTS_DIR.parent / "tools" / "check_repo.py"
+        result = subprocess.run([sys.executable, str(script), "--bogus"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertTrue(result.stderr.startswith("usage:"), result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

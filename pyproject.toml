@@ -41,7 +41,10 @@ max-complexity = 15
 # The gate's modules import one another by bare name from tools/, as the
 # tests do, so Ruff has to treat them as first-party.
 known-first-party = [
+    "check_external_links",
+    "check_issues",
     "check_repo",
+    "check_rulesets",
     "demo_cleanup_fixtures",
     "gate_fixture",
     "reformat",
