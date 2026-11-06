@@ -10,7 +10,7 @@ unless -Mode gives the answer:
 - Production: the four modules of src\.
 - Development: the production modules and the regression module of test\,
   for a workbook that runs the regression suite and release certification.
-- Demo: the production modules and the two modules of demo\.
+- Demo: the production modules and the modules of demo\.
 
 Every module the configuration lists is replaced from the source. Modules
 the configuration does not list stay in the workbook: a synchronization
