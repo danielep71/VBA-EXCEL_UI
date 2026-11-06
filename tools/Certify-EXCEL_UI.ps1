@@ -199,7 +199,10 @@ function Invoke-Git([string[]]$Arguments) {
     if ($result.ExitCode -ne 0) {
         throw ('git {0} failed: {1}' -f ($Arguments -join ' '), $result.Error.Trim())
     }
-    return $result.Output
+    # The unary comma returns the byte array as one object. Without it
+    # PowerShell enumerates the array, so an empty output (the status of a
+    # clean checkout) reaches the caller as $null and other output as Object[].
+    return ,$result.Output
 }
 
 function Get-Sha256Hex([byte[]]$Bytes) {
