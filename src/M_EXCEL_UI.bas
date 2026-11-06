@@ -8,7 +8,7 @@ Option Private Module
 ' PURPOSE
 '   Centralizes visibility control for the Excel UI elements managed by this
 '   package, combining Excel object-model elements with delegated WinAPI
-'   title-bar control for the main window represented by Application.Hwnd.
+'   title-bar control for the top-level frame of the active window.
 '
 ' WHY THIS EXISTS
 '   Workbook-driven solutions often need a constrained or application-style
@@ -44,13 +44,14 @@ Option Private Module
 '
 ' MANAGED UI SURFACE
 '   Application-level, affecting the current Excel instance:
-'     Ribbon, Status Bar, Scroll Bars, Formula Bar
+'     Status Bar, Scroll Bars, Formula Bar
 '
 '   Window-level, affecting the requested target scope:
 '     Headings, Workbook Tabs, Gridlines
 '
-'   Main-window frame:
-'     Title Bar
+'   Active window only. Under the Single Document Interface each workbook
+'   window has its own Ribbon and frame, and neither accepts a target:
+'     Ribbon, Title Bar
 '
 ' DESIGN PRINCIPLES
 '   1. Explicit caller intent. Tri-state values rather than ambiguous optional
@@ -174,7 +175,7 @@ Public Sub UI_SetExcelUI( _
 ' BEHAVIOR
 '   - Applies application-level settings to the current Excel instance.
 '   - Applies window-level settings to the requested target scope.
-'   - Applies title-bar visibility to Application.Hwnd.
+'   - Applies title-bar visibility to the active window's frame.
 '   - Continues after an element-level failure.
 '
 ' ERROR POLICY
@@ -1170,7 +1171,7 @@ Private Function UI_ApplyExcelUIState( _
 '   - Applies window-level state to all Excel windows, the active window, or
 '     all windows belonging to the active workbook.
 '   - TargetScope never changes the Ribbon, application-level properties, or
-'     the Excel main-window title bar.
+'     the active window's title bar.
 '   - Preserves ScreenUpdating through a quiet-update scope.
 '
 ' ERROR POLICY
@@ -1502,7 +1503,7 @@ Private Function UI_ApplyExcelUIState( _
 '------------------------------------------------------------------------------
 ' APPLY TITLE-BAR STATE
 '------------------------------------------------------------------------------
-    'Apply the frame state; TargetScope never affects the main window
+    'Apply the frame state; TargetScope never affects the title bar
         If ValidTitleBar And TitleBar <> UI_LeaveUnchanged Then
             ShowFlag = UI_VisibilityToBoolean(TitleBar)
 

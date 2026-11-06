@@ -41,6 +41,10 @@ Option Private Module
 '     - UI_RuntimeTryGetBooleanProperty
 '     - UI_RuntimeTrySetBooleanPropertyIfNeeded
 '
+'   Regression seams:
+'     - UI_InternalInjectFailureListGrowthFailure
+'     - UI_InternalInjectQuietUpdateFault
+'
 ' DESIGN PRINCIPLES
 '   - Every Try... entry point returns a Boolean and reports its reason through
 '     a ByRef FailMsg rather than raising to the caller.
@@ -49,7 +53,9 @@ Option Private Module
 '   - A failed read never blocks the corresponding write; it only disables the
 '     no-op short circuit.
 '   - Diagnostics are data, not user interface. Nothing here displays a dialog.
-'   - The module holds no mutable state, so it has no lifecycle of its own.
+'   - The only mutable module state is the two one-shot regression seams,
+'     m_InjectFailureListGrowthFailure and m_InjectQuietUpdateFault. Each is
+'     consumed by its next use, so the module has no lifecycle of its own.
 '
 ' DIAGNOSTIC CONTRACT
 '   Failures are recorded in insertion order as:
@@ -101,6 +107,10 @@ Option Private Module
 '     is attempted, not assumed; see DIAGNOSTIC DURABILITY above.
 '
 ' UPDATED
+'   2026-11-06 - Header and comments aligned with the code (#114).
+'   2026-08-29 - The quiet-update scope claims ownership only after a readback
+'                confirms suppression. Added the
+'                UI_InternalInjectQuietUpdateFault seam.
 '   2026-08-19 - Failure accumulation made non-raising, so a diagnostic failure
 '                can no longer replace the failure being diagnosed. Fixes
 '                ICR-UI-P2-02.

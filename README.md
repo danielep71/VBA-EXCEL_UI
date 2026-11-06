@@ -8,7 +8,7 @@
 
 <br>
 
-[![Excel VBA](https://img.shields.io/badge/Excel_VBA-32%20%2F%2064--bit-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-EXCEL_UI)
+[![Excel VBA](https://img.shields.io/badge/Excel_VBA-64--bit%20certified-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-EXCEL_UI)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
 [![API](https://img.shields.io/badge/API-Backward_Compatible-6f42c1?style=for-the-badge)](#public-api)
 [![Modules](https://img.shields.io/badge/Production_Modules-4-c2185b?style=for-the-badge)](INSTALLATION.md)
@@ -134,10 +134,13 @@ captured from. Measurements and the planned fix are in
 
 > [!IMPORTANT]
 > **Source compatibility is not package compatibility.** Every public `UI_...`
-> procedure and enum member is unchanged from `1.0.1`, so no call site needs
-> editing. Upgrading nonetheless means replacing **all four** `src/` modules
-> together: the internal boundaries between them changed at `1.1.0`, and a
-> project holding a mixture of versions will not compile.
+> procedure and enum member from `1.0.1` keeps its name, parameter order and
+> defaults; `1.1.0` only added members (`UIWindowTargetScope`, an optional
+> trailing `TargetScope` argument and the two snapshot `_WithResult`
+> functions), so no call site needs editing. Upgrading nonetheless means
+> replacing **all four** `src/` modules together: the internal boundaries
+> between them changed at `1.1.0`, and a project holding a mixture of versions
+> will not compile.
 
 ### 1. Import the complete production package
 
@@ -368,7 +371,7 @@ Supported values:
 | `UI_TargetActiveWindow` | Apply only to `Application.ActiveWindow` |
 | `UI_TargetActiveWorkbookWindows` | Apply to all windows in `ActiveWorkbook.Windows` |
 
-Ribbon, Status Bar, Scroll Bars, Formula Bar, and Title Bar keep their existing application/main-window scope.
+`TargetScope` does not apply to the other elements. Status Bar, Scroll Bars and Formula Bar are application-level; the Ribbon and the title bar act on whichever window is active, as the managed UI surface table above shows.
 
 An unsupported target value is handled through the established best-effort diagnostics contract. Valid application-level operations can still proceed, while window-level writes are suppressed when no safe scope can be resolved.
 
@@ -434,10 +437,12 @@ Expected behavior:
 - a closed, recreated, or otherwise unusable captured window is reported as a best-effort failure;
 - state is never intentionally applied to a different replacement window.
 
-The v1.1.3 implementation pairs the retained Excel `Window` with the native
-handle read from that same object's `Window.hWnd`. Restore requires that the
-retained object still reports the captured handle; a handle alone is never
-accepted as generation identity.
+On `release/v1.1.3` (not yet released, and not in v1.1.2), the implementation
+pairs the retained Excel `Window` with the native handle read from that same
+object's `Window.hWnd`. Restore requires that the retained object still reports
+the captured handle; a handle alone is never accepted as generation identity.
+The proof for that branch is incomplete until
+[#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) and [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) close.
 
 The Ribbon is also not identity-safe in v1.1.2. Its APIs act on the active
 window and accept no window argument, so a snapshot restored while a different
@@ -451,7 +456,7 @@ Every captured element carries a `Known` flag recording whether its value was ac
 > Snapshot restoration is not persistent or transactional. It cannot survive a VBA project reset or guarantee rollback after Excel process termination.
 
 > [!IMPORTANT]
-> A snapshot retains a live `Window` reference per captured window, and restoring does not release them: the snapshot is deliberately kept so it can be replayed. Call `UI_ClearExcelUIStateSnapshot` when the baseline is no longer needed — `Workbook_BeforeClose` is the natural place. See [snapshot ownership](INSTALLATION.md#snapshot-ownership).
+> A snapshot retains a live `Window` reference per captured window, and restoring does not release them: the snapshot is deliberately kept so it can be replayed. Call `UI_ClearExcelUIStateSnapshot` when the baseline is no longer needed — `Workbook_BeforeClose` is the natural place. See [snapshot ownership](INSTALLATION.md#snapshot-lifetime-and-window-references).
 
 ---
 
@@ -467,14 +472,19 @@ The title-bar subsystem owns only these `GWL_STYLE` bits:
 
 Showing the title bar merges the captured owned bits into the current style. It does not restore an entire historical style value, so unrelated style changes are preserved.
 
-When a show is requested, a stored baseline is usable only when `HasBaseline`
-is true and the baseline contains `WS_CAPTION`. Zero and non-zero captionless
-baselines use the safe visible-frame fallback. Every show, including a no-op,
-reads the live style back and requires `WS_CAPTION` before reporting success.
+In v1.1.2, a show falls back to the safe visible frame only when the stored
+baseline is all zero, so a non-zero baseline without a caption can still be
+re-applied ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)). On `release/v1.1.3` a stored baseline is used only
+when `HasBaseline` is true, and every show, including a no-op, reads the live
+style back before reporting success. Both checks still accept a style that
+carries only one of the two bits that make up `WS_CAPTION` (`WS_BORDER` or
+`WS_DLGFRAME`); requiring the complete `WS_CAPTION` mask is open under
+[#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6), with its bounded negative control under [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66).
 
-Frame state is held per top-level window rather than once per process. Each hWnd
-slot retains its owning Excel `Window` object as a generation token; equal style
-bits are only a consistency check and cannot authenticate a recycled handle.
+Frame state is held per top-level window rather than once per process. On
+`release/v1.1.3`, each hWnd slot also retains its owning Excel `Window` object
+as a generation token; equal style bits are only a consistency check and cannot
+authenticate a recycled handle ([#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) remains open).
 While the component does not own a hidden
 state for a window, the live owned bits are re-read on every call, so a
 legitimate frame change made by Excel or another add-in is adopted rather than
@@ -552,13 +562,15 @@ test/M_EXCEL_UI_REGRESSION_TESTS.bas
 Public runners:
 
 ```vb
-Test_EXCEL_UI_RunReleaseCertification   ' the release gate
-Test_EXCEL_UI_RunAll                    ' interactive, non-destructive
+Test_EXCEL_UI_RunReleaseCertification     ' the release gate
+Test_EXCEL_UI_RunAll                      ' interactive; opens and closes temporary windows
 Test_EXCEL_UI_RunCore
 Test_EXCEL_UI_RunTitleBarOnly
 Test_EXCEL_UI_RunSnapshotIdentity
-Test_EXCEL_UI_RunTitleBarSdiIdentity    ' destructive: opens and closes windows
-Test_EXCEL_UI_RunRibbonSdiProbe         ' characterization, asserts nothing
+Test_EXCEL_UI_RunTitleBarSdiIdentity      ' destructive: opens and closes windows
+Test_EXCEL_UI_RunRibbonSdiProbe           ' characterization, asserts nothing
+Test_EXCEL_UI_RunCertificationSelfTest    ' standalone: a failed certification must re-raise
+Test_EXCEL_UI_RunOwnershipCleanupChecks   ' standalone: runner-owned snapshots are always released
 ```
 
 To certify a release, run one command:
@@ -582,8 +594,9 @@ skipped a mandatory unit is not a pass, whatever the assertions that did execute
 reported.
 
 `Test_EXCEL_UI_RunAll` remains the interactive runner and is **not** the release
-gate: it executes no multi-window case and produces no machine-readable
-evidence.
+gate. It opens and closes temporary windows and workbooks for its targeting and
+handle-reuse cases, but it does not run the snapshot-identity and SDI identity
+units, and it produces no machine-readable evidence.
 
 The suite covers:
 
@@ -644,7 +657,7 @@ Release-asset preparation should include:
 3. run the applicable regression sequence;
 4. perform manual UI recovery checks;
 5. save the `.xlsm`;
-6. optionally calculate and publish a SHA-256 checksum;
+6. calculate its SHA-256 checksum and publish it with the release;
 7. attach the workbook to the GitHub Release.
 
 Users who want a ready-to-run workbook should obtain it from the repository's **Releases** page rather than from the source tree.
@@ -672,8 +685,10 @@ VBA-EXCEL_UI/
 │  ├─ M_DEMO_BUILDER.bas
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ docs/
+│  ├─ ISSUE_LABELS.md
 │  ├─ RIBBON_SDI_BEHAVIOR.md
 │  └─ VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md
+├─ images/
 ├─ src/
 │  ├─ M_EXCEL_UI.bas
 │  ├─ M_EXCEL_UI_RUNTIME.bas
@@ -681,15 +696,23 @@ VBA-EXCEL_UI/
 │  └─ M_EXCEL_UI_TITLEBAR.bas
 ├─ test/
 │  └─ M_EXCEL_UI_REGRESSION_TESTS.bas
+├─ tests/
+├─ tools/
+├─ AGENTS.md
 ├─ CHANGELOG.md
 ├─ CODE_OF_CONDUCT.md
 ├─ CONTRIBUTING.md
 ├─ INSTALLATION.md
 ├─ LICENSE
 ├─ README.md
+├─ RELEASING.md
 ├─ SECURITY.md
-└─ VERSION
+├─ VERSION
+└─ pyproject.toml
 ```
+
+`tools/` holds the Python static gate and its helpers, `tests/` the unit tests
+for that gate, and `images/` the documentation images.
 
 The source repository intentionally contains no versioned demo `.xlsm`. Release binaries are attached to tagged GitHub Releases.
 
@@ -701,7 +724,11 @@ The source repository intentionally contains no versioned demo `.xlsm`. Release 
 | [README.md](README.md) | Project overview, API, architecture, behavior, limitations |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow and module-boundary rules |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [RELEASING.md](RELEASING.md) | Release preparation, certification, evidence and publication |
 | [SECURITY.md](SECURITY.md) | Security reporting and safe-use boundaries |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Expected conduct and how it is enforced |
+| [AGENTS.md](AGENTS.md) | Instructions for automated coding assistants working in this repository |
+| [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md) | Issue labels, priorities, milestones, target dates and the issue workflows |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
 | [v1.1.3 implementation sequence](docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md) | Ordered issue dependencies, release gates, and the milestone issue snapshot |
 | [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |
@@ -717,7 +744,9 @@ The source repository intentionally contains no versioned demo `.xlsm`. Release 
 - a macro-enabled workbook or add-in host;
 - VBA project access for importing `.bas` modules;
 - VBA7;
-- 32-bit or 64-bit Office;
+- 64-bit Office, on which releases are certified. The WinAPI declarations also
+  compile for 32-bit Office, but no release has been certified there yet
+  ([#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51));
 - host policy permitting the required WinAPI calls.
 
 Unsupported:
@@ -736,12 +765,14 @@ No third-party DLL, COM component, package manager, or non-standard VBA referenc
 - **Windows only.** Title-bar control depends on WinAPI.
 - **Current Excel instance.** Application-level properties affect the running Excel process.
 - **Targeted window operations.** Headings, Workbook Tabs, and Gridlines support all windows, active window, or active-workbook windows.
-- **Retained identity, in memory only.** Window identity is retained by object reference and the title bar pairs that object with its `Window.hWnd`; snapshots do not survive VBA reset or Excel restart.
+- **Retained identity, in memory only.** Window identity is retained by object reference; on `release/v1.1.3` the title bar also pairs that object with its `Window.hWnd`. Snapshots do not survive VBA reset or Excel restart.
 - **Changed window set after capture.** New windows are unchanged; missing captured windows produce diagnostics.
 - **Ribbon restoration is not window-identity-safe.** Every Ribbon mechanism acts on the active window and accepts no window argument, so a snapshot restored while a different window is active applies the captured value to that window. See [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md).
-- **Native frame corrections require v1.1.3 certification.** The branch repairs
-  #32, #45 and #6, but those guarantees are not release claims until the exact
-  source passes the Excel regression and release gates.
+- **Native frame corrections are incomplete.** `release/v1.1.3` carries partial
+  corrections for [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32), [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) and [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6). All three are still
+  open, and none of them is a release claim until the exact source passes the
+  Excel regression and release gates; see the release boundaries in
+  [INSTALLATION.md](INSTALLATION.md).
 - **Best-effort Ribbon and frame behavior.** Excel, Windows, add-ins, and window mode can affect visible results.
 - **No durable transaction.** Process termination can prevent restoration.
 - **Not a security boundary.** Hidden Excel UI does not prevent other code or informed users from changing state.
@@ -753,9 +784,9 @@ No third-party DLL, COM component, package manager, or non-standard VBA referenc
 
 ### v1.1.2 — correctness release
 
-Addresses the findings of an independent review of `v1.1.1`, cited by their
-`ICR-UI-111-*` identifiers, together with three defects found while correcting
-them. The public API is
+Addresses three findings of an independent review of `v1.1.1`, cited by their
+`ICR-UI-111-*` identifiers, together with four defects found during the
+release. The public API is
 unchanged: no procedure, enum or parameter was added, removed or renamed, and no
 existing call site requires modification.
 
@@ -818,10 +849,11 @@ or renamed, and no existing call site requires modification.
 
 ## 📌 Status
 
-Stable. The public `UI_...` surface established in `1.0.1` is preserved
-unchanged through `1.1.2`, alongside object-identity snapshots, per-window
-title-bar ownership, structured snapshot results, a four-module internal
-architecture and backward-compatible window targeting. The current v1.1.2
+Stable. Every public `UI_...` procedure and enum member established in `1.0.1`
+is preserved through `1.1.2`. `1.1.0` added backward-compatible window
+targeting and structured snapshot results to that surface, alongside
+object-identity snapshots, per-window title-bar ownership and a four-module
+internal architecture. The current v1.1.2
 runtime and assurance boundaries are tracked in
 [INSTALLATION.md](INSTALLATION.md#current-release-boundaries).
 

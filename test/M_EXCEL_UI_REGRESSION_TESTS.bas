@@ -27,6 +27,11 @@ Option Private Module
 '   - Test_EXCEL_UI_RunCore
 '   - Test_EXCEL_UI_RunTitleBarOnly
 '   - Test_EXCEL_UI_RunSnapshotIdentity
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'   - Test_EXCEL_UI_RunReleaseCertification
+'   - Test_EXCEL_UI_RunCertificationSelfTest
+'   - Test_EXCEL_UI_RunOwnershipCleanupChecks
+'   - Test_EXCEL_UI_RunRibbonSdiProbe
 '
 ' TEST SCOPE
 '   Core tests
@@ -94,6 +99,7 @@ Option Private Module
 '   - Assumes the EXCEL_UI module is present in the same VBA project
 '
 ' UPDATED
+'   2026-11-06 - Header and comments aligned with the code (#114).
 '   2026-08-21 - Registered every frame-state case in the pack certification
 '                runs, added the stale-frame-entry and certification-cleanup
 '                cases, and stopped certification destroying the error it
@@ -573,9 +579,10 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   complete/incomplete and pass/fail verdict with machine-readable evidence.
 '
 ' WHY THIS EXISTS
-'   The existing runners cannot certify a release. Test_EXCEL_UI_RunAll executes
-'   no multi-window case, silently skips the snapshot cases when a snapshot
-'   already exists, and reports its outcome only as Immediate Window prose. A
+'   The existing runners cannot certify a release. Test_EXCEL_UI_RunAll does
+'   not run the snapshot-identity and SDI identity units, silently skips the
+'   snapshot cases when a snapshot already exists, and reports its outcome
+'   only as Immediate Window prose. A
 '   reader of that output cannot distinguish
 '
 '       a complete pass
@@ -1255,9 +1262,10 @@ Private Function TST_CertIsWindowUsable( _
 '   - Does not raise.
 '
 ' CALLED FROM
-'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_CertEvaluateCleanup
 '
 ' UPDATED
+'   2026-08-21
 '   2026-08-19
 '==============================================================================
 '
@@ -1319,9 +1327,10 @@ Private Function TST_CertAppendDetail( _
 '   - Does not raise.
 '
 ' CALLED FROM
-'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_CertEvaluateCleanup
 '
 ' UPDATED
+'   2026-08-21
 '   2026-08-19
 '==============================================================================
 '
@@ -2013,11 +2022,12 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
 '   and record the result as evidence.
 '
 ' WHY THIS EXISTS
-'   README.md states the Ribbon scope as "Excel application", which a reader will
-'   take to mean one state shared by every workbook window. Under the Single
-'   Document Interface each workbook window has its own Ribbon UI, and nothing
-'   in the component verifies that the documented scope is the scope Excel
-'   actually implements. The claim is currently an assumption.
+'   README.md once stated the Ribbon scope as "Excel application", which a
+'   reader would take to mean one state shared by every workbook window. Under
+'   the Single Document Interface each workbook window has its own Ribbon UI,
+'   and nothing in the component verified that claim. This probe measured it:
+'   README.md now states the Ribbon scope as the active window, and
+'   docs/RIBBON_SDI_BEHAVIOR.md records the measurement.
 '
 '   This is deliberately a PROBE and not a test. It asserts nothing, because
 '   there is no agreed correct answer yet: the point is to discover what the
@@ -2053,6 +2063,7 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
 '   Results belong in docs/RIBBON_SDI_BEHAVIOR.md, one block per host tested.
 '
 ' UPDATED
+'   2026-08-20 - README.md now states the active-window Ribbon scope.
 '   2026-08-19
 '==============================================================================
 '
@@ -2540,10 +2551,10 @@ Public Sub Test_EXCEL_UI_RunAll()
 '   - TST_RunRegressionPack
 '
 ' NOTES
-'   This is NOT the release gate. It runs no multi-window case, it can skip
-'   snapshot cases silently when a snapshot already exists, and it produces no
-'   machine-readable evidence. Use Test_EXCEL_UI_RunReleaseCertification to
-'   certify a release.
+'   This is NOT the release gate. It does not run the snapshot-identity and SDI
+'   identity units, it can skip snapshot cases silently when a snapshot
+'   already exists, and it produces no machine-readable evidence. Use
+'   Test_EXCEL_UI_RunReleaseCertification to certify a release.
 '
 ' UPDATED
 '   2026-08-19
@@ -3008,8 +3019,10 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '
 ' NOTES
 '   Destructive: creates and closes temporary workbooks. It is deliberately a
-'   separate runner rather than part of Test_EXCEL_UI_RunAll, because RunAll is
-'   currently non-destructive. Folding every mandatory case into one runner is
+'   separate runner rather than part of Test_EXCEL_UI_RunAll. RunAll also opens
+'   and closes temporary windows and workbooks for its targeting and
+'   handle-reuse cases, but it does not run these SDI identity cases. Folding
+'   every mandatory case into one runner is
 '   tracked separately as the release-certification work.
 '
 ' UPDATED
@@ -5655,7 +5668,6 @@ Private Sub TST_Case_SnapshotCapturePartialApplicationRead()
 ' DEPENDENCIES
 '   - UI_CaptureExcelUIState_WithResult
 '   - UI_ResetExcelUIToSnapshot_WithResult
-'   - UI_HasExcelUIStateSnapshot
 '   - UI_ClearExcelUIStateSnapshot
 '   - UI_SetExcelUI
 '   - TST_AssertResultSuccess
@@ -5680,6 +5692,7 @@ Private Sub TST_Case_SnapshotCapturePartialApplicationRead()
 '   longer treat the three properties as one indivisible step.
 '
 ' UPDATED
+'   2026-11-06
 '   2026-08-18
 '==============================================================================
 '
@@ -7946,7 +7959,9 @@ Private Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 '   longer prove describes the window its handle names.
 '
 ' WHY THIS EXISTS
-'   This is the regression for ICR-UI-111-P2-01. Windows reissues a window
+'   This guards the different-owned-bits form of ICR-UI-111-P2-01. The
+'   equal-bits form, ICR-UI-112-P2-02 (#32), remains open and is exercised by
+'   TST_Case_TitleBarSameStyleHandleReuse. Windows reissues a window
 '   handle once the window holding it has closed, and IsWindow answers for
 '   whichever window holds the handle now, so a handle match was accepted as
 '   proof of identity. A show could then restore a closed window's captured
@@ -7955,8 +7970,8 @@ Private Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 '   A reissued handle cannot be forced on demand, so this case reproduces what
 '   the registry actually sees: an entry claiming the frame is hidden while the
 '   window it names carries owned bits the component never wrote. That is the
-'   same evidence a reissued handle presents, and it is the evidence the fix
-'   acts on.
+'   same evidence a reissued handle with different owned bits presents, and
+'   it is the evidence the owned-bits check acts on.
 '
 ' RETURNS
 '   None.
@@ -7976,6 +7991,7 @@ Private Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 '   the stale baseline before drawing any conclusion from it.
 '
 ' UPDATED
+'   2026-11-02
 '   2026-08-21
 '==============================================================================
 '
@@ -10717,7 +10733,6 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 '   - UI_CaptureExcelUIState
 '   - UI_ClearExcelUIStateSnapshot
 '   - UI_ResetExcelUIToSnapshot
-'   - UI_HasExcelUIStateSnapshot
 '   - TST_AssertRefusal
 '   - TST_AssertSnapshotAvailability
 '   - TST_AssertApplicationProperty
@@ -10736,6 +10751,7 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 '   only host mutation here is this case's own capture, mutate and restore.
 '
 ' UPDATED
+'   2026-11-06
 '   2026-08-29
 '==============================================================================
 '

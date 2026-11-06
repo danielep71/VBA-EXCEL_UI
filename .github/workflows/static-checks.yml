@@ -145,6 +145,10 @@ jobs:
         if: always()
         run: mypy --strict tools
 
+      - name: Type-check the gate's tests with mypy --strict
+        if: always()
+        run: mypy --strict tests
+
   minimum-python:
     # Not a required check: it reports when the tools stop running on the
     # oldest supported Python version, without blocking a merge on it.

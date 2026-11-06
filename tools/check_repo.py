@@ -12,7 +12,8 @@ Each check is independent and reports every finding it has rather than stopping
 at the first, because a contributor fixing one problem per push is a bad use of
 their time.
 
-Exit status is 0 when every check passed, 1 otherwise.
+Exit status is 0 when every check passed, 1 otherwise. --help prints the usage
+and exits 0 without running a check.
 """
 
 import fnmatch
@@ -351,7 +352,7 @@ def check_house_labels() -> None:
             for statement in statements(raw):
                 code = code_only(statement).strip()
                 if re.fullmatch(r'\w+:', code) and code[:-1] not in HOUSE_LABELS:
-                    fail('labels', f'{rel}:{n}: non-house label {code[:-1]!r}')
+                    fail('house-labels', f'{rel}:{n}: non-house label {code[:-1]!r}')
 
 
 def check_vba_analyzer() -> None:
@@ -1902,7 +1903,24 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
 ]
 
 
-def main() -> int:
+USAGE = """usage:
+  check_repo.py           run every static check against this checkout
+  check_repo.py --help    print this message and exit
+
+Exit status is 0 when every check passed, 1 when any check failed, and 2 for
+an unknown argument.
+"""
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args in (["-h"], ["--help"]):
+        print(USAGE, end="")
+        return 0
+    if args:
+        print(USAGE, end="", file=sys.stderr)
+        return 2
+
     print(f"VBA-EXCEL_UI static gate\nrepository: {REPO}\n")
 
     for label, fn in CHECKS:
