@@ -8,6 +8,9 @@ name: Sync issue labels
 
 on:
   pull_request:
+    branches:
+      - main
+      - 'release/**'
     paths:
       - .github/labels.json
       - .github/scripts/labels-sync.mjs
@@ -22,9 +25,14 @@ on:
 permissions:
   contents: read
 
+# Pull requests share one group per ref, so a newer push cancels the run it
+# supersedes. Every other run gets a group of its own (its run id): GitHub
+# replaces a pending run when a newer one joins the same group, even without
+# cancel-in-progress, and a shared group would let a later push to main,
+# release/** or a tag drop an earlier commit's queued run and its evidence.
 concurrency:
-  group: labels-sync-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: labels-sync-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -64,6 +72,13 @@ jobs:
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # Runs have separate groups above, so reconciliations would otherwise
+    # overlap and an older manifest could finish last. This group runs them
+    # one at a time; a queued one is replaced only by a newer reconciliation,
+    # which applies the newer manifest.
+    concurrency:
+      group: labels-sync-reconcile
+      cancel-in-progress: false
     permissions:
       contents: read
       issues: write
