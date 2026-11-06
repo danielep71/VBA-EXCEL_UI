@@ -134,8 +134,10 @@ captured from. Measurements and the planned fix are in
 
 > [!IMPORTANT]
 > **Source compatibility is not package compatibility.** Every public `UI_...`
-> procedure and enum member is unchanged from `1.0.1`, so no call site needs
-> editing. Upgrading nonetheless means replacing **all four** `src/` modules
+> procedure and enum member from `1.0.1` keeps its name, parameter order and
+> defaults; `1.1.0` only added members (`UIWindowTargetScope`, an optional
+> trailing `TargetScope` argument and the two snapshot `_WithResult`
+> functions), so no call site needs editing. Upgrading nonetheless means replacing **all four** `src/` modules
 > together: the internal boundaries between them changed at `1.1.0`, and a
 > project holding a mixture of versions will not compile.
 
@@ -559,13 +561,15 @@ test/M_EXCEL_UI_REGRESSION_TESTS.bas
 Public runners:
 
 ```vb
-Test_EXCEL_UI_RunReleaseCertification   ' the release gate
-Test_EXCEL_UI_RunAll                    ' interactive; opens and closes temporary windows
+Test_EXCEL_UI_RunReleaseCertification     ' the release gate
+Test_EXCEL_UI_RunAll                      ' interactive; opens and closes temporary windows
 Test_EXCEL_UI_RunCore
 Test_EXCEL_UI_RunTitleBarOnly
 Test_EXCEL_UI_RunSnapshotIdentity
-Test_EXCEL_UI_RunTitleBarSdiIdentity    ' destructive: opens and closes windows
-Test_EXCEL_UI_RunRibbonSdiProbe         ' characterization, asserts nothing
+Test_EXCEL_UI_RunTitleBarSdiIdentity      ' destructive: opens and closes windows
+Test_EXCEL_UI_RunRibbonSdiProbe           ' characterization, asserts nothing
+Test_EXCEL_UI_RunCertificationSelfTest    ' standalone: a failed certification must re-raise
+Test_EXCEL_UI_RunOwnershipCleanupChecks   ' standalone: runner-owned snapshots are always released
 ```
 
 To certify a release, run one command:
@@ -652,7 +656,7 @@ Release-asset preparation should include:
 3. run the applicable regression sequence;
 4. perform manual UI recovery checks;
 5. save the `.xlsm`;
-6. optionally calculate and publish a SHA-256 checksum;
+6. calculate its SHA-256 checksum and publish it with the release;
 7. attach the workbook to the GitHub Release.
 
 Users who want a ready-to-run workbook should obtain it from the repository's **Releases** page rather than from the source tree.
@@ -680,8 +684,10 @@ VBA-EXCEL_UI/
 │  ├─ M_DEMO_BUILDER.bas
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ docs/
+│  ├─ ISSUE_LABELS.md
 │  ├─ RIBBON_SDI_BEHAVIOR.md
 │  └─ VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md
+├─ images/
 ├─ src/
 │  ├─ M_EXCEL_UI.bas
 │  ├─ M_EXCEL_UI_RUNTIME.bas
@@ -689,15 +695,23 @@ VBA-EXCEL_UI/
 │  └─ M_EXCEL_UI_TITLEBAR.bas
 ├─ test/
 │  └─ M_EXCEL_UI_REGRESSION_TESTS.bas
+├─ tests/
+├─ tools/
+├─ AGENTS.md
 ├─ CHANGELOG.md
 ├─ CODE_OF_CONDUCT.md
 ├─ CONTRIBUTING.md
 ├─ INSTALLATION.md
 ├─ LICENSE
 ├─ README.md
+├─ RELEASING.md
 ├─ SECURITY.md
-└─ VERSION
+├─ VERSION
+└─ pyproject.toml
 ```
+
+`tools/` holds the Python static gate and its helpers, `tests/` the unit tests
+for that gate, and `images/` the documentation images.
 
 The source repository intentionally contains no versioned demo `.xlsm`. Release binaries are attached to tagged GitHub Releases.
 
@@ -709,7 +723,11 @@ The source repository intentionally contains no versioned demo `.xlsm`. Release 
 | [README.md](README.md) | Project overview, API, architecture, behavior, limitations |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow and module-boundary rules |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [RELEASING.md](RELEASING.md) | Release preparation, certification, evidence and publication |
 | [SECURITY.md](SECURITY.md) | Security reporting and safe-use boundaries |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Expected conduct and how it is enforced |
+| [AGENTS.md](AGENTS.md) | Instructions for automated coding assistants working in this repository |
+| [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md) | Issue labels, priorities, milestones, target dates and the issue workflows |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
 | [v1.1.3 implementation sequence](docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md) | Ordered issue dependencies, release gates, and the milestone issue snapshot |
 | [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |
@@ -765,9 +783,9 @@ No third-party DLL, COM component, package manager, or non-standard VBA referenc
 
 ### v1.1.2 — correctness release
 
-Addresses the findings of an independent review of `v1.1.1`, cited by their
-`ICR-UI-111-*` identifiers, together with three defects found while correcting
-them. The public API is
+Addresses three findings of an independent review of `v1.1.1`, cited by their
+`ICR-UI-111-*` identifiers, together with four defects found during the
+release. The public API is
 unchanged: no procedure, enum or parameter was added, removed or renamed, and no
 existing call site requires modification.
 
@@ -830,10 +848,11 @@ or renamed, and no existing call site requires modification.
 
 ## 📌 Status
 
-Stable. The public `UI_...` surface established in `1.0.1` is preserved
-unchanged through `1.1.2`, alongside object-identity snapshots, per-window
-title-bar ownership, structured snapshot results, a four-module internal
-architecture and backward-compatible window targeting. The current v1.1.2
+Stable. Every public `UI_...` procedure and enum member established in `1.0.1`
+is preserved through `1.1.2`. `1.1.0` added backward-compatible window
+targeting and structured snapshot results to that surface, alongside
+object-identity snapshots, per-window title-bar ownership and a four-module
+internal architecture. The current v1.1.2
 runtime and assurance boundaries are tracked in
 [INSTALLATION.md](INSTALLATION.md#current-release-boundaries).
 

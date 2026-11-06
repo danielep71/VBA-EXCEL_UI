@@ -1,7 +1,7 @@
 # Quality tools for the gate's own Python code: Ruff and mypy, run in CI only.
 #
 # tools/check_repo.py and tests/ use only the standard library and need none
-# of this. These two tools check that code, so I pin them exactly, with their
+# of this (the issue-form check and its tests also need Node.js). These two tools check that code, so I pin them exactly, with their
 # full dependency closure, and hash-lock every wheel. A file replaced upstream
 # under the same version number then fails the install instead of running.
 #

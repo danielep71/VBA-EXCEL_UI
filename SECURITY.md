@@ -66,8 +66,12 @@ Hiding Excel interface elements is a presentation and workflow feature. It is no
 If the project has not yet published a functional release, development code is
 pre-release and no production version is security-supported.
 
-Security fixes normally land on **main** and are included in a new tagged
-release. Older releases are not normally patched in place unless I
+Security fixes follow the
+[base-branch rule](CONTRIBUTING.md#base-branch): they start from **main**, except
+that while a release branch `release/vX.Y.Z` is open, a VBA correction for that
+release targets the release branch and reaches **main** with the release, and a
+non-VBA repository change is made on the release branch and mirrored to
+**main**. Each fix is included in a new tagged release. Older releases are not normally patched in place unless I
 state otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such
@@ -89,6 +93,11 @@ Use either private channel:
    GitHub private vulnerability reporting is available.
 2. Otherwise email **danielep71@gmail.com** with the subject:
    **Private security report — VBA-EXCEL_UI**.
+
+If you can use neither channel, open an issue with the **Private security
+contact** form and give only a way to reach you privately. That issue is
+visible to everyone who can read the repository's issues, so it must contain no
+vulnerability details. I reply with a private channel; send the report there.
 
 Include the smallest amount of information needed to reproduce and assess the
 issue:
@@ -258,7 +267,7 @@ after suspected exposure.
 Trusted distribution is limited to the official repository and its GitHub
 Releases page.
 
-Maintainers should:
+To keep the distribution trustworthy, I:
 
 - review executable and macro-enabled artifacts before publication;
 - pin third-party workflow actions to immutable commit SHAs;
@@ -333,8 +342,11 @@ The static workflow:
 is read-only and uploads nothing; only the push and scheduled job has
 `security-events: write`. **Workflow lint** runs a pinned actionlint release
 whose archive is verified by SHA-256 before it runs, with a read-only token.
-Dependabot (`.github/dependabot.yml`) proposes updates to the pinned Actions;
-nothing merges automatically.
+Dependabot (`.github/dependabot.yml`) proposes updates to the pinned Actions and
+to the hash-locked Python quality tools, on `main` and on the open release
+branch; nothing merges automatically. The actionlint version and SHA-256 in
+`.github/workflows/actionlint.yml` are outside Dependabot and are updated by
+hand.
 
 The issue workflows are documented in
 [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md). Only **Sync issue labels** has
@@ -350,7 +362,7 @@ read-only.
 **External links** requests the public URLs already published in the tracked
 Markdown files, weekly and on demand, with a read-only token and no secrets.
 
-The Wiki workflow checks the separately hosted Wiki against the root `VERSION`
+**Wiki badges** checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly
 schedule and relevant-change triggers and cannot write to the Wiki. It is
 present on both `main` and `release/v1.1.3`, so its scheduled and manual runs
