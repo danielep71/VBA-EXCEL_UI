@@ -51,6 +51,7 @@ known-first-party = [
     "compare_vba_export",
     "demo_cleanup_fixtures",
     "gate_fixture",
+    "make_titlebar_mutant",
     "reformat",
     "reformat_fixtures",
     "repository_policy",
