@@ -445,6 +445,23 @@ CI runs the static gate on every pull request. It cannot execute VBA — a hoste
 runner has no Excel — so certification remains a manual step on a real host, and
 the two are complementary rather than alternatives.
 
+On Windows, the workbook tools shorten that step:
+
+- `tools\Sync-EXCEL_UI-VBA.cmd` imports the modules of a configuration from
+  `tools/vba-projects.json` into a workbook ([docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md));
+- `tools\Export-EXCEL_UI-VBA.ps1` and `tools/compare_vba_export.py` check that a
+  workbook holds exactly the VBA of a commit;
+- `tools\Certify-EXCEL_UI.cmd` builds, compiles and certifies a development
+  workbook from the checked-out commit and writes an evidence folder that
+  `tools/check_excel_evidence.py` validates
+  ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
+
+The required job also runs `tools/check_vba_calls.py`, which resolves calls
+across the modules of each configuration
+([docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md)). It is advisory: its
+result appears in the job summary and never blocks a merge, because compiling
+in Excel remains the authoritative check.
+
 The Python tools under `tools/` need **Python 3.11 or later**, and the static
 gate needs only the standard library. The issue-form check
 (`python3 tools/check_issues.py --check-config`) and its tests in

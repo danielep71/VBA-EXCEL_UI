@@ -8,8 +8,11 @@ breaking the rule their fixtures exercise and expecting the self-test to say so.
 """
 
 import hashlib
+import json
 import re
 import unittest
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import patch
 
 from gate_fixture import GateTestCase, check_repo, reformat, vba_api, wiki_badges
@@ -66,6 +69,65 @@ class ModuleInventory(GateTestCase):
     def test_fails_on_a_documented_production_module_that_is_not_tracked(self) -> None:
         self.repo.remove("src/M_EXCEL_UI_SNAPSHOT.bas")
         self.assertFails("src/M_EXCEL_UI_SNAPSHOT.bas: listed in EXPECTED_PRODUCTION_MODULES but not tracked")
+
+
+class VbaProjectManifest(GateTestCase):
+    check = "VBA project manifest"
+    MANIFEST = "tools/vba-projects.json"
+
+    def edit(self, change: Callable[[dict[str, Any]], object]) -> None:
+        manifest = json.loads(self.repo.read_text(self.MANIFEST))
+        change(manifest)
+        self.repo.write(self.MANIFEST, json.dumps(manifest, indent=2) + "\n")
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_a_module_is_missing_from_the_manifest(self) -> None:
+        self.edit(lambda m: m["configurations"]["development"]["modules"].remove(TESTS))
+        self.assertFails(f"development does not list {TESTS}",
+                         f"{TESTS}: tracked module is in no configuration of {self.MANIFEST}")
+
+    def test_fails_on_a_new_module_that_no_configuration_lists(self) -> None:
+        self.repo.write("demo/M_DEMO_EXTRA.bas", 'Attribute VB_Name = "M_DEMO_EXTRA"\r\n')
+        self.assertFails("demo does not list demo/M_DEMO_EXTRA.bas",
+                         "demo/M_DEMO_EXTRA.bas: tracked module is in no configuration")
+
+    def test_fails_on_a_listed_path_that_does_not_exist(self) -> None:
+        self.edit(lambda m: m["configurations"]["production"]["modules"].append("src/M_GONE.bas"))
+        self.assertFails("production lists src/M_GONE.bas, which does not exist")
+
+    def test_fails_on_a_listed_file_that_git_does_not_track(self) -> None:
+        self.repo.write("src/M_LOCAL.bas", 'Attribute VB_Name = "M_LOCAL"\r\n', track=False)
+        self.edit(lambda m: m["configurations"]["production"]["modules"].append("src/M_LOCAL.bas"))
+        self.assertFails("production lists src/M_LOCAL.bas, which Git does not track")
+
+    def test_fails_on_a_module_in_the_wrong_configuration_or_listed_twice(self) -> None:
+        def change(manifest: dict[str, Any]) -> None:
+            manifest["configurations"]["production"]["modules"].append(TESTS)
+            manifest["configurations"]["demo"]["modules"].append(BUILDER)
+        self.edit(change)
+        self.assertFails(f"production lists {TESTS}, which does not belong to it",
+                         f"demo lists {BUILDER} more than once")
+
+    def test_fails_on_document_modules_or_a_missing_configuration(self) -> None:
+        def change(manifest: dict[str, Any]) -> None:
+            manifest["document_modules"] = ["src/ThisWorkbook.cls"]
+            del manifest["configurations"]["demo"]
+        self.edit(change)
+        self.assertFails("document_modules must be an empty list",
+                         "configuration 'demo' has no list of module paths",
+                         f"{BUILDER}: tracked module is in no configuration")
+
+    def test_fails_on_an_invalid_pattern(self) -> None:
+        self.edit(lambda m: m["project_name_patterns"].append("^M_("))
+        self.assertFails("project name pattern '^M_(' is invalid")
+
+    def test_fails_on_a_manifest_that_does_not_parse_or_is_missing(self) -> None:
+        self.repo.write(self.MANIFEST, "{ not json\n")
+        self.assertFails(f"{self.MANIFEST} is not valid JSON")
+        self.repo.remove(self.MANIFEST)
+        self.assertFails(f"{self.MANIFEST} is missing")
 
 
 class RequiredFiles(GateTestCase):
