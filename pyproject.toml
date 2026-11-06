@@ -46,6 +46,7 @@ known-first-party = [
     "check_issues",
     "check_repo",
     "check_rulesets",
+    "check_vba_calls",
     "demo_cleanup_fixtures",
     "gate_fixture",
     "reformat",
