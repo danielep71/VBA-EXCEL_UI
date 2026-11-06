@@ -286,6 +286,23 @@ class DynamicTargetTests(unittest.TestCase):
             self.assertIn((channel, "resolved"), statuses)
         self.assertNotIn("missing", [status for _, status in statuses])
 
+    def test_constants_are_evaluated_whole(self) -> None:
+        # A constant joined from literals names the whole result; anything else
+        # in an initializer leaves the constant unknown, never its first literal.
+        joined = self.report('    Const Target As String = "UI_" & "Tick"\n    Application.Run Target\n')
+        joined_module = analyze({"a.bas": mod("M_A", 'Private Const M_TARGET As String = "UI_" & "Tick"\n'
+                                              + self.PROCS + "Public Sub UI_Run()\n    Application.Run M_TARGET\n"
+                                              "End Sub\n")})
+        self.assertEqual(codes(joined), [])
+        self.assertIn(("Application.Run", "resolved"), entries(joined))
+        self.assertEqual(codes(joined_module), [])
+        self.assertIn(("Application.Run", "resolved"), entries(joined_module))
+        missing = self.report('    Const Target As String = "UI_" & "Gone"\n    Application.Run Target\n')
+        self.assertEqual(codes(missing), ["VBA-CALL-030"])
+        hidden = self.report('    Const Target As String = "UI_Tick" & Suffix\n    Application.Run Target\n')
+        self.assertEqual(codes(hidden), [])
+        self.assertIn(("Application.Run", "unknown-dynamic"), entries(hidden))
+
     def test_literal_targets_that_do_not_resolve(self) -> None:
         bad = self.report('    Application.Run "UI_Gone"\n'
                           '    Excel.Application.OnTime EarliestTime:=Now, Procedure:="UI_Gone2"\n'

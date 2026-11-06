@@ -294,6 +294,24 @@ def parse_params(tokens: list[Tok]) -> list[Param]:
     return params
 
 
+def constant_value(part: list[Tok]) -> str | None:
+    """The string a ``Const`` declaration assigns, when its initializer joins only string literals.
+
+    ``"UI_" & "Tick"`` is ``UI_Tick``. Any other initializer, even one that starts with a literal,
+    gives None, so the constant stays unknown rather than resolving to a prefix of its value.
+    """
+    equals = next((i for i, t in enumerate(part) if t.is_op("=")), None)
+    if equals is None or equals + 1 >= len(part):
+        return None
+    pieces = []
+    for piece in split_top(part[equals + 1:], "&"):
+        value = literal_value(piece[0]) if len(piece) == 1 else None
+        if value is None:
+            return None
+        pieces.append(value)
+    return "".join(pieces)
+
+
 def type_after_as(tokens: list[Tok], start: int) -> str | None:
     if start < len(tokens) and tokens[start].is_kw("as"):
         index = start + 1
@@ -531,9 +549,7 @@ def parse_module_declaration(module: Module, tokens: list[Tok], line: int) -> No
         declared_type = type_after_as(part, position)
         value = None
         if is_const:
-            equals = next((i for i, t in enumerate(part) if t.is_op("=")), None)
-            if equals is not None and equals + 1 < len(part):
-                value = literal_value(part[equals + 1])
+            value = constant_value(part)
         if withevents:
             module.withevents.add(name.casefold())
         add_member(module, Member(name, "const" if is_const else "var", visibility, line, declared_type, value))
@@ -557,8 +573,7 @@ def collect_locals(proc: Proc) -> None:
                 position = matching_paren(part, position) + 1
             value = None
             if tokens[0].is_kw("const"):
-                equals = next((i for i, t in enumerate(part) if t.is_op("=")), None)
-                value = literal_value(part[equals + 1]) if equals is not None and equals + 1 < len(part) else None
+                value = constant_value(part)
             existing = proc.locals.get(name)
             if existing is None or tokens[0].is_kw("dim", "static", "const"):
                 proc.locals[name] = (type_after_as(part, position), "const:" + (value or "") if value else "local")
