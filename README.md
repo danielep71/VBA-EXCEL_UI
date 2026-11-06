@@ -643,6 +643,9 @@ demo/M_DEMO_BUILDER.bas
 demo/M_DEMO_CLEANUP_TESTS.bas
 ```
 
+`demo/M_DEMO_CLEANUP_TESTS.bas` exists only on `release/v1.1.3` until v1.1.3 is
+released; `main` does not have it yet.
+
 The macro-enabled demo workbook is intentionally **not committed to Git**.
 
 For tagged releases, a tested workbook should be published as a GitHub Release asset, named for the tag it was built from:

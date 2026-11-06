@@ -362,8 +362,9 @@ Before closure, use disposable worksheets and a bounded host harness to test
 ordinary failure, missing/wrong password, reprotection and selection failure,
 and read back every captured option at the exact tested commit.
 
-`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook from
-the commit under test:
+`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness; it exists only on
+`release/v1.1.3` until v1.1.3 is released. Build a new demo workbook from the
+commit under test:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath "C:\work\EXCEL_UI_Demo.xlsm" -Mode Demo -NewWorkbook
