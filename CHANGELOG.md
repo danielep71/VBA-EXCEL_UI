@@ -441,6 +441,23 @@ measured against that baseline.
   Source fixtures guard these paths; Excel fault-injection and protection
   readback remain outstanding. Reset is still destructive, not transactional.
 
+- **Not yet certified.** The title-bar refusal cases now prove that a refused
+  call writes nothing to the active frame
+  ([#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45)). Each records
+  the frame's complete `GWL_STYLE` before the refused call and fails unless it
+  is identical afterwards: both restores without a snapshot, the closed-window
+  title-bar and Ribbon restores, and the other-active-window restores, where
+  the active frame is now hidden first so that a redirected write would show.
+  Two cases run in the `TitleBarSdiIdentity` certification unit:
+  `TST_Case_TitleBarPairRefusalLeavesFrameUntouched` drives the frame-pair
+  seam through `UI_SetExcelUI_WithResult`, `UI_SetExcelUI`, capture and two
+  restores, and `TST_Case_TitleBarClosedFrameReopenedIsRefused` closes the
+  captured window, opens another and hides its frame before restore.
+  [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) maps each
+  scenario to its cases and unit. No seam reaches the restore-time
+  Window/hWnd mismatch; it is exercised only when Windows reuses a closed
+  frame's handle. No Excel run has executed these cases.
+
 - Added stage diagnostics to the captionless-baseline regression (#66) and
   disabled its local handler before the saved-error re-raise, preventing that
   cleanup path from re-entering itself. A source regression guards the change.
