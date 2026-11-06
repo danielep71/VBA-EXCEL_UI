@@ -541,9 +541,13 @@ measured against that baseline.
 - **Not yet certified.** Ribbon snapshot restore now fails closed instead of
   applying the captured value to whichever window is active
   ([#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23), `ICR-UI-112-P1-01`). Capture records the Excel `Window` the
-  Ribbon was read from, and keeps the value only when that window is still
-  active after the read. Restore writes the Ribbon only while that same
-  `Window` object is open and active. Otherwise it reports an ordered
+  Ribbon was read from and its `Window.hWnd`, and keeps the value only when
+  the active window still reports that handle after the read. Restore writes
+  the Ribbon only while the retained `Window` is open, still reports that
+  handle, and the active window reports it too. Windows are compared by
+  handle because Excel returns a new wrapper from every read of
+  `Application.ActiveWindow`, so `Is` rejects even the same window (measured
+  on Excel 16.0 build 20430). Otherwise it reports an ordered
   `Ribbon | …` failure, writes nothing, and activates no window. The
   same-window capture and restore path is unchanged, and no public procedure,
   parameter, enum value or default changes. Real-host certification is still

@@ -7533,7 +7533,7 @@ Private Sub TST_Case_RibbonRestoreRefusesOtherActiveWindow()
 '------------------------------------------------------------------------------
     'Restore must not have moved focus to the captured window
         TST_AssertTrue _
-            ActualValue:=(ActiveWindow Is SecondWindow), _
+            ActualValue:=(ActiveWindow.hWnd = SecondWindow.hWnd), _
             AssertionName:="RibbonRestoreOtherActiveWindow.FocusUnchanged"
 
     'The active window must not have received the anchor's captured value

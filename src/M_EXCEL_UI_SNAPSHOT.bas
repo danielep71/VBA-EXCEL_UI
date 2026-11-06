@@ -76,12 +76,19 @@ Option Private Module
 '   Under the Single Document Interface each workbook window has its own
 '   Ribbon, and every mechanism this component can use to read or write it acts
 '   on the ACTIVE window and accepts no target. The Ribbon value is therefore
-'   captured with the Window it was read from, resolved from
-'   Application.ActiveWindow before the read and confirmed still active after
-'   it.
+'   captured with the Window it was read from and that Window's frame handle,
+'   Window.hWnd, both read from Application.ActiveWindow before the read. The
+'   active window's handle is read again after it and must be the same.
 '
-'   Restore applies the value only while that same Window object is the active
-'   window. When the captured window has closed, or another window is active,
+'   Windows are compared by handle, not with Is. Excel returns a new COM
+'   wrapper from every read of Application.ActiveWindow, so even
+'   "Application.ActiveWindow Is Application.ActiveWindow" is False on a real
+'   host (Excel 16.0 build 20430, measured 2026-11-06). As for the title bar,
+'   the retained Window object proves that the handle still names the captured
+'   window: its Window.hWnd must still equal the captured handle.
+'
+'   Restore applies the value only while the active window's handle is the
+'   captured one. When the captured window has closed, or another window is active,
 '   restore reports a Ribbon failure and writes nothing. It never activates the
 '   captured window to complete the restore: activation moves focus and fires
 '   workbook events, which is a separate, opt-in behavior (#44).
@@ -160,11 +167,18 @@ Private m_HasExcelUIStateSnapshot       As Boolean
 Private m_SnapshotRibbonKnown           As Boolean
 Private m_SnapshotRibbonVisible         As Boolean
 
-'Window the Ribbon value was read from. Every Ribbon mechanism acts on the
-'active window, so restore applies the value only while this exact object is
-'still the active window. The label is diagnostic only.
+'Window the Ribbon value was read from, and its frame handle at capture.
+'Every Ribbon mechanism acts on the active window, so restore applies the value
+'only while the active window's handle is this one and the retained Window
+'still reports it. The label is diagnostic only.
 Private m_SnapshotRibbonWindow          As Object
 Private m_SnapshotRibbonLabel           As String
+
+#If VBA7 Then
+    Private m_SnapshotRibbonHwnd        As LongPtr
+#Else
+    Private m_SnapshotRibbonHwnd        As Long
+#End If
 
 Private m_SnapshotStatusBarKnown        As Boolean
 Private m_SnapshotStatusBarVisible      As Boolean
@@ -980,6 +994,7 @@ Public Sub UI_SnapshotClear()
     'Release the captured Ribbon owner
         Set m_SnapshotRibbonWindow = Nothing
         m_SnapshotRibbonLabel = vbNullString
+        m_SnapshotRibbonHwnd = 0
 
     'Release the captured frame identity. The Window reference is dropped here
     'and only here, on the same terms as the per-window references below.
@@ -1233,10 +1248,11 @@ Private Function UI_SnapshotTryCaptureRibbon( _
 '
 ' BEHAVIOR
 '   - Clears any previously captured Ribbon value and owner first.
-'   - Resolves Application.ActiveWindow, reads the Ribbon, and resolves
-'     Application.ActiveWindow again.
-'   - Publishes the value, the Window and its diagnostic label only when both
-'     resolutions returned the same object.
+'   - Resolves Application.ActiveWindow and its Window.hWnd, reads the
+'     Ribbon, and reads the active window's Window.hWnd again.
+'   - Publishes the value, the Window, its handle and its diagnostic label
+'     only when both handles are the same. Windows are never compared with
+'     Is: Excel returns a new wrapper from every read of ActiveWindow.
 '
 ' ERROR POLICY
 '   - Does not raise to callers.
@@ -1251,6 +1267,8 @@ Private Function UI_SnapshotTryCaptureRibbon( _
 '   - UI_SnapshotCaptureCore
 '
 ' UPDATED
+'   2026-11-06 - Windows compared by Window.hWnd: Is rejects the same
+'                window on a real host.
 '   2026-11-03
 '==============================================================================
 '
@@ -1262,6 +1280,11 @@ Private Function UI_SnapshotTryCaptureRibbon( _
     Dim ActiveAfterRead     As Object          'Active window after the read
     Dim RibbonVisible       As Boolean         'Value read from the host
     Dim ReadMsg             As String          'Diagnostic returned by the read
+#If VBA7 Then
+    Dim OwnerHwnd           As LongPtr         'Frame of the owner before the read
+#Else
+    Dim OwnerHwnd           As Long            'Frame of the owner before the read
+#End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1279,6 +1302,7 @@ Private Function UI_SnapshotTryCaptureRibbon( _
         m_SnapshotRibbonVisible = False
         Set m_SnapshotRibbonWindow = Nothing
         m_SnapshotRibbonLabel = vbNullString
+        m_SnapshotRibbonHwnd = 0
 
 '------------------------------------------------------------------------------
 ' RESOLVE OWNER AND READ
@@ -1290,6 +1314,17 @@ Private Function UI_SnapshotTryCaptureRibbon( _
             FailMsg = _
                 "no active Excel Window owns the Ribbon; its state was not " & _
                 "captured"
+            GoTo Safe_Exit
+        End If
+
+    'The handle identifies the owner; a later wrapper of the same window is a
+    'different object, so Is cannot be used
+        OwnerHwnd = OwnerWindow.hWnd
+
+        If OwnerHwnd = 0 Then
+            FailMsg = _
+                "the active Excel Window reported no frame handle; the " & _
+                "Ribbon state was not captured"
             GoTo Safe_Exit
         End If
 
@@ -1305,7 +1340,14 @@ Private Function UI_SnapshotTryCaptureRibbon( _
     'different window from the one recorded as its owner
         Set ActiveAfterRead = Application.ActiveWindow
 
-        If Not (ActiveAfterRead Is OwnerWindow) Then
+        If ActiveAfterRead Is Nothing Then
+            FailMsg = _
+                "the active Excel Window changed while the Ribbon was read; " & _
+                "its state was not captured"
+            GoTo Safe_Exit
+        End If
+
+        If ActiveAfterRead.hWnd <> OwnerHwnd Then
             FailMsg = _
                 "the active Excel Window changed while the Ribbon was read; " & _
                 "its state was not captured"
@@ -1318,6 +1360,7 @@ Private Function UI_SnapshotTryCaptureRibbon( _
     'Keep the value only together with its owner
         m_SnapshotRibbonVisible = RibbonVisible
         Set m_SnapshotRibbonWindow = OwnerWindow
+        m_SnapshotRibbonHwnd = OwnerHwnd
         m_SnapshotRibbonLabel = UI_RuntimeBuildWindowLabel(OwnerWindow)
         m_SnapshotRibbonKnown = True
 
@@ -1339,6 +1382,7 @@ Err_Handler:
         m_SnapshotRibbonVisible = False
         Set m_SnapshotRibbonWindow = Nothing
         m_SnapshotRibbonLabel = vbNullString
+        m_SnapshotRibbonHwnd = 0
 
         UI_SnapshotTryCaptureRibbon = False
         FailMsg = UI_RuntimeBuildErrorText
@@ -1379,10 +1423,12 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
 '              written.
 '
 ' BEHAVIOR
-'   - Requires the retained Window object.
-'   - Requires that object to still respond to a non-mutating read.
-'   - Compares it with Application.ActiveWindow by object identity only, never
-'     by caption, workbook name, collection index or hWnd.
+'   - Requires the retained Window object and its captured handle.
+'   - Requires that object to still respond to a non-mutating read and to
+'     still report the captured Window.hWnd, so a reissued handle cannot pass.
+'   - Requires Application.ActiveWindow to report that same handle. Never
+'     compares windows with Is, and never by caption, workbook name or
+'     collection index.
 '   - Names the captured window in every failure message.
 '   - Never activates a window.
 '
@@ -1398,12 +1444,14 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
 '   - UI_SnapshotRestoreCore
 '
 ' NOTES
-'   The owner and the active window are both obtained from
-'   Application.ActiveWindow, so the comparison is between two references the
-'   host returned for the same property. The liveness probe reads
-'   DisplayHeadings, matching the other resolvers in this module.
+'   Excel returns a new COM wrapper from every read of
+'   Application.ActiveWindow, so Is rejects even the same window; the handle
+'   is the comparison that holds. The liveness probe reads DisplayHeadings,
+'   matching the other resolvers in this module.
 '
 ' UPDATED
+'   2026-11-06 - Windows compared by Window.hWnd: Is rejects the same
+'                window on a real host.
 '   2026-11-03
 '==============================================================================
 '
@@ -1415,6 +1463,11 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
     Dim ProbeValue          As Boolean         'Non-mutating probe output
     Dim ProbeMsg            As String          'Diagnostic returned by the probe
     Dim OwnerLabel          As String          'Captured window, for diagnostics
+#If VBA7 Then
+    Dim CurrentHwnd         As LongPtr         'Handle the retained Window reports
+#Else
+    Dim CurrentHwnd         As Long            'Handle the retained Window reports
+#End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1437,7 +1490,7 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
 ' VALIDATE OWNER
 '------------------------------------------------------------------------------
     'A value without its owner is never safe to restore
-        If m_SnapshotRibbonWindow Is Nothing Then
+        If m_SnapshotRibbonWindow Is Nothing Or m_SnapshotRibbonHwnd = 0 Then
             FailMsg = _
                 "captured Ribbon Window identity is unavailable; no state " & _
                 "was applied | " & OwnerLabel
@@ -1464,11 +1517,23 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
             GoTo Safe_Exit
         End If
 
+    'The retained Window must still own the captured frame, so a handle that
+    'Windows reissued to another window cannot pass for the owner
+        CurrentHwnd = m_SnapshotRibbonWindow.hWnd
+
+        If CurrentHwnd <> m_SnapshotRibbonHwnd Then
+            FailMsg = _
+                "captured Ribbon window is no longer open or usable; its " & _
+                "frame handle changed, so no state was applied | " & OwnerLabel
+            GoTo Safe_Exit
+        End If
+
 '------------------------------------------------------------------------------
 ' VALIDATE ACTIVE WINDOW
 '------------------------------------------------------------------------------
     'The Ribbon write acts on the active window, so the owner must be that
-    'window. Object identity is the only accepted proof.
+    'window. Excel returns a new wrapper from every read of ActiveWindow, so
+    'the frame handle, not Is, is the comparison that holds.
         Set ActiveNow = Application.ActiveWindow
 
         If ActiveNow Is Nothing Then
@@ -1478,7 +1543,7 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
             GoTo Safe_Exit
         End If
 
-        If Not (ActiveNow Is m_SnapshotRibbonWindow) Then
+        If ActiveNow.hWnd <> m_SnapshotRibbonHwnd Then
             FailMsg = _
                 "captured Ribbon window is not the active window; the " & _
                 "Ribbon acts only on the active window, so no state was " & _
