@@ -28,8 +28,8 @@ permissions:
 # Pull requests share one group per ref, so a newer push cancels the run it
 # supersedes. Every other run gets a group of its own (its run id): GitHub
 # replaces a pending run when a newer one joins the same group, even without
-# cancel-in-progress, and a shared group would let a later push to main,
-# release/** or a tag drop an earlier commit's queued run and its evidence.
+# cancel-in-progress, and a shared group would let a later push or manual run
+# drop an earlier commit's queued run and its evidence.
 concurrency:
   group: labels-sync-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
