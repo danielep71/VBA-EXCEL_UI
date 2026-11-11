@@ -238,6 +238,27 @@ function Get-SyncMode {
            $Configuration, $SyncScript, ($modes -join ', '))
 }
 
+function Assert-SyncManifest {
+    # The synchronizer builds from its own manifest, so the policy must name
+    # that manifest: otherwise the bundle would inventory one module set and
+    # the workbook would hold another. The synchronizer's path is read from
+    # its source, so it is not restated here.
+    param(
+        [Parameter(Mandatory = $true)][string]$Manifest,
+        [Parameter(Mandatory = $true)][string]$SyncScript
+    )
+    $match = Select-String -LiteralPath $SyncScript -Pattern '^\$ManifestRelativePath\s*=\s*"([^"]+)"' |
+        Select-Object -First 1
+    if ($null -eq $match) {
+        throw "Cannot find the manifest path in $SyncScript."
+    }
+    $syncManifest = $match.Matches[0].Groups[1].Value
+    if (($Manifest -replace '\\', '/') -ne ($syncManifest -replace '\\', '/')) {
+        throw ('The evidence policy names manifest {0}, but {1} builds from {2}.' -f
+               $Manifest, $SyncScript, $syncManifest)
+    }
+}
+
 function Read-EvidencePolicy([string]$Path) {
     # Reads .github\excel-evidence-policy.json and checks the entries this
     # script uses. tools\check_excel_evidence.py validates the whole file.
@@ -633,7 +654,7 @@ else {
     [void](New-Item -ItemType Directory -Path $script:BundleDir)
 }
 $script:SessionLog = Join-Path $script:BundleDir 'session.log'
-$Files = $script:Policy.required_files
+$PolicyFiles = $script:Policy.required_files
 $CertificationMacro = [string]$script:Policy.certification_runner
 $StepNames = @($script:Policy.steps | ForEach-Object { [string]$_ })
 $script:CurrentStep = $StepNames[0]
@@ -697,8 +718,9 @@ try {
         throw "The synchronizer is missing: $syncScript"
     }
     $syncMode = Get-SyncMode -Configuration ([string]$script:Policy.configuration) -SyncScript $syncScript
-    Write-JsonFile $Files.source_digests (Get-SourceDigests $sha)
-    Set-Step 'preflight' 'PASS' ('Commit {0}; {1} written' -f $sha, $Files.source_digests)
+    Assert-SyncManifest -Manifest ([string]$script:Policy.manifest) -SyncScript $syncScript
+    Write-JsonFile $PolicyFiles.source_digests (Get-SourceDigests $sha)
+    Set-Step 'preflight' 'PASS' ('Commit {0}; {1} written' -f $sha, $PolicyFiles.source_digests)
 
     # --- build --------------------------------------------------------------
     Set-Step 'build' 'RUNNING' ('tools\Sync-EXCEL_UI-VBA.ps1 -Mode {0} -NewWorkbook' -f $syncMode)
@@ -762,7 +784,7 @@ try {
             automation_security = 'msoAutomationSecurityByUI'
         }
     }
-    Write-JsonFile $Files.host $hostRecord
+    Write-JsonFile $PolicyFiles.host $hostRecord
     Set-Step 'open' 'PASS' ('Excel {0} build {1}, {2}; process {3}' -f $hostRecord.excel.version, $hostRecord.excel.build,
                             $hostRecord.excel.bitness, $excelProcessId)
 
@@ -870,16 +892,16 @@ try {
                (@(Get-TempFolders) -join ', '))
     }
     $evidence = New-Object System.Collections.ArrayList
-    foreach ($pair in @(@($json[0], $Files.certification_json), @($text[0], $Files.certification_report))) {
+    foreach ($pair in @(@($json[0], $PolicyFiles.certification_json), @($text[0], $PolicyFiles.certification_report))) {
         $target = Join-Path $script:BundleDir $pair[1]
         Copy-Item -LiteralPath $pair[0].FullName -Destination $target
         [void]$evidence.Add([ordered]@{ file = $pair[1]; source_name = [string]$pair[0].Name; sha256 = Get-FileSha256 $target })
         Write-Log ('Collected {0} as {1}' -f $pair[0].FullName, $pair[1])
     }
     $script:Session.evidence = $evidence
-    $result = Get-Content -LiteralPath (Join-Path $script:BundleDir $Files.certification_json) -Raw | ConvertFrom-Json
+    $result = Get-Content -LiteralPath (Join-Path $script:BundleDir $PolicyFiles.certification_json) -Raw | ConvertFrom-Json
     $certificationPassed = ($result.passed -eq $true -and $result.complete -eq $true)
-    $line = @(Select-String -LiteralPath (Join-Path $script:BundleDir $Files.certification_report) -Pattern '^RESULT: ')
+    $line = @(Select-String -LiteralPath (Join-Path $script:BundleDir $PolicyFiles.certification_report) -Pattern '^RESULT: ')
     $verdict = $(if ($line.Count -gt 0) { $line[0].Line } else { 'no RESULT line in the report' })
     Set-Step 'collect' 'PASS' $verdict
 }
@@ -960,7 +982,7 @@ else {
     $script:Session.result = 'FAIL'
     $script:Session.exit_code = 1
 }
-Write-JsonFile $Files.session $script:Session
+Write-JsonFile $PolicyFiles.session $script:Session
 Write-Log ('Run finished: {0}' -f $script:Session.result)
 
 $exitCode = [int]$script:Session.exit_code

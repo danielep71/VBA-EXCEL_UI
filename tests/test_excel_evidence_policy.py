@@ -159,7 +159,7 @@ def script_problems(policy: evidence.Policy, text: str) -> list[str]:
     described = re.findall(r"^\d+\. ([a-z][a-z0-9-]*):", help_block, re.MULTILINE)
     if described != list(policy.steps):
         problems.append(f"the script's help describes the steps {described}, not {list(policy.steps)}")
-    roles = set(re.findall(r"\$Files\.(\w+)", code))
+    roles = set(re.findall(r"\$PolicyFiles\.(\w+)", code))
     if roles != set(evidence.ROLES):
         problems.append(f"the script writes the files of roles {sorted(roles)}, not {sorted(evidence.ROLES)}")
     for section_name, fields in policy.host_fields.items():
@@ -255,7 +255,7 @@ class DisagreementTests(unittest.TestCase):
         self.assertIn("the guide does not name `Test_Other`", guide_problems(policy, self.guide))
 
     def test_a_script_that_restates_a_file_name_or_the_runner_is_reported(self) -> None:
-        restated = self.script.replace("Write-JsonFile $Files.host $hostRecord",
+        restated = self.script.replace("Write-JsonFile $PolicyFiles.host $hostRecord",
                                        "Write-JsonFile 'host.json' $hostRecord")
         self.assertNotEqual(restated, self.script)
         problems = script_problems(self.policy, restated)

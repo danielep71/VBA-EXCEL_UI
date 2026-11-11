@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -246,6 +247,33 @@ class EvidencePolicyTests(unittest.TestCase):
         build = text.split("# --- build", 1)[1].split("# ---", 1)[0]
         self.assertNotIn("-Mode Development", build)
         self.assertIn("-Mode $syncMode", build)
+
+    def test_the_policy_manifest_must_be_the_synchronizer_manifest(self) -> None:
+        sync = str(SCRIPT.parent / "Sync-EXCEL_UI-VBA.ps1")
+        manifest = policy_document()["manifest"]
+        result = self.run_body(
+            f"$s = '{sync}'\n"
+            f"Assert-SyncManifest -Manifest '{manifest}' -SyncScript $s\n"
+            f"Assert-SyncManifest -Manifest '{manifest.replace('/', chr(92))}' -SyncScript $s\n"
+            "$m = ''\ntry { Assert-SyncManifest -Manifest 'config/other.json' -SyncScript $s } "
+            "catch { $m = $_.Exception.Message }\n"
+            "@{ error = $m }" + self.WRITE)
+        self.assertIn("names manifest config/other.json", result["error"])
+        self.assertIn(f"builds from {manifest}", result["error"])
+
+    def test_no_two_script_variables_differ_only_in_case(self) -> None:
+        # PowerShell variable names are case-insensitive: $Files and $files
+        # are one variable, so a second spelling silently overwrites the first.
+        # Function locals live in their own scope; the clash that matters is
+        # in the script body, where both spellings name one variable.
+        text = re.sub(r"^function [^\n]*\{.*?^\}[ \t]*$", "",
+                      SCRIPT.read_text(encoding="utf-8").replace("\r\n", "\n"),
+                      flags=re.MULTILINE | re.DOTALL)
+        spellings: dict[str, set[str]] = {}
+        for name in re.findall(r"\$(?:script:)?([A-Za-z_][A-Za-z0-9_]*)", text):
+            spellings.setdefault(name.lower(), set()).add(name)
+        clashes = {key: sorted(names) for key, names in spellings.items() if len(names) > 1}
+        self.assertEqual(clashes, {})
 
     def test_set_step_records_a_policy_step_and_refuses_any_other(self) -> None:
         self.write_policy(lambda document: document.update(steps=["first", "second"]))
