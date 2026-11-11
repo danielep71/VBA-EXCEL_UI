@@ -7,11 +7,13 @@ added here runs everywhere at once:
 
 1. check-repo: the static gate, tools/check_repo.py;
 2. reformat: house-style normal form of src/, test/ and demo/ *.bas;
-3. labels: the self-tests of the two Node.js label scripts;
-4. check-issues: the issue forms against the label catalogue (Node.js);
-5. unittest: the unit tests under tests/;
-6. ruff: Ruff on tools/ and tests/;
-7. mypy: mypy --strict on tools/, then on tests/.
+3. render-docs: the generated tables of the documentation against
+   tools/vba-projects.json, tools/render_docs.py --check;
+4. labels: the self-tests of the two Node.js label scripts;
+5. check-issues: the issue forms against the label catalogue (Node.js);
+6. unittest: the unit tests under tests/;
+7. ruff: Ruff on tools/ and tests/;
+8. mypy: mypy --strict on tools/, then on tests/.
 
 The Python checks run with the interpreter that runs this script. Node.js, Ruff
 and mypy are found on PATH. When one of them is missing, the checks that need
@@ -90,6 +92,14 @@ def declared_checks(root: Path, python: str = sys.executable) -> list[Check]:
                 "Formatting drift is mechanical. Run:",
                 "  python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas",
                 "then re-import the affected modules into the VBE before committing.",
+            ),
+        ),
+        Check(
+            "render-docs", "Generated documentation tables",
+            ((python, "tools/render_docs.py", "--check"),),
+            hint=(
+                "A generated table differs from tools/vba-projects.json. Run:",
+                "  python3 tools/render_docs.py --write",
             ),
         ),
         Check(

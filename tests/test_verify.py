@@ -9,18 +9,20 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
 import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import verify  # noqa: E402
 
-ORDER = ["check-repo", "reformat", "labels", "check-issues", "unittest", "ruff", "mypy"]
+ORDER = ["check-repo", "reformat", "render-docs", "labels", "check-issues", "unittest", "ruff", "mypy"]
 
 
 class FakeRunner:
@@ -72,13 +74,13 @@ def result_lines(output: str) -> dict[str, str]:
 
 
 class DeclaredChecks(unittest.TestCase):
-    def test_declares_the_seven_checks_in_order(self) -> None:
+    def test_declares_the_eight_checks_in_order(self) -> None:
         self.assertEqual([c.name for c in verify.declared_checks(ROOT)], ORDER)
 
     def test_python_checks_use_the_running_interpreter(self) -> None:
         commands = [c for check in verify.declared_checks(ROOT, python="/opt/python") for c in check.commands]
         python = [c for c in commands if c[0] not in ("node", "ruff", "mypy")]
-        self.assertEqual(len(python), 4)
+        self.assertEqual(len(python), 5)
         self.assertEqual({c[0] for c in python}, {"/opt/python"})
 
     def test_expands_the_module_globs_itself(self) -> None:
@@ -99,6 +101,7 @@ class RunOrder(unittest.TestCase):
         self.assertEqual(programs, [
             "tools/check_repo.py",
             "tools/reformat.py --check",
+            "tools/render_docs.py --check",
             "node .github/scripts/labels-sync.mjs --self-test",
             "node .github/scripts/labels-drift.mjs --self-test",
             "tools/check_issues.py --check-config",
@@ -112,7 +115,7 @@ class RunOrder(unittest.TestCase):
         runner = FakeRunner(failing=["check_repo.py"])
         code, output = run([], runner)
         self.assertEqual(code, 1)
-        self.assertEqual(len(runner.commands), 9)
+        self.assertEqual(len(runner.commands), 10)
         self.assertEqual(result_lines(output)["check-repo"], "FAIL")
         self.assertEqual(result_lines(output)["mypy"], "PASS")
 
@@ -127,7 +130,7 @@ class RunOrder(unittest.TestCase):
         runner = FakeRunner()
         code, output = run(["--skip", "ruff,mypy"], runner)
         self.assertEqual(code, 0)
-        self.assertEqual(list(result_lines(output)), ORDER[:5])
+        self.assertEqual(list(result_lines(output)), ORDER[:6])
         self.assertIn("not selected: ruff, mypy", output)
 
         runner = FakeRunner()
@@ -159,7 +162,7 @@ class MissingTools(unittest.TestCase):
         self.assertEqual(statuses["ruff"], "SKIPPED")
         self.assertEqual(statuses["mypy"], "PASS")
         self.assertIn("node not found on PATH", output)
-        self.assertIn("RESULT: INCOMPLETE | checks=7 passed=4 failed=0 skipped=3", output)
+        self.assertIn("RESULT: INCOMPLETE | checks=8 passed=5 failed=0 skipped=3", output)
         self.assertFalse([c for c in runner.commands if c[0] in ("node", "ruff")])
 
     def test_fails_a_missing_tool_with_ci(self) -> None:
@@ -167,12 +170,12 @@ class MissingTools(unittest.TestCase):
         code, output = run(["--ci"], runner, missing=["mypy"])
         self.assertEqual(code, 1)
         self.assertEqual(result_lines(output)["mypy"], "FAIL")
-        self.assertIn("RESULT: FAIL | checks=7 passed=6 failed=1 skipped=0", output)
+        self.assertIn("RESULT: FAIL | checks=8 passed=7 failed=1 skipped=0", output)
 
     def test_a_check_left_out_by_skip_is_not_a_failure_with_ci(self) -> None:
         code, output = run(["--ci", "--skip", "ruff,mypy"], FakeRunner(), missing=["ruff", "mypy"])
         self.assertEqual(code, 0)
-        self.assertIn("RESULT: PASS | checks=5 passed=5 failed=0 skipped=0", output)
+        self.assertIn("RESULT: PASS | checks=6 passed=6 failed=0 skipped=0", output)
 
 
 class Reporting(unittest.TestCase):
@@ -180,11 +183,24 @@ class Reporting(unittest.TestCase):
         code, output = run([], FakeRunner())
         self.assertEqual(code, 0)
         self.assertEqual(list(result_lines(output)), ORDER)
-        self.assertTrue(output.rstrip("\n").endswith("RESULT: PASS | checks=7 passed=7 failed=0 skipped=0"))
+        self.assertTrue(output.rstrip("\n").endswith("RESULT: PASS | checks=8 passed=8 failed=0 skipped=0"))
 
     def test_prints_the_formatting_hint_on_drift(self) -> None:
         _, output = run([], FakeRunner(failing=["reformat.py"]))
         self.assertIn("reformat.py --write src/*.bas test/*.bas demo/*.bas", output)
+
+    def test_prints_the_render_hint_on_drift(self) -> None:
+        # The hint is plain text locally and a notice annotation under
+        # GitHub Actions; pin the local form so the test runs the same in CI.
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": ""}):
+            code, output = run(["--only", "render-docs"], FakeRunner(failing=["render_docs.py"]))
+        self.assertEqual(code, 1)
+        self.assertIn("hint:   python3 tools/render_docs.py --write", output)
+
+    def test_prints_the_render_hint_as_a_notice_under_actions(self) -> None:
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
+            _, output = run(["--only", "render-docs"], FakeRunner(failing=["render_docs.py"]))
+        self.assertIn("::notice::  python3 tools/render_docs.py --write", output)
 
     def test_appends_a_markdown_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -200,7 +216,7 @@ class Reporting(unittest.TestCase):
         self.assertIn("| `labels` | SKIPPED (node not found on PATH) | 0.0 s |", text)
         self.assertIn("| `ruff` | FAIL (ruff check tools ... exited 1) | 1.0 s |", text)
         self.assertIn("Not selected: `mypy`.", text)
-        self.assertIn("**RESULT: FAIL** | checks=6 passed=3 failed=1 skipped=2", text)
+        self.assertIn("**RESULT: FAIL** | checks=7 passed=4 failed=1 skipped=2", text)
 
 
 if __name__ == "__main__":

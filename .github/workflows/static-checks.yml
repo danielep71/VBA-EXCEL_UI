@@ -98,12 +98,13 @@ jobs:
           -r tools/requirements-quality-ci.txt
 
       # tools/verify.py holds the one list of static checks: the gate, the
-      # house-style normal form, the label script self-tests, the issue-form
-      # check, the unit tests, Ruff and mypy --strict. It runs every check even
-      # after one fails, prints how to fix formatting drift, and writes a table
-      # of the results to the job summary. --ci fails a check whose tool is
-      # missing instead of skipping it. It runs even when a set-up step above
-      # failed, so every check that can still run reports its result.
+      # house-style normal form, the generated documentation tables, the label
+      # script self-tests, the issue-form check, the unit tests, Ruff and
+      # mypy --strict. It runs every check even after one fails, prints how to
+      # fix formatting drift, and writes a table of the results to the job
+      # summary. --ci fails a check whose tool is missing instead of skipping
+      # it. It runs even when a set-up step above failed, so every check that
+      # can still run reports its result.
       - name: Run every static check
         if: ${{ !cancelled() }}
         run: python3 tools/verify.py --ci --summary "$GITHUB_STEP_SUMMARY"
