@@ -866,6 +866,13 @@ measured against that baseline.
   read-only **Ruleset drift** check that fails when a live ruleset is weakened,
   disabled, deleted or not versioned (#87). `CONTRIBUTING.md` no longer
   describes a direct-push route that the `main` ruleset forbids.
+- Versioned the other repository settings in `.github/repository-settings.json`
+  — merge methods and repository features, secret scanning and push
+  protection, Dependabot alerts and security updates, private vulnerability
+  reporting, and the GitHub Actions policy — and added
+  `tools/check_settings.py` to the **Ruleset drift** workflow (#161). It fails
+  when a live setting differs, and reports the settings that only an
+  administrator can read as not verifiable instead of passing them.
 
 ### ✅ Validation
 

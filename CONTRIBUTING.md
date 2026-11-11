@@ -162,6 +162,27 @@ its copy. To change a ruleset, change it in the repository settings, run
 `python3 tools/check_rulesets.py --repository danielep71/VBA-EXCEL_UI --export`,
 and commit the result in a pull request that explains why.
 
+The other settings that protect the repository are versioned in
+`.github/repository-settings.json`: the merge methods and repository features,
+secret scanning, push protection, Dependabot alerts and security updates,
+private vulnerability reporting, and the GitHub Actions policy (allowed actions,
+the default `GITHUB_TOKEN` permissions, and whether Actions may approve pull
+requests). The same **Ruleset drift** workflow runs `tools/check_settings.py`,
+which reports each setting as a match, a difference or not verifiable, and
+fails only on a difference. Its token is read-only, so the security and Actions
+settings, which GitHub shows only to administrators, are reported as not
+verifiable there. I check every setting locally with my own administrator
+token:
+
+```text
+GITHUB_TOKEN="$(gh auth token)" python3 tools/check_settings.py --repository danielep71/VBA-EXCEL_UI --strict
+```
+
+`--strict` also fails when a setting is not verifiable, so a token without
+administrator access cannot pass. To change a setting, change it in the
+repository settings, update `.github/repository-settings.json` in a pull
+request that explains why, and run the command again.
+
 ### Commit discipline
 
 Write imperative, specific subjects, normally in this form:
@@ -535,7 +556,8 @@ Other workflows run alongside the gate and are not required checks:
   nothing.
 - **Workflow lint** runs a checksum-verified actionlint release on every
   workflow, after proving that it rejects `.github/actionlint/invalid-workflow.yml`.
-- **Ruleset drift** compares the live rulesets with `.github/rulesets/`.
+- **Ruleset drift** compares the live rulesets with `.github/rulesets/`, and
+  the repository settings it can read with `.github/repository-settings.json`.
 - **OpenSSF Scorecard** scores the supply-chain posture of `main` weekly and
   publishes the findings to code scanning.
 - **External links** checks the public URLs in the tracked Markdown weekly and

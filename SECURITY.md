@@ -358,7 +358,11 @@ pull-request code. **Detect issue-label drift** and **Issue triage** are
 read-only.
 
 **Ruleset drift** compares the live repository rulesets with
-`.github/rulesets/` using the job's read-only token and never changes them.
+`.github/rulesets/` using the job's read-only token and never changes them. It
+also compares the repository settings with `.github/repository-settings.json`;
+the security and Actions settings, which only administrators can read, are
+reported there as not verifiable and are checked with an administrator token,
+as [CONTRIBUTING.md](CONTRIBUTING.md) describes.
 
 **OpenSSF Scorecard** scores `main` weekly, on pushes to `main`, when branch
 protection changes and on demand, and runs only while the repository is
