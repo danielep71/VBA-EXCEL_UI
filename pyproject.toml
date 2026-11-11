@@ -47,6 +47,7 @@ known-first-party = [
     "check_issues",
     "check_repo",
     "check_rulesets",
+    "check_settings",
     "check_vba_calls",
     "compare_vba_export",
     "demo_cleanup_fixtures",
@@ -59,6 +60,7 @@ known-first-party = [
     "vba_analyze_fixtures",
     "vba_api",
     "vba_lex",
+    "verify",
     "wiki_badges",
     "winapi_capture_fixtures",
 ]

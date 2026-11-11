@@ -151,6 +151,11 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added the **OpenSSF Scorecard** workflow (`.github/workflows/scorecard.yml`).
+  It scores the supply-chain posture of `main` weekly and on pushes to `main`,
+  and publishes the results to code scanning. Its one job holds
+  `security-events: write` and `id-token: write`; every action is pinned to a
+  full SHA (#156).
 - Added the demo cleanup harness `Demo_Test_RunCleanupChecks` in the new
   **M_DEMO_CLEANUP_TESTS** module of the demo workbook, with a cleanup probe
   and one-shot fault seams in **M_DEMO_BUILDER**
@@ -423,6 +428,12 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- While a release branch is open, every change now targets it and reaches
+  `main` with the certified release; non-VBA changes are no longer copied to
+  `main` by separate pull requests. Only CI, security and dependency fixes that
+  cannot wait go to `main` directly, after which `main` is merged into the
+  release branch. The release merge must leave `main` identical to the release
+  branch (#155).
 - Replaced the Markdown issue templates with issue forms (bug, enhancement,
   documentation, private security contact) that require the exact commit, the
   Excel build and bitness, expected and observed behaviour, and the recovery
@@ -554,6 +565,17 @@ measured against that baseline.
   [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) disagrees with
   the policy. The bundle format is unchanged, and the validator's output for
   the same bundle is identical. No Excel run has used the changed script yet.
+- Replaced the separate static-check commands with one entry point,
+  **tools/verify.py**
+  ([#154](https://github.com/danielep71/VBA-EXCEL_UI/issues/154)). It runs the
+  gate, the formatter check, the label script self-tests, the issue-form check,
+  the unit tests, Ruff and `mypy --strict` in one declared order, prints one
+  result line per check and a final `RESULT` line, and appends a Markdown table
+  to a job summary with `--summary`. A missing Node.js, Ruff or mypy is
+  reported as skipped, or fails the run with `--ci`. Both jobs of
+  **.github/workflows/static-checks.yml** now run it, the minimum-Python job
+  without Ruff and mypy, and **AGENTS.md**, **CONTRIBUTING.md** and the
+  pull-request template name the one command.
 
 ### 🐛 Fixed
 
@@ -866,6 +888,13 @@ measured against that baseline.
   read-only **Ruleset drift** check that fails when a live ruleset is weakened,
   disabled, deleted or not versioned (#87). `CONTRIBUTING.md` no longer
   describes a direct-push route that the `main` ruleset forbids.
+- Versioned the other repository settings in `.github/repository-settings.json`
+  — merge methods and repository features, secret scanning and push
+  protection, Dependabot alerts and security updates, private vulnerability
+  reporting, and the GitHub Actions policy — and added
+  `tools/check_settings.py` to the **Ruleset drift** workflow (#161). It fails
+  when a live setting differs, and reports the settings that only an
+  administrator can read as not verifiable instead of passing them.
 
 ### ✅ Validation
 

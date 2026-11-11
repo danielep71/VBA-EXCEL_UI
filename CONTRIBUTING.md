@@ -139,10 +139,17 @@ the gate until the entry is updated in the same change.
 
 ### Base branch
 
-Start everyday work and governance changes from the current `main`. While a
-release branch `release/vX.Y.Z` is open, VBA corrections for that release
-target the release branch and reach `main` with the release; non-VBA repository
-changes are made on the release branch and mirrored to `main`.
+While no release branch is open, start from the current `main`. While a
+release branch `release/vX.Y.Z` is open, every change targets it: VBA
+corrections, tooling, workflows and documentation alike. `main` receives that
+work in one merge, once the release is certified, so I never copy a change to
+both branches.
+
+While a release branch is open, a change goes to `main` directly only when it
+fixes CI, security or a dependency and cannot wait for the release, such as a
+Dependabot update of a pinned Action. After such a change, merge `main` into
+the release branch in a pull request, so the release still contains everything
+on `main`.
 
 Every change to `main` and `release/**` goes through a pull request, including
 mine. Repository rulesets enforce it: on `main` and `release/**` a pull request
@@ -154,6 +161,27 @@ and the **Ruleset drift** workflow fails daily if a live ruleset differs from
 its copy. To change a ruleset, change it in the repository settings, run
 `python3 tools/check_rulesets.py --repository danielep71/VBA-EXCEL_UI --export`,
 and commit the result in a pull request that explains why.
+
+The other settings that protect the repository are versioned in
+`.github/repository-settings.json`: the merge methods and repository features,
+secret scanning, push protection, Dependabot alerts and security updates,
+private vulnerability reporting, and the GitHub Actions policy (allowed actions,
+the default `GITHUB_TOKEN` permissions, and whether Actions may approve pull
+requests). The same **Ruleset drift** workflow runs `tools/check_settings.py`,
+which reports each setting as a match, a difference or not verifiable, and
+fails only on a difference. Its token is read-only, so the security and Actions
+settings, which GitHub shows only to administrators, are reported as not
+verifiable there. I check every setting locally with my own administrator
+token:
+
+```text
+GITHUB_TOKEN="$(gh auth token)" python3 tools/check_settings.py --repository danielep71/VBA-EXCEL_UI --strict
+```
+
+`--strict` also fails when a setting is not verifiable, so a token without
+administrator access cannot pass. To change a setting, change it in the
+repository settings, update `.github/repository-settings.json` in a pull
+request that explains why, and run the command again.
 
 ### Commit discipline
 
@@ -343,12 +371,6 @@ cannot observe the error a call leaves, so
 `TST_Case_TitleBarApiErrorCapture` must still pass on a real Excel host. The
 demo modules in `demo/` are not yet held to this rule (#144).
 
-The VBA that follows this rule, the gate check and the regression case exist
-only on `release/v1.1.3` until v1.1.3 is released. On `main`, the title-bar
-module still declares `GetLastError`, the check is not registered in
-`tools/check_repo.py` and the case is absent, so a passing gate on `main` does
-not enforce this sequence.
-
 ### Public contracts and compatibility
 
 Demo cleanup (#71) is single-pass, not a host watchdog. With
@@ -368,9 +390,8 @@ Before closure, use disposable worksheets and a bounded host harness to test
 ordinary failure, missing/wrong password, reprotection and selection failure,
 and read back every captured option at the exact tested commit.
 
-`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness; it exists only on
-`release/v1.1.3` until v1.1.3 is released. Build a new demo workbook from the
-commit under test:
+`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
+from the commit under test:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath "C:\work\EXCEL_UI_Demo.xlsm" -Mode Demo -NewWorkbook
@@ -498,9 +519,27 @@ substitute for certification: `Test_EXCEL_UI_RunAll` does not run the
 snapshot-identity and SDI identity units, and produces no machine-readable
 evidence. It still opens and closes temporary windows and workbooks.
 
-CI runs the static gate on every pull request. It cannot execute VBA — a hosted
-runner has no Excel — so certification remains a manual step on a real host, and
-the two are complementary rather than alternatives.
+For every change, run the static checks before you push:
+
+```text
+python3 tools/verify.py --ci
+```
+
+It runs every static check in one declared order, including the gate
+(`tools/check_repo.py`), the house-style check of the VBA modules, the unit
+tests, Ruff and `mypy --strict`. Every check runs even after one fails. The
+command prints one result line per check and a final `RESULT` line: `PASS`,
+`FAIL`, or `INCOMPLETE` when a check was skipped. `--list` prints the checks and
+their commands, and `--only` and `--skip` take check names. Without `--ci`, a
+check whose tool is missing (Node.js, Ruff or mypy) is reported as `SKIPPED`,
+which is not a pass; with `--ci` it fails. Fix formatting drift with
+`python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas`, then
+re-import the affected modules into the VBE.
+
+CI runs the same command on every pull request and writes its table of results
+to the job summary. It cannot execute VBA — a hosted runner has no Excel — so
+certification remains a manual step on a real host, and the two are
+complementary rather than alternatives.
 
 On Windows, the workbook tools shorten that step:
 
@@ -523,10 +562,10 @@ The Python tools under `tools/` need **Python 3.11 or later**, and the static
 gate needs only the standard library. The issue-form check
 (`python3 tools/check_issues.py --check-config`) and its tests in
 `tests/test_check_issues.py` also need Node.js, because they run
-`.github/scripts/labels-sync.mjs`; CI provides it. The required check runs the
-gate on an exact Python 3.12 release; a second, non-required job runs the same
-gate on Python 3.11 so that a change needing a newer interpreter is reported
-before it reaches your machine.
+`.github/scripts/labels-sync.mjs`; CI provides it. The required check runs
+`tools/verify.py` on an exact Python 3.12 release; a second, non-required job
+runs it on Python 3.11, without Ruff and mypy, so that a change needing a newer
+interpreter is reported before it reaches your machine.
 
 Other workflows run alongside the gate and are not required checks:
 
@@ -535,7 +574,10 @@ Other workflows run alongside the gate and are not required checks:
   nothing.
 - **Workflow lint** runs a checksum-verified actionlint release on every
   workflow, after proving that it rejects `.github/actionlint/invalid-workflow.yml`.
-- **Ruleset drift** compares the live rulesets with `.github/rulesets/`.
+- **Ruleset drift** compares the live rulesets with `.github/rulesets/`, and
+  the repository settings it can read with `.github/repository-settings.json`.
+- **OpenSSF Scorecard** scores the supply-chain posture of `main` weekly and
+  publishes the findings to code scanning.
 - **External links** checks the public URLs in the tracked Markdown weekly and
   on demand.
 - **Wiki badges** checks the Wiki against `VERSION`.
@@ -567,16 +609,14 @@ holds the VBA regression suite.
 
 The Python code under `tools/` and `tests/` must also be clean under Ruff and
 `mypy --strict`, both configured in `pyproject.toml` against Python 3.11, the
-oldest interpreter I support for the gate. CI runs both on `tools/` and
-`tests/` and installs them from `tools/requirements-quality-ci.txt`, where
-every wheel is hash-locked. To run
-them locally, install them into a virtual environment the same way:
+oldest interpreter I support for the gate. CI installs both from
+`tools/requirements-quality-ci.txt`, where every wheel is hash-locked, and
+`tools/verify.py` runs them on `tools/` and `tests/`. To run them locally,
+install them into a virtual environment the same way:
 
 ```text
 python3 -m pip install --require-hashes --only-binary=:all: -r tools/requirements-quality-ci.txt
-ruff check tools tests
-mypy --strict tools
-mypy --strict tests
+python3 tools/verify.py --only ruff,mypy
 ```
 
 A finding is fixed in the code, not silenced, unless the fix would change what

@@ -91,10 +91,10 @@ Record which Windows and Office-bitness combinations were exercised; do not gene
 
 1. Update refs. If the release branch `release/vX.Y.Z` is not open yet, create
    it from current protected `main`; otherwise use the open branch.
-2. While the release branch is open, VBA corrections for the release target it
-   and reach `main` with the release; non-VBA repository changes are made on
-   it and mirrored to `main`. Everyday work and governance changes start from
-   `main`, as [CONTRIBUTING.md](CONTRIBUTING.md#base-branch) describes.
+2. While the release branch is open, every change targets it and reaches
+   `main` with the release, as [CONTRIBUTING.md](CONTRIBUTING.md#base-branch)
+   describes. A CI, security or dependency fix that cannot wait goes to `main`
+   directly; merge `main` into the release branch afterwards.
 3. Record the base and candidate full commit SHAs.
 4. Stop feature work on that branch.
 5. Review the complete diff from the previous release tag.
@@ -214,7 +214,11 @@ Where policy requires a pull request, make these items easy to verify:
 - compatibility, migration, and security notes;
 - remaining limitations.
 
-Require configured checks and record the resulting `main` SHA. If the merge
+Require configured checks and record the resulting `main` SHA. The merge must
+leave `main` identical to the certified release branch:
+`git diff --stat main release/vX.Y.Z` prints nothing. A difference means `main`
+holds a change the release did not certify, or the release branch lacks a fix
+made on `main`; resolve it before tagging. If the merge
 changes the source commit identity, every pre-merge binary artifact and its hash
 are stale—even when the resulting source tree appears unchanged. Before tagging:
 
@@ -323,7 +327,7 @@ Do not silently replace assets or move the tag.
 | 6 | Excel certification passes | ☐ |
 | 7 | Artifacts built and packaged-tested | ☐ |
 | 8 | Hashes and evidence recorded | ☐ |
-| 9 | Required pull request merged | ☐ |
+| 9 | Required pull request merged; `main` equals the release branch | ☐ |
 | 10 | Annotated tag targets certified main SHA | ☐ |
 | 11 | GitHub Release published | ☐ |
 | 12 | Post-publication checks pass | ☐ |
