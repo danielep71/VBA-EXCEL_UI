@@ -12,7 +12,8 @@ For the commit checked out in this repository:
    changing them, and stops when "Trust access to the VBA project object
    model" is off; writes source-digests.json from the commit;
 2. build: creates a development workbook in the bundle with
-   tools\Sync-EXCEL_UI-VBA.ps1 -Mode Development -NewWorkbook;
+   tools\Sync-EXCEL_UI-VBA.ps1 -Mode Development -NewWorkbook, or, with
+   -Builder Python, with tools\build_workbook.py --mode Development;
 3. open: opens it in a visible Excel instance of its own, which follows the
    Trust Center macro setting, and writes host.json;
 4. enable-macros: waits for the operator to click Enable Content when the
@@ -46,9 +47,19 @@ default, EXCEL_UI-certification-<SHA12>-<yyyyMMdd-HHmmss> next to the checkout.
 Run even though the working tree has changes. The bundle records it, and the
 validator rejects such a bundle: it cannot certify a commit.
 
+.PARAMETER Builder
+How the build step creates the workbook. Sync (the default) imports the
+modules into a new workbook through Excel with tools\Sync-EXCEL_UI-VBA.ps1.
+Python writes the workbook from source with tools\build_workbook.py, without
+Excel, and needs Python 3.11 or later. The Python builder is not yet validated
+in Excel: use it only to try it, and certify releases with the default. Either
+way the compile step reads the VBA project, so "Trust access to the VBA project
+object model" stays required. session.json records the builder.
+
 .PARAMETER Python
-The Python 3.11+ executable that validates the bundle. By default the script
-tries py -3, python and python3.
+The Python 3.11+ executable that validates the bundle and, with -Builder
+Python, builds the workbook. By default the script tries py -3, python and
+python3.
 
 .PARAMETER RepoRoot
 The repository. By default, the parent of this script's folder.
@@ -58,11 +69,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Certify-EXCEL_UI
 
 .EXAMPLE
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Certify-EXCEL_UI.ps1 -BundleDir D:\Evidence\EXCEL_UI-1.1.3
+
+.EXAMPLE
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Certify-EXCEL_UI.ps1 -Builder Python
+
+Builds the workbook with tools\build_workbook.py instead of the synchronizer.
 #>
 [CmdletBinding()]
 param(
     [string]$BundleDir,
     [switch]$AllowDirty,
+    [ValidateSet('Sync', 'Python')]
+    [string]$Builder = 'Sync',
     [string]$Python,
     [string]$RepoRoot
 )
@@ -256,6 +274,25 @@ function Assert-SyncManifest {
     if (($Manifest -replace '\\', '/') -ne ($syncManifest -replace '\\', '/')) {
         throw ('The evidence policy names manifest {0}, but {1} builds from {2}.' -f
                $Manifest, $SyncScript, $syncManifest)
+    }
+}
+
+function Assert-BuilderManifest {
+    # The same check for tools\build_workbook.py, whose manifest path is the
+    # MANIFEST constant of its source.
+    param(
+        [Parameter(Mandatory = $true)][string]$Manifest,
+        [Parameter(Mandatory = $true)][string]$BuilderScript
+    )
+    $match = Select-String -LiteralPath $BuilderScript -Pattern '^MANIFEST\s*=\s*"([^"]+)"' |
+        Select-Object -First 1
+    if ($null -eq $match) {
+        throw "Cannot find the manifest path in $BuilderScript."
+    }
+    $builderManifest = $match.Matches[0].Groups[1].Value
+    if (($Manifest -replace '\\', '/') -ne ($builderManifest -replace '\\', '/')) {
+        throw ('The evidence policy names manifest {0}, but {1} builds from {2}.' -f
+               $Manifest, $BuilderScript, $builderManifest)
     }
 }
 
@@ -663,6 +700,7 @@ $workbookPath = Join-Path $script:BundleDir $WorkbookFileName
 $script:Session = [ordered]@{
     schema         = $script:Policy.evidence_schema
     tool           = 'tools/Certify-EXCEL_UI.ps1'
+    builder        = $(if ($Builder -eq 'Python') { 'tools/build_workbook.py' } else { 'tools/Sync-EXCEL_UI-VBA.ps1' })
     commit         = $sha
     dirty          = ($dirtyPaths.Count -gt 0)
     allow_dirty    = [bool]$AllowDirty
@@ -709,7 +747,10 @@ try {
     Write-Log ('Windows: {0} {1} build {2} ({3})' -f $windows.caption, $windows.version, $windows.build, $windows.architecture)
     Write-Log "Macro setting: $macroSetting; Trust access to the VBA project object model: $vbaProjectAccess"
     if ($vbaProjectAccess -ne 'On') {
-        throw ("'Trust access to the VBA project object model' is off. Building the workbook needs it: " +
+        # The Python builder needs no Excel, but the compile step reads the
+        # VBA project of the workbook, which needs the setting with either builder.
+        $needs = $(if ($Builder -eq 'Python') { 'The compile step' } else { 'Building the workbook' })
+        throw ("'Trust access to the VBA project object model' is off. $needs needs it: " +
                'turn it on in File > Options > Trust Center > Trust Center Settings > Macro Settings, ' +
                'if your policy allows. This script never changes it.')
     }
@@ -717,32 +758,62 @@ try {
     if (-not (Test-Path -LiteralPath $syncScript -PathType Leaf)) {
         throw "The synchronizer is missing: $syncScript"
     }
+    # The Python builder accepts the synchronizer's modes, so the mode comes
+    # from the synchronizer either way.
     $syncMode = Get-SyncMode -Configuration ([string]$script:Policy.configuration) -SyncScript $syncScript
-    Assert-SyncManifest -Manifest ([string]$script:Policy.manifest) -SyncScript $syncScript
+    if ($Builder -eq 'Python') {
+        $builderScript = Join-Path $script:RepoRoot 'tools\build_workbook.py'
+        if (-not (Test-Path -LiteralPath $builderScript -PathType Leaf)) {
+            throw "The builder is missing: $builderScript"
+        }
+        Assert-BuilderManifest -Manifest ([string]$script:Policy.manifest) -BuilderScript $builderScript
+        $builderPython = Find-Python
+        if ($null -eq $builderPython) {
+            throw '-Builder Python needs Python 3.11 or later; none was found (see -Python).'
+        }
+        Write-Log 'Builder: tools\build_workbook.py, which is not yet validated in Excel'
+    }
+    else {
+        Assert-SyncManifest -Manifest ([string]$script:Policy.manifest) -SyncScript $syncScript
+    }
     Write-JsonFile $PolicyFiles.source_digests (Get-SourceDigests $sha)
     Set-Step 'preflight' 'PASS' ('Commit {0}; {1} written' -f $sha, $PolicyFiles.source_digests)
 
     # --- build --------------------------------------------------------------
-    Set-Step 'build' 'RUNNING' ('tools\Sync-EXCEL_UI-VBA.ps1 -Mode {0} -NewWorkbook' -f $syncMode)
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript `
-            -WorkbookPath $workbookPath -Mode $syncMode -NewWorkbook -Force -NoBackup 2>&1 |
-            ForEach-Object { Write-Log ('  sync: ' + [string]$_) }
-        $syncCode = $LASTEXITCODE
+    if ($Builder -eq 'Python') {
+        Set-Step 'build' 'RUNNING' ('tools\build_workbook.py --mode {0}' -f $syncMode)
+        $builderArguments = @($builderPython.Arguments) + @($builderScript, '--mode', $syncMode, $workbookPath)
+        $built = Invoke-Native -FilePath $builderPython.Exe -Arguments $builderArguments -WorkingDirectory $script:RepoRoot
+        $builderText = $Utf8NoBom.GetString($built.Output) + "`n" + $built.Error
+        foreach ($line in ($builderText -split "`r?`n" | Where-Object { $_ -ne '' })) {
+            Write-Log ('  build: ' + $line)
+        }
+        if ($built.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $workbookPath -PathType Leaf)) {
+            throw ('tools\build_workbook.py exited with code {0}; see session.log.' -f $built.ExitCode)
+        }
     }
-    finally {
-        $ErrorActionPreference = $previousPreference
-    }
-    if ($syncCode -eq 2) {
-        Stop-Cancelled 'The synchronizer was cancelled.'
-    }
-    if ($syncCode -ne 0 -or -not (Test-Path -LiteralPath $workbookPath -PathType Leaf)) {
-        throw "The synchronizer exited with code $syncCode; see session.log."
+    else {
+        Set-Step 'build' 'RUNNING' ('tools\Sync-EXCEL_UI-VBA.ps1 -Mode {0} -NewWorkbook' -f $syncMode)
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript `
+                -WorkbookPath $workbookPath -Mode $syncMode -NewWorkbook -Force -NoBackup 2>&1 |
+                ForEach-Object { Write-Log ('  sync: ' + [string]$_) }
+            $syncCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($syncCode -eq 2) {
+            Stop-Cancelled 'The synchronizer was cancelled.'
+        }
+        if ($syncCode -ne 0 -or -not (Test-Path -LiteralPath $workbookPath -PathType Leaf)) {
+            throw "The synchronizer exited with code $syncCode; see session.log."
+        }
     }
     $script:Session.workbook = [ordered]@{ file = $WorkbookFileName; sha256 = Get-FileSha256 $workbookPath }
-    Set-Step 'build' 'PASS' "$WorkbookFileName built from the checkout"
+    Set-Step 'build' 'PASS' ('{0} built from the checkout with {1}' -f $WorkbookFileName, $script:Session.builder)
 
     # --- open ---------------------------------------------------------------
     Set-Step 'open' 'RUNNING' 'Starting Excel'

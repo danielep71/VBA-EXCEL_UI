@@ -25,6 +25,7 @@ POLICY = ROOT / ".github" / "excel-evidence-policy.json"
 PWSH = shutil.which("pwsh")
 sys.path.insert(0, str(ROOT / "tools"))
 
+import build_workbook  # noqa: E402
 import check_excel_evidence as evidence  # noqa: E402
 
 # Defines the script's functions without running its body.
@@ -261,6 +262,37 @@ class EvidencePolicyTests(unittest.TestCase):
         self.assertIn("names manifest config/other.json", result["error"])
         self.assertIn(f"builds from {manifest}", result["error"])
 
+    def test_the_policy_manifest_must_be_the_python_builder_manifest(self) -> None:
+        builder = str(SCRIPT.parent / "build_workbook.py")
+        manifest = policy_document()["manifest"]
+        result = self.run_body(
+            f"$b = '{builder}'\n"
+            f"Assert-BuilderManifest -Manifest '{manifest}' -BuilderScript $b\n"
+            "$m = ''\ntry { Assert-BuilderManifest -Manifest 'config/other.json' -BuilderScript $b } "
+            "catch { $m = $_.Exception.Message }\n"
+            "@{ error = $m }" + self.WRITE)
+        self.assertIn("names manifest config/other.json", result["error"])
+        self.assertIn(f"builds from {manifest}", result["error"])
+
+    def test_the_builder_is_an_opt_in_with_the_synchronizer_modes(self) -> None:
+        sync = str(SCRIPT.parent / "Sync-EXCEL_UI-VBA.ps1")
+        result = self.run_body(
+            "function Get-Set($Path, $Name) { @((Get-Command -Name $Path -CommandType ExternalScript).Parameters[$Name]"
+            ".Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } | "
+            "ForEach-Object { $_.ValidValues }) }\n"
+            "$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:CERTIFY_SCRIPT, [ref]$null, "
+            "[ref]$null)\n"
+            "$default = ($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'Builder' })"
+            ".DefaultValue.Value\n"
+            f"@{{ builders = (Get-Set $env:CERTIFY_SCRIPT 'Builder'); modes = (Get-Set '{sync}' 'Mode'); "
+            "default = $default }" + self.WRITE)
+        self.assertEqual(result["builders"], ["Sync", "Python"])
+        self.assertEqual(result["default"], "Sync")
+        self.assertEqual(result["modes"], list(build_workbook.MODES))
+        text = SCRIPT.read_text(encoding="utf-8")
+        build = text.split("# --- build", 1)[1].split("# ---", 1)[0]
+        self.assertIn("'--mode', $syncMode, $workbookPath", build)
+
     def test_no_two_script_variables_differ_only_in_case(self) -> None:
         # PowerShell variable names are case-insensitive: $Files and $files
         # are one variable, so a second spelling silently overwrites the first.
@@ -340,10 +372,10 @@ class ScriptRunTests(unittest.TestCase):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "fixture")
 
-    def run_script(self) -> subprocess.CompletedProcess[str]:
+    def run_script(self, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(PWSH), "-NoProfile", "-NonInteractive", "-File", str(SCRIPT), "-RepoRoot", str(self.repo),
-             "-BundleDir", str(self.bundle), "-Python", "no-such-python-for-this-test"],
+             "-BundleDir", str(self.bundle), "-Python", "no-such-python-for-this-test", *extra],
             capture_output=True, text=True, timeout=120, check=False)
 
     def test_the_session_record_uses_the_policy_names_and_steps(self) -> None:
@@ -361,6 +393,22 @@ class ScriptRunTests(unittest.TestCase):
         self.assertEqual([step["name"] for step in session["steps"]], document["steps"])
         self.assertEqual(session["steps"][0]["status"], "FAIL")
         self.assertEqual({step["status"] for step in session["steps"][1:]}, {"NOT_RUN"})
+
+    def test_the_session_record_names_the_builder(self) -> None:
+        (self.repo / ".github").mkdir()
+        (self.repo / ".github" / "excel-evidence-policy.json").write_text(json.dumps(policy_document()),
+                                                                          encoding="utf-8")
+        self.commit()
+        for builder, recorded in ((None, "tools/Sync-EXCEL_UI-VBA.ps1"), ("Python", "tools/build_workbook.py")):
+            with self.subTest(builder=builder):
+                shutil.rmtree(self.bundle, ignore_errors=True)
+                completed = self.run_script(*(("-Builder", builder) if builder else ()))
+                self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+                session = json.loads((self.bundle / "session.json").read_text(encoding="utf-8-sig"))
+                self.assertEqual(session["builder"], recorded)
+        completed = self.run_script("-Builder", "Excel")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("Builder", completed.stdout + completed.stderr)
 
     def test_a_missing_policy_stops_the_script_before_the_bundle(self) -> None:
         self.commit()
