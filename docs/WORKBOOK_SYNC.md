@@ -2,7 +2,9 @@
 
 The scripts in `tools/` build an Excel workbook from the modules of this
 checkout and check afterwards that a workbook holds exactly the source of one
-commit:
+commit. The synchronizer imports the modules through Excel; the builder writes
+a workbook directly from the source, without Excel, and is
+[not yet validated in Excel](#building-a-workbook-without-excel).
 
 | File | Purpose |
 | --- | --- |
@@ -11,6 +13,9 @@ commit:
 | [`Sync-EXCEL_UI-VBA-Downloads.cmd`](../tools/Sync-EXCEL_UI-VBA-Downloads.cmd) | Drag-and-drop launcher that imports modules from a folder, `Downloads` by default |
 | [`Export-EXCEL_UI-VBA.ps1`](../tools/Export-EXCEL_UI-VBA.ps1) | Exports every VBA component of a workbook, with a manifest of SHA-256 digests |
 | [`compare_vba_export.py`](../tools/compare_vba_export.py) | Compares an export with the source of one commit |
+| [`build_workbook.py`](../tools/build_workbook.py) | Writes the `.xlsm` of one configuration from the source, without Excel |
+| [`vba_project.py`](../tools/vba_project.py) | Writes the workbook's VBA project (`vbaProject.bin`) for `build_workbook.py` |
+| [`lo_smoke.py`](../tools/lo_smoke.py) | Opens a built workbook in headless LibreOffice and checks its modules |
 | [`vba-projects.json`](../tools/vba-projects.json) | The module set of each configuration |
 
 The scripts change VBA code only. Compiling the workbook and running
@@ -31,6 +36,9 @@ checks of behaviour.
 - Python 3.11 or later and Git for `compare_vba_export.py`. It does not need
   Excel, so you can run it on any machine that has the export folder and a
   clone of the repository.
+- Python 3.11 or later for `build_workbook.py`, on any platform. It needs
+  neither Excel nor VBA project trust. `lo_smoke.py` also needs LibreOffice
+  and its Python UNO bridge.
 
 ## Quick start
 
@@ -180,6 +188,111 @@ synchronization brings the workbook back to the repository source.
 
 The launchers print the outcome, wait for a key and return the same code.
 
+## Building a workbook without Excel
+
+`tools/build_workbook.py` writes a new macro-enabled workbook for one
+configuration directly from the source, with the Python standard library
+only:
+
+```sh
+python3 tools/build_workbook.py --mode Development test-results/EXCEL_UI_Development.xlsm
+```
+
+> [!IMPORTANT]
+> The built workbook is not yet validated in Excel. Until a run on a Windows
+> host has opened it, compiled it and passed
+> `Test_EXCEL_UI_RunReleaseCertification`, I use the synchronizer for
+> certification and for every other piece of evidence, and so should you.
+
+| Argument | Meaning |
+| --- | --- |
+| `--mode` | `Production`, `Development` or `Demo`, in any letter case. Required. |
+| `--override DIR` | Replace modules with the files of `DIR`, as described below. |
+| `OUTPUT` | The `.xlsm` file to write. Its folder is created, and a file of that name is replaced. |
+
+The workbook holds what a new Excel workbook holds after a full
+synchronization with `-NewWorkbook`:
+
+- the modules that the configuration lists, in the manifest's order, each
+  with its source, its `Attribute` lines and CRLF line endings;
+- one worksheet, `Sheet1`, with the code name `Sheet1`, and the workbook code
+  name `ThisWorkbook`. Both document modules hold only `Option Explicit`.
+
+The source rules are the synchronizer's: every listed module must be a `.bas`
+file with one valid `Attribute VB_Name`, every `.bas` file in `src/`, `test/`
+and `demo/` must be in a configuration, and no two modules may share a name.
+
+The package and its VBA project (`xl/vbaProject.bin`) are written from the
+Office file format specifications. The VBA project holds the module source and
+no compiled code, so Excel compiles it from source when it opens the workbook.
+Nothing drives Excel, so the build needs no **Trust access to the VBA project
+object model**, and it runs on any platform.
+
+### Overrides for negative controls
+
+`--override DIR` builds the configuration with some of its modules replaced,
+for example by a mutant for a negative control or by modules under review. A
+file in `DIR` is identified as with `-SourceDir`: only by the
+`Attribute VB_Name` it declares, never by its file name.
+
+- A file whose `VB_Name` is a module of the configuration replaces that module
+  in its place.
+- A standard module (`.bas`) that the checkout does not have, whose name
+  matches one of the manifest's `project_name_patterns` that the repository's
+  own module names match (today `^M_`), is added after the configuration's
+  modules, in name order.
+- When several files carry the same `VB_Name`, the newest is taken; the tool
+  names the older copies it ignored.
+
+Where the synchronizer would ignore a file, the builder stops with exit code
+1: a file without exactly one valid `VB_Name`, a `.cls` or `.frm` file, or a
+`VB_Name` that names no module of the repository and matches no pattern. A
+repository module that the configuration does not list, such as a demo module
+in a development build, stops it too, because modules of different
+configurations are never combined. A folder without any `.bas`, `.cls` or
+`.frm` file stops it as well.
+
+```sh
+python3 tools/build_workbook.py --mode Development --override test-results/mutant test-results/EXCEL_UI_mutant.xlsm
+```
+
+### Reproducible output
+
+The same mode and the same module source give the same bytes, on any platform
+and from any checkout: line endings are normalized to CRLF, every part of the
+package is stored uncompressed with a fixed time and fixed permissions, and the
+project ID and the random values of the VBA project are derived from the
+source. The tool prints the SHA-256 of the workbook, so two builds of one
+commit can be compared by their digests.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The workbook was written. |
+| 1 | The source or the override folder cannot be built; the message names the cause and nothing is written. |
+| 2 | An error in the arguments, such as an unknown mode or an output that is not an `.xlsm` file. |
+
+### LibreOffice smoke check
+
+`tools/lo_smoke.py` builds the workbook of a mode, opens it in headless
+LibreOffice with macro execution off, and checks that the VBA project holds
+exactly `ThisWorkbook`, `Sheet1` and the configuration's modules, each with the
+code of its source file, and that the code names are those above:
+
+```sh
+python3 tools/lo_smoke.py --mode Development
+```
+
+Run it with a Python that has LibreOffice's UNO bridge; on Debian and Ubuntu,
+that is `/usr/bin/python3` with the `python3-uno` package. Given a workbook
+path, it checks that workbook instead of building one. It exits with 0 when the
+check passes, 1 when it fails, and 2 when it cannot run, for example when
+`soffice` or the UNO bridge is missing. The static-checks workflow runs it for
+every mode in a job of its own, which is not a required check.
+
+LibreOffice is not a supported host. The check shows that the package and its
+VBA project can be read; it does not show that the code compiles or runs in
+Excel.
+
 ## Source round trip
 
 The round trip shows that a workbook holds exactly the source of one commit:
@@ -274,3 +387,10 @@ The unit tests run on any platform, without Excel:
 - `tests/test_compare_vba_export.py` builds exports from the source at
   `HEAD`, damages them the way a faulty round trip would, and checks each
   finding and binding result.
+- `tests/test_build_workbook.py` reads built workbooks back with readers of
+  its own: the package parts and relationships, the compound file, the
+  decompressed module and `dir` streams, and the `PROJECT` stream. It checks
+  the code names, `--override`, the refusals and that a rebuild is
+  byte-identical.
+- `tests/test_lo_smoke.py` checks the comparison of the smoke check, and runs
+  it end to end where LibreOffice and its UNO bridge are installed.

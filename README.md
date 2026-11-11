@@ -705,7 +705,7 @@ to tagged GitHub Releases.
 | [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | Base branch, rulesets, pull requests and review threads, repository settings, pinned Actions and Dependabot |
 | [docs/REPOSITORY_STRUCTURE.md](docs/REPOSITORY_STRUCTURE.md) | The file tree and what each directory holds |
 | [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md) | Issue labels, priorities, milestones, target dates and the issue workflows |
-| [docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md) | Importing the modules into a workbook from the command line, and checking a workbook's VBA against a commit |
+| [docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md) | Importing the modules into a workbook from the command line, building a workbook from the source without Excel, and checking a workbook's VBA against a commit |
 | [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) | One-command release certification in Excel and its evidence folder |
 | [docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md) | The advisory check of calls across modules |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |

@@ -151,6 +151,13 @@ into a closed `.xlsm` instead of steps 1–4, and keeps a backup until it has
 saved. Compile afterwards as in step 5. See
 [docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md).
 
+On any platform, `python3 tools/build_workbook.py --mode Production <file>.xlsm`
+writes a new workbook that holds one configuration, without Excel and without
+**Trust access to the VBA project object model**. It is not yet validated in
+Excel: open it, compile it as in step 5 and run the validation below before you
+rely on it, and use the synchronizer for release evidence. See
+[Building a workbook without Excel](docs/WORKBOOK_SYNC.md#building-a-workbook-without-excel).
+
 ---
 
 <a id="validation"></a>

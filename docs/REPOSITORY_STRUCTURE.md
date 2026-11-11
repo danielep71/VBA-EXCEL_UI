@@ -45,9 +45,10 @@ VBA-EXCEL_UI/
 └─ pyproject.toml
 ```
 
-`tools/` holds the Python static gate and its helpers, the release tool, and
-the Windows workbook tools (synchronization, export and certification), `tests/` the unit tests for
-those tools, and `images/` the documentation images.
+`tools/` holds the Python static gate and its helpers, the release tool, the
+Windows workbook tools (synchronization, export and certification), and the
+workbook builder that writes an `.xlsm` from the source without Excel; `tests/`
+holds the unit tests for those tools, and `images/` the documentation images.
 
 The source repository intentionally contains no versioned demo `.xlsm`. Release
 binaries are attached to tagged GitHub Releases.
