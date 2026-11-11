@@ -151,6 +151,16 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added the **branch coverage** check to `tools/check_repo.py`, with its own
+  self-test fixtures (#159). Every ecosystem in `.github/dependabot.yml` needs
+  one entry for the default branch and, while a release is open, one entry for
+  the release that follows `VERSION`, with the same directory, schedule, groups
+  and labels; an entry for any other branch, including a release that has
+  already shipped, fails the gate. `.github/workflows/codeql.yml` must run on
+  pushes to `main` and on pull requests to `main` and `release/**`, with no
+  negative (`!`) pattern in those branch lists. The check reads the YAML with
+  a narrow standard-library reader and reports any shape it does not
+  understand instead of guessing.
 - Added the **OpenSSF Scorecard** workflow (`.github/workflows/scorecard.yml`).
   It scores the supply-chain posture of `main` weekly and on pushes to `main`,
   and publishes the results to code scanning. Its one job holds
