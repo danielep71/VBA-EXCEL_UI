@@ -151,6 +151,18 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added **tools/release.py** and the **Release** workflow
+  (`.github/workflows/release.yml`). On a pushed `v*` tag, the workflow checks
+  that the tag is annotated and equals `VERSION`, that `CHANGELOG.md` has a
+  dated section for it, that the tagged commit is reachable from `main`, and
+  that **Repository and module checks** concluded success on that exact
+  commit. It then builds `git archive` source archives and `SHA256SUMS`,
+  publishes the GitHub Release with the changelog section as its notes, and
+  checks the published notes and asset hashes. A manual run verifies an
+  existing tag and publishes nothing. Only the publish job holds
+  `contents: write`; every action is pinned to a full SHA. Excel certification
+  and the evidence record stay manual, and **RELEASING.md** now says which
+  steps are automated (#162).
 - Added the **OpenSSF Scorecard** workflow (`.github/workflows/scorecard.yml`).
   It scores the supply-chain posture of `main` weekly and on pushes to `main`,
   and publishes the results to code scanning. Its one job holds
