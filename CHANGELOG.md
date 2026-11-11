@@ -543,6 +543,17 @@ measured against that baseline.
 - Rebuilt the feature-request template around a user problem, testable
   acceptance criteria, targeting and ownership, compatibility, failure policy,
   recovery, verification, alternatives and explicit non-goals.
+- Moved the Excel evidence contract into
+  `.github/excel-evidence-policy.json`
+  ([#158](https://github.com/danielep71/VBA-EXCEL_UI/issues/158)).
+  `tools/Certify-EXCEL_UI.ps1` takes the bundle file names, the steps, the
+  certification runner, the configuration and the schema from it, and
+  `tools/check_excel_evidence.py` reads every rule from it (or from
+  `--policy`) and validates the policy before it reads a bundle. A new test
+  fails when the script, the validator or
+  [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) disagrees with
+  the policy. The bundle format is unchanged, and the validator's output for
+  the same bundle is identical. No Excel run has used the changed script yet.
 
 ### 🐛 Fixed
 

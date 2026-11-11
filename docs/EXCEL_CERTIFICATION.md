@@ -5,7 +5,8 @@ Windows host with Excel. It builds a development workbook from that commit,
 compiles it, runs `Test_EXCEL_UI_RunReleaseCertification`, and collects the
 result into an evidence bundle that names the commit, the host and the source
 it ran. `tools/check_excel_evidence.py` then validates the bundle against the
-commit, on any machine with a clone.
+commit, on any machine with a clone. Both read what a bundle must contain from
+one file, [the evidence policy](#-the-evidence-policy).
 
 The script automates the compile and certification steps of
 [RELEASING.md](../RELEASING.md). It does not replace the manual checks listed
@@ -124,16 +125,52 @@ Keep a failed bundle as it is: it records what happened.
 `session.log` contains local paths, such as your `%TEMP%` folder, which can
 include your user name. Review it before you publish it.
 
+## 📐 The evidence policy
+
+`.github/excel-evidence-policy.json` states the evidence contract in one place.
+The script takes from it the names of the files it writes, the steps it
+records and their order, the certification runner, the configuration and the
+schema, and stops before it starts anything when the file is missing or
+incomplete. The validator reads the whole file and checks it before it reads a
+bundle: each entry must have the right type, no list may be empty, and no step
+or file may appear twice. An unusable policy stops the validator with exit
+code `2`.
+
+| Key | Content |
+| --- | --- |
+| `description` | What the file is for. |
+| `schema_version` | The format of the policy file itself. The validator accepts `1`. |
+| `evidence_schema` | The `schema` value that `session.json`, `host.json`, `source-digests.json` and `certification.json` carry. |
+| `component` | The `component` that `certification.json` names. |
+| `manifest` | The project manifest, `tools/vba-projects.json`. |
+| `configuration` | The configuration the workbook is built from, `development`. |
+| `certification_module` | The module that holds the certification runner. |
+| `certification_runner` | The macro the certify step runs, `Test_EXCEL_UI_RunReleaseCertification`. Its `TST_CertRunUnit` calls are the units a bundle must report. |
+| `required_files` | The bundle file for each role: the session record, the host record, the source digests, the certification document and the text report. |
+| `evidence_files` | The files the workbook writes and the collect step copies. `session.json` records the SHA-256 of each. |
+| `steps` | The steps the script records, in the order it runs them. |
+| `host_fields` | The `windows` and `excel` fields of `host.json` that must be non-empty text. |
+| `excel_matches_certification` | Each Excel field of `host.json` and the `certification.json` key it must equal. |
+| `bitness` | The Excel bitness values the validator accepts. |
+
+To change the contract, change the policy and, in the same pull request, the
+code and the text that implement it: a new step needs its own block in the
+script, an entry in its help and one in the list under **What it does**; a
+renamed file needs its row in the bundle table. `tests/test_excel_evidence_policy.py`
+fails when the script, the validator or this guide disagrees with the policy,
+so the mismatch shows up in CI instead of during an Excel run.
+
 ## 🔍 Validate a bundle
 
 ```bash
 python3 tools/check_excel_evidence.py <bundle> --commit <full-sha>
 ```
 
-`--commit` defaults to `HEAD`. The validator prints one line per check and a
-final `RESULT: PASS` or `RESULT: FAIL`, and exits with `0` when every check
-passes, `1` when one fails, and `2` when it cannot run (no Git, an unknown
-commit or no bundle folder). It checks that:
+`--commit` defaults to `HEAD`. The validator reads the policy of the checkout
+it runs from; `--policy <file>` names another one. It prints one line per check
+and a final `RESULT: PASS` or `RESULT: FAIL`, and exits with `0` when every
+check passes, `1` when one fails, and `2` when it cannot run (no Git, an
+unknown commit, no bundle folder or an unusable policy). It checks that:
 
 - every file it needs is present;
 - `session.json` names the commit and a clean working tree, every step passed,
