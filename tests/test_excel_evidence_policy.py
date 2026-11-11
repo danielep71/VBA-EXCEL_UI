@@ -335,6 +335,8 @@ class PolicyValidationTests(unittest.TestCase):
                                  "required_files.host 'x/host.json' is not a valid name"),
             "one file for two roles": (put_in("required_files", "host", "session.json"),
                                        "names the same file for two roles"),
+            "two roles differing in case": (put_in("required_files", "host", "SESSION.json"),
+                                            "names the same file for two roles"),
             "evidence outside the bundle": (put("evidence_files", ["other.json"]),
                                             "evidence_files other.json are not required files"),
             "session as evidence": (put("evidence_files", ["session.json"]),

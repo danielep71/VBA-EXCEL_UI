@@ -290,6 +290,32 @@ class PolicyDrivenTests(Fixture):
         # The repository policy does not accept that bundle.
         self.assertIn("files", self.failed())
 
+    def renamed_documents(self) -> Path:
+        """A policy and a bundle whose session and host records are named without .json."""
+        names = {"session": "session.data", "host": "HOST.JSON"}
+        policy = self.policy_file(lambda document: document["required_files"].update(names))
+        self.bundle_with()
+        (self.bundle / "session.json").rename(self.bundle / "session.data")
+        (self.bundle / "host.json").rename(self.bundle / "HOST.JSON")
+        return policy
+
+    def test_json_documents_are_read_by_role_whatever_their_names(self) -> None:
+        policy = self.renamed_documents()
+        code, out, _ = self.run_main(str(self.bundle), "--commit", self.sha, "--policy", str(policy))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count("  PASS  "), len(evidence.CHECKS))
+        self.assertIn("session.data, HOST.JSON, source-digests.json", out)
+
+    def test_a_role_document_that_is_not_json_fails_clearly(self) -> None:
+        policy = self.renamed_documents()
+        (self.bundle / "session.data").write_text("{not json", encoding="utf-8")
+        found = evidence.evaluate(self.bundle, self.sha, self.root, evidence.load_policy(policy))
+        failed = {name: detail for name, passed, detail in found if not passed}
+        self.assertNotIn("files", failed)
+        for check in ("session", "evidence digests", "workbook modules", "timing"):
+            self.assertIn("cannot check: session.data is not valid JSON", failed[check], check)
+        self.assertNotIn("host", failed)
+
     def test_a_step_the_bundle_did_not_record_fails(self) -> None:
         self.bundle_with()
         policy = self.policy_file(lambda document: document["steps"].append("archive"))

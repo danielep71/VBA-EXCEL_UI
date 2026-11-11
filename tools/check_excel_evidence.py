@@ -89,6 +89,8 @@ def require(condition: object, message: str) -> None:
 # ----------------------------------------------------------------------------
 # The roles of the bundle files; the policy names the file for each.
 ROLES = ("session", "host", "source_digests", "certification_json", "certification_report")
+# The roles whose file is a JSON document, whatever the policy names it.
+JSON_ROLES = ("session", "host", "source_digests", "certification_json")
 HOST_SECTIONS = ("windows", "excel")
 # The host fields the PASS line of the host check prints.
 REPORTED_HOST_FIELDS = {"windows": ("caption", "version", "build"), "excel": ("version", "build", "bitness")}
@@ -123,6 +125,10 @@ class Policy:
     @property
     def required_files(self) -> tuple[str, ...]:
         return tuple(self.files[role] for role in ROLES)
+
+    @property
+    def json_files(self) -> tuple[str, ...]:
+        return tuple(self.files[role] for role in JSON_ROLES)
 
     @property
     def session(self) -> str:
@@ -208,7 +214,8 @@ def policy_files(read: PolicyReader, document: dict[str, Any]) -> tuple[dict[str
     if sorted(files) != sorted(ROLES):
         read.fail(f"required_files must name exactly the roles {', '.join(ROLES)}")
     named = {role: read.text(files[role], f"required_files.{role}", FILE_NAME) for role in ROLES}
-    if len(set(named.values())) != len(named):
+    # Windows file names ignore case, so two roles must differ in more than case.
+    if len({name.lower() for name in named.values()}) != len(named):
         read.fail("required_files names the same file for two roles")
     evidence_files = read.names(document["evidence_files"], "evidence_files", FILE_NAME)
     outside = [name for name in evidence_files if name not in named.values()]
@@ -453,7 +460,7 @@ def load_bundle(folder: Path, sha: str, root: Path, policy: Policy) -> Bundle:
             errors[name] = f"{name} is missing"
             continue
         raw[name] = path.read_bytes()
-        if name.endswith(".json"):
+        if name in policy.json_files:
             try:
                 documents[name] = parse_json(raw[name], name)
             except EvidenceError as error:
