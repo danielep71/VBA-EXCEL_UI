@@ -904,6 +904,15 @@ with the steps above before merging. While a release branch is open, Dependabot
 opens the same updates against it too, so neither branch falls behind; remove
 those entries when the release branch is merged.
 
+The gate's **branch coverage** check holds that configuration to the branches
+that exist. Every ecosystem needs one entry without `target-branch`, for
+`main`. While a release is open, it also needs one entry for that release
+branch, with the same directory, schedule, groups and labels as the `main`
+entry. The release branch must be the next patch, minor or major release after
+`VERSION`; an entry for a release that has already shipped, or for any other
+branch, fails. The same check requires **CodeQL** to run on pushes to `main`
+and on pull requests to `main` and `release/**`.
+
 The actionlint release that **Workflow lint** downloads is neither an Action nor
 a Python package, so Dependabot does not update it. Update
 `ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` in
