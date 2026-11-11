@@ -68,10 +68,10 @@ pre-release and no production version is security-supported.
 
 Security fixes follow the
 [base-branch rule](CONTRIBUTING.md#base-branch): they start from **main**, except
-that while a release branch `release/vX.Y.Z` is open, a VBA correction for that
-release targets the release branch and reaches **main** with the release, and a
-non-VBA repository change is made on the release branch and mirrored to
-**main**. Each fix is included in a new tagged release. Older releases are not
+that while a release branch `release/vX.Y.Z` is open they target the release
+branch and reach **main** with the release. A fix that cannot wait for the
+release goes to **main** directly, and **main** is then merged into the release
+branch. Each fix is included in a new tagged release. Older releases are not
 normally patched in place unless I state otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such
@@ -323,6 +323,7 @@ The repository currently contains these workflows:
 .github/workflows/labels-sync.yml
 .github/workflows/pr-milestones.yml
 .github/workflows/rulesets-drift.yml
+.github/workflows/scorecard.yml
 .github/workflows/static-checks.yml
 .github/workflows/wiki-badges.yml
 ~~~
@@ -357,7 +358,16 @@ pull-request code. **Detect issue-label drift** and **Issue triage** are
 read-only.
 
 **Ruleset drift** compares the live repository rulesets with
-`.github/rulesets/` using the job's read-only token and never changes them.
+`.github/rulesets/` using the job's read-only token and never changes them. It
+also compares the repository settings with `.github/repository-settings.json`;
+the security and Actions settings, which only administrators can read, are
+reported there as not verifiable and are checked with an administrator token,
+as [CONTRIBUTING.md](CONTRIBUTING.md) describes.
+
+**OpenSSF Scorecard** scores `main` weekly, on pushes to `main`, when branch
+protection changes and on demand, and runs only while the repository is
+public. It publishes its SARIF to code scanning and signs the published
+results, so its one job holds `security-events: write` and `id-token: write`.
 
 **External links** requests the public URLs already published in the tracked
 Markdown files, weekly and on demand, with a read-only token and no secrets.
@@ -370,10 +380,11 @@ operate from the default branch.
 #53 and #49 retain the requirement for a runnable final-repository/final-Wiki
 check before release readiness.
 
-Three jobs hold a write permission, each confined to that job: **Sync issue
+Four jobs hold a write permission, each confined to that job: **Sync issue
 labels** (`issues: write`, reconciling only from the default branch), **Keep
-milestones issue-only** (`pull-requests: write`), and the push and scheduled
-**CodeQL** job (`security-events: write`). None reads or publishes release
+milestones issue-only** (`pull-requests: write`), the push and scheduled
+**CodeQL** job (`security-events: write`), and the **OpenSSF Scorecard** job
+(`security-events: write` and `id-token: write`). None reads or publishes release
 artifacts, and their permissions must not be copied into static or Wiki jobs.
 
 This is intentionally a low-privilege automation surface.
