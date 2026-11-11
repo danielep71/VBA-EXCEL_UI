@@ -101,6 +101,12 @@ unlisted module stops the script before Excel starts. The static gate
 manifest and the tracked modules disagree, so add a new module to the
 manifest in the same change.
 
+Each configuration lists its modules in import order, which is the order in
+which the script imports them, and `module_descriptions` gives each module a
+one-line description. The module tables of [INSTALLATION.md](../INSTALLATION.md)
+are generated from both; after a change to the manifest, run
+`python3 tools/render_docs.py --write`.
+
 ## Importing modules from a folder
 
 To try modules received outside the repository, for example modules

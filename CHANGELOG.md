@@ -166,6 +166,22 @@ measured against that baseline.
   and publishes the results to code scanning. Its one job holds
   `security-events: write` and `id-token: write`; every action is pinned to a
   full SHA (#156).
+- Held the documentation to the repository (#160):
+  - the static gate gained a **documented commands** check, with a self-test.
+    It reads the tracked Markdown, except this changelog, for invocations of
+    `tools/*.py`, `tools/*.ps1` and `tools/*.cmd` in fenced and inline code,
+    and fails when the tool is not tracked, a Python tool does not accept an
+    `--option`, or a PowerShell script does not declare a `-Parameter`;
+  - the module tables of `INSTALLATION.md` are generated from
+    `tools/vba-projects.json` by the new `tools/render_docs.py`, between
+    `<!-- generated:modules:<configuration> -->` markers. The manifest gained
+    a description for each module, and each configuration now lists its
+    modules in import order, so the workbook tools import the production
+    modules in the documented dependency-first order. `tools/verify.py` runs
+    `python3 tools/render_docs.py --check` as `render-docs`;
+  - the gate's **module inventory** check reads the production set from the
+    manifest instead of a list of its own, and checks that the
+    `INSTALLATION.md` import order is the manifest's.
 - Added the demo cleanup harness `Demo_Test_RunCleanupChecks` in the new
   **M_DEMO_CLEANUP_TESTS** module of the demo workbook, with a cleanup probe
   and one-shot fault seams in **M_DEMO_BUILDER**

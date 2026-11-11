@@ -54,6 +54,7 @@ known-first-party = [
     "gate_fixture",
     "reformat",
     "reformat_fixtures",
+    "render_docs",
     "repository_policy",
     "titlebar_control_fixtures",
     "vba_analyze",

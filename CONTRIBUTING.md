@@ -238,8 +238,8 @@ python3 tools/verify.py --ci
 ```
 
 It runs every static check in one declared order, including the gate
-(`tools/check_repo.py`), the house-style check of the VBA modules, the unit
-tests, Ruff and `mypy --strict`. Every check runs even after one fails. The
+(`tools/check_repo.py`), the house-style check of the VBA modules, the
+generated documentation tables, the unit tests, Ruff and `mypy --strict`. Every check runs even after one fails. The
 command prints one result line per check and a final `RESULT` line: `PASS`,
 `FAIL`, or `INCOMPLETE` when a check was skipped. `--list` prints the checks and
 their commands, and `--only` and `--skip` take check names. Without `--ci`, a
@@ -247,6 +247,29 @@ check whose tool is missing (Node.js, Ruff or mypy) is reported as `SKIPPED`,
 which is not a pass; with `--ci` it fails. Fix formatting drift with
 `python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas`, then
 re-import the affected modules into the VBE.
+
+Two checks hold the documentation to the repository:
+
+- **Generated tables.** The module tables of `INSTALLATION.md` sit between
+  `<!-- generated:modules:<configuration> -->` and
+  `<!-- /generated:modules:<configuration> -->` marker lines and are written
+  from `tools/vba-projects.json`: the configuration's modules in import order,
+  with the descriptions in its `module_descriptions`. Edit the manifest, not
+  the table, then run `python3 tools/render_docs.py --write`.
+  `python3 tools/render_docs.py --check` prints a diff and fails when a table
+  differs from the manifest; `tools/verify.py` runs it as `render-docs`.
+- **Documented commands.** The gate's *documented commands* check reads every
+  tracked Markdown file except `CHANGELOG.md` for invocations of
+  `tools/*.py`, `tools/*.ps1` and `tools/*.cmd` in fenced and inline code.
+  The tool must be tracked; each `--option` given to a Python tool must be one
+  its parser accepts; and each `-Parameter` given to a PowerShell script,
+  directly or through a `.cmd` launcher that passes its arguments on, must be
+  declared in the script's `param()` block, in any letter case. Python options
+  are read from the tool's source, never by running it: the option strings of
+  its `add_argument` calls, or, for a tool that reads `sys.argv` itself, the
+  option strings it compares the arguments with. Values and placeholders such
+  as `<sha>` are not checked. When you rename a tool, an option or a
+  parameter, update the documentation in the same change.
 
 CI runs the same command on every pull request and writes its table of results
 to the job summary. It cannot execute VBA — a hosted runner has no Excel — so

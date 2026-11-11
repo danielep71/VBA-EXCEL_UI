@@ -16,6 +16,7 @@ Exit status is 0 when every check passed, 1 otherwise. --help prints the usage
 and exits 0 without running a check.
 """
 
+import ast
 import fnmatch
 import hashlib
 import html
@@ -48,20 +49,16 @@ TEST_MODULES: list[str] = []
 DEMO_MODULES: list[str] = []
 ALL_MODULES: list[str] = []
 
-# The production set as I document it, in the INSTALLATION.md import order.
-# It is data, not the list the checks iterate: the module-inventory check fails
-# when the discovered src/ set disagrees with it, so adding or removing a
-# production module has to be a deliberate change here and in INSTALLATION.md.
-EXPECTED_PRODUCTION_MODULES = [
+# Modules that other checks read by name: the title-bar, WinAPI and
+# demo-cleanup regressions and the public API manifest inspect these files
+# directly, so they must exist. Which modules make up each configuration is not
+# written here: tools/vba-projects.json lists them, and the module-inventory
+# and VBA-project-manifest checks hold the tracked modules to it.
+REQUIRED_MODULES = [
     "src/M_EXCEL_UI_RUNTIME.bas",
     "src/M_EXCEL_UI_TITLEBAR.bas",
     "src/M_EXCEL_UI_SNAPSHOT.bas",
     "src/M_EXCEL_UI.bas",
-]
-
-# Modules that other checks read by name: the title-bar and demo-cleanup
-# regressions inspect these files directly, so they must exist.
-REQUIRED_MODULES = EXPECTED_PRODUCTION_MODULES + [
     "test/M_EXCEL_UI_REGRESSION_TESTS.bas",
     "demo/M_DEMO_BUILDER.bas",
     "demo/M_EXCEL_UI_DEMO.bas",
@@ -93,6 +90,7 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/binary_allowlist.txt",
     "tools/check_issues.py",
     "tools/verify.py",
+    "tools/render_docs.py",
     "tools/vba-projects.json",
     ".github/labels.json",
     ".github/excel-evidence-policy.json",
@@ -239,35 +237,72 @@ def load_modules() -> list[str]:
     return misplaced
 
 
+INSTALLATION_GUIDE = "INSTALLATION.md"
+PRODUCTION_BLOCK_RE = re.compile(
+    r"^<!-- generated:modules:production -->$(?P<body>.*?)^<!-- /generated:modules:production -->$",
+    re.M | re.S)
+TABLE_SOURCE_RE = re.compile(r"^\|[^|\n]*\|\s*`([^`]+)`", re.M)
+
+
+def documented_import_order() -> list[str] | None:
+    """The module paths of the production table of INSTALLATION.md, in order.
+
+    Returns None after recording why the table cannot be read.
+    """
+    if not os.path.isfile(os.path.join(REPO, INSTALLATION_GUIDE)):
+        fail("module-inventory", f"{INSTALLATION_GUIDE} is missing")
+        return None
+    m = PRODUCTION_BLOCK_RE.search(read(INSTALLATION_GUIDE).decode("utf-8"))
+    if m is None:
+        fail("module-inventory",
+             f"{INSTALLATION_GUIDE}: no generated:modules:production block; the import "
+             f"order must be generated from {VBA_PROJECT_MANIFEST} by tools/render_docs.py")
+        return None
+    return TABLE_SOURCE_RE.findall(m.group("body"))
+
+
 def check_module_inventory() -> None:
     """Discover the modules every other module check iterates, and audit them.
 
-    Three things fail here: a VBA module tracked outside src/, test/ or demo/;
-    a production set that disagrees with EXPECTED_PRODUCTION_MODULES; and a
-    production module that tools/vba_api.py assigns to no public API section,
-    whose public declarations would otherwise never reach the manifest.
+    Four things fail here: a VBA module tracked outside src/, test/ or demo/;
+    a src/ set that disagrees with the production configuration of
+    tools/vba-projects.json; an INSTALLATION.md import order that is not the
+    order of that configuration; and a production module that tools/vba_api.py
+    assigns to no public API section, whose public declarations would
+    otherwise never reach the manifest.
     """
+    check = "module-inventory"
     for rel in load_modules():
-        fail("module-inventory",
+        fail(check,
              f"{rel}: VBA module tracked outside src/, test/ or demo/; it "
              f"would escape every module check")
 
     discovered = set(PRODUCTION_MODULES)
-    expected = set(EXPECTED_PRODUCTION_MODULES)
-    for rel in sorted(discovered - expected):
-        fail("module-inventory",
-             f"{rel}: production module is not in EXPECTED_PRODUCTION_MODULES; "
-             f"add it there and to the INSTALLATION.md import order")
-    for rel in sorted(expected - discovered):
-        fail("module-inventory",
-             f"{rel}: listed in EXPECTED_PRODUCTION_MODULES but not tracked")
+    manifest = load_vba_project_manifest(check)
+    production = configuration_modules(manifest, "production", check) if manifest is not None else None
+    if production is not None:
+        for rel in sorted(discovered - set(production)):
+            fail(check,
+                 f"{rel}: production module is not in the production configuration of "
+                 f"{VBA_PROJECT_MANIFEST}; add it there in import order and run "
+                 f"python3 tools/render_docs.py --write")
+        for rel in sorted(set(production) - discovered):
+            fail(check,
+                 f"{rel}: listed in the production configuration of {VBA_PROJECT_MANIFEST} "
+                 f"but not tracked in src/")
+        documented = documented_import_order()
+        if documented is not None and documented != production:
+            fail(check,
+                 f"{INSTALLATION_GUIDE}: the production import order is "
+                 f"{', '.join(documented) or 'empty'}, but {VBA_PROJECT_MANIFEST} lists "
+                 f"{', '.join(production)}; run python3 tools/render_docs.py --write")
 
     vba_api = import_vba_api()
     if vba_api is None:
         return
     sectioned = {rel for _, modules in vba_api.SECTIONS for rel in modules}
     for rel in sorted(discovered - sectioned):
-        fail("module-inventory",
+        fail(check,
              f"{rel}: production module in no public API section of "
              f"tools/vba_api.py; its declarations would never be recorded")
 
@@ -291,9 +326,8 @@ def expected_configurations() -> dict[str, set[str]]:
     }
 
 
-def load_vba_project_manifest() -> dict[str, object] | None:
+def load_vba_project_manifest(check: str = "vba-project-manifest") -> dict[str, object] | None:
     """Parse the manifest, or record why it cannot be read and return None."""
-    check = "vba-project-manifest"
     path = os.path.join(REPO, VBA_PROJECT_MANIFEST)
     if not os.path.isfile(path):
         fail(check, f"{VBA_PROJECT_MANIFEST} is missing")
@@ -309,14 +343,14 @@ def load_vba_project_manifest() -> dict[str, object] | None:
     return manifest
 
 
-def configuration_modules(manifest: dict[str, object], name: str) -> list[str] | None:
+def configuration_modules(manifest: dict[str, object], name: str,
+                          check: str = "vba-project-manifest") -> list[str] | None:
     """The module list of one configuration, or None after recording why not."""
     configurations = manifest.get("configurations")
     entry = configurations.get(name) if isinstance(configurations, dict) else None
     modules = entry.get("modules") if isinstance(entry, dict) else None
     if not isinstance(modules, list) or not all(isinstance(rel, str) for rel in modules):
-        fail("vba-project-manifest",
-             f"{VBA_PROJECT_MANIFEST}: configuration {name!r} has no list of module paths")
+        fail(check, f"{VBA_PROJECT_MANIFEST}: configuration {name!r} has no list of module paths")
         return None
     return modules
 
@@ -328,8 +362,11 @@ def check_vba_project_manifest() -> None:
     read their module sets from this manifest. It must parse; each tracked
     standard module of src/, test/ and demo/ must be in a configuration; each
     listed path must be tracked; the three configurations must hold exactly
-    the sets of expected_configurations(), each path once; and it must list
-    no document modules, since this repository has none.
+    the sets of expected_configurations(), each path once; it must list no
+    document modules, since this repository has none; and module_descriptions
+    must give every listed module a one-line description, which
+    tools/render_docs.py writes into the module tables, and describe nothing
+    else.
     """
     check = "vba-project-manifest"
     manifest = load_vba_project_manifest()
@@ -368,6 +405,30 @@ def check_vba_project_manifest() -> None:
 
     for rel in sorted(set().union(*expected.values()) - listed):
         fail(check, f"{rel}: tracked module is in no configuration of {VBA_PROJECT_MANIFEST}")
+
+    for finding in module_description_findings(manifest.get("module_descriptions"), listed):
+        fail(check, f"{VBA_PROJECT_MANIFEST}: {finding}")
+
+
+def module_description_findings(descriptions: object, listed: set[str]) -> list[str]:
+    """Every listed module needs a one-line description, and nothing else has one.
+
+    tools/render_docs.py writes each description into a table cell, so a
+    description must hold neither a line break nor a '|'.
+    """
+    if not isinstance(descriptions, dict):
+        return ["module_descriptions must map each module path to its description"]
+    findings: list[str] = []
+    for rel in sorted(listed):
+        text = descriptions.get(rel)
+        if not isinstance(text, str) or not text.strip():
+            findings.append(f"module_descriptions has no description for {rel}")
+        elif "|" in text or "\n" in text:
+            findings.append(f"the description of {rel} must be one line without '|', "
+                            f"since it becomes a table cell")
+    findings.extend(f"module_descriptions describes {rel}, which no configuration lists"
+                    for rel in sorted(set(descriptions) - listed))
+    return findings
 
 
 # --------------------------------------------------------------------------
@@ -1758,6 +1819,379 @@ def check_markdown_escape_selftest() -> None:
                  + (f" | {found}" if found else ""))
 
 
+# --------------------------------------------------------------------------
+# Documented commands. A renamed tool or option leaves instructions that fail
+# on the reader's machine, often a Windows host where finding out costs an
+# Excel session. Every invocation of a repository tool that the documentation
+# quotes as code is held to the tool itself. The changelog is history: it may
+# name a tool or an option as it was when the entry was written.
+DOCUMENTED_COMMANDS_EXCLUDED = ("CHANGELOG.md",)
+
+TOOL_PATH_RE = re.compile(
+    r"(?<![\w./\\-])(?:\.[\\/])?tools[\\/][\w.-]+\.(?:py|ps1|cmd)(?![\w.\\/-])")
+COMMAND_TOKEN_RE = re.compile(r"\"[^\"]*\"|'[^']*'|\S+")
+COMMAND_STOP_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "2>", "2>&1", "<"})
+PYTHON_OPTION_RE = re.compile(r"--[A-Za-z][\w-]*")
+POWERSHELL_PARAMETER_RE = re.compile(r"-[A-Za-z]\w*")
+POWERSHELL_SCRIPT_PARAM_RE = re.compile(
+    r"^\s*(?:\[CmdletBinding\((?P<binding>[^)]*)\)\]\s*)?param\s*\(", re.I | re.M)
+POWERSHELL_VARIABLE_RE = re.compile(r"\$\{?([A-Za-z_]\w*)")
+# The parameters PowerShell adds to every advanced script.
+POWERSHELL_COMMON_PARAMETERS = frozenset(name.casefold() for name in (
+    "Verbose", "Debug", "ErrorAction", "WarningAction", "InformationAction",
+    "ProgressAction", "ErrorVariable", "WarningVariable", "InformationVariable",
+    "OutVariable", "OutBuffer", "PipelineVariable"))
+CMD_SCRIPT_RE = re.compile(r"%~dp0(?P<script>[\w.-]+\.ps1)", re.I)
+
+# Repository path -> source text, or None when no such tool is tracked.
+SourceReader = Callable[[str], "str | None"]
+
+
+def code_segments(text: str) -> Iterator[tuple[int, str]]:
+    """Yield (line number, code) for each fenced code line and inline code span.
+
+    A fenced line that ends in a continuation (a space and then a backslash or
+    PowerShell's backtick) is joined with the next one and yielded at the line
+    where it starts. HTML comment blocks are skipped, like everything GitHub
+    does not render; prose is not read at all.
+    """
+    fence: tuple[str, int] | None = None
+    in_comment = False
+    pending: tuple[int, str] | None = None
+    for n, line in enumerate(text.split("\n"), 1):
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        if fence is not None:
+            if closes_fence(line, fence):
+                fence = None
+                if pending is not None:
+                    yield pending
+                    pending = None
+                continue
+            start, joined = pending if pending is not None else (n, "")
+            joined += line.rstrip("\r")
+            if re.search(r"\s[\\`]$", joined):
+                pending = (start, joined[:-1])
+                continue
+            pending = None
+            yield start, joined
+            continue
+        fence = fence_opener(line)
+        if fence is not None:
+            continue
+        if HTML_COMMENT_BLOCK_START_RE.match(line):
+            in_comment = "-->" not in line[line.index("<!--") + 4:]
+            continue
+        for m in INLINE_CODE_RE.finditer(line):
+            yield n, m.group(0).strip("`")
+    if pending is not None:
+        yield pending
+
+
+def command_arguments(tail: str) -> list[str]:
+    """The arguments after a tool path, up to the end of its command."""
+    arguments: list[str] = []
+    for token in COMMAND_TOKEN_RE.findall(tail):
+        if token in COMMAND_STOP_TOKENS or token.startswith("#"):
+            break
+        arguments.append(token)
+    return arguments
+
+
+def python_tool_options(source: str) -> set[str]:
+    """The options a Python tool accepts, read from its source without running it.
+
+    Importing a tool to build its parser would run its module code inside the
+    gate, so the source is parsed instead. A tool that uses argparse accepts the
+    option strings of its add_argument calls, plus -h and --help unless its
+    ArgumentParser sets add_help=False. A tool that reads sys.argv by hand
+    accepts the option-shaped string literals of its comparisons (== and in),
+    which is how such a parser recognises an argument.
+    An option assembled at run time is not seen, and is reported as unknown
+    rather than passed unchecked. Raises SyntaxError for unparsable source.
+    """
+    tree = ast.parse(source)
+    declared: set[str] = set()
+    uses_argparse = False
+    adds_help = True
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+        if name == "add_argument":
+            uses_argparse = True
+            declared.update(arg.value for arg in node.args
+                            if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                            and arg.value.startswith("-"))
+        elif name == "ArgumentParser":
+            adds_help = adds_help and not any(
+                keyword.arg == "add_help" and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is False for keyword in node.keywords)
+    if uses_argparse:
+        return declared | ({"-h", "--help"} if adds_help else set())
+    return {constant.value for node in ast.walk(tree) if isinstance(node, ast.Compare)
+            for operand in (node.left, *node.comparators) for constant in ast.walk(operand)
+            if isinstance(constant, ast.Constant) and isinstance(constant.value, str)
+            and PYTHON_OPTION_RE.fullmatch(constant.value)}
+
+
+def powershell_code(source: str) -> str:
+    """Return PowerShell source without comments and with every string emptied.
+
+    What is left is code only, so a comma, a bracket or a $name inside a
+    comment or a string cannot be taken for part of a parameter list.
+    """
+    out: list[str] = []
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        if source.startswith("<#", i):
+            end = source.find("#>", i + 2)
+            i = n if end < 0 else end + 2
+            out.append(" ")
+        elif c == "#":
+            end = source.find("\n", i)
+            i = n if end < 0 else end
+        elif c in "\"'":
+            j = i + 1
+            while j < n and source[j] != c:
+                j += 2 if source[j] == "`" and c == '"' else 1
+            out.append(c + c)
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def split_top_level(text: str) -> list[str]:
+    """Split text at the commas outside every (), [] and {}."""
+    pieces: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for c in text:
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        if c == "," and depth == 0:
+            pieces.append("".join(current))
+            current = []
+        else:
+            current.append(c)
+    pieces.append("".join(current))
+    return pieces
+
+
+def powershell_parameters(source: str) -> set[str]:
+    """The parameters a PowerShell script declares, lower-cased.
+
+    Read from the script's own param() block, the first one in the code once
+    comments are removed: a function's param() block comes later and declares
+    the function's parameters, not the script's. An advanced script (one with
+    [CmdletBinding()] or a [Parameter()] attribute) also accepts the common
+    parameters, and -WhatIf and -Confirm when it supports ShouldProcess. A
+    script without a param() block takes no parameters.
+    """
+    code = powershell_code(source)
+    m = POWERSHELL_SCRIPT_PARAM_RE.search(code)
+    if m is None:
+        return set()
+    depth, end = 1, m.end()
+    while end < len(code) and depth:
+        depth += {"(": 1, ")": -1}.get(code[end], 0)
+        end += 1
+    block = code[m.end():end - 1]
+    names: set[str] = set()
+    for piece in split_top_level(block):
+        while True:
+            stripped = re.sub(r"\[[^\[\]]*\]", " ", piece)
+            if stripped == piece:
+                break
+            piece = stripped
+        variable = POWERSHELL_VARIABLE_RE.search(piece)
+        if variable:
+            names.add(variable.group(1).casefold())
+    binding = m.group("binding")
+    if binding is not None or re.search(r"\[Parameter\b", block, re.I):
+        names |= POWERSHELL_COMMON_PARAMETERS
+    if binding is not None and re.search(r"SupportsShouldProcess", binding, re.I):
+        names |= {"whatif", "confirm"}
+    return names
+
+
+def cmd_forward_target(rel: str, source: str) -> str | None:
+    """The PowerShell script a .cmd launcher passes its own arguments (%*) to."""
+    targets = set(CMD_SCRIPT_RE.findall(source))
+    if "%*" not in source or len(targets) != 1:
+        return None
+    directory = os.path.dirname(rel)
+    return f"{directory}/{targets.pop()}" if directory else targets.pop()
+
+
+def powershell_findings(script: str, rel: str, source: str, arguments: list[str],
+                        read_source: SourceReader) -> list[str]:
+    """Report each -Parameter that the script, or the script a .cmd runs, does not declare."""
+    used = [token.split(":")[0] for token in arguments
+            if POWERSHELL_PARAMETER_RE.fullmatch(token.split(":")[0])]
+    if not used:
+        return []
+    if rel.endswith(".cmd"):
+        target = cmd_forward_target(rel, source)
+        if target is None:
+            return [f"{script} passes no arguments on, so {name} does nothing" for name in used]
+        forwarded = read_source(target)
+        if forwarded is None:
+            return [f"{script} runs {target}, which is not tracked"]
+        script, source = target, forwarded
+    declared = powershell_parameters(source)
+    return [f"{script} declares no parameter {name}" for name in used
+            if name[1:].casefold() not in declared]
+
+
+def invocation_findings(script: str, tail: str, read_source: SourceReader) -> list[str]:
+    """Check one documented invocation of a tool: the tool, then its options."""
+    rel = script.replace("\\", "/").removeprefix("./")
+    source = read_source(rel)
+    if source is None:
+        return [f"{script}: no such tool is tracked"]
+    arguments = command_arguments(tail)
+    if not rel.endswith(".py"):
+        return powershell_findings(script, rel, source, arguments, read_source)
+    try:
+        accepted = python_tool_options(source)
+    except SyntaxError as exc:
+        return [f"{script} cannot be parsed to read its options: {exc.msg}"]
+    return [f"{script} accepts no option {option}" for option in
+            (token.split("=")[0] for token in arguments) if PYTHON_OPTION_RE.fullmatch(option)
+            and option not in accepted]
+
+
+def documented_command_findings(rel: str, text: str, read_source: SourceReader) -> list[str]:
+    """Report every quoted tool invocation of a document that would not run as written."""
+    findings: list[str] = []
+    for n, segment in code_segments(text):
+        matches = list(TOOL_PATH_RE.finditer(segment))
+        for index, m in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(segment)
+            findings.extend(f"{rel}:{n}: {finding}"
+                            for finding in invocation_findings(m.group(0), segment[m.end():end], read_source))
+    return findings
+
+
+def check_documented_commands() -> None:
+    """Hold every tool invocation the documentation quotes as code to the tool.
+
+    Each tracked Markdown file except the changelog is read for tools/*.py,
+    tools/*.ps1 and tools/*.cmd paths in fenced code and inline code. The tool
+    must be tracked; each --option given to a Python tool must be one it
+    accepts (python_tool_options); each -Parameter given to a PowerShell
+    script, directly or through a .cmd launcher that passes its arguments on,
+    must be declared in the script's param() block, in any letter case.
+    Values, placeholders such as <sha> and the options of the program that
+    runs the tool (powershell.exe -File, python3) are not checked.
+    """
+    tracked = git_tracked_files()
+    if tracked is None:
+        return
+    known = set(tracked)
+
+    def read_source(rel: str) -> str | None:
+        if rel not in known or not os.path.isfile(os.path.join(REPO, rel)):
+            return None
+        return read(rel).decode("utf-8-sig", errors="replace")
+
+    for rel in sorted(r for r in tracked if r.endswith(".md") and r not in DOCUMENTED_COMMANDS_EXCLUDED):
+        for finding in documented_command_findings(rel, read(rel).decode("utf-8"), read_source):
+            fail("documented-commands", finding)
+
+
+DOCUMENTED_COMMANDS_SELFTEST_TOOLS = {
+    "tools/run_check.py": (
+        "import argparse\n"
+        "parser = argparse.ArgumentParser()\n"
+        "parser.add_argument('--check', action='store_true')\n"
+        "parser.add_argument('-r', '--root')\n"),
+    "tools/by_hand.py": (
+        "import subprocess, sys\n"
+        "if sys.argv[1:] == ['--selftest']:\n"
+        "    subprocess.run(['git', 'ls-files', '--stage'])\n"),
+    "tools/Run-Thing.ps1": (
+        "<#\n.SYNOPSIS\nparam($NotAParameter)\n#>\n"
+        "[CmdletBinding()]\n"
+        "param(\n"
+        "    [Parameter(Mandatory = $true)]\n"
+        "    [ValidateSet(\"A, $B\", \"C)\")]\n"
+        "    [string]$WorkbookPath,  # $Commented, too\n"
+        "    [switch]$NewWorkbook = $false\n"
+        ")\n"
+        "function Inner { param($Inner) }\n"),
+    "tools/Run-Thing.cmd": "@echo off\npowershell.exe -File \"%~dp0Run-Thing.ps1\" %*\n",
+    "tools/Fixed.cmd": "@echo off\npowershell.exe -File \"%~dp0Run-Thing.ps1\" -NewWorkbook\n",
+}
+
+DOCUMENTED_COMMANDS_SELFTEST_CASES = [
+    ("a valid invocation passes",
+     "```text\npython3 tools/run_check.py --check --root <dir>\n```\n", 0),
+    ("an inline-code invocation is read",
+     "Run `python3 tools/run_check.py --chek` first.\n", 1),
+    ("a valid inline-code invocation passes",
+     "Run `py -3 tools\\run_check.py --check` first.\n", 0),
+    ("a missing script is reported",
+     "```text\npython3 tools/gone.py --check\n```\n", 1),
+    ("an unknown option is reported",
+     "```text\npython tools/run_check.py --check --chek\n```\n", 1),
+    ("an option given with = is checked by its name",
+     "`python3 tools/run_check.py --root=C:\\x --rot=y`\n", 1),
+    ("argparse adds --help", "`python3 tools/run_check.py --help`\n", 0),
+    ("an option a hand-written parser compares with passes",
+     "`python3 tools/by_hand.py --selftest`\n", 0),
+    ("an option a hand-written parser never compares with is reported",
+     "`python3 tools/by_hand.py --write --stage`\n", 2),
+    ("values, placeholders and short options are not options",
+     "```text\npython3 tools/run_check.py <bundle> -r \"--quoted\" --check ...\n```\n", 0),
+    ("a valid PowerShell invocation passes",
+     "```powershell\npowershell.exe -NoProfile -File .\\tools\\Run-Thing.ps1 "
+     "-WorkbookPath \"C:\\w.xlsm\" -NewWorkbook\n```\n", 0),
+    ("PowerShell parameters are case-insensitive and include the common ones",
+     "`tools/Run-Thing.ps1 -workbookpath x -NewWorkbook:$true -Verbose`\n", 0),
+    ("an unknown PowerShell parameter is reported",
+     "```powershell\n.\\tools\\Run-Thing.ps1 -WorkbookPath x -Mode Demo\n```\n", 1),
+    ("comments, strings and inner functions declare no script parameter",
+     "`tools\\Run-Thing.ps1 -Inner 1 -NotAParameter 2 -Commented 3 -B 4`\n", 4),
+    ("a .cmd passes its arguments on to its script",
+     "`tools\\Run-Thing.cmd -NewWorkbook`\n", 0),
+    ("an unknown parameter through a .cmd is reported",
+     "`tools\\Run-Thing.cmd -Bogus`\n", 1),
+    ("a .cmd that passes nothing on takes no parameters",
+     "`tools\\Fixed.cmd -NewWorkbook`\n", 1),
+    ("a missing .cmd is reported", "Double-click `tools\\Gone.cmd`.\n", 1),
+    ("two commands on one line are read apart",
+     "```text\npython3 tools/run_check.py --check && python3 tools/by_hand.py --selftest\n```\n", 0),
+    ("a continued fenced line is one command",
+     "```bash\npython3 tools/run_check.py \\\n  --chek\n```\n", 1),
+    ("prose is not code", "Run python3 tools/gone.py --check by hand.\n", 0),
+    ("a path that merely ends in tools/ is not a tool", "`docs/tools/gone.py`\n", 0),
+    ("an HTML comment is not code", "<!-- `python3 tools/gone.py` -->\n", 0),
+]
+
+
+def check_documented_commands_selftest() -> None:
+    """Run the documented-command rules against their own fixtures.
+
+    A rule that stopped finding invocations would report nothing and look
+    healthy on the real documentation; the failing fixtures catch that.
+    """
+    for label, text, expected in DOCUMENTED_COMMANDS_SELFTEST_CASES:
+        found = documented_command_findings("fixture.md", text, DOCUMENTED_COMMANDS_SELFTEST_TOOLS.get)
+        if len(found) != expected:
+            fail("documented-commands-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
+
+
 # Independent reviews are internal working material and are not carried by this
 # repository from v1.1.3 onward. The pattern is deliberately the whole family
 # rather than the two archives that were withdrawn: naming individual files
@@ -2664,6 +3098,8 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("markdown links", check_markdown_links),
     ("markdown escapes", check_markdown_escapes),
     ("markdown escape self-test", check_markdown_escape_selftest),
+    ("documented commands", check_documented_commands),
+    ("documented commands self-test", check_documented_commands_selftest),
     ("label catalogue", check_label_catalogue),
     ("private review denylist", check_private_review_denylist),
     ("private review denylist self-test", check_private_review_denylist_selftest),

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "The VBA projects a workbook built from this repository can hold. Each configuration is one VBA project; modules from different configurations are never combined. tools/Sync-EXCEL_UI-VBA.ps1 imports a configuration, tools/compare_vba_export.py checks an export against one, and tools/check_vba_calls.py analyses each.",
+  "description": "The VBA projects a workbook built from this repository can hold. Each configuration is one VBA project; modules from different configurations are never combined. tools/Sync-EXCEL_UI-VBA.ps1 imports a configuration, tools/compare_vba_export.py checks an export against one, and tools/check_vba_calls.py analyses each. Each configuration lists its modules in import order, and module_descriptions gives the description tools/render_docs.py writes into the module tables of the documentation.",
   "project_name_patterns": [
     "^M_",
     "^UI_",
@@ -10,25 +10,35 @@
   ],
   "macro_name_functions": [],
   "document_modules": [],
+  "module_descriptions": {
+    "src/M_EXCEL_UI_RUNTIME.bas": "Host operations, diagnostics, result buffers, and quiet-update scope",
+    "src/M_EXCEL_UI_TITLEBAR.bas": "WinAPI declarations, owned title-bar bits, and frame refresh",
+    "src/M_EXCEL_UI_SNAPSHOT.bas": "Snapshot state, capture/restore, and window identity",
+    "src/M_EXCEL_UI.bas": "Public `UI_*` facade and targeting orchestration",
+    "test/M_EXCEL_UI_REGRESSION_TESTS.bas": "Regression and release certification",
+    "demo/M_EXCEL_UI_DEMO.bas": "Demonstration actions",
+    "demo/M_DEMO_BUILDER.bas": "Demo worksheet construction",
+    "demo/M_DEMO_CLEANUP_TESTS.bas": "Excel harness for demo sheet reset and template cleanup"
+  },
   "configurations": {
     "production": {
       "description": "The production package of INSTALLATION.md: the four modules of src/.",
       "gating": true,
       "modules": [
-        "src/M_EXCEL_UI.bas",
         "src/M_EXCEL_UI_RUNTIME.bas",
+        "src/M_EXCEL_UI_TITLEBAR.bas",
         "src/M_EXCEL_UI_SNAPSHOT.bas",
-        "src/M_EXCEL_UI_TITLEBAR.bas"
+        "src/M_EXCEL_UI.bas"
       ]
     },
     "development": {
       "description": "A workbook that runs the regression suite and release certification: the production modules and the regression module.",
       "gating": true,
       "modules": [
-        "src/M_EXCEL_UI.bas",
         "src/M_EXCEL_UI_RUNTIME.bas",
-        "src/M_EXCEL_UI_SNAPSHOT.bas",
         "src/M_EXCEL_UI_TITLEBAR.bas",
+        "src/M_EXCEL_UI_SNAPSHOT.bas",
+        "src/M_EXCEL_UI.bas",
         "test/M_EXCEL_UI_REGRESSION_TESTS.bas"
       ]
     },
@@ -36,13 +46,13 @@
       "description": "The demo workbook: the production modules, the two demo modules and the demo cleanup harness.",
       "gating": true,
       "modules": [
-        "src/M_EXCEL_UI.bas",
         "src/M_EXCEL_UI_RUNTIME.bas",
-        "src/M_EXCEL_UI_SNAPSHOT.bas",
         "src/M_EXCEL_UI_TITLEBAR.bas",
+        "src/M_EXCEL_UI_SNAPSHOT.bas",
+        "src/M_EXCEL_UI.bas",
+        "demo/M_EXCEL_UI_DEMO.bas",
         "demo/M_DEMO_BUILDER.bas",
-        "demo/M_DEMO_CLEANUP_TESTS.bas",
-        "demo/M_EXCEL_UI_DEMO.bas"
+        "demo/M_DEMO_CLEANUP_TESTS.bas"
       ]
     }
   }
