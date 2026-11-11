@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
 import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -188,9 +190,17 @@ class Reporting(unittest.TestCase):
         self.assertIn("reformat.py --write src/*.bas test/*.bas demo/*.bas", output)
 
     def test_prints_the_render_hint_on_drift(self) -> None:
-        code, output = run(["--only", "render-docs"], FakeRunner(failing=["render_docs.py"]))
+        # The hint is plain text locally and a notice annotation under
+        # GitHub Actions; pin the local form so the test runs the same in CI.
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": ""}):
+            code, output = run(["--only", "render-docs"], FakeRunner(failing=["render_docs.py"]))
         self.assertEqual(code, 1)
         self.assertIn("hint:   python3 tools/render_docs.py --write", output)
+
+    def test_prints_the_render_hint_as_a_notice_under_actions(self) -> None:
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
+            _, output = run(["--only", "render-docs"], FakeRunner(failing=["render_docs.py"]))
+        self.assertIn("::notice::  python3 tools/render_docs.py --write", output)
 
     def test_appends_a_markdown_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
