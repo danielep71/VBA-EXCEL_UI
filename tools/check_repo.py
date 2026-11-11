@@ -28,6 +28,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Iterator
 from datetime import date
 from types import ModuleType
+from typing import TypeAlias
 from urllib.parse import unquote
 
 from vba_lex import code_only
@@ -947,6 +948,627 @@ def check_workflow_policy_selftest() -> None:
                  f"{label}: expected {expected} finding(s), got {len(found)}"
                  + (f" | {found}" if found else ""))
 
+
+# --------------------------------------------------------------------------
+# Branch coverage. Which branches Dependabot updates and CodeQL analyses is
+# configured by hand, and a branch that is renamed, added or forgotten loses
+# its updates or its analysis without anything turning red.
+
+DEPENDABOT_CONFIG = ".github/dependabot.yml"
+CODEQL_WORKFLOW = ".github/workflows/codeql.yml"
+
+# The settings a release-branch entry must share with its ecosystem's
+# default-branch entry, so both branches receive the same updates.
+MIRRORED_KEYS = ("directory", "schedule", "groups", "labels")
+
+# The branch filters CodeQL must include, per event.
+CODEQL_BRANCHES = {
+    "push": ("main",),
+    "pull_request": ("main", "release/**"),
+}
+
+# The only filter the check reads. Another one (paths, branches-ignore, types)
+# can narrow what runs in ways the check cannot judge, so it is reported.
+CODEQL_FILTER_KEYS = ("branches",)
+
+VERSION_CORE_RE = re.compile(
+    r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)(?P<suffix>[-+].*)?$")
+
+RELEASE_BRANCH_RE = re.compile(r"^release/v(?P<core>[0-9]+\.[0-9]+\.[0-9]+)$")
+
+YamlValue: TypeAlias = "str | list[YamlValue] | dict[str, YamlValue] | None"
+
+# One structural line: (line number, indentation, content without comment).
+YamlLine = tuple[int, int, str]
+
+YAML_KEY_RE = re.compile(
+    r"""^(?P<key>"[^"\\]*"|'[^']*'|[^\s"'#\-?:,\[\]{}&*!|>%@`][^:]*?)\s*:"""
+    r"""(?:\s+(?P<value>.*))?$""")
+
+# A plain scalar starting with one of these is a flow collection, an anchor,
+# an alias, a tag, a block scalar or a reserved indicator.
+YAML_UNSUPPORTED_START = "[]{}&*!|>%@`"
+
+
+class YamlShapeError(ValueError):
+    """The text uses YAML that the narrow reader below does not understand."""
+
+
+def strip_yaml_comment(line: str) -> str:
+    """Remove a trailing comment, leaving a # inside a quoted scalar alone."""
+    quote = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == quote:
+                if quote == "'" and line[i + 1:i + 2] == "'":
+                    i += 2
+                    continue
+                quote = ""
+        elif ch in "'\"" and (i == 0 or line[i - 1] == " "):
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i].rstrip()
+        i += 1
+    return line
+
+
+def yaml_lines(text: str) -> list[YamlLine]:
+    """Return the lines that carry structure, with comments removed."""
+    out: list[YamlLine] = []
+    for n, raw in enumerate(text.split("\n"), 1):
+        body = strip_yaml_comment(raw.rstrip())
+        if not body.strip():
+            continue
+        indent = len(body) - len(body.lstrip(" "))
+        out.append((n, indent, body[indent:]))
+    return out
+
+
+class YamlReader:
+    """A deliberately narrow reader for block-style YAML.
+
+    It reads block mappings, block sequences and single-line plain or quoted
+    scalars, and keeps every scalar as a string. Anything else — flow
+    collections, anchors, aliases, tags, block scalars, multi-document
+    streams, tab indentation — raises YamlShapeError rather than being guessed
+    at: a reader that silently misread a shape would let the check pass a
+    configuration it never really read. The gate uses only the standard
+    library, so there is no full YAML parser to fall back on.
+    """
+
+    def __init__(self, rel: str, lines: list[YamlLine]) -> None:
+        self.rel = rel
+        self.lines = list(lines)
+
+    def error(self, i: int, message: str) -> YamlShapeError:
+        n = self.lines[min(i, len(self.lines) - 1)][0] if self.lines else 0
+        return YamlShapeError(
+            f"{self.rel}:{n}: {message}; the check reads block mappings, block "
+            f"sequences and single-line scalars only")
+
+    def parse(self) -> YamlValue:
+        if not self.lines:
+            return None
+        value, end = self.block(0, self.lines[0][1])
+        if end != len(self.lines):
+            raise self.error(end, "inconsistent indentation")
+        return value
+
+    @staticmethod
+    def is_item(content: str) -> bool:
+        return content == "-" or content.startswith("- ")
+
+    def nested(self, i: int, indent: int) -> tuple[YamlValue, int]:
+        """Return the block nested under line i, or None when there is none."""
+        if i + 1 < len(self.lines) and self.lines[i + 1][1] > indent:
+            return self.block(i + 1, self.lines[i + 1][1])
+        return None, i + 1
+
+    def block(self, i: int, indent: int) -> tuple[YamlValue, int]:
+        if self.is_item(self.lines[i][2]):
+            return self.sequence(i, indent)
+        return self.mapping(i, indent)
+
+    def mapping(self, i: int, indent: int) -> tuple[YamlValue, int]:
+        out: dict[str, YamlValue] = {}
+        while i < len(self.lines):
+            _, ind, content = self.lines[i]
+            if ind < indent:
+                break
+            if ind > indent:
+                raise self.error(i, "unexpected indentation")
+            if self.is_item(content):
+                raise self.error(i, "a sequence item where a mapping key was expected")
+            m = YAML_KEY_RE.match(content)
+            if not m:
+                raise self.error(i, f"cannot read {content!r} as a mapping key")
+            key = self.scalar(i, m.group("key"))
+            if key in out:
+                raise self.error(i, f"duplicate key {key!r}")
+            if m.group("value"):
+                out[key] = self.scalar(i, m.group("value"))
+                i += 1
+            else:
+                out[key], i = self.nested(i, ind)
+        return out, i
+
+    def sequence(self, i: int, indent: int) -> tuple[YamlValue, int]:
+        out: list[YamlValue] = []
+        while i < len(self.lines):
+            n, ind, content = self.lines[i]
+            if ind < indent:
+                break
+            if ind > indent:
+                raise self.error(i, "unexpected indentation")
+            if not self.is_item(content):
+                raise self.error(i, "a mapping key where a sequence item was expected")
+            rest = content[1:].lstrip(" ")
+            if not rest:
+                item, i = self.nested(i, ind)
+            elif YAML_KEY_RE.match(rest):
+                # "- key: value" opens a mapping whose keys align with "key".
+                column = ind + len(content) - len(rest)
+                self.lines[i] = (n, column, rest)
+                item, i = self.mapping(i, column)
+            else:
+                item = self.scalar(i, rest)
+                i += 1
+            out.append(item)
+        return out, i
+
+    def scalar(self, i: int, text: str) -> str:
+        if text.startswith('"'):
+            inner = text[1:-1]
+            if len(text) < 2 or not text.endswith('"') or '"' in inner or "\\" in inner:
+                raise self.error(i, f"cannot read the double-quoted scalar {text}")
+            return inner
+        if text.startswith("'"):
+            inner = text[1:-1]
+            if len(text) < 2 or not text.endswith("'") or "'" in inner.replace("''", ""):
+                raise self.error(i, f"cannot read the single-quoted scalar {text}")
+            return inner.replace("''", "'")
+        if text[0] in YAML_UNSUPPORTED_START or text[0] == "\t":
+            raise self.error(i, f"{text!r} is a flow collection, anchor, alias, tag "
+                                f"or block scalar")
+        if ": " in text or text in ("---", "..."):
+            raise self.error(i, f"cannot read {text!r} as a plain scalar")
+        return text
+
+
+def parse_yaml(rel: str, text: str) -> YamlValue:
+    """Parse a whole block-style YAML document, or raise YamlShapeError."""
+    lines = yaml_lines(text)
+    if lines and lines[0][1] != 0:
+        raise YamlReader(rel, lines).error(0, "the document must start at column 0")
+    return YamlReader(rel, lines).parse()
+
+
+def open_release_branches(version: str) -> list[str] | None:
+    """Return the release branches that may be open while VERSION is current.
+
+    VERSION names the newest shipped release: the release-state check holds it
+    to the newest dated CHANGELOG.md section, and it moves only in the change
+    that dates the next one. While a release is being prepared, VERSION still
+    names the previous release, so the open branch is the next patch, minor or
+    major release after it. A pre-release VERSION may also be followed by its
+    own final release.
+    """
+    m = VERSION_CORE_RE.match(version)
+    if not m:
+        return None
+    major, minor, patch = (int(m.group(k)) for k in ("major", "minor", "patch"))
+    branches: list[str] = []
+    if (m.group("suffix") or "").startswith("-"):
+        branches.append(f"release/v{major}.{minor}.{patch}")
+    branches += [
+        f"release/v{major}.{minor}.{patch + 1}",
+        f"release/v{major}.{minor + 1}.0",
+        f"release/v{major + 1}.0.0",
+    ]
+    return branches
+
+
+def is_shipped_release(branch: str, version: str) -> bool:
+    """Return True when the branch names VERSION or an earlier release."""
+    branch_m = RELEASE_BRANCH_RE.match(branch)
+    version_m = VERSION_CORE_RE.match(version)
+    if not branch_m or not version_m:
+        return False
+    core = tuple(int(part) for part in branch_m.group("core").split("."))
+    current = tuple(int(version_m.group(k)) for k in ("major", "minor", "patch"))
+    return core <= current
+
+
+DependabotEntry = dict[str, YamlValue]
+
+
+def classify_dependabot_entries(
+        rel: str, updates: list[YamlValue], version: str, candidates: list[str],
+) -> tuple[dict[str, list[DependabotEntry]],
+           dict[str, dict[str, list[DependabotEntry]]], list[str]]:
+    """Sort entries into default-branch and release-branch entries per ecosystem.
+
+    Returns the default entries, the release entries keyed by target branch,
+    and a finding for every entry that names no branch the check accepts.
+    """
+    findings: list[str] = []
+    defaults: dict[str, list[DependabotEntry]] = {}
+    releases: dict[str, dict[str, list[DependabotEntry]]] = {}
+
+    for k, entry in enumerate(updates):
+        assert isinstance(entry, dict)
+        ecosystem = entry.get("package-ecosystem")
+        target = entry.get("target-branch")
+        if not isinstance(ecosystem, str):
+            findings.append(f"{rel}: updates[{k}] has no package-ecosystem")
+            continue
+        where = f"{rel}: updates[{k}] ({ecosystem})"
+        if "directories" in entry:
+            findings.append(f"{where} uses 'directories'; the check compares a "
+                            f"single 'directory'")
+        elif target is None:
+            defaults.setdefault(ecosystem, []).append(entry)
+        elif not isinstance(target, str):
+            findings.append(f"{where} has a target-branch that is not a branch name")
+        elif target in candidates:
+            releases.setdefault(ecosystem, {}).setdefault(target, []).append(entry)
+        elif is_shipped_release(target, version):
+            findings.append(
+                f"{where} targets {target}, but VERSION is {version}: that release "
+                f"has shipped, so the entry is stale. Point it at the release "
+                f"branch that is open now, or remove it when none is")
+        else:
+            findings.append(
+                f"{where} targets {target}, which is not a release that can "
+                f"follow VERSION {version} ({', '.join(candidates)}); the "
+                f"default-branch entry names no target-branch")
+    return defaults, releases, findings
+
+
+def release_entry_findings(rel: str, ecosystem: str, target: str,
+                           entries: list[DependabotEntry],
+                           defaults: list[DependabotEntry]) -> list[str]:
+    """Return the problems with one ecosystem's entries for the open release."""
+    if not entries:
+        return [f"{rel}: {ecosystem} has no entry for {target}, which other "
+                f"ecosystems target; every ecosystem must cover the open "
+                f"release branch"]
+    findings: list[str] = []
+    if len(entries) > 1:
+        findings.append(f"{rel}: {ecosystem} has {len(entries)} entries for "
+                        f"{target}; it needs exactly one")
+    if len(defaults) != 1:
+        return findings              # reported as a default-entry count
+    for key in MIRRORED_KEYS:
+        if any(entry.get(key) != defaults[0].get(key) for entry in entries):
+            findings.append(
+                f"{rel}: {ecosystem} entry for {target}: {key} differs from the "
+                f"default-branch entry; both branches must receive the same "
+                f"updates")
+    return findings
+
+
+def dependabot_findings(rel: str, text: str, version: str) -> list[str]:
+    """Return every branch-coverage problem in a Dependabot configuration.
+
+    Each ecosystem needs exactly one entry without target-branch, which
+    Dependabot applies to the default branch. While a release is open, each
+    ecosystem also needs one entry for that release branch, mirroring the
+    default entry's settings, and no entry may name any other branch. After a
+    release ships, the default entries alone are the correct configuration.
+    """
+    candidates = open_release_branches(version)
+    if candidates is None:
+        return [f"VERSION does not hold a release number ({version!r}), so the "
+                f"open release branch cannot be derived"]
+
+    try:
+        config = parse_yaml(rel, text)
+    except YamlShapeError as exc:
+        return [str(exc)]
+
+    updates = config.get("updates") if isinstance(config, dict) else None
+    if not isinstance(updates, list) or not all(isinstance(e, dict) for e in updates):
+        return [f"{rel}: 'updates' must be a block sequence of mappings"]
+
+    defaults, releases, findings = classify_dependabot_entries(
+        rel, updates, version, candidates)
+
+    ecosystems = sorted(set(defaults) | set(releases))
+    for ecosystem in ecosystems:
+        count = len(defaults.get(ecosystem, []))
+        if count != 1:
+            findings.append(
+                f"{rel}: {ecosystem} has {count} entries without target-branch; it "
+                f"needs exactly one, for the default branch")
+
+    targets = sorted({t for by_target in releases.values() for t in by_target})
+    if len(targets) > 1:
+        findings.append(
+            f"{rel}: entries target {', '.join(targets)}; only one release "
+            f"branch is open at a time")
+        return findings
+
+    for ecosystem in ecosystems:
+        for target in targets:
+            findings += release_entry_findings(
+                rel, ecosystem, target, releases.get(ecosystem, {}).get(target, []),
+                defaults.get(ecosystem, []))
+    return findings
+
+
+def codeql_findings(rel: str, text: str) -> list[str]:
+    """Return every branch-coverage problem in the CodeQL workflow triggers."""
+    lines = yaml_lines(text)
+    on_at = next((i for i, (_, ind, content) in enumerate(lines)
+                  if ind == 0 and ON_KEY_RE.match(content)), None)
+    if on_at is None:
+        return [f"{rel}: no 'on:' block mapping; the triggers cannot be read"]
+
+    block: list[YamlLine] = []
+    for line in lines[on_at + 1:]:
+        if line[1] == 0:
+            break
+        block.append(line)
+
+    try:
+        triggers = YamlReader(rel, block).parse()
+    except YamlShapeError as exc:
+        return [str(exc)]
+
+    if not isinstance(triggers, dict):
+        return [f"{rel}: 'on' must be a block mapping of events"]
+
+    findings: list[str] = []
+    for event, required in CODEQL_BRANCHES.items():
+        if event not in triggers:
+            findings.append(f"{rel}: on.{event} is missing; CodeQL must analyse "
+                            f"{event} events for {', '.join(required)}")
+            continue
+        trigger = triggers[event]
+        if trigger is None:
+            continue                 # no filter: every branch is analysed
+        if not isinstance(trigger, dict):
+            findings.append(f"{rel}: on.{event} must be a mapping with a "
+                            f"branches list")
+            continue
+        for key in trigger:
+            if key not in CODEQL_FILTER_KEYS:
+                findings.append(
+                    f"{rel}: on.{event}.{key} is a filter this check does not "
+                    f"read; teach tools/check_repo.py about it before relying on it")
+        branches = trigger.get("branches")
+        if not isinstance(branches, list) or not all(isinstance(b, str) for b in branches):
+            findings.append(f"{rel}: on.{event}.branches must be a list of branch "
+                            f"names")
+            continue
+        for branch in required:
+            if branch not in branches:
+                findings.append(f"{rel}: on.{event}.branches does not include "
+                                f"{branch!r}")
+    return findings
+
+
+def check_branch_coverage() -> None:
+    """Hold Dependabot and CodeQL to the default and the open release branch."""
+    if not os.path.isfile(os.path.join(REPO, "VERSION")):
+        return                       # already reported by required files
+
+    version = read("VERSION").decode("utf-8").strip()
+
+    for rel in (DEPENDABOT_CONFIG, CODEQL_WORKFLOW):
+        if not os.path.isfile(os.path.join(REPO, rel)):
+            fail("branch-coverage", f"{rel} is missing")
+            continue
+        text = read(rel).decode("utf-8")
+        found = (dependabot_findings(rel, text, version) if rel == DEPENDABOT_CONFIG
+                 else codeql_findings(rel, text))
+        for finding in found:
+            fail("branch-coverage", finding)
+
+
+def dependabot_entry(template: str, target: str | None = None) -> str:
+    """Return one fixture entry, for the default branch or for a target."""
+    line = f"    target-branch: {target}\n" if target else ""
+    return template.replace("    schedule:\n", line + "    schedule:\n", 1)
+
+
+DEPENDABOT_ACTIONS = """\
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:23"
+      timezone: Europe/Rome
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - ci
+      - P3
+    commit-message:
+      prefix: ci
+"""
+
+DEPENDABOT_PIP = """\
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: monthly
+    groups:
+      python-quality-tools:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    labels:
+      - ci
+      - P3
+"""
+
+
+def dependabot_doc(*entries: str) -> str:
+    return "# Fixture.\nversion: 2\nupdates:\n" + "\n".join(entries)
+
+
+def dependabot_pair(release: str | None, actions: str = DEPENDABOT_ACTIONS,
+                    pip: str = DEPENDABOT_PIP) -> str:
+    """Return the shape of the tracked configuration with one release open."""
+    entries = [dependabot_entry(DEPENDABOT_ACTIONS)]
+    if release:
+        entries.append(dependabot_entry(actions, release))
+    entries.append(dependabot_entry(DEPENDABOT_PIP))
+    if release:
+        entries.append(dependabot_entry(pip, release))
+    return dependabot_doc(*entries)
+
+
+DEPENDABOT_SELFTEST_CASES = [
+    ("the tracked shape passes", "1.1.2", dependabot_pair("release/v1.1.3"), 0),
+    ("no release entry passes while no release is open", "1.1.2",
+     dependabot_pair(None), 0),
+    ("a minor release branch passes", "1.1.2", dependabot_pair("release/v1.2.0"), 0),
+    ("a major release branch passes", "1.1.2", dependabot_pair("release/v2.0.0"), 0),
+    ("a pre-release VERSION may be followed by its final release", "1.2.0-rc.1",
+     dependabot_pair("release/v1.2.0"), 0),
+    ("a missing release entry is rejected", "1.1.2",
+     dependabot_doc(dependabot_entry(DEPENDABOT_ACTIONS),
+                    dependabot_entry(DEPENDABOT_ACTIONS, "release/v1.1.3"),
+                    dependabot_entry(DEPENDABOT_PIP)),
+     1),
+    ("a stale release branch is rejected", "1.1.3",
+     dependabot_pair("release/v1.1.3"), 2),
+    ("an older release branch is rejected", "1.1.3",
+     dependabot_pair("release/v1.1.2"), 2),
+    ("a release two patches ahead is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.4"), 2),
+    ("an extra branch is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3")
+     + "\n" + dependabot_entry(DEPENDABOT_ACTIONS, "develop"),
+     1),
+    ("two open release branches are rejected", "1.1.2",
+     dependabot_doc(dependabot_entry(DEPENDABOT_ACTIONS),
+                    dependabot_entry(DEPENDABOT_ACTIONS, "release/v1.1.3"),
+                    dependabot_entry(DEPENDABOT_PIP),
+                    dependabot_entry(DEPENDABOT_PIP, "release/v1.2.0")),
+     1),
+    ("a second default entry is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3") + "\n" + dependabot_entry(DEPENDABOT_PIP),
+     1),
+    ("a second release entry is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3")
+     + "\n" + dependabot_entry(DEPENDABOT_PIP, "release/v1.1.3"),
+     1),
+    ("a mismatched directory is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3",
+                     pip=DEPENDABOT_PIP.replace("directory: /tools", "directory: /")),
+     1),
+    ("a mismatched schedule is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3",
+                     actions=DEPENDABOT_ACTIONS.replace("day: monday", "day: friday")),
+     1),
+    ("mismatched groups are rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3",
+                     pip=DEPENDABOT_PIP.replace("python-quality-tools:", "tools:")),
+     1),
+    ("mismatched labels are rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3",
+                     actions=DEPENDABOT_ACTIONS.replace("      - P3\n", "      - P2\n")),
+     1),
+    ("a malformed VERSION is reported", "next", dependabot_pair("release/v1.1.3"), 1),
+    ("a flow sequence is reported, not guessed at", "1.1.2",
+     dependabot_pair("release/v1.1.3").replace("    labels:\n      - ci\n      - P3\n",
+                                               "    labels: [ci, P3]\n", 1),
+     1),
+    ("an alias is reported, not guessed at", "1.1.2",
+     dependabot_pair("release/v1.1.3").replace('time: "05:23"', "time: *at", 1),
+     1),
+    ("tab indentation is reported, not guessed at", "1.1.2",
+     dependabot_pair("release/v1.1.3").replace("      day: monday", "\tday: monday", 1),
+     1),
+    ("a directories list is reported", "1.1.2",
+     dependabot_pair(None).replace("    directory: /tools\n",
+                                   "    directories:\n      - /tools\n"),
+     1),
+]
+
+CODEQL_TRIGGERS = """\
+name: CodeQL
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+  push:
+    branches:
+      - main
+      - 'release/**'
+  schedule:
+    - cron: '41 4 * * 2'
+  workflow_dispatch:
+
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "a block scalar outside 'on' is not read"
+"""
+
+CODEQL_SELFTEST_CASES = [
+    ("the tracked triggers pass", CODEQL_TRIGGERS, 0),
+    ("an unfiltered push trigger passes",
+     CODEQL_TRIGGERS.replace("  push:\n    branches:\n      - main\n      - 'release/**'\n",
+                             "  push:\n"),
+     0),
+    ("a pull-request trigger without release/** is rejected",
+     CODEQL_TRIGGERS.replace("      - main\n      - 'release/**'\n  push:",
+                             "      - main\n  push:"),
+     1),
+    ("a push trigger without main is rejected",
+     CODEQL_TRIGGERS.replace("  push:\n    branches:\n      - main\n",
+                             "  push:\n    branches:\n"),
+     1),
+    ("a missing pull-request trigger is rejected",
+     CODEQL_TRIGGERS.replace("  pull_request:\n    branches:\n      - main\n"
+                             "      - 'release/**'\n", ""),
+     1),
+    ("an unread filter is reported",
+     CODEQL_TRIGGERS.replace("  push:\n", "  push:\n    paths:\n      - tools/**\n"),
+     1),
+    ("a flow sequence of branches is reported, not guessed at",
+     CODEQL_TRIGGERS.replace("    branches:\n      - main\n      - 'release/**'\n  push:",
+                             "    branches: [main, 'release/**']\n  push:"),
+     1),
+    ("a missing on block is reported",
+     CODEQL_TRIGGERS.replace("on:\n", "triggers:\n"),
+     1),
+]
+
+
+def check_branch_coverage_selftest() -> None:
+    """Run the branch-coverage rules against their own fixtures.
+
+    A rule that read nothing would report nothing, and a green gate would then
+    say every branch is covered when none is checked.
+    """
+    for label, version, text, expected in DEPENDABOT_SELFTEST_CASES:
+        found = dependabot_findings("fixture.yml", text, version)
+        if len(found) != expected:
+            fail("branch-coverage-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
+
+    for label, text, expected in CODEQL_SELFTEST_CASES:
+        found = codeql_findings("fixture.yml", text)
+        if len(found) != expected:
+            fail("branch-coverage-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
 
 # --------------------------------------------------------------------------
 # Characters a Markdown renderer treats as escapable. A backslash before any of
@@ -2001,6 +2623,8 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("supported API declaration", check_supported_api_declaration),
     ("workflow pin policy", check_workflow_policy),
     ("workflow policy self-test", check_workflow_policy_selftest),
+    ("branch coverage", check_branch_coverage),
+    ("branch coverage self-test", check_branch_coverage_selftest),
     ("wiki badge self-test", check_wiki_badge_selftest),
     ("release state", check_release_state),
     ("review finding crosswalk", check_review_crosswalk),
