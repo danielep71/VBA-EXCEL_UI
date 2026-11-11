@@ -519,9 +519,27 @@ substitute for certification: `Test_EXCEL_UI_RunAll` does not run the
 snapshot-identity and SDI identity units, and produces no machine-readable
 evidence. It still opens and closes temporary windows and workbooks.
 
-CI runs the static gate on every pull request. It cannot execute VBA — a hosted
-runner has no Excel — so certification remains a manual step on a real host, and
-the two are complementary rather than alternatives.
+For every change, run the static checks before you push:
+
+```text
+python3 tools/verify.py --ci
+```
+
+It runs every static check in one declared order, including the gate
+(`tools/check_repo.py`), the house-style check of the VBA modules, the unit
+tests, Ruff and `mypy --strict`. Every check runs even after one fails. The
+command prints one result line per check and a final `RESULT` line: `PASS`,
+`FAIL`, or `INCOMPLETE` when a check was skipped. `--list` prints the checks and
+their commands, and `--only` and `--skip` take check names. Without `--ci`, a
+check whose tool is missing (Node.js, Ruff or mypy) is reported as `SKIPPED`,
+which is not a pass; with `--ci` it fails. Fix formatting drift with
+`python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas`, then
+re-import the affected modules into the VBE.
+
+CI runs the same command on every pull request and writes its table of results
+to the job summary. It cannot execute VBA — a hosted runner has no Excel — so
+certification remains a manual step on a real host, and the two are
+complementary rather than alternatives.
 
 On Windows, the workbook tools shorten that step:
 
@@ -544,10 +562,10 @@ The Python tools under `tools/` need **Python 3.11 or later**, and the static
 gate needs only the standard library. The issue-form check
 (`python3 tools/check_issues.py --check-config`) and its tests in
 `tests/test_check_issues.py` also need Node.js, because they run
-`.github/scripts/labels-sync.mjs`; CI provides it. The required check runs the
-gate on an exact Python 3.12 release; a second, non-required job runs the same
-gate on Python 3.11 so that a change needing a newer interpreter is reported
-before it reaches your machine.
+`.github/scripts/labels-sync.mjs`; CI provides it. The required check runs
+`tools/verify.py` on an exact Python 3.12 release; a second, non-required job
+runs it on Python 3.11, without Ruff and mypy, so that a change needing a newer
+interpreter is reported before it reaches your machine.
 
 Other workflows run alongside the gate and are not required checks:
 
@@ -591,16 +609,14 @@ holds the VBA regression suite.
 
 The Python code under `tools/` and `tests/` must also be clean under Ruff and
 `mypy --strict`, both configured in `pyproject.toml` against Python 3.11, the
-oldest interpreter I support for the gate. CI runs both on `tools/` and
-`tests/` and installs them from `tools/requirements-quality-ci.txt`, where
-every wheel is hash-locked. To run
-them locally, install them into a virtual environment the same way:
+oldest interpreter I support for the gate. CI installs both from
+`tools/requirements-quality-ci.txt`, where every wheel is hash-locked, and
+`tools/verify.py` runs them on `tools/` and `tests/`. To run them locally,
+install them into a virtual environment the same way:
 
 ```text
 python3 -m pip install --require-hashes --only-binary=:all: -r tools/requirements-quality-ci.txt
-ruff check tools tests
-mypy --strict tools
-mypy --strict tests
+python3 tools/verify.py --only ruff,mypy
 ```
 
 A finding is fixed in the code, not silenced, unless the fix would change what

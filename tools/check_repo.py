@@ -91,6 +91,7 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/public_api_manifest.txt",
     "tools/binary_allowlist.txt",
     "tools/check_issues.py",
+    "tools/verify.py",
     "tools/vba-projects.json",
     ".github/labels.json",
     "docs/ISSUE_LABELS.md",
