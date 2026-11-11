@@ -709,7 +709,6 @@ to tagged GitHub Releases.
 | [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) | One-command release certification in Excel and its evidence folder |
 | [docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md) | The advisory check of calls across modules |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
-| [v1.1.3 implementation sequence](docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md) | Ordered issue dependencies, release gates, and the milestone issue snapshot |
 | [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |
 | [GitHub Releases](https://github.com/danielep71/VBA-EXCEL_UI/releases) | Tested binary demo workbooks and release notes |
 

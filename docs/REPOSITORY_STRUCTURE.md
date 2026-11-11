@@ -19,7 +19,6 @@ VBA-EXCEL_UI/
 │  ├─ ISSUE_LABELS.md
 │  ├─ REPOSITORY_STRUCTURE.md
 │  ├─ RIBBON_SDI_BEHAVIOR.md
-│  ├─ VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md
 │  ├─ VBA_CALL_CHECKER.md
 │  ├─ VBA_HOUSE_STYLE.md
 │  └─ WORKBOOK_SYNC.md
@@ -62,7 +61,7 @@ binaries are attached to tagged GitHub Releases.
 | `demo/` | Demo and reproducible host setup |
 | `tools/` | Repository/static validation |
 | `tests/` | Unit tests for the static validation in `tools/` |
-| `docs/` | VBA house style, governance, this page, issue and label rules, workbook synchronization, Excel certification, the VBA call checker, measured Ribbon SDI behaviour, and the v1.1.3 implementation sequence |
+| `docs/` | VBA house style, governance, this page, issue and label rules, workbook synchronization, Excel certification, the VBA call checker, and measured Ribbon SDI behaviour |
 | `images/` | Documentation images, the only approved home for binary files |
 | `.github/` | Workflows, rulesets, repository settings, issue and pull-request templates, the label catalogue and its scripts |
 

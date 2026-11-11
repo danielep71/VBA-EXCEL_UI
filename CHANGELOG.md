@@ -762,6 +762,9 @@ measured against that baseline.
   directory table from `CONTRIBUTING.md`. `CONTRIBUTING.md` keeps the
   contributor workflow and links to all three; the rules are moved, not
   changed.
+- Removed `docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md` (#157). It
+  copied issue bodies and had already drifted from them; the order of the work
+  lives in each issue's Planning and Dependencies sections.
 - Added a weekly, non-blocking check of every external link in the tracked
   Markdown files (#85). Broken links fail the scheduled run and are listed in
   its summary; links inside the repository remain part of the required gate.
