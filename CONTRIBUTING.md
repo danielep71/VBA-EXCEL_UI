@@ -313,6 +313,10 @@ Other workflows run alongside the gate and are not required checks:
   the repository settings it can read with `.github/repository-settings.json`.
 - **OpenSSF Scorecard** scores the supply-chain posture of `main` weekly and
   publishes the findings to code scanning.
+- **Release** runs when a `v*` tag is pushed: it verifies the tag with
+  `tools/release.py`, builds the source archives and `SHA256SUMS`, and
+  publishes the GitHub Release, as [RELEASING.md](RELEASING.md#automation)
+  describes. Run by hand, it verifies an existing tag and publishes nothing.
 - **External links** checks the public URLs in the tracked Markdown weekly and
   on demand.
 - **Wiki badges** checks the Wiki against `VERSION`.

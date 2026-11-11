@@ -322,6 +322,7 @@ The repository currently contains these workflows:
 .github/workflows/labels-drift.yml
 .github/workflows/labels-sync.yml
 .github/workflows/pr-milestones.yml
+.github/workflows/release.yml
 .github/workflows/rulesets-drift.yml
 .github/workflows/scorecard.yml
 .github/workflows/static-checks.yml
@@ -369,6 +370,17 @@ protection changes and on demand, and runs only while the repository is
 public. It publishes its SARIF to code scanning and signs the published
 results, so its one job holds `security-events: write` and `id-token: write`.
 
+**Release** runs when a `v*` tag is pushed, and by hand for an existing tag.
+Its verify job checks the tag, `VERSION`, `CHANGELOG.md`, reachability from
+`main` and the required check on the tagged commit, with `contents: read` and
+`checks: read`. Its bundle job builds the source archives and `SHA256SUMS`
+from the tag with `contents: read`. Only its publish job, which runs after both
+and never on a manual run, holds `contents: write`: it creates the GitHub
+Release with the preinstalled `gh` client and then checks the published notes
+and asset hashes. It needs no repository secrets, and it cannot replace Excel
+certification, which happens before the tag is pushed
+([RELEASING.md](RELEASING.md#automation)).
+
 **External links** requests the public URLs already published in the tracked
 Markdown files, weekly and on demand, with a read-only token and no secrets.
 
@@ -380,12 +392,14 @@ operate from the default branch.
 #53 and #49 retain the requirement for a runnable final-repository/final-Wiki
 check before release readiness.
 
-Four jobs hold a write permission, each confined to that job: **Sync issue
+Five jobs hold a write permission, each confined to that job: **Sync issue
 labels** (`issues: write`, reconciling only from the default branch), **Keep
 milestones issue-only** (`pull-requests: write`), the push and scheduled
-**CodeQL** job (`security-events: write`), and the **OpenSSF Scorecard** job
-(`security-events: write` and `id-token: write`). None reads or publishes release
-artifacts, and their permissions must not be copied into static or Wiki jobs.
+**CodeQL** job (`security-events: write`), the **OpenSSF Scorecard** job
+(`security-events: write` and `id-token: write`), and the **Release** publish
+job (`contents: write`). Only the Release publish job publishes release
+artifacts, and none of these permissions may be copied into static or Wiki
+jobs.
 
 This is intentionally a low-privilege automation surface.
 

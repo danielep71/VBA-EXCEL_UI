@@ -51,9 +51,45 @@ If an invariant is false, stop and repair the candidate. Never compensate by edi
 | Released source identity | Annotated Git tag and full commit SHA |
 | Supported installation | `INSTALLATION.md` |
 | Published binaries | GitHub Release assets |
-| Integrity | SHA-256 hashes recorded with the release |
+| Release notes | The version's section of `CHANGELOG.md` at the tagged commit |
+| Integrity | `SHA256SUMS`, published with the release assets |
 | Validation | Evidence record retained for the candidate |
 | Vulnerability disclosure | `SECURITY.md` |
+
+<a id="automation"></a>
+## 🤖 Automated and manual steps
+
+Pushing a `vX.Y.Z` tag starts the **Release** workflow
+(`.github/workflows/release.yml`). It makes every decision with
+`tools/release.py`, which you can also run locally:
+
+| Step | `tools/release.py` | What it does |
+| --- | --- | --- |
+| Verify | `verify vX.Y.Z --repository danielep71/VBA-EXCEL_UI` | Checks that the tag is annotated and equals `v` + `VERSION` at the tagged commit, that `CHANGELOG.md` there has a dated section for the version, that the commit is reachable from `origin/main`, and that the required check **Repository and module checks** concluded success on that exact commit |
+| Notes | `notes vX.Y.Z` | Prints that changelog section, which becomes the release body |
+| Classify | `is-prerelease vX.Y.Z` | Prints `true` when the version has a pre-release suffix, such as `1.2.0-rc.1`, and `false` otherwise |
+| Bundle | `bundle vX.Y.Z --out DIR` | Writes `git archive` output of the tag as `VBA-EXCEL_UI-X.Y.Z.zip` and `VBA-EXCEL_UI-X.Y.Z.tar.gz`, plus `SHA256SUMS`, and refuses an archive that still holds a path `.gitattributes` marks `export-ignore`, such as `AGENTS.md` |
+| Publish | (workflow only) | Creates the GitHub Release from the tag with `gh release create`, using the notes and the bundle, and marks it as a pre-release when `is-prerelease` prints `true` |
+| Verify after publication | `verify-published vX.Y.Z --repository danielep71/VBA-EXCEL_UI --dir DIR [--asset NAME=SHA256]` | Checks that the release exists and is not a draft, that its pre-release flag matches the version, that its body equals the notes, and that its assets are exactly the files in `SHA256SUMS`, that file, and each asset declared with `--asset`, all with matching SHA-256 values |
+
+The verify and bundle jobs only read the repository. The publish job runs only
+after both have passed, only on a tag push, and is the one job with
+`contents: write`. Without `--repository`, `verify` checks everything except the
+required check and reports `INCOMPLETE`.
+
+To check an existing tag without publishing anything, run the workflow by hand
+(**Actions → Release → Run workflow**) with the tag as input: it runs verify
+and notes only.
+
+These steps stay manual, and each must be complete before the tag is pushed:
+
+- scope, version surfaces, the changelog and the installation guide (sections 1–4);
+- Excel certification on the exact candidate (section 6) and the
+  [evidence record](#evidence-record), which no workflow can produce;
+- any workbook artifact (section 7), which the workflow neither builds nor
+  uploads, and the `verify-published` run that includes it (section 11);
+- the merge into `main` (section 8) and creating the annotated tag (section 9);
+- the post-publication checks the workflow cannot run (section 11).
 
 <a id="versioning"></a>
 ## 🧮 Versioning
@@ -182,7 +218,12 @@ Certification rules:
 Planned outputs:
 
 - Demo or certification `.xlsm` workbook, when published
-- Source archive created by GitHub from the tag
+- Source archives `VBA-EXCEL_UI-X.Y.Z.zip` and `VBA-EXCEL_UI-X.Y.Z.tar.gz`
+  with `SHA256SUMS`, built from the tag by the Release workflow
+
+The source archives need no manual step: the workflow builds them from the
+pushed tag with `git archive`, so the `export-ignore` rules in `.gitattributes`
+apply. A workbook is built by hand, as below.
 
 For each artifact:
 
@@ -203,7 +244,10 @@ Get-FileHash -Algorithm SHA256 .\dist\<artifact>
 sha256sum dist/<artifact>
 ```
 
-Publish only artifacts promised by the installation guide.
+Publish only artifacts promised by the installation guide. A workbook is not
+part of the bundle, so it is not in `SHA256SUMS`: record its file name and
+SHA-256 in the evidence record, attach it to the published release, and then
+verify the release with it declared, as section 11 describes.
 
 Disposable mutants and their local output belong only in `/.mutation-scratch/`.
 They are not release evidence and must never enter source archives or binary
@@ -254,7 +298,16 @@ git show --no-patch --decorate vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-Before pushing, confirm the tag equals `VERSION`, targets the certified commit, and has a matching dated changelog section. Never delete and recreate a public tag to hide a mistake.
+Before pushing, confirm the tag equals `VERSION`, targets the certified commit, and has a matching dated changelog section:
+
+```bash
+git fetch origin main
+python3 tools/release.py verify vX.Y.Z --repository danielep71/VBA-EXCEL_UI
+```
+
+Pushing the tag starts the Release workflow, which runs the same verification
+again before it publishes anything. Never delete and recreate a public tag to
+hide a mistake.
 
 <a id="evidence-record"></a>
 ## 🧾 Evidence record
@@ -277,26 +330,50 @@ A release note summarizes evidence; it does not replace it.
 
 ## 10. Publish the GitHub Release
 
-Create the release from the annotated tag and include:
+The Release workflow creates the release from the annotated tag. Its body is
+the version's `CHANGELOG.md` section at the tagged commit, and its assets are
+the source archives and `SHA256SUMS` from the bundle job; the publish job checks
+the bundle against `SHA256SUMS` before it uploads anything. Write the release
+text into that changelog section before tagging, including:
 
 1. User-facing summary and highlights.
 2. Upgrade or migration notes.
 3. Supported platform statement.
 4. Known limitations.
 5. Installation link.
-6. Asset table with SHA-256 hashes.
-7. Full changelog comparison link.
-8. Security-reporting link.
+6. Full changelog comparison link.
+7. Security-reporting link.
 
-Upload the already-hashed artifacts. Do not rebuild between tagging and upload.
+Do not edit the release body by hand: `verify-published` compares it with the
+changelog section. Do not rebuild between tagging and upload.
 
 ## 11. Verify after publication
+
+The publish job runs `verify-published`, which covers the release state, the
+body and the asset hashes. The other checks below stay manual.
+
+After attaching a workbook, run `verify-published` again with the workbook
+declared by the name and SHA-256 in the evidence record. Download the bundle
+artifact of the Release run first, because it holds the `SHA256SUMS` that the
+workflow built; the run keeps it for 30 days:
+
+```bash
+gh run download <run-id> --repo danielep71/VBA-EXCEL_UI \
+  --name release-bundle-<run-id> --dir dist
+python3 tools/release.py verify-published vX.Y.Z \
+  --repository danielep71/VBA-EXCEL_UI --dir dist \
+  --asset <workbook>.xlsm=<sha256>
+```
+
+Repeat `--asset` for each additional asset. The check fails when an asset is
+missing, when a hash differs, or when the release holds an asset that is neither
+in `SHA256SUMS` nor declared.
 
 | Check | Result |
 | --- | :---: |
 | Tag resolves to the certified SHA | ☐ |
-| `VERSION` and changelog match the tag | ☐ |
-| Assets download and hashes match | ☐ |
+| `VERSION` and changelog match the tag (`verify`) | ☐ |
+| Assets download and hashes match (`verify-published`) | ☐ |
 | Installation links and examples work | ☐ |
 | Packaged artifact opens and passes its smoke test | ☐ |
 | Source archive contains expected release files | ☐ |
@@ -311,6 +388,11 @@ Do not announce broad availability until these checks pass.
 Fix the branch or pull request, update evidence, and rerun affected gates. Rebuilding invalidates the prior hash and packaged-test result.
 
 ### After tag, before GitHub Release
+
+If the verify job fails, nothing was published. The tag is protected and must
+not be moved, so fix the cause in a new patch candidate. If only the publish
+job failed, delete any draft release it left behind and re-run the failed jobs
+from the workflow run.
 
 Pause publication and document the correction. Prefer a new patch candidate whenever the tag may have propagated.
 
@@ -338,7 +420,7 @@ Do not silently replace assets or move the tag.
 | 8 | Hashes and evidence recorded | ☐ |
 | 9 | Required pull request merged; `main` equals the release branch | ☐ |
 | 10 | Annotated tag targets certified main SHA | ☐ |
-| 11 | GitHub Release published | ☐ |
+| 11 | GitHub Release published by the Release workflow | ☐ |
 | 12 | Post-publication checks pass | ☐ |
 
 ## 📚 Related documents

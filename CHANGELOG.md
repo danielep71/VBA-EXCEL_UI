@@ -151,6 +151,21 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added **tools/release.py** and the **Release** workflow
+  (`.github/workflows/release.yml`). On a pushed `v*` tag, the workflow checks
+  that the tag is annotated and equals `VERSION`, that `CHANGELOG.md` has a
+  dated section for it, that the tagged commit is reachable from `main`, and
+  that **Repository and module checks** concluded success on that exact
+  commit. It then builds `git archive` source archives and `SHA256SUMS`,
+  publishes the GitHub Release with the changelog section as its notes,
+  marked as a pre-release when the version has a pre-release suffix, and
+  checks the published notes and asset hashes. A workbook attached by hand is
+  verified the same way once it is declared with
+  `verify-published --asset NAME=SHA256`. A manual run verifies an
+  existing tag and publishes nothing. Only the publish job holds
+  `contents: write`; every action is pinned to a full SHA. Excel certification
+  and the evidence record stay manual, and **RELEASING.md** now says which
+  steps are automated (#162).
 - Added the **branch coverage** check to `tools/check_repo.py`, with its own
   self-test fixtures (#159). Every ecosystem in `.github/dependabot.yml` needs
   one entry for the default branch and, while a release is open, one entry for
