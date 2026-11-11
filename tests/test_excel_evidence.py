@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import hashlib
 import io
 import json
@@ -126,7 +127,7 @@ def documents(root: Path, sha: str) -> dict[str, Any]:
         "started_utc": "2026-11-06T09:00:00Z", "started_local": "2026-11-06T10:00:00+01:00",
         "finished_utc": "2026-11-06T09:05:00Z", "finished_local": "2026-11-06T10:05:00+01:00",
         "steps": [{"name": name, "status": "PASS", "detail": "", "at_utc": "2026-11-06T09:01:00Z"}
-                  for name in evidence.STEPS],
+                  for name in evidence.default_policy().steps],
         "workbook": {"file": "EXCEL_UI-development.xlsm", "sha256": "0" * 64},
         "components": [{"name": "ThisWorkbook", "type": 100}, {"name": "Sheet1", "type": 100}]
         + [{"name": module["name"], "type": 1} for module in inventory["modules"]],
@@ -236,6 +237,76 @@ class PassingBundleTests(Fixture):
             docs["certification.json"]["unitResults"][0]["detail"] = "résumé"
         self.bundle_with(detail)
         self.assertEqual(self.failed(), {})
+
+
+class PolicyDrivenTests(Fixture):
+    """The checker takes every rule from the policy it is given."""
+
+    RENAMES = {"session.json": "run.json", "host.json": "machine.json", "source-digests.json": "sources.json",
+               "certification.json": "verdict.json", "certification.txt": "verdict.txt"}
+    STEPS = ["prepare", "run", "tidy"]
+
+    def policy_file(self, change: Callable[[dict[str, Any]], None] | None = None) -> Path:
+        document = json.loads(evidence.POLICY.read_text(encoding="utf-8"))
+        if change is not None:
+            change(document)
+        path = Path(self.temp.name) / "policy.json"
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        return path
+
+    def test_an_explicit_copy_of_the_policy_passes_every_check(self) -> None:
+        self.bundle_with()
+        code, out, _ = self.run_main(str(self.bundle), "--commit", self.sha, "--policy", str(self.policy_file()))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count("  PASS  "), len(evidence.CHECKS))
+        self.assertEqual(len(evidence.CHECKS), 9)
+
+    def test_a_bundle_follows_renamed_files_steps_schema_and_component(self) -> None:
+        def contract(document: dict[str, Any]) -> None:
+            document["required_files"] = {role: self.RENAMES[name] for role, name in document["required_files"].items()}
+            document["evidence_files"] = [self.RENAMES[name] for name in document["evidence_files"]]
+            document.update(steps=self.STEPS, evidence_schema=4, component="Another component")
+
+        def documents_for(docs: dict[str, Any]) -> None:
+            for name in ("session.json", "host.json", "source-digests.json", "certification.json"):
+                docs[name]["schema"] = 4
+            docs["certification.json"]["component"] = "Another component"
+            docs["session.json"]["steps"] = [{"name": step, "status": "PASS", "detail": "", "at_utc": None}
+                                             for step in self.STEPS]
+
+        policy = self.policy_file(contract)
+        self.bundle_with(documents_for)
+        session = json.loads((self.bundle / "session.json").read_text(encoding="utf-8"))
+        for item in session["evidence"]:
+            item["file"] = self.RENAMES[item["file"]]
+        (self.bundle / "session.json").write_text(json.dumps(session), encoding="utf-8")
+        for old, new in self.RENAMES.items():
+            (self.bundle / old).rename(self.bundle / new)
+
+        code, out, _ = self.run_main(str(self.bundle), "--commit", self.sha, "--policy", str(policy))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count("  PASS  "), len(evidence.CHECKS))
+        self.assertIn("run.json, machine.json, sources.json, verdict.json, verdict.txt", out)
+        # The repository policy does not accept that bundle.
+        self.assertIn("files", self.failed())
+
+    def test_a_step_the_bundle_did_not_record_fails(self) -> None:
+        self.bundle_with()
+        policy = self.policy_file(lambda document: document["steps"].append("archive"))
+        code, out, _ = self.run_main(str(self.bundle), "--commit", self.sha, "--policy", str(policy))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  session:", out)
+        self.assertIn("'archive'", out)
+
+    def test_the_configuration_and_runner_come_from_the_policy(self) -> None:
+        policy = evidence.default_policy()
+        production = dataclasses.replace(policy, configuration="production")
+        inventory = evidence.source_inventory(self.root, self.sha, production)
+        self.assertEqual(inventory["configuration"], "production")
+        self.assertEqual([module["path"] for module in inventory["modules"]], ["src/M_EXCEL_UI.bas"])
+        other = dataclasses.replace(policy, certification_runner="Test_Other")
+        with self.assertRaisesRegex(evidence.EvidenceError, "has no Test_Other"):
+            evidence.certification_units(self.root, self.sha, other)
 
 
 class NegativeTests(Fixture):
