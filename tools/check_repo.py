@@ -95,7 +95,10 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/vba-projects.json",
     ".github/labels.json",
     ".github/excel-evidence-policy.json",
+    "docs/GOVERNANCE.md",
     "docs/ISSUE_LABELS.md",
+    "docs/REPOSITORY_STRUCTURE.md",
+    "docs/VBA_HOUSE_STYLE.md",
 ]
 
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?$")

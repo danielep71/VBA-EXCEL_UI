@@ -20,11 +20,13 @@
 &nbsp;·&nbsp;
 [Workflow](#development-workflow)
 &nbsp;·&nbsp;
-[VBA rules](#source-first-vba)
+[VBA house style](docs/VBA_HOUSE_STYLE.md)
 &nbsp;·&nbsp;
 [Validation](#validation-and-evidence)
 &nbsp;·&nbsp;
 [Pull requests](#pull-requests)
+&nbsp;·&nbsp;
+[Governance](docs/GOVERNANCE.md)
 
 </div>
 
@@ -49,7 +51,8 @@ never disclose sensitive details in a public issue or pull request.
 
 Before opening work:
 
-1. Read the README, this guide, the [Code of Conduct](CODE_OF_CONDUCT.md),
+1. Read the README, this guide, the [VBA house style](docs/VBA_HOUSE_STYLE.md),
+   [Governance](docs/GOVERNANCE.md), the [Code of Conduct](CODE_OF_CONDUCT.md),
    [Security Policy](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md).
 2. Search open and closed issues and pull requests for related work.
 3. Open an issue before a non-trivial feature, public-API change, dependency,
@@ -92,27 +95,9 @@ cost disproportionate to its benefit.
 ## 📁 Repository model
 
 This is a **source-first Excel UI library**. The Git diff, not an opaque workbook, is
-the review artifact.
-
-| Location | Purpose |
-|---|---|
-| `src/` | Authoritative production modules for UI, runtime, snapshots, and title-bar control |
-| `test/` | Regression and release-certification source |
-| `demo/` | Demo and reproducible host setup |
-| `tools/` | Repository/static validation |
-| `tests/` | Unit tests for the static validation in `tools/` |
-| `docs/` | Issue and label rules, measured Ribbon SDI behaviour, and the v1.1.3 implementation sequence |
-| `images/` | Documentation images, the only approved home for binary files |
-
-The README and current tree are authoritative if a listed optional directory is
-not present.
-
-Binary files belong under `images/`. Anywhere else, `tools/check_repo.py`
-rejects a tracked file that Git treats as binary (its `text` attribute is unset
-in `.gitattributes`) or whose content contains a NUL byte, unless
-`tools/binary_allowlist.txt` lists it with the SHA-256 of its exact content. The
-digest makes the approval specific to that content: replacing the file fails
-the gate until the entry is updated in the same change.
+the review artifact. [docs/REPOSITORY_STRUCTURE.md](docs/REPOSITORY_STRUCTURE.md)
+describes each directory and file, and the one directory where binary files
+may live.
 
 ---
 
@@ -139,49 +124,10 @@ the gate until the entry is updated in the same change.
 
 ### Base branch
 
-While no release branch is open, start from the current `main`. While a
-release branch `release/vX.Y.Z` is open, every change targets it: VBA
-corrections, tooling, workflows and documentation alike. `main` receives that
-work in one merge, once the release is certified, so I never copy a change to
-both branches.
-
-While a release branch is open, a change goes to `main` directly only when it
-fixes CI, security or a dependency and cannot wait for the release, such as a
-Dependabot update of a pinned Action. After such a change, merge `main` into
-the release branch in a pull request, so the release still contains everything
-on `main`.
-
-Every change to `main` and `release/**` goes through a pull request, including
-mine. Repository rulesets enforce it: on `main` and `release/**` a pull request
-must pass **Repository and module checks** on an up-to-date branch with every
-review thread resolved, and is merged with a merge commit; a push to the pull
-request dismisses earlier approvals. Force-pushes and deletion are blocked, and
-`v*` tags cannot be moved or deleted. The rulesets are versioned in `.github/rulesets/`,
-and the **Ruleset drift** workflow fails daily if a live ruleset differs from
-its copy. To change a ruleset, change it in the repository settings, run
-`python3 tools/check_rulesets.py --repository danielep71/VBA-EXCEL_UI --export`,
-and commit the result in a pull request that explains why.
-
-The other settings that protect the repository are versioned in
-`.github/repository-settings.json`: the merge methods and repository features,
-secret scanning, push protection, Dependabot alerts and security updates,
-private vulnerability reporting, and the GitHub Actions policy (allowed actions,
-the default `GITHUB_TOKEN` permissions, and whether Actions may approve pull
-requests). The same **Ruleset drift** workflow runs `tools/check_settings.py`,
-which reports each setting as a match, a difference or not verifiable, and
-fails only on a difference. Its token is read-only, so the security and Actions
-settings, which GitHub shows only to administrators, are reported as not
-verifiable there. I check every setting locally with my own administrator
-token:
-
-```text
-GITHUB_TOKEN="$(gh auth token)" python3 tools/check_settings.py --repository danielep71/VBA-EXCEL_UI --strict
-```
-
-`--strict` also fails when a setting is not verifiable, so a token without
-administrator access cannot pass. To change a setting, change it in the
-repository settings, update `.github/repository-settings.json` in a pull
-request that explains why, and run the command again.
+Start from the open release branch `release/vX.Y.Z`, or from `main` while no
+release branch is open. [docs/GOVERNANCE.md](docs/GOVERNANCE.md#base-branch)
+states the full policy, including the fixes that go to `main` directly, and the
+rulesets every pull request must satisfy.
 
 ### Commit discipline
 
@@ -206,11 +152,11 @@ claims in commit messages.
 ## 📦 Source-first VBA
 
 Exported source is authoritative.
-
-Portable text (Markdown, Python, YAML and JSON) uses LF. Exported VBA keeps its
-existing CRLF policy. Windows-native `.bat`, `.cmd`, `.ps1`, `.psm1`, `.psd1`,
-`.vbs`, `.reg` and `.ini` files use CRLF in editors and Git checkouts. This is a
-repository consistency policy, not a claim that every host rejects LF.
+[docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md) holds the rules the source
+must follow: line endings, exported-source rules, the formatter, the bounded
+VBA analyzer, WinAPI error capture, public contracts and compatibility, Excel
+state ownership, and the project engineering contract. Read it before you
+change a module.
 
 ### Disposable mutation controls
 
@@ -242,240 +188,6 @@ This inventories recorded types and purposes, not recoverable local filenames:
 the historical throwaway files were not committed. For #32, a true unchanged-
 hWnd generation control remains outstanding; do not count the distinct-handle
 seam as that evidence. Preserve reviewed results separately from disposable code.
-
-### Exported-source rules
-
-- Use `Option Explicit`.
-- Preserve the repository's VBE export metadata, module names, encoding, and
-  line-ending policy.
-- Match `.bas`, `.cls`, and `.frm` filenames to their component identity.
-- Keep every required `.frm` / `.frx` pair together; treat `.frx` as binary.
-- Do not edit a binary form resource as text.
-- Do not use a workbook or add-in as the only record of a code change.
-- Do not commit Office lock files, recovery copies, local exports, test output,
-  or generated binaries unless the repository explicitly designates them as
-  source.
-- Qualify workbook, worksheet, range, and application references.
-- Avoid implicit active-workbook, active-sheet, selection, and default-member
-  dependencies.
-- Keep `On Error Resume Next` scopes narrow and intentional.
-- Preserve useful diagnostic context and clean up on success and failure.
-- Avoid new references, APIs, dependencies, or platform assumptions until their
-  support and deployment impact is agreed.
-
-### Formatter verification (#52)
-
-Exported VBA source is **ASCII only**, with CRLF checkout/output line endings.
-The formatter rejects non-ASCII input, including comments, before writing; it
-never silently transliterates or changes the VBE code page. The existing Git
-attributes and Windows-native file overrides remain authoritative.
-
-`tools/vba_lex.py` is the shared code/string/comment scanner used by the
-formatter and VBA analyzer. It recognizes doubled
-quotes, apostrophe comments, statement-position `Rem`, and bracketed identifiers.
-It is not a complete VBA parser. The analyzer consumes the same lexical
-boundaries for procedure-local resolution and targeted assignment analysis.
-
-Conditional blocks (including their directives and whitespace) and continued
-logical statements are preserved. `--check` reports that their formatting was
-skipped; clean preserved input may pass. Malformed literals, interrupted or
-unterminated continuations/conditionals, non-ASCII text and ambiguous label
-renames fail before any file is written. Line endings normalize to CRLF.
-
-Before publication, the formatter compares ordered executable tokens and
-statement boundaries, preserving literal bytes and Option statements; only the
-explicit house-label renaming and Option relocation are normalized. This
-bounded equivalence check is not compilation or Excel runtime certification.
-Every fixture is exercised by the existing formatter self-test in static CI.
-
-`--write` preflights all inputs and replaces each changed file through a flushed
-same-directory temporary file and `os.replace`. Existing permissions are kept,
-symlinks are refused, and failed writes/replacements remove their temporary
-file. This is atomic per file, not a multi-file transaction or a guarantee
-against power loss. The legacy source/destination form uses the same writer.
-
-Always inspect the resulting diff and re-import any changed VBA modules into
-the VBE before committing them. A formatter change that leaves every module
-byte-identical does not create a new Excel runtime result.
-
-### Bounded VBA analyzer (#31)
-
-`python tools/vba_analyze.py` checks all `.bas` files in `src/`, `test/` and
-`demo/`. The static gate runs it and its independent malformed/benign fixtures
-on configured pushes and pull requests. Diagnostics identify the source path,
-physical start line, rule and compilation configuration. A continued statement
-uses its first physical line. Dynamic dispatch appears as `INVENTORY` in the
-gate log; these entries are unresolved host/binding work, not validated calls.
-
-The analyzer collects procedure, DLL, constant, variable, type and enum names;
-resolves project-prefixed references against visible declarations; and checks
-simple unqualified assignment targets under `Option Explicit`. Parameters,
-locals and visible module/project names are recognized after continuation and
-colon normalization. This is declaration coverage, not type checking: member,
-array-element, `With` and host-object resolution, argument compatibility and
-complete expression/loop-variable analysis still require the VBA compiler.
-
-Labels resolve within their procedure, opener/end kinds must agree, and
-duplicates are checked independently for VBA7 x64, VBA7 x86 and legacy x86.
-Conditional directives use a nested stack. Boolean `VBA7`/`Win64` expressions
-and local Boolean `#Const` definitions are supported; unknown symbols or
-unsupported expressions fail explicitly, including in inactive nested blocks.
-Each effective VBA7 `Declare` requires `PtrSafe`; prefixed DLL declarations
-require an explicit `Alias`. The eight known WinAPI contracts have versioned
-ABI-v1 fixtures covering parameter types, ByVal passing and return types. This
-is not a general DLL export/ABI verifier.
-
-The error-preservation rule covers straight-line handler segments and direct
-reads of `Err.Number`, `Err.Source` and `Err.Description` after a call or
-`On Error` statement. Arguments are read before the call changes the state;
-saved-local re-raises pass. A subsequent error-producing operation under
-`On Error Resume Next` is a fresh source, while a scalar flag assignment is
-not. Scalar capture intrinsics (`IIf`, `Len`, `CStr`, `CLng`, `CBool`, `CInt`,
-`CDbl`, `CSng`) are treated as capture expressions. This does not prove their
-arguments cannot raise. Branches, loops and label joins delimit the analysis;
-there is no interprocedural or whole-control-flow proof, cleanup proof, or
-protection against re-raise loops.
-
-Run `Debug -> Compile VBAProject` and the relevant Excel tests after VBA edits.
-Passing static analysis does not produce runtime evidence. The mandatory
-certification-manifest registration check remains dependent on #42's manifest;
-the current analyzer does not certify case completeness or execution.
-
-### WinAPI error capture (#27)
-
-In `src/` and `test/`, read a native error code only through
-`Err.LastDllError`, and do not declare `GetLastError`. VBA sets
-`Err.LastDllError` after every `Declare` call, the next `Declare` call replaces
-it, and `Err.Clear` or any `On Error` statement resets it. Write every native
-call whose error you report as three adjacent statements:
-
-```vba
-SetLastError 0                                  ' immediately before the call
-ApiResult = GetWindowLongPtr(hWnd, GWL_STYLE)   ' result copied to a local
-DllError = Err.LastDllError                     ' the very next statement
-```
-
-Put nothing between them: no other call, no formatting or logging helper and
-no `On Error` statement. Take a regression seam before `SetLastError 0`, and
-replace captured values only after the capture. `GetWindowLong[Ptr]` and
-`SetWindowLong[Ptr]` can return zero legitimately, so treat zero with a
-captured error of zero as a valid value, zero with a non-zero captured error as
-a failure, and any non-zero result as success. Report a failure with the
-exported API name, the operation, the captured error and the target hWnd.
-
-The gate's `WinAPI error capture` check
-(`tools/winapi_capture_fixtures.py`) enforces this sequence separately for VBA7
-x64, VBA7 x86 and legacy x86, and proves itself against passing and failing
-fixtures first. It reads statement order only: it does not follow `GoTo` and
-cannot observe the error a call leaves, so
-`TST_Case_TitleBarApiErrorCapture` must still pass on a real Excel host. The
-demo modules in `demo/` are not yet held to this rule (#144).
-
-### Public contracts and compatibility
-
-Demo cleanup (#71) is single-pass, not a host watchdog. With
-`ReProtectAtEnd=True`, reset captures the fifteen Boolean `Worksheet.Protect`
-options and `EnableSelection` before unprotecting, then attempts to restore
-them only if that invocation's unprotect returned successfully. A missing or
-incorrect password must not arm reprotection. With `ReProtectAtEnd=False`
-(the existing default), leaving the sheet unprotected is intentional.
-
-An operation error retains its number/source and description prefix; cleanup
-failures append a separately identified diagnostic. A cleanup-only failure is
-raised to the caller. This does not restore deleted cells, shapes, tables or
-range-level permissions, nor guarantee recovery after Reset/End or a blocked
-Excel call. `UserInterfaceOnly` is restored for the current session, not promised
-across workbook reopening. Source fixtures do not establish Excel outcomes.
-Before closure, use disposable worksheets and a bounded host harness to test
-ordinary failure, missing/wrong password, reprotection and selection failure,
-and read back every captured option at the exact tested commit.
-
-`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
-from the commit under test:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath "C:\work\EXCEL_UI_Demo.xlsm" -Mode Demo -NewWorkbook
-```
-
-Open it, run **Debug → Compile VBAProject**, and run
-`Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
-creates a temporary workbook, runs fourteen scenarios on sheets of its own,
-closes the workbook without saving and prints one `PASS` or `FAIL` line per
-scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
-`DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
-operation error after a successful unprotect, a failed Protect and a failed
-`EnableSelection` restoration have no worksheet cause that can be produced on
-demand, so the harness injects them through the one-shot
-`DEMO_InternalCleanupProbe*` seams of `M_DEMO_BUILDER`. Those seams stay inert
-unless the harness arms them. Record the commit, Excel build and bitness with
-the Immediate window output.
-
-Treat documented procedures, functions, classes, enums, parameters, defaults,
-return values, errors, side effects, workbook formats, and supported platforms
-as contracts.
-
-A contract-changing contribution must:
-
-1. identify affected callers and migration needs;
-2. explain what changes and what remains unchanged;
-3. add or update regression coverage;
-4. update user-facing documentation and examples; and
-5. state whether the release impact is patch, minor, or major.
-
-Do not make an internal helper public merely to simplify a test. Use an explicit
-test seam where the project supports one.
-
-External compatibility is a promise about the `[supported]` facade in
-`M_EXCEL_UI`. It is not the same promise as the deployment rule that all four
-`src/` modules are replaced together: internal boundaries may move in a patch
-release without any caller-visible change, which is why a mixed-version project
-fails to compile even when the external API is untouched.
-
-Preserve the `[supported]` facade unless an explicitly approved breaking release
-requires otherwise:
-
-- public procedure and function names;
-- parameter order;
-- optional defaults;
-- enum values;
-- show/hide/leave-unchanged semantics;
-- fire-and-forget behavior;
-- ordered structured-result behavior;
-- application and window scope;
-- `UI_ShowExcelUI` as the emergency show-all operation.
-
-New backward-compatible parameters must normally be optional and trailing.
-
-### Excel state ownership
-
-Assume these surfaces belong to the caller or host unless the project explicitly
-owns them:
-
-```text
-Application.Calculation
-Application.EnableEvents
-Application.ScreenUpdating
-Application.DisplayAlerts
-Application.StatusBar
-active workbook / worksheet / selection
-window styles, shortcuts, timers, names, links, connections, and shapes
-```
-
-Capture state before changing it. Restore only state the component successfully
-changed and still owns. Cleanup must not conceal the original failure.
-
----
-
-## 🧩 Project engineering contract
-
-| Area | Required behavior |
-|---|---|
-| **Module boundaries** | Preserve the UI, runtime, snapshot, and title-bar dependency direction. |
-| **Window identity** | Never restore per-window state by collection index; handle closed, recreated, and newly opened windows explicitly. |
-| **Snapshot lifecycle** | Document partial capture, failure ordering, reset behavior, and emergency recovery. |
-| **Title-bar ownership** | Restore only the style bits owned; capture `Err.LastDllError` immediately after each WinAPI call; handle valid zero returns, handle changes, and frame refresh. |
-| **Failure behavior** | Production entry points are fail-soft unless documented otherwise; never silently discard failures or leave screen updating suppressed. |
-| **Platform support** | Validate affected 32-bit and 64-bit declarations on a real Windows Excel host. |
 
 ---
 
@@ -622,6 +334,34 @@ python3 tools/verify.py --only ruff,mypy
 A finding is fixed in the code, not silenced, unless the fix would change what
 a check accepts or rejects. The few complexity exemptions carry their reason
 beside them.
+
+### Demo cleanup checks (#71)
+
+The demo cleanup contract is stated in
+[docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md#demo-cleanup-contract-71).
+Before closure, use disposable worksheets and a bounded host harness to test
+ordinary failure, missing/wrong password, reprotection and selection failure,
+and read back every captured option at the exact tested commit.
+
+`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
+from the commit under test:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath "C:\work\EXCEL_UI_Demo.xlsm" -Mode Demo -NewWorkbook
+```
+
+Open it, run **Debug → Compile VBAProject**, and run
+`Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
+creates a temporary workbook, runs fourteen scenarios on sheets of its own,
+closes the workbook without saving and prints one `PASS` or `FAIL` line per
+scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
+`DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
+operation error after a successful unprotect, a failed Protect and a failed
+`EnableSelection` restoration have no worksheet cause that can be produced on
+demand, so the harness injects them through the one-shot
+`DEMO_InternalCleanupProbe*` seams of `M_DEMO_BUILDER`. Those seams stay inert
+unless the harness arms them. Record the commit, Excel build and bitness with
+the Immediate window output.
 
 ### Evidence principles
 
@@ -865,54 +605,6 @@ against the review finding crosswalk in `CHANGELOG.md` (under
 identifier that is not in the table yet, add its row in the same pull request:
 `check_repo.py` fails on a cited identifier without exactly one row.
 
-### Updating a pinned Action
-
-Every `uses:` reference in `.github/workflows/` is pinned to a full 40-character
-commit SHA with a trailing comment naming the release it is, and
-`tools/check_repo.py` fails on anything else. A version tag is a mutable
-pointer: `actions/checkout@v4` moved to a different commit as recently as the
-pin currently in the tree, so a workflow referencing it runs whatever the
-upstream account publishes next, including whatever an attacker publishes after
-compromising it.
-
-The comment is not decoration. A bare 40-hex string cannot be reviewed — nobody
-can tell a real release from an arbitrary commit by reading it. The comment
-states the claim, and resolving the tag is what checks it.
-
-To move a pin:
-
-1. Find the intended release in the official Action repository and note its tag,
-   for example `v4.4.0`. Read its release notes; a pin bump is a dependency
-   change, not housekeeping.
-2. Resolve that tag to a commit without trusting a web page:
-
-   ```text
-   git ls-remote https://github.com/actions/checkout.git refs/tags/v4.4.0
-   ```
-
-   If the tag is annotated, resolve `refs/tags/v4.4.0^{}` as well and pin the
-   commit it dereferences to, not the tag object.
-3. Replace the SHA and the version comment **together**, in one edit. A SHA
-   updated without its comment, or a comment updated without its SHA, is worse
-   than no pin: it is a false statement a reviewer will believe.
-4. Run `python3 tools/check_repo.py`.
-
-Dependabot (`.github/dependabot.yml`) opens a weekly grouped pull request when a
-pinned Action has a newer release, and a monthly one for the hash-locked Python
-quality tools. It changes the SHA and the version comment together; review it
-with the steps above before merging. While a release branch is open, Dependabot
-opens the same updates against it too, so neither branch falls behind; remove
-those entries when the release branch is merged.
-
-The actionlint release that **Workflow lint** downloads is neither an Action nor
-a Python package, so Dependabot does not update it. Update
-`ACTIONLINT_VERSION` and `ACTIONLINT_SHA256` in
-`.github/workflows/actionlint.yml` by hand, together, in one edit.
-
-A repository-local action — `uses: ./…` — is versioned by this repository's own
-history and is exempt. Nothing else is.
-
-
 ## 🚀 Pull requests
 
 A pull request should answer:
@@ -944,7 +636,9 @@ What remains unverified?
 
 Reviews may request changes to scope, tests, contracts, compatibility,
 documentation, or evidence. Discussion must remain technical and respectful
-under the [Code of Conduct](CODE_OF_CONDUCT.md).
+under the [Code of Conduct](CODE_OF_CONDUCT.md). The rulesets a pull request
+must satisfy before it merges, including resolved review threads, are in
+[docs/GOVERNANCE.md](docs/GOVERNANCE.md#rulesets).
 
 <a id="pull-request-reference"></a>
 
@@ -988,6 +682,9 @@ Before you request review, check each document your change can affect:
 - `README.md` reflects supported behavior and examples.
 - `INSTALLATION.md` reflects paths, dependencies, import order, validation, upgrades, and removal.
 - `CONTRIBUTING.md` reflects development and evidence requirements.
+- `docs/VBA_HOUSE_STYLE.md` reflects the rules for source.
+- `docs/GOVERNANCE.md` reflects branch, ruleset, settings and dependency-update rules.
+- `docs/REPOSITORY_STRUCTURE.md` reflects added, moved, or removed files and directories.
 - `CHANGELOG.md` records material change under `[Unreleased]`.
 - `SECURITY.md` reflects supported versions or trust boundaries.
 - `RELEASING.md` reflects certification, package, provenance, or recovery changes.
@@ -1036,7 +733,8 @@ Every pull request must satisfy these, or state the exception:
 ### Project-specific review profiles
 
 Apply every profile your change touches, and list in the pull request any item
-it does not meet.
+it does not meet. The rules behind them are in
+[docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md).
 
 #### 🧱 Module ownership and API manifest
 

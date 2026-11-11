@@ -761,6 +761,21 @@ measured against that baseline.
 
 ### 📖 Documentation
 
+- Gave reference material its own documents (#157). `docs/VBA_HOUSE_STYLE.md`
+  holds the rules for the source that `CONTRIBUTING.md` used to carry: line
+  endings, exported-source rules, formatter verification, the bounded VBA
+  analyzer, WinAPI error capture, public contracts and compatibility, the demo
+  cleanup contract, Excel state ownership and the project engineering contract.
+  `docs/GOVERNANCE.md` holds the base-branch policy, the rulesets, pull-request
+  and review-thread rules, the versioned repository settings, pinned Actions
+  and Dependabot, and points to `docs/ISSUE_LABELS.md` for labels.
+  `docs/REPOSITORY_STRUCTURE.md` holds the file tree from `README.md` and the
+  directory table from `CONTRIBUTING.md`. `CONTRIBUTING.md` keeps the
+  contributor workflow and links to all three; the rules are moved, not
+  changed.
+- Removed `docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md` (#157). It
+  copied issue bodies and had already drifted from them; the order of the work
+  lives in each issue's Planning and Dependencies sections.
 - Added a weekly, non-blocking check of every external link in the tracked
   Markdown files (#85). Broken links fail the scheduled run and are listed in
   its summary; links inside the repository remain part of the required gate.
