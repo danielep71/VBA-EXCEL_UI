@@ -59,6 +59,7 @@ known-first-party = [
     "vba_analyze_fixtures",
     "vba_api",
     "vba_lex",
+    "verify",
     "wiki_badges",
     "winapi_capture_fixtures",
 ]
