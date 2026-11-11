@@ -6,6 +6,12 @@ name: Ruleset drift
 # changes a ruleset. The rulesets of a public repository are readable with
 # the job's read-only token; bypass actors are visible only to administrators
 # and are therefore not compared.
+#
+# It then compares the other repository settings with
+# .github/repository-settings.json (tools/check_settings.py) and fails on any
+# setting that differs. The security and Actions settings are visible only to
+# administrators, and the job's token is not one: the step reports them as not
+# verifiable, without failing, and an administrator run checks them.
 
 on:
   pull_request:
@@ -14,7 +20,9 @@ on:
       - 'release/**'
     paths:
       - '.github/rulesets/**'
+      - '.github/repository-settings.json'
       - 'tools/check_rulesets.py'
+      - 'tools/check_settings.py'
       - '.github/workflows/rulesets-drift.yml'
   schedule:
     - cron: '29 5 * * *'
@@ -32,7 +40,7 @@ concurrency:
 
 jobs:
   drift:
-    name: Compare live rulesets
+    name: Compare live rulesets and settings
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -52,5 +60,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
           python3 tools/check_rulesets.py
+          --repository "$GITHUB_REPOSITORY"
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare live settings with .github/repository-settings.json
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 tools/check_settings.py
           --repository "$GITHUB_REPOSITORY"
           --summary "$GITHUB_STEP_SUMMARY"
