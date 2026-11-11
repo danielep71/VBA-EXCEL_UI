@@ -95,6 +95,7 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/verify.py",
     "tools/vba-projects.json",
     ".github/labels.json",
+    ".github/excel-evidence-policy.json",
     "docs/GOVERNANCE.md",
     "docs/ISSUE_LABELS.md",
     "docs/REPOSITORY_STRUCTURE.md",
