@@ -374,6 +374,79 @@ class WorkflowPolicySelfTest(GateTestCase):
             self.assertFails("a version series is not an audited version")
 
 
+class BranchCoverage(GateTestCase):
+    check = "branch coverage"
+    DEPENDABOT = ".github/dependabot.yml"
+    CODEQL = ".github/workflows/codeql.yml"
+
+    def release_branch(self) -> str:
+        found = re.search(r"target-branch: (\S+)", self.repo.read_text(self.DEPENDABOT))
+        assert found is not None, "the tracked configuration has no release entry"
+        return found[1]
+
+    def version(self) -> str:
+        return self.repo.read_text("VERSION").strip()
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_passes_once_the_release_entries_are_removed(self) -> None:
+        text = self.repo.read_text(self.DEPENDABOT)
+        entries = text.split("\n\n")
+        kept = [e for e in entries if "target-branch:" not in e]
+        self.assertLess(len(kept), len(entries))
+        self.repo.write(self.DEPENDABOT, "\n\n".join(kept) + "\n")
+        self.assertPasses()
+
+    def test_fails_on_a_missing_release_entry(self) -> None:
+        text = self.repo.read_text(self.DEPENDABOT)
+        line = f"    target-branch: {self.release_branch()}\n"
+        head, _, tail = text.rpartition(line)
+        self.repo.write(self.DEPENDABOT, head + tail)
+        self.assertFails(f"pip has no entry for {self.release_branch()}",
+                         "pip has 2 entries without target-branch")
+
+    def test_fails_on_a_stale_release_branch(self) -> None:
+        stale = f"release/v{self.version()}"
+        self.repo.replace(self.DEPENDABOT, f"target-branch: {self.release_branch()}",
+                          f"target-branch: {stale}", count=2)
+        self.assertFails(f"targets {stale}, but VERSION is {self.version()}")
+
+    def test_fails_on_an_extra_branch(self) -> None:
+        self.repo.replace(self.DEPENDABOT, f"target-branch: {self.release_branch()}",
+                          "target-branch: develop")
+        self.assertFails("(github-actions) targets develop, which is not a release")
+
+    def test_fails_on_a_mismatched_schedule(self) -> None:
+        text = self.repo.read_text(self.DEPENDABOT)
+        head, _, tail = text.rpartition("interval: monthly")
+        self.repo.write(self.DEPENDABOT, head + "interval: weekly" + tail)
+        self.assertFails(f"pip entry for {self.release_branch()}: schedule differs")
+
+    def test_fails_when_codeql_skips_release_pull_requests(self) -> None:
+        self.repo.replace(self.CODEQL, "      - 'release/**'\n  push:", "  push:")
+        self.assertFails("on.pull_request.branches does not include 'release/**'")
+
+    def test_fails_when_a_file_is_missing(self) -> None:
+        self.repo.remove(self.CODEQL)
+        self.assertFails(f"{self.CODEQL} is missing")
+
+
+class BranchCoverageSelfTest(GateTestCase):
+    check = "branch coverage self-test"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_no_setting_is_compared(self) -> None:
+        with patch.object(check_repo, "MIRRORED_KEYS", ()):
+            self.assertFails("a mismatched schedule is rejected: expected 1 finding(s), got 0")
+
+    def test_fails_when_codeql_requires_no_branch(self) -> None:
+        with patch.object(check_repo, "CODEQL_BRANCHES", {}):
+            self.assertFails("a missing pull-request trigger is rejected")
+
+
 class WikiBadgeSelfTest(GateTestCase):
     check = "wiki badge self-test"
 
