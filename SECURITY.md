@@ -67,7 +67,7 @@ If the project has not yet published a functional release, development code is
 pre-release and no production version is security-supported.
 
 Security fixes follow the
-[base-branch rule](CONTRIBUTING.md#base-branch): they start from **main**, except
+[base-branch rule](docs/GOVERNANCE.md#base-branch): they start from **main**, except
 that while a release branch `release/vX.Y.Z` is open they target the release
 branch and reach **main** with the release. A fix that cannot wait for the
 release goes to **main** directly, and **main** is then merged into the release
@@ -363,7 +363,7 @@ read-only.
 also compares the repository settings with `.github/repository-settings.json`;
 the security and Actions settings, which only administrators can read, are
 reported there as not verifiable and are checked with an administrator token,
-as [CONTRIBUTING.md](CONTRIBUTING.md) describes.
+as [docs/GOVERNANCE.md](docs/GOVERNANCE.md#repository-settings) describes.
 
 **OpenSSF Scorecard** scores `main` weekly, on pushes to `main`, when branch
 protection changes and on demand, and runs only while the repository is
@@ -532,6 +532,7 @@ No paid bug bounty is offered unless I state otherwise in writing.
 
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Contributing Guidelines](CONTRIBUTING.md)
+- [Repository governance](docs/GOVERNANCE.md)
 - The repository README, license, release notes, and project documentation where
   present
 - GitHub's platform security and acceptable-use policies

@@ -1,0 +1,55 @@
+{
+  "description": "The Excel certification evidence contract. tools/Certify-EXCEL_UI.ps1 reads it to name the bundle files, record the steps and run the certification runner; tools/check_excel_evidence.py reads it to validate a bundle. evidence_schema is the schema the bundle documents carry; required_files maps each role to its file name in the bundle; evidence_files are the files the workbook writes and session.json records digests for; steps are the steps the script records, in the order it runs them; host_fields are the host.json fields that must be non-empty text, and excel_matches_certification pairs each Excel field with the certification.json key it must equal. docs/EXCEL_CERTIFICATION.md describes the contract, and tests/test_excel_evidence_policy.py fails when the script, the validator or that guide disagrees with this file.",
+  "schema_version": 1,
+  "evidence_schema": 1,
+  "component": "VBA Excel UI",
+  "manifest": "tools/vba-projects.json",
+  "configuration": "development",
+  "certification_module": "test/M_EXCEL_UI_REGRESSION_TESTS.bas",
+  "certification_runner": "Test_EXCEL_UI_RunReleaseCertification",
+  "required_files": {
+    "session": "session.json",
+    "host": "host.json",
+    "source_digests": "source-digests.json",
+    "certification_json": "certification.json",
+    "certification_report": "certification.txt"
+  },
+  "evidence_files": [
+    "certification.json",
+    "certification.txt"
+  ],
+  "steps": [
+    "preflight",
+    "build",
+    "open",
+    "enable-macros",
+    "compile",
+    "certify",
+    "collect",
+    "close"
+  ],
+  "host_fields": {
+    "windows": [
+      "caption",
+      "version",
+      "build",
+      "architecture"
+    ],
+    "excel": [
+      "version",
+      "build",
+      "operating_system",
+      "bitness"
+    ]
+  },
+  "excel_matches_certification": {
+    "version": "excelVersion",
+    "build": "excelBuild",
+    "operating_system": "operatingSystem",
+    "bitness": "bitness"
+  },
+  "bitness": [
+    "x64",
+    "x86"
+  ]
+}

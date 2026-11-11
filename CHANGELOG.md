@@ -568,6 +568,17 @@ measured against that baseline.
 - Rebuilt the feature-request template around a user problem, testable
   acceptance criteria, targeting and ownership, compatibility, failure policy,
   recovery, verification, alternatives and explicit non-goals.
+- Moved the Excel evidence contract into
+  `.github/excel-evidence-policy.json`
+  ([#158](https://github.com/danielep71/VBA-EXCEL_UI/issues/158)).
+  `tools/Certify-EXCEL_UI.ps1` takes the bundle file names, the steps, the
+  certification runner, the configuration and the schema from it, and
+  `tools/check_excel_evidence.py` reads every rule from it (or from
+  `--policy`) and validates the policy before it reads a bundle. A new test
+  fails when the script, the validator or
+  [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) disagrees with
+  the policy. The bundle format is unchanged, and the validator's output for
+  the same bundle is identical. No Excel run has used the changed script yet.
 - Replaced the separate static-check commands with one entry point,
   **tools/verify.py**
   ([#154](https://github.com/danielep71/VBA-EXCEL_UI/issues/154)). It runs the
@@ -764,6 +775,21 @@ measured against that baseline.
 
 ### 📖 Documentation
 
+- Gave reference material its own documents (#157). `docs/VBA_HOUSE_STYLE.md`
+  holds the rules for the source that `CONTRIBUTING.md` used to carry: line
+  endings, exported-source rules, formatter verification, the bounded VBA
+  analyzer, WinAPI error capture, public contracts and compatibility, the demo
+  cleanup contract, Excel state ownership and the project engineering contract.
+  `docs/GOVERNANCE.md` holds the base-branch policy, the rulesets, pull-request
+  and review-thread rules, the versioned repository settings, pinned Actions
+  and Dependabot, and points to `docs/ISSUE_LABELS.md` for labels.
+  `docs/REPOSITORY_STRUCTURE.md` holds the file tree from `README.md` and the
+  directory table from `CONTRIBUTING.md`. `CONTRIBUTING.md` keeps the
+  contributor workflow and links to all three; the rules are moved, not
+  changed.
+- Removed `docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md` (#157). It
+  copied issue bodies and had already drifted from them; the order of the work
+  lives in each issue's Planning and Dependencies sections.
 - Added a weekly, non-blocking check of every external link in the tracked
   Markdown files (#85). Broken links fail the scheduled run and are listed in
   its summary; links inside the repository remain part of the required gate.
