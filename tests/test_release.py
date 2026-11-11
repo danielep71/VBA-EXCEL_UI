@@ -379,10 +379,11 @@ class VerifyPublished(ReleaseRepository):
                        for path in self.paths],
         }
 
-    def check(self) -> tuple[int, str]:
+    def check(self, *extra: str) -> tuple[int, str]:
         api = FakeApi({f"/repos/{REPOSITORY}/releases/tags/v1.2.0": self.release}, self.files)
-        status, out, err = self.cli("verify-published", "v1.2.0", "--repository", REPOSITORY,
-                                    "--dir", str(self.out), api=api)
+        with contextlib.redirect_stderr(io.StringIO()):
+            status, out, err = self.cli("verify-published", "v1.2.0", "--repository", REPOSITORY,
+                                        "--dir", str(self.out), *extra, api=api)
         return status, out + err
 
     def test_matching_release_passes(self) -> None:
@@ -419,7 +420,50 @@ class VerifyPublished(ReleaseRepository):
         status, out = self.check()
         self.assertEqual(status, 1)
         self.assertIn("asset VBA-EXCEL_UI-1.2.0.zip is missing", out)
-        self.assertIn("asset extra.xlsm is not listed in SHA256SUMS", out)
+        self.assertIn("asset extra.xlsm is neither listed in SHA256SUMS", out)
+
+    def add_workbook(self, data: bytes = b"workbook") -> str:
+        """Attach a workbook asset and return the SHA-256 of what was attached."""
+        url = "https://api.invalid/assets/VBA-EXCEL_UI-Demo-v1.2.0.xlsm"
+        self.files[url] = data
+        self.release["assets"].append({"name": "VBA-EXCEL_UI-Demo-v1.2.0.xlsm",
+                                       "state": "uploaded", "url": url})
+        return hashlib.sha256(data).hexdigest()
+
+    def test_declared_matching_workbook_passes(self) -> None:
+        digest = self.add_workbook()
+        status, out = self.check("--asset", f"VBA-EXCEL_UI-Demo-v1.2.0.xlsm={digest.upper()}")
+        self.assertEqual((status, out.splitlines()[-1]), (0, "RESULT: PASS"))
+
+    def test_declared_workbook_with_wrong_hash_is_rejected(self) -> None:
+        self.add_workbook()
+        status, out = self.check("--asset", f"VBA-EXCEL_UI-Demo-v1.2.0.xlsm={'0' * 64}")
+        self.assertEqual(status, 1)
+        self.assertIn("--asset expects " + "0" * 64, out)
+
+    def test_declared_workbook_missing_is_rejected(self) -> None:
+        status, out = self.check("--asset", f"VBA-EXCEL_UI-Demo-v1.2.0.xlsm={'0' * 64}")
+        self.assertEqual(status, 1)
+        self.assertIn("asset VBA-EXCEL_UI-Demo-v1.2.0.xlsm is missing", out)
+
+    def test_undeclared_workbook_is_rejected(self) -> None:
+        self.add_workbook()
+        status, out = self.check()
+        self.assertEqual(status, 1)
+        self.assertIn("VBA-EXCEL_UI-Demo-v1.2.0.xlsm is neither listed in SHA256SUMS nor declared", out)
+
+    def test_malformed_or_clashing_declarations_are_usage_errors(self) -> None:
+        digest = "0" * 64
+        for args in (["--asset", "workbook.xlsm"], ["--asset", f"dir/workbook.xlsm={digest}"],
+                     ["--asset", f"SHA256SUMS={digest}"],
+                     ["--asset", f"VBA-EXCEL_UI-1.2.0.zip={digest}"],
+                     ["--asset", f"a.xlsm={digest}", "--asset", f"a.xlsm={digest}"]):
+            with self.subTest(args=args):
+                try:
+                    status, _ = self.check(*args)
+                except SystemExit as stop:  # argparse rejects a malformed value
+                    status = int(str(stop.code))
+                self.assertEqual(status, 2)
 
     def test_missing_release_is_rejected(self) -> None:
         api = FakeApi({}, self.files)

@@ -158,7 +158,9 @@ measured against that baseline.
   that **Repository and module checks** concluded success on that exact
   commit. It then builds `git archive` source archives and `SHA256SUMS`,
   publishes the GitHub Release with the changelog section as its notes, and
-  checks the published notes and asset hashes. A manual run verifies an
+  checks the published notes and asset hashes. A workbook attached by hand is
+  verified the same way once it is declared with
+  `verify-published --asset NAME=SHA256`. A manual run verifies an
   existing tag and publishes nothing. Only the publish job holds
   `contents: write`; every action is pinned to a full SHA. Excel certification
   and the evidence record stay manual, and **RELEASING.md** now says which

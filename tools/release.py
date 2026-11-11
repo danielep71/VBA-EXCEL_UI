@@ -15,10 +15,11 @@ against a different commit from the one the tag names:
   .tar.gz, named VBA-EXCEL_UI-<version>, and a SHA256SUMS file. git archive
   honours the export-ignore attributes in .gitattributes, and the bundle is
   refused if an excluded path such as AGENTS.md is still in it.
-- verify-published TAG --repository OWNER/NAME --dir DIR: the GitHub release
-  for the tag exists and is not a draft, its body equals the notes, and its
-  assets are exactly the files in DIR/SHA256SUMS plus that file, with matching
-  SHA-256 values.
+- verify-published TAG --repository OWNER/NAME --dir DIR [--asset NAME=SHA256]:
+  the GitHub release for the tag exists and is not a draft, its body equals the
+  notes, and its assets are exactly the files in DIR/SHA256SUMS, that file, and
+  each asset declared with --asset, such as a hand-built workbook, all with
+  matching SHA-256 values.
 
 The GitHub REST API is read with the token in GITHUB_TOKEN, when set. Nothing
 here writes to GitHub: the release workflow creates the release with gh.
@@ -71,6 +72,9 @@ TAG_RE = re.compile(
 NOT_FAILED = {"success", "cancelled", "skipped"}
 
 SUM_LINE_RE = re.compile(r"^(?P<hash>[0-9a-f]{64})  (?P<name>[^/\s][^/]*)$")
+
+# A declared extra asset: a file name without a directory, "=", and a SHA-256.
+EXTRA_ASSET_RE = re.compile(r"^(?P<name>[^/\s=][^/=]*)=(?P<hash>[0-9A-Fa-f]{64})$")
 
 
 class ReleaseError(Exception):
@@ -405,9 +409,18 @@ def bundle(root: Path, tag: str, out: Path) -> list[Path]:
 
 
 def published_findings(api: Api, repository: str, tag: str, notes: str,
-                       sums_text: str) -> list[str]:
-    """Compare the published GitHub release with the notes and SHA256SUMS."""
+                       sums_text: str, extras: dict[str, str] | None = None) -> list[str]:
+    """Compare the published GitHub release with the notes, SHA256SUMS and extras.
+
+    extras maps each additional expected asset, such as a hand-built workbook,
+    to the SHA-256 recorded for it in the evidence record. The release must
+    hold exactly the bundle, SHA256SUMS and those assets.
+    """
     expected = parse_sums(sums_text)
+    declared = dict(extras or {})
+    clashes = sorted(name for name in declared if name in expected or name == SUMS)
+    if clashes:
+        raise ReleaseError(f"--asset {clashes[0]} is already part of the bundle")
     try:
         release = api.get_json(f"/repos/{repository}/releases/tags/{urllib.parse.quote(tag, safe='')}")
     except NotFound:
@@ -425,11 +438,11 @@ def published_findings(api: Api, repository: str, tag: str, notes: str,
 
     assets: dict[str, dict[str, Any]] = {str(asset.get("name")): asset
                                          for asset in release.get("assets") or []}
-    wanted = set(expected) | {SUMS}
+    wanted = set(expected) | {SUMS} | set(declared)
     for name in sorted(wanted - set(assets)):
         findings.append(f"asset {name} is missing from the release")
     for name in sorted(set(assets) - wanted):
-        findings.append(f"asset {name} is not listed in {SUMS}")
+        findings.append(f"asset {name} is neither listed in {SUMS} nor declared with --asset")
 
     for name in sorted(wanted & set(assets)):
         asset = assets[name]
@@ -437,9 +450,14 @@ def published_findings(api: Api, repository: str, tag: str, notes: str,
             findings.append(f"asset {name} is in state {asset.get('state')!r}, not uploaded")
             continue
         actual = sha256_bytes(api.download(str(asset["url"])))
-        want = sha256_bytes(sums_text.encode("utf-8")) if name == SUMS else expected[name]
+        if name == SUMS:
+            want, source = sha256_bytes(sums_text.encode("utf-8")), f"the local {SUMS}"
+        elif name in declared:
+            want, source = declared[name], "--asset"
+        else:
+            want, source = expected[name], SUMS
         if actual != want:
-            findings.append(f"asset {name} has SHA-256 {actual}; {SUMS} expects {want}")
+            findings.append(f"asset {name} has SHA-256 {actual}; {source} expects {want}")
         digest = asset.get("digest")
         if isinstance(digest, str) and digest.startswith("sha256:") and digest[7:] != actual:
             findings.append(f"asset {name}: GitHub reports {digest}, but the download hashes to {actual}")
@@ -448,6 +466,13 @@ def published_findings(api: Api, repository: str, tag: str, notes: str,
 
 # --------------------------------------------------------------------------
 # Command line
+
+
+def extra_asset(value: str) -> tuple[str, str]:
+    match = EXTRA_ASSET_RE.match(value)
+    if not match:
+        raise argparse.ArgumentTypeError("an asset must have the form NAME=SHA256")
+    return match.group("name"), match.group("hash").lower()
 
 
 def repository_name(value: str) -> str:
@@ -481,6 +506,10 @@ def parser() -> argparse.ArgumentParser:
                            help="owner/name (reads GITHUB_TOKEN)")
     published.add_argument("--dir", type=Path, required=True,
                            help="the directory that holds the bundle's SHA256SUMS")
+    published.add_argument("--asset", type=extra_asset, action="append", default=[],
+                           metavar="NAME=SHA256",
+                           help="an additional expected asset and its SHA-256, such as a "
+                                "workbook; repeat for each one")
     return root
 
 
@@ -515,8 +544,13 @@ def run(args: argparse.Namespace, api: Api | None) -> int:
 
     if api is None:
         raise ReleaseError("verify-published needs --repository")
+    extras: dict[str, str] = {}
+    for name, digest in args.asset:
+        if name in extras:
+            raise ReleaseError(f"--asset {name} is declared more than once")
+        extras[name] = digest
     sums_text = (args.dir / SUMS).read_text(encoding="utf-8")
-    findings = published_findings(api, args.repository, tag, tag_notes(root, tag), sums_text)
+    findings = published_findings(api, args.repository, tag, tag_notes(root, tag), sums_text, extras)
     print(f"Published release check for {tag}")
     for finding in findings:
         print(f"  - {finding}")

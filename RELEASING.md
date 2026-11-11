@@ -69,7 +69,7 @@ Pushing a `vX.Y.Z` tag starts the **Release** workflow
 | Notes | `notes vX.Y.Z` | Prints that changelog section, which becomes the release body |
 | Bundle | `bundle vX.Y.Z --out DIR` | Writes `git archive` output of the tag as `VBA-EXCEL_UI-X.Y.Z.zip` and `VBA-EXCEL_UI-X.Y.Z.tar.gz`, plus `SHA256SUMS`, and refuses an archive that still holds a path `.gitattributes` marks `export-ignore`, such as `AGENTS.md` |
 | Publish | (workflow only) | Creates the GitHub Release from the tag with `gh release create`, using the notes and the bundle |
-| Verify after publication | `verify-published vX.Y.Z --repository danielep71/VBA-EXCEL_UI --dir DIR` | Checks that the release exists and is not a draft, that its body equals the notes, and that its assets are exactly the files in `SHA256SUMS` plus that file, with matching SHA-256 values |
+| Verify after publication | `verify-published vX.Y.Z --repository danielep71/VBA-EXCEL_UI --dir DIR [--asset NAME=SHA256]` | Checks that the release exists and is not a draft, that its body equals the notes, and that its assets are exactly the files in `SHA256SUMS`, that file, and each asset declared with `--asset`, all with matching SHA-256 values |
 
 The verify and bundle jobs only read the repository. The publish job runs only
 after both have passed, only on a tag push, and is the one job with
@@ -86,7 +86,7 @@ These steps stay manual, and each must be complete before the tag is pushed:
 - Excel certification on the exact candidate (section 6) and the
   [evidence record](#evidence-record), which no workflow can produce;
 - any workbook artifact (section 7), which the workflow neither builds nor
-  uploads;
+  uploads, and the `verify-published` run that includes it (section 11);
 - the merge into `main` (section 8) and creating the annotated tag (section 9);
 - the post-publication checks the workflow cannot run (section 11).
 
@@ -235,8 +235,9 @@ sha256sum dist/<artifact>
 ```
 
 Publish only artifacts promised by the installation guide. A workbook is not
-listed in `SHA256SUMS`, so `verify-published` reports it as an unlisted asset
-once it is attached; record its hash in the evidence record instead.
+part of the bundle, so it is not in `SHA256SUMS`: record its file name and
+SHA-256 in the evidence record, attach it to the published release, and then
+verify the release with it declared, as section 11 describes.
 
 Disposable mutants and their local output belong only in `/.mutation-scratch/`.
 They are not release evidence and must never enter source archives or binary
@@ -340,6 +341,23 @@ changelog section. Do not rebuild between tagging and upload.
 
 The publish job runs `verify-published`, which covers the release state, the
 body and the asset hashes. The other checks below stay manual.
+
+After attaching a workbook, run `verify-published` again with the workbook
+declared by the name and SHA-256 in the evidence record. Download the bundle
+artifact of the Release run first, because it holds the `SHA256SUMS` that the
+workflow built; the run keeps it for 30 days:
+
+```bash
+gh run download <run-id> --repo danielep71/VBA-EXCEL_UI \
+  --name release-bundle-<run-id> --dir dist
+python3 tools/release.py verify-published vX.Y.Z \
+  --repository danielep71/VBA-EXCEL_UI --dir dist \
+  --asset <workbook>.xlsm=<sha256>
+```
+
+Repeat `--asset` for each additional asset. The check fails when an asset is
+missing, when a hash differs, or when the release holds an asset that is neither
+in `SHA256SUMS` nor declared.
 
 | Check | Result |
 | --- | :---: |
