@@ -98,7 +98,7 @@ Record which Windows and Office-bitness combinations were exercised; do not gene
    removes the entries. The gate's **branch coverage** check fails on a
    missing, stale or extra entry.
 2. While the release branch is open, every change targets it and reaches
-   `main` with the release, as [CONTRIBUTING.md](CONTRIBUTING.md#base-branch)
+   `main` with the release, as [docs/GOVERNANCE.md](docs/GOVERNANCE.md#base-branch)
    describes. A CI, security or dependency fix that cannot wait goes to `main`
    directly; merge `main` into the release branch afterwards.
 3. Record the base and candidate full commit SHAs.
@@ -345,6 +345,7 @@ Do not silently replace assets or move the tag.
 - [README.md](README.md) — project overview
 - [INSTALLATION.md](INSTALLATION.md) — deployment and removal
 - [CONTRIBUTING.md](CONTRIBUTING.md) — change and review workflow
+- [docs/GOVERNANCE.md](docs/GOVERNANCE.md) — base branch, rulesets and repository settings
 - [CHANGELOG.md](CHANGELOG.md) — release history
 - [SECURITY.md](SECURITY.md) — supported versions and private reporting
 - [VERSION](VERSION) — authoritative version
