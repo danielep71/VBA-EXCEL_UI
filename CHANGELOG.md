@@ -151,6 +151,16 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added the **branch coverage** check to `tools/check_repo.py`, with its own
+  self-test fixtures (#159). Every ecosystem in `.github/dependabot.yml` needs
+  one entry for the default branch and, while a release is open, one entry for
+  the release that follows `VERSION`, with the same directory, schedule, groups
+  and labels; an entry for any other branch, including a release that has
+  already shipped, fails the gate. `.github/workflows/codeql.yml` must run on
+  pushes to `main` and on pull requests to `main` and `release/**`, with no
+  negative (`!`) pattern in those branch lists. The check reads the YAML with
+  a narrow standard-library reader and reports any shape it does not
+  understand instead of guessing.
 - Added the **OpenSSF Scorecard** workflow (`.github/workflows/scorecard.yml`).
   It scores the supply-chain posture of `main` weekly and on pushes to `main`,
   and publishes the results to code scanning. Its one job holds
@@ -570,6 +580,17 @@ measured against that baseline.
 - Rebuilt the feature-request template around a user problem, testable
   acceptance criteria, targeting and ownership, compatibility, failure policy,
   recovery, verification, alternatives and explicit non-goals.
+- Moved the Excel evidence contract into
+  `.github/excel-evidence-policy.json`
+  ([#158](https://github.com/danielep71/VBA-EXCEL_UI/issues/158)).
+  `tools/Certify-EXCEL_UI.ps1` takes the bundle file names, the steps, the
+  certification runner, the configuration and the schema from it, and
+  `tools/check_excel_evidence.py` reads every rule from it (or from
+  `--policy`) and validates the policy before it reads a bundle. A new test
+  fails when the script, the validator or
+  [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) disagrees with
+  the policy. The bundle format is unchanged, and the validator's output for
+  the same bundle is identical. No Excel run has used the changed script yet.
 - Replaced the separate static-check commands with one entry point,
   **tools/verify.py**
   ([#154](https://github.com/danielep71/VBA-EXCEL_UI/issues/154)). It runs the

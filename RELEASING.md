@@ -90,7 +90,14 @@ Record which Windows and Office-bitness combinations were exercised; do not gene
 ## 1. Freeze and identify the candidate
 
 1. Update refs. If the release branch `release/vX.Y.Z` is not open yet, create
-   it from current protected `main`; otherwise use the open branch.
+   it from current protected `main`; otherwise use the open branch. When you
+   open it, add its `target-branch: release/vX.Y.Z` entries to
+   `.github/dependabot.yml` on `main`, one per ecosystem. `VERSION` and those
+   entries move together: `X.Y.Z` must be the next patch, minor or major
+   release after `VERSION`, and the change that bumps `VERSION` to `X.Y.Z`
+   removes the entries. The gate's **branch coverage** check fails on a
+   missing, stale or extra entry, as
+   [docs/GOVERNANCE.md](docs/GOVERNANCE.md#dependabot) describes.
 2. While the release branch is open, every change targets it and reaches
    `main` with the release, as [docs/GOVERNANCE.md](docs/GOVERNANCE.md#base-branch)
    describes. A CI, security or dependency fix that cannot wait goes to `main`
@@ -114,6 +121,8 @@ A dirty tree, unknown generated file, or unreviewed binary delta is blocking.
 Update every applicable surface in one reviewable change:
 
 - `VERSION`
+- `.github/dependabot.yml`: remove the `target-branch` entries of the release
+  that `VERSION` now names
 - `CHANGELOG.md`
 - the four production VBA module headers
 - test and demo version stamps

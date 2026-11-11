@@ -28,6 +28,11 @@ For the commit checked out in this repository:
 It then writes session.json and validates the bundle with
 tools\check_excel_evidence.py when Python 3.11 or later is available.
 
+The bundle file names, the step names and their order, the certification
+runner, the configuration and the schema come from
+.github\excel-evidence-policy.json, which the validator reads too. The script
+stops before it runs anything when that file is missing or incomplete.
+
 Exit codes: 0 the certification passed (and the bundle validated, when Python
 was found); 1 it failed or stopped on an error; 2 the operator cancelled it.
 
@@ -72,15 +77,15 @@ $Latin1 = [System.Text.Encoding]::GetEncoding(28591)
 $MsoAutomationSecurityByUI = 2
 $CompileControlId = 578
 $WorkbookFileName = 'EXCEL_UI-development.xlsm'
-$CertificationMacro = 'Test_EXCEL_UI_RunReleaseCertification'
 # A read-only public function: it runs only when the macros are enabled.
 $ReadinessMacro = 'M_EXCEL_UI.UI_HasExcelUIStateSnapshot'
 # The files TST_CertTryWriteEvidence writes; the Ribbon probe's
 # .ribbon.json and .ribbon.txt do not match.
 $EvidenceNamePattern = '^EXCEL_UI_certification_(\d{8}_\d{6})\.(json|txt)$'
 $script:SessionLog = $null
-$script:CurrentStep = 'preflight'
-$StepNames = @('preflight', 'build', 'open', 'enable-macros', 'compile', 'certify', 'collect', 'close')
+# Set from .github\excel-evidence-policy.json before the run starts.
+$script:Policy = $null
+$script:CurrentStep = $null
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -102,12 +107,18 @@ function Write-Log([string]$Text) {
 }
 
 function Set-Step([string]$Name, [string]$Status, [string]$Detail) {
+    $found = $false
     foreach ($step in $script:Session.steps) {
         if ($step.name -eq $Name) {
             $step.status = $Status
             $step.detail = $Detail
             $step.at_utc = Get-UtcStamp
+            $found = $true
         }
+    }
+    if (-not $found) {
+        # A step the policy does not list would go unrecorded.
+        throw "The step '$Name' is not in the evidence policy."
     }
     $script:CurrentStep = $Name
     Write-Log ('[{0}] {1}: {2}' -f $Status, $Name, $Detail)
@@ -203,6 +214,107 @@ function Invoke-Git([string[]]$Arguments) {
     # PowerShell enumerates the array, so an empty output (the status of a
     # clean checkout) reaches the caller as $null and other output as Object[].
     return ,$result.Output
+}
+
+function Get-SyncMode {
+    # The Sync-EXCEL_UI-VBA.ps1 -Mode value that builds the policy's
+    # configuration. The accepted values come from the synchronizer's own
+    # ValidateSet, so a configuration it cannot build stops the run here,
+    # before anything starts Excel.
+    param(
+        [Parameter(Mandatory = $true)][string]$Configuration,
+        [Parameter(Mandatory = $true)][string]$SyncScript
+    )
+    $parameter = (Get-Command -Name $SyncScript -CommandType ExternalScript).Parameters['Mode']
+    $modes = @($parameter.Attributes |
+        Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } |
+        ForEach-Object { $_.ValidValues })
+    foreach ($mode in $modes) {
+        if ($mode -ieq $Configuration) {
+            return [string]$mode
+        }
+    }
+    throw ('The evidence policy names configuration {0}, which {1} cannot build; its -Mode accepts {2}.' -f
+           $Configuration, $SyncScript, ($modes -join ', '))
+}
+
+function Assert-SyncManifest {
+    # The synchronizer builds from its own manifest, so the policy must name
+    # that manifest: otherwise the bundle would inventory one module set and
+    # the workbook would hold another. The synchronizer's path is read from
+    # its source, so it is not restated here.
+    param(
+        [Parameter(Mandatory = $true)][string]$Manifest,
+        [Parameter(Mandatory = $true)][string]$SyncScript
+    )
+    $match = Select-String -LiteralPath $SyncScript -Pattern '^\$ManifestRelativePath\s*=\s*"([^"]+)"' |
+        Select-Object -First 1
+    if ($null -eq $match) {
+        throw "Cannot find the manifest path in $SyncScript."
+    }
+    $syncManifest = $match.Matches[0].Groups[1].Value
+    if (($Manifest -replace '\\', '/') -ne ($syncManifest -replace '\\', '/')) {
+        throw ('The evidence policy names manifest {0}, but {1} builds from {2}.' -f
+               $Manifest, $SyncScript, $syncManifest)
+    }
+}
+
+function Read-EvidencePolicy([string]$Path) {
+    # Reads .github\excel-evidence-policy.json and checks the entries this
+    # script uses. tools\check_excel_evidence.py validates the whole file.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "The evidence policy is missing: $Path"
+    }
+    try {
+        $policy = [System.IO.File]::ReadAllText($Path, $Utf8NoBom) | ConvertFrom-Json
+    }
+    catch {
+        throw ('The evidence policy is not valid JSON: {0}: {1}' -f $Path, (Get-InnerMessage $_))
+    }
+    if ($null -eq $policy -or $policy -isnot [System.Management.Automation.PSCustomObject]) {
+        throw "The evidence policy is not a JSON object: $Path"
+    }
+    $properties = @($policy.PSObject.Properties | ForEach-Object { $_.Name })
+    foreach ($name in @('evidence_schema', 'manifest', 'configuration', 'certification_runner', 'required_files',
+                        'evidence_files', 'steps')) {
+        if ($properties -notcontains $name) {
+            throw "The evidence policy has no $name`: $Path"
+        }
+    }
+    if ($policy.evidence_schema -isnot [int] -and $policy.evidence_schema -isnot [long]) {
+        throw "The evidence policy's evidence_schema is not a number: $Path"
+    }
+    foreach ($name in @('manifest', 'configuration', 'certification_runner')) {
+        if ($policy.$name -isnot [string] -or [string]::IsNullOrWhiteSpace($policy.$name)) {
+            throw "The evidence policy's $name is not text: $Path"
+        }
+    }
+    foreach ($role in @('session', 'host', 'source_digests', 'certification_json', 'certification_report')) {
+        $entry = $policy.required_files.PSObject.Properties[$role]
+        if ($null -eq $entry -or $entry.Value -isnot [string] -or [string]::IsNullOrWhiteSpace($entry.Value)) {
+            throw "The evidence policy names no $role file: $Path"
+        }
+    }
+    # The collect step copies the certification document and the report;
+    # the policy's evidence files must be those two.
+    $collected = @($policy.required_files.certification_json, $policy.required_files.certification_report)
+    $evidence = @($policy.evidence_files)
+    if ($evidence.Count -ne 2 -or @(Compare-Object $collected $evidence).Count -ne 0) {
+        throw ('The evidence policy lists evidence files {0}, not the {1} this script collects: {2}' -f
+               ($evidence -join ', '), ($collected -join ' and '), $Path)
+    }
+    $steps = @($policy.steps)
+    if ($steps.Count -eq 0) {
+        throw "The evidence policy lists no steps: $Path"
+    }
+    $seen = @{}
+    foreach ($step in $steps) {
+        if ($step -isnot [string] -or [string]::IsNullOrWhiteSpace($step) -or $seen.ContainsKey($step)) {
+            throw "The evidence policy's steps must be distinct names: $Path"
+        }
+        $seen[$step] = $true
+    }
+    return $policy
 }
 
 function Get-Sha256Hex([byte[]]$Bytes) {
@@ -343,13 +455,14 @@ function Get-ExcelBitness($ProcessId, [string]$OperatingSystem) {
 }
 
 function Get-SourceDigests([string]$Sha) {
-    # The development modules of the commit, with SHA-256 of each as a
-    # checkout writes it (.gitattributes: *.bas eol=crlf), and of the file the
-    # build imported from the working tree.
-    $manifestText = $Utf8NoBom.GetString((Invoke-Git @('show', "${Sha}:tools/vba-projects.json")))
+    # The modules of the policy's configuration at the commit, with SHA-256
+    # of each as a checkout writes it (.gitattributes: *.bas eol=crlf), and of
+    # the file the build imported from the working tree.
+    $configuration = [string]$script:Policy.configuration
+    $manifestText = $Utf8NoBom.GetString((Invoke-Git @('show', ('{0}:{1}' -f $Sha, $script:Policy.manifest))))
     $manifest = $manifestText | ConvertFrom-Json
     $modules = New-Object System.Collections.ArrayList
-    foreach ($path in @($manifest.configurations.development.modules)) {
+    foreach ($path in @($manifest.configurations.$configuration.modules)) {
         $text = $Latin1.GetString((Invoke-Git @('show', "${Sha}:$path")))
         $checkedOut = $Latin1.GetBytes([regex]::Replace($text, "(?<!`r)`n", "`r`n"))
         $name = [regex]::Match($text, '(?m)^Attribute VB_Name = "([A-Za-z]\w*)"\r?$').Groups[1].Value
@@ -366,9 +479,9 @@ function Get-SourceDigests([string]$Sha) {
         })
     }
     return [ordered]@{
-        schema        = 1
+        schema        = $script:Policy.evidence_schema
         commit        = $Sha
-        configuration = 'development'
+        configuration = $configuration
         line_endings  = 'CRLF'
         modules       = $modules
     }
@@ -499,8 +612,10 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent $PSScriptRoot
 }
 $script:RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path.TrimEnd('\')
+$script:PolicyPath = Join-Path (Join-Path $script:RepoRoot '.github') 'excel-evidence-policy.json'
 
 try {
+    $script:Policy = Read-EvidencePolicy $script:PolicyPath
     $sha = $Utf8NoBom.GetString((Invoke-Git @('rev-parse', '--verify', 'HEAD^{commit}'))).Trim()
     $statusText = $Utf8NoBom.GetString((Invoke-Git @('status', '--porcelain', '--untracked-files=no')))
 }
@@ -539,10 +654,14 @@ else {
     [void](New-Item -ItemType Directory -Path $script:BundleDir)
 }
 $script:SessionLog = Join-Path $script:BundleDir 'session.log'
+$PolicyFiles = $script:Policy.required_files
+$CertificationMacro = [string]$script:Policy.certification_runner
+$StepNames = @($script:Policy.steps | ForEach-Object { [string]$_ })
+$script:CurrentStep = $StepNames[0]
 $workbookPath = Join-Path $script:BundleDir $WorkbookFileName
 
 $script:Session = [ordered]@{
-    schema         = 1
+    schema         = $script:Policy.evidence_schema
     tool           = 'tools/Certify-EXCEL_UI.ps1'
     commit         = $sha
     dirty          = ($dirtyPaths.Count -gt 0)
@@ -598,16 +717,18 @@ try {
     if (-not (Test-Path -LiteralPath $syncScript -PathType Leaf)) {
         throw "The synchronizer is missing: $syncScript"
     }
-    Write-JsonFile 'source-digests.json' (Get-SourceDigests $sha)
-    Set-Step 'preflight' 'PASS' "Commit $sha; source-digests.json written"
+    $syncMode = Get-SyncMode -Configuration ([string]$script:Policy.configuration) -SyncScript $syncScript
+    Assert-SyncManifest -Manifest ([string]$script:Policy.manifest) -SyncScript $syncScript
+    Write-JsonFile $PolicyFiles.source_digests (Get-SourceDigests $sha)
+    Set-Step 'preflight' 'PASS' ('Commit {0}; {1} written' -f $sha, $PolicyFiles.source_digests)
 
     # --- build --------------------------------------------------------------
-    Set-Step 'build' 'RUNNING' 'tools\Sync-EXCEL_UI-VBA.ps1 -Mode Development -NewWorkbook'
+    Set-Step 'build' 'RUNNING' ('tools\Sync-EXCEL_UI-VBA.ps1 -Mode {0} -NewWorkbook' -f $syncMode)
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript `
-            -WorkbookPath $workbookPath -Mode Development -NewWorkbook -Force -NoBackup 2>&1 |
+            -WorkbookPath $workbookPath -Mode $syncMode -NewWorkbook -Force -NoBackup 2>&1 |
             ForEach-Object { Write-Log ('  sync: ' + [string]$_) }
         $syncCode = $LASTEXITCODE
     }
@@ -646,7 +767,7 @@ try {
     $bitness = Get-ExcelBitness $excelProcessId $operatingSystem
     $clickToRun = 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration'
     $hostRecord = [ordered]@{
-        schema       = 1
+        schema       = $script:Policy.evidence_schema
         windows      = $windows
         excel        = [ordered]@{
             version               = [string](Invoke-Excel { $excel.Version })
@@ -663,7 +784,7 @@ try {
             automation_security = 'msoAutomationSecurityByUI'
         }
     }
-    Write-JsonFile 'host.json' $hostRecord
+    Write-JsonFile $PolicyFiles.host $hostRecord
     Set-Step 'open' 'PASS' ('Excel {0} build {1}, {2}; process {3}' -f $hostRecord.excel.version, $hostRecord.excel.build,
                             $hostRecord.excel.bitness, $excelProcessId)
 
@@ -771,16 +892,16 @@ try {
                (@(Get-TempFolders) -join ', '))
     }
     $evidence = New-Object System.Collections.ArrayList
-    foreach ($pair in @(@($json[0], 'certification.json'), @($text[0], 'certification.txt'))) {
+    foreach ($pair in @(@($json[0], $PolicyFiles.certification_json), @($text[0], $PolicyFiles.certification_report))) {
         $target = Join-Path $script:BundleDir $pair[1]
         Copy-Item -LiteralPath $pair[0].FullName -Destination $target
         [void]$evidence.Add([ordered]@{ file = $pair[1]; source_name = [string]$pair[0].Name; sha256 = Get-FileSha256 $target })
         Write-Log ('Collected {0} as {1}' -f $pair[0].FullName, $pair[1])
     }
     $script:Session.evidence = $evidence
-    $result = Get-Content -LiteralPath (Join-Path $script:BundleDir 'certification.json') -Raw | ConvertFrom-Json
+    $result = Get-Content -LiteralPath (Join-Path $script:BundleDir $PolicyFiles.certification_json) -Raw | ConvertFrom-Json
     $certificationPassed = ($result.passed -eq $true -and $result.complete -eq $true)
-    $line = @(Select-String -LiteralPath (Join-Path $script:BundleDir 'certification.txt') -Pattern '^RESULT: ')
+    $line = @(Select-String -LiteralPath (Join-Path $script:BundleDir $PolicyFiles.certification_report) -Pattern '^RESULT: ')
     $verdict = $(if ($line.Count -gt 0) { $line[0].Line } else { 'no RESULT line in the report' })
     Set-Step 'collect' 'PASS' $verdict
 }
@@ -861,7 +982,7 @@ else {
     $script:Session.result = 'FAIL'
     $script:Session.exit_code = 1
 }
-Write-JsonFile 'session.json' $script:Session
+Write-JsonFile $PolicyFiles.session $script:Session
 Write-Log ('Run finished: {0}' -f $script:Session.result)
 
 $exitCode = [int]$script:Session.exit_code
@@ -875,7 +996,8 @@ if (-not $cancelled) {
         Write-Host "  python3 tools/check_excel_evidence.py <bundle> --commit $sha"
     }
     else {
-        $arguments = @($pythonCommand.Arguments) + @($validator, $script:BundleDir, '--commit', $sha, '--root', $script:RepoRoot)
+        $arguments = @($pythonCommand.Arguments) + @($validator, $script:BundleDir, '--commit', $sha, '--root', $script:RepoRoot,
+                                                     '--policy', $script:PolicyPath)
         & $pythonCommand.Exe @arguments
         if ($LASTEXITCODE -ne 0 -and $exitCode -eq 0) {
             $exitCode = 1
