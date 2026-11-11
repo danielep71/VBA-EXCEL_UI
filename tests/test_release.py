@@ -349,6 +349,17 @@ class Bundle(ReleaseRepository):
         with self.assertRaisesRegex(release.ReleaseError, "AGENTS.md"):
             release.bundle(self.root, "v1.2.1", self.out)
 
+    def test_relative_output_is_resolved_against_the_caller(self) -> None:
+        caller = Path(self.directory.name) / "caller"
+        caller.mkdir()
+        with contextlib.chdir(caller):
+            status, out, err = self.cli("bundle", "v1.2.0", "--out", "dist")
+        self.assertEqual(status, 0, err)
+        written = sorted(path.name for path in (caller / "dist").iterdir())
+        self.assertEqual(written, ["SHA256SUMS", "VBA-EXCEL_UI-1.2.0.tar.gz", "VBA-EXCEL_UI-1.2.0.zip"])
+        self.assertFalse((self.root / "dist").exists())
+        self.assertIn(str((caller / "dist").resolve()), out)
+
     def test_non_empty_output_directory_is_refused(self) -> None:
         self.out.mkdir()
         (self.out / "stale.zip").write_bytes(b"old")
@@ -385,6 +396,12 @@ class VerifyPublished(ReleaseRepository):
             status, out, err = self.cli("verify-published", "v1.2.0", "--repository", REPOSITORY,
                                         "--dir", str(self.out), *extra, api=api)
         return status, out + err
+
+    def test_stable_release_marked_prerelease_is_rejected(self) -> None:
+        self.release["prerelease"] = True
+        status, out = self.check()
+        self.assertEqual(status, 1)
+        self.assertIn("is marked a pre-release, but its version is stable", out)
 
     def test_matching_release_passes(self) -> None:
         self.assertEqual(self.check(), (0, "Published release check for v1.2.0\nRESULT: PASS\n"))
@@ -471,6 +488,44 @@ class VerifyPublished(ReleaseRepository):
                                   "--dir", str(self.out), api=api)
         self.assertEqual(status, 1)
         self.assertIn("no published GitHub release exists for v1.2.0", out)
+
+
+class PreRelease(ReleaseRepository):
+    def test_suffix_decides_the_classification(self) -> None:
+        cases = {"1.2.0": False, "1.2.0-rc.1": True, "1.2.0+build.5": False,
+                 "1.2.0-rc.1+build.5": True, "1.2.0+build-5": False}
+        for version, expected in cases.items():
+            with self.subTest(version=version):
+                self.assertIs(release.is_prerelease(version), expected)
+
+    def test_cli_prints_true_or_false(self) -> None:
+        self.assertEqual(self.cli("is-prerelease", "v1.2.0-rc.1"), (0, "true\n", ""))
+        self.assertEqual(self.cli("is-prerelease", "v1.2.0"), (0, "false\n", ""))
+        self.assertEqual(self.cli("is-prerelease", "V1.2.0")[0], 2)
+
+    def published(self, flag: bool) -> list[str]:
+        sha = commit(self.root, {"VERSION": "1.3.0-rc.1\n", "CHANGELOG.md": CHANGELOG.replace(
+            "## [1.2.0] - 2026-12-01", "## [1.3.0-rc.1] - 2026-12-02\n\n- Candidate.\n\n---\n\n"
+            "## [1.2.0] - 2026-12-01")})
+        self.tag("v1.3.0-rc.1", sha)
+        out = Path(self.directory.name) / "dist"
+        paths = release.bundle(self.root, "v1.3.0-rc.1", out)
+        files = {f"https://api.invalid/{path.name}": path.read_bytes() for path in paths}
+        published = {"tag_name": "v1.3.0-rc.1", "draft": False, "prerelease": flag,
+                     "body": "- Candidate.\n",
+                     "assets": [{"name": path.name, "url": f"https://api.invalid/{path.name}"}
+                                for path in paths]}
+        api = FakeApi({f"/repos/{REPOSITORY}/releases/tags/v1.3.0-rc.1": published}, files)
+        return release.published_findings(api, REPOSITORY, "v1.3.0-rc.1",
+                                          release.tag_notes(self.root, "v1.3.0-rc.1"),
+                                          (out / release.SUMS).read_text(encoding="utf-8"))
+
+    def test_prerelease_published_as_prerelease_passes(self) -> None:
+        self.assertEqual(self.published(True), [])
+
+    def test_prerelease_published_as_stable_is_rejected(self) -> None:
+        self.assertEqual(self.published(False), [
+            "the release for v1.3.0-rc.1 is marked a stable release, but its version is a pre-release"])
 
 
 class GitHubClient(unittest.TestCase):

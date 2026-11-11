@@ -10,8 +10,9 @@ name: Release
 # 2. bundle: git archive of the tag as .zip and .tar.gz, which honours the
 #    export-ignore attributes, plus SHA256SUMS;
 # 3. publish: creates the release from the tag with the changelog section as
-#    its notes and the bundle as its assets, then checks the published release
-#    against both.
+#    its notes and the bundle as its assets, marked as a pre-release when the
+#    version has a pre-release suffix, then checks the published release
+#    against all three.
 #
 # Excel certification and the evidence record stay manual and happen before
 # the tag is pushed (RELEASING.md); nothing here can run VBA.
@@ -149,17 +150,23 @@ jobs:
         run: python3 tools/release.py notes "$TAG" > "$RUNNER_TEMP/release-notes.md"
 
       # gh uploads the assets to a draft and publishes the release only once
-      # every upload has finished.
+      # every upload has finished. A version with a pre-release suffix, such
+      # as v1.2.0-rc.1, is published as a GitHub pre-release.
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$TAG"
-          --repo "$GITHUB_REPOSITORY"
-          --verify-tag
-          --title "VBA Excel UI ${TAG#v}"
-          --notes-file "$RUNNER_TEMP/release-notes.md"
-          "$RUNNER_TEMP"/dist/*
+        run: |
+          prerelease=()
+          if [ "$(python3 tools/release.py is-prerelease "$TAG")" = true ]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            "${prerelease[@]}" \
+            --title "VBA Excel UI ${TAG#v}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            "$RUNNER_TEMP"/dist/*
 
       - name: Verify the published release
         env:

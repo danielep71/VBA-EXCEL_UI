@@ -11,15 +11,19 @@ against a different commit from the one the tag names:
   exact commit.
 - notes TAG: prints the CHANGELOG.md section of the version, the text the
   GitHub release carries.
+- is-prerelease TAG: prints "true" when the version has a pre-release suffix,
+  such as 1.2.0-rc.1, and "false" otherwise, so the release is published with
+  the matching GitHub pre-release flag.
 - bundle TAG --out DIR: writes git archive output of the tag as .zip and
   .tar.gz, named VBA-EXCEL_UI-<version>, and a SHA256SUMS file. git archive
   honours the export-ignore attributes in .gitattributes, and the bundle is
   refused if an excluded path such as AGENTS.md is still in it.
 - verify-published TAG --repository OWNER/NAME --dir DIR [--asset NAME=SHA256]:
-  the GitHub release for the tag exists and is not a draft, its body equals the
-  notes, and its assets are exactly the files in DIR/SHA256SUMS, that file, and
-  each asset declared with --asset, such as a hand-built workbook, all with
-  matching SHA-256 values.
+  the GitHub release for the tag exists and is not a draft, its pre-release
+  flag matches the version, its body equals the notes, and its assets are
+  exactly the files in DIR/SHA256SUMS, that file, and each asset declared
+  with --asset, such as a hand-built workbook, all with matching SHA-256
+  values.
 
 The GitHub REST API is read with the token in GITHUB_TOKEN, when set. Nothing
 here writes to GitHub: the release workflow creates the release with gh.
@@ -151,6 +155,15 @@ def tag_version(tag: str) -> str:
     if not match:
         raise ReleaseError(f"{tag!r} is not a release tag; expected a lower-case 'vX.Y.Z'")
     return match.group("version")
+
+
+def is_prerelease(version: str) -> bool:
+    """Return True when a SemVer version has a pre-release suffix.
+
+    Build metadata after "+" is not a pre-release, so 1.2.0+build.5 is stable
+    and 1.2.0-rc.1+build.5 is not.
+    """
+    return "-" in version.partition("+")[0]
 
 
 def tag_commit(root: Path, tag: str) -> tuple[str, str] | None:
@@ -377,6 +390,9 @@ def bundle(root: Path, tag: str, out: Path) -> list[Path]:
     version = tag_version(tag)
     if tag_commit(root, tag) is None:
         raise ReleaseError(f"tag {tag} does not exist")
+    # git archive runs in root, so a relative path would be read from there
+    # while the directory is created here. Resolve it against the caller.
+    out = out.resolve()
     if out.exists() and any(out.iterdir()):
         raise ReleaseError(f"{out} is not empty; bundle into a new directory")
     out.mkdir(parents=True, exist_ok=True)
@@ -408,6 +424,23 @@ def bundle(root: Path, tag: str, out: Path) -> list[Path]:
 # verify-published
 
 
+def release_state_findings(release: dict[str, Any], tag: str, notes: str) -> list[str]:
+    """Return problems with a published release's state, flags and body."""
+    findings: list[str] = []
+    if release.get("draft"):
+        findings.append(f"the release for {tag} is still a draft")
+    if release.get("tag_name") != tag:
+        findings.append(f"the release names tag {release.get('tag_name')!r}, not {tag}")
+    expected_prerelease = is_prerelease(tag_version(tag))
+    if bool(release.get("prerelease")) != expected_prerelease:
+        findings.append(f"the release for {tag} is marked "
+                        f"{'a pre-release' if release.get('prerelease') else 'a stable release'}, "
+                        f"but its version is {'a pre-release' if expected_prerelease else 'stable'}")
+    if normalized_notes(str(release.get("body") or "")) != normalized_notes(notes):
+        findings.append(f"the release body differs from the CHANGELOG.md section for {tag}")
+    return findings
+
+
 def published_findings(api: Api, repository: str, tag: str, notes: str,
                        sums_text: str, extras: dict[str, str] | None = None) -> list[str]:
     """Compare the published GitHub release with the notes, SHA256SUMS and extras.
@@ -428,14 +461,7 @@ def published_findings(api: Api, repository: str, tag: str, notes: str,
     if not isinstance(release, dict):
         raise ReleaseError("the release endpoint did not return an object")
 
-    findings: list[str] = []
-    if release.get("draft"):
-        findings.append(f"the release for {tag} is still a draft")
-    if release.get("tag_name") != tag:
-        findings.append(f"the release names tag {release.get('tag_name')!r}, not {tag}")
-    if normalized_notes(str(release.get("body") or "")) != normalized_notes(notes):
-        findings.append(f"the release body differs from the CHANGELOG.md section for {tag}")
-
+    findings = release_state_findings(release, tag, notes)
     assets: dict[str, dict[str, Any]] = {str(asset.get("name")): asset
                                          for asset in release.get("assets") or []}
     wanted = set(expected) | {SUMS} | set(declared)
@@ -496,6 +522,10 @@ def parser() -> argparse.ArgumentParser:
     notes = commands.add_parser("notes", help="print the changelog section of a tag")
     notes.add_argument("tag")
 
+    pre = commands.add_parser("is-prerelease",
+                              help="print true when the tag's version has a pre-release suffix")
+    pre.add_argument("tag")
+
     build = commands.add_parser("bundle", help="write the source archives and SHA256SUMS")
     build.add_argument("tag")
     build.add_argument("--out", type=Path, required=True, help="a new or empty directory")
@@ -535,6 +565,10 @@ def run(args: argparse.Namespace, api: Api | None) -> int:
 
     if args.command == "notes":
         sys.stdout.write(tag_notes(root, tag))
+        return 0
+
+    if args.command == "is-prerelease":
+        print("true" if is_prerelease(tag_version(tag)) else "false")
         return 0
 
     if args.command == "bundle":

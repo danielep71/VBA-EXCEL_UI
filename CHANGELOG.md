@@ -157,7 +157,8 @@ measured against that baseline.
   dated section for it, that the tagged commit is reachable from `main`, and
   that **Repository and module checks** concluded success on that exact
   commit. It then builds `git archive` source archives and `SHA256SUMS`,
-  publishes the GitHub Release with the changelog section as its notes, and
+  publishes the GitHub Release with the changelog section as its notes,
+  marked as a pre-release when the version has a pre-release suffix, and
   checks the published notes and asset hashes. A workbook attached by hand is
   verified the same way once it is declared with
   `verify-published --asset NAME=SHA256`. A manual run verifies an

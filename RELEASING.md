@@ -67,9 +67,10 @@ Pushing a `vX.Y.Z` tag starts the **Release** workflow
 | --- | --- | --- |
 | Verify | `verify vX.Y.Z --repository danielep71/VBA-EXCEL_UI` | Checks that the tag is annotated and equals `v` + `VERSION` at the tagged commit, that `CHANGELOG.md` there has a dated section for the version, that the commit is reachable from `origin/main`, and that the required check **Repository and module checks** concluded success on that exact commit |
 | Notes | `notes vX.Y.Z` | Prints that changelog section, which becomes the release body |
+| Classify | `is-prerelease vX.Y.Z` | Prints `true` when the version has a pre-release suffix, such as `1.2.0-rc.1`, and `false` otherwise |
 | Bundle | `bundle vX.Y.Z --out DIR` | Writes `git archive` output of the tag as `VBA-EXCEL_UI-X.Y.Z.zip` and `VBA-EXCEL_UI-X.Y.Z.tar.gz`, plus `SHA256SUMS`, and refuses an archive that still holds a path `.gitattributes` marks `export-ignore`, such as `AGENTS.md` |
-| Publish | (workflow only) | Creates the GitHub Release from the tag with `gh release create`, using the notes and the bundle |
-| Verify after publication | `verify-published vX.Y.Z --repository danielep71/VBA-EXCEL_UI --dir DIR [--asset NAME=SHA256]` | Checks that the release exists and is not a draft, that its body equals the notes, and that its assets are exactly the files in `SHA256SUMS`, that file, and each asset declared with `--asset`, all with matching SHA-256 values |
+| Publish | (workflow only) | Creates the GitHub Release from the tag with `gh release create`, using the notes and the bundle, and marks it as a pre-release when `is-prerelease` prints `true` |
+| Verify after publication | `verify-published vX.Y.Z --repository danielep71/VBA-EXCEL_UI --dir DIR [--asset NAME=SHA256]` | Checks that the release exists and is not a draft, that its pre-release flag matches the version, that its body equals the notes, and that its assets are exactly the files in `SHA256SUMS`, that file, and each asset declared with `--asset`, all with matching SHA-256 values |
 
 The verify and bundle jobs only read the repository. The publish job runs only
 after both have passed, only on a tag push, and is the one job with
