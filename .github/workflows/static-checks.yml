@@ -35,6 +35,10 @@ name: Static checks
 # the same commit. A second, non-required job runs the same gate on the oldest
 # Python version the tools support (CONTRIBUTING.md), so a change that needs a
 # newer interpreter is caught before it reaches a contributor's machine.
+#
+# A third, non-required job builds each workbook from source and opens it in
+# headless LibreOffice. That is the one place a hosted runner reads a built
+# .xlsm; it still runs no VBA, so it does not replace the Excel run either.
 
 on:
   pull_request:
@@ -163,3 +167,40 @@ jobs:
       # job runs both, and pyproject.toml already points them at Python 3.11.
       - name: Run every static check
         run: python3 tools/verify.py --ci --skip ruff,mypy --summary "$GITHUB_STEP_SUMMARY"
+
+  libreoffice-smoke:
+    # Not a required check. It builds each workbook from source with
+    # tools/build_workbook.py and opens it in headless LibreOffice, which
+    # proves that the package and its VBA project can be read: every module of
+    # the configuration is present with its source code, and the sheet and
+    # workbook code names are those of the build. LibreOffice is not a
+    # supported host. Macro execution is off, nothing in the workbook runs,
+    # and the result is never Excel evidence.
+    name: LibreOffice smoke test of the built workbooks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # LibreOffice Calc and its Python UNO bridge come from the runner image's
+      # distribution. The bridge belongs to the system Python (/usr/bin/python3),
+      # so the steps below run that interpreter and do not set up another one.
+      - name: Install LibreOffice and its Python UNO bridge
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libreoffice-calc python3-uno
+
+      # Every mode runs, even after one fails, so a single run reports them all.
+      - name: Build each workbook and open it in LibreOffice
+        run: |
+          status=0
+          for mode in Production Development Demo; do
+            echo "::group::$mode"
+            /usr/bin/python3 tools/lo_smoke.py --mode "$mode" || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
