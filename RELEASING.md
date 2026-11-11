@@ -96,7 +96,8 @@ Record which Windows and Office-bitness combinations were exercised; do not gene
    entries move together: `X.Y.Z` must be the next patch, minor or major
    release after `VERSION`, and the change that bumps `VERSION` to `X.Y.Z`
    removes the entries. The gate's **branch coverage** check fails on a
-   missing, stale or extra entry.
+   missing, stale or extra entry, as
+   [docs/GOVERNANCE.md](docs/GOVERNANCE.md#dependabot) describes.
 2. While the release branch is open, every change targets it and reaches
    `main` with the release, as [docs/GOVERNANCE.md](docs/GOVERNANCE.md#base-branch)
    describes. A CI, security or dependency fix that cannot wait goes to `main`

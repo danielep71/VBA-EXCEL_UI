@@ -157,9 +157,10 @@ measured against that baseline.
   the release that follows `VERSION`, with the same directory, schedule, groups
   and labels; an entry for any other branch, including a release that has
   already shipped, fails the gate. `.github/workflows/codeql.yml` must run on
-  pushes to `main` and on pull requests to `main` and `release/**`. The check
-  reads the YAML with a narrow standard-library reader and reports any shape it
-  does not understand instead of guessing.
+  pushes to `main` and on pull requests to `main` and `release/**`, with no
+  negative (`!`) pattern in those branch lists. The check reads the YAML with
+  a narrow standard-library reader and reports any shape it does not
+  understand instead of guessing.
 - Added the **OpenSSF Scorecard** workflow (`.github/workflows/scorecard.yml`).
   It scores the supply-chain posture of `main` weekly and on pushes to `main`,
   and publishes the results to code scanning. Its one job holds

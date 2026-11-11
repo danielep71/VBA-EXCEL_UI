@@ -375,57 +375,96 @@ class WorkflowPolicySelfTest(GateTestCase):
 
 
 class BranchCoverage(GateTestCase):
+    """The branch coverage check, independent of whether a release is open.
+
+    The tracked configuration has release entries while a release is open and
+    none after it ships. Each test that needs release entries builds them from
+    the tracked default-branch entries, so the tests hold in both states.
+    """
+
     check = "branch coverage"
     DEPENDABOT = ".github/dependabot.yml"
     CODEQL = ".github/workflows/codeql.yml"
-
-    def release_branch(self) -> str:
-        found = re.search(r"target-branch: (\S+)", self.repo.read_text(self.DEPENDABOT))
-        assert found is not None, "the tracked configuration has no release entry"
-        return found[1]
+    ENTRY = re.compile(r"^  - package-ecosystem:", re.M)
 
     def version(self) -> str:
         return self.repo.read_text("VERSION").strip()
 
+    def next_release(self) -> str:
+        branches = check_repo.open_release_branches(self.version())
+        assert branches is not None, "VERSION does not hold a release number"
+        return branches[0]
+
+    def configuration(self, release: str | None) -> str:
+        """Return the tracked configuration with release entries for one branch.
+
+        Every tracked release entry is dropped. With a release, each default
+        entry is followed by a copy that targets it.
+        """
+        text = self.repo.read_text(self.DEPENDABOT)
+        starts = [m.start() for m in self.ENTRY.finditer(text)]
+        self.assertTrue(starts, "the tracked configuration has no entries")
+        chunks = [text[i:j].rstrip("\n") + "\n"
+                  for i, j in zip(starts, [*starts[1:], len(text)], strict=True)]
+        defaults = [c for c in chunks if "target-branch:" not in c]
+        entries: list[str] = []
+        for chunk in defaults:
+            entries.append(chunk)
+            if release:
+                directory = re.search(r"^    directory: .*\n", chunk, re.M)
+                assert directory is not None
+                entries.append(chunk.replace(
+                    directory[0], directory[0] + f"    target-branch: {release}\n", 1))
+        return text[:starts[0]] + "\n".join(entries)
+
+    def write_configuration(self, release: str | None) -> str:
+        text = self.configuration(release)
+        self.repo.write(self.DEPENDABOT, text)
+        return text
+
     def test_passes_on_the_current_tree(self) -> None:
         self.assertPasses()
 
-    def test_passes_once_the_release_entries_are_removed(self) -> None:
-        text = self.repo.read_text(self.DEPENDABOT)
-        entries = text.split("\n\n")
-        kept = [e for e in entries if "target-branch:" not in e]
-        self.assertLess(len(kept), len(entries))
-        self.repo.write(self.DEPENDABOT, "\n\n".join(kept) + "\n")
+    def test_passes_without_release_entries(self) -> None:
+        self.write_configuration(None)
+        self.assertPasses()
+
+    def test_passes_with_entries_for_the_next_release(self) -> None:
+        self.write_configuration(self.next_release())
         self.assertPasses()
 
     def test_fails_on_a_missing_release_entry(self) -> None:
-        text = self.repo.read_text(self.DEPENDABOT)
-        line = f"    target-branch: {self.release_branch()}\n"
-        head, _, tail = text.rpartition(line)
+        release = self.next_release()
+        text = self.write_configuration(release)
+        head, _, tail = text.rpartition(f"    target-branch: {release}\n")
         self.repo.write(self.DEPENDABOT, head + tail)
-        self.assertFails(f"pip has no entry for {self.release_branch()}",
+        self.assertFails(f"pip has no entry for {release}",
                          "pip has 2 entries without target-branch")
 
     def test_fails_on_a_stale_release_branch(self) -> None:
         stale = f"release/v{self.version()}"
-        self.repo.replace(self.DEPENDABOT, f"target-branch: {self.release_branch()}",
-                          f"target-branch: {stale}", count=2)
+        self.write_configuration(stale)
         self.assertFails(f"targets {stale}, but VERSION is {self.version()}")
 
     def test_fails_on_an_extra_branch(self) -> None:
-        self.repo.replace(self.DEPENDABOT, f"target-branch: {self.release_branch()}",
-                          "target-branch: develop")
+        self.write_configuration("develop")
         self.assertFails("(github-actions) targets develop, which is not a release")
 
     def test_fails_on_a_mismatched_schedule(self) -> None:
-        text = self.repo.read_text(self.DEPENDABOT)
+        release = self.next_release()
+        text = self.write_configuration(release)
         head, _, tail = text.rpartition("interval: monthly")
         self.repo.write(self.DEPENDABOT, head + "interval: weekly" + tail)
-        self.assertFails(f"pip entry for {self.release_branch()}: schedule differs")
+        self.assertFails(f"pip entry for {release}: schedule differs")
 
     def test_fails_when_codeql_skips_release_pull_requests(self) -> None:
         self.repo.replace(self.CODEQL, "      - 'release/**'\n  push:", "  push:")
         self.assertFails("on.pull_request.branches does not include 'release/**'")
+
+    def test_fails_when_codeql_excludes_main_after_including_it(self) -> None:
+        self.repo.replace(self.CODEQL, "      - 'release/**'\n  push:",
+                          "      - 'release/**'\n      - '!main'\n  push:")
+        self.assertFails("on.pull_request.branches has the negative pattern '!main'")
 
     def test_fails_when_a_file_is_missing(self) -> None:
         self.repo.remove(self.CODEQL)
@@ -441,6 +480,10 @@ class BranchCoverageSelfTest(GateTestCase):
     def test_fails_when_no_setting_is_compared(self) -> None:
         with patch.object(check_repo, "MIRRORED_KEYS", ()):
             self.assertFails("a mismatched schedule is rejected: expected 1 finding(s), got 0")
+
+    def test_fails_when_negative_patterns_are_ignored(self) -> None:
+        with patch.object(check_repo, "NEGATIVE_PATTERN_PREFIX", "\0"):
+            self.assertFails("a negative pattern after main is rejected")
 
     def test_fails_when_codeql_requires_no_branch(self) -> None:
         with patch.object(check_repo, "CODEQL_BRANCHES", {}):

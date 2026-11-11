@@ -974,6 +974,9 @@ CODEQL_BRANCHES = {
 # can narrow what runs in ways the check cannot judge, so it is reported.
 CODEQL_FILTER_KEYS = ("branches",)
 
+# GitHub reads a branch pattern starting with this as an exclusion.
+NEGATIVE_PATTERN_PREFIX = "!"
+
 VERSION_CORE_RE = re.compile(
     r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)(?P<suffix>[-+].*)?$")
 
@@ -1329,28 +1332,44 @@ def codeql_findings(rel: str, text: str) -> list[str]:
         if event not in triggers:
             findings.append(f"{rel}: on.{event} is missing; CodeQL must analyse "
                             f"{event} events for {', '.join(required)}")
-            continue
-        trigger = triggers[event]
-        if trigger is None:
-            continue                 # no filter: every branch is analysed
-        if not isinstance(trigger, dict):
-            findings.append(f"{rel}: on.{event} must be a mapping with a "
-                            f"branches list")
-            continue
-        for key in trigger:
-            if key not in CODEQL_FILTER_KEYS:
-                findings.append(
-                    f"{rel}: on.{event}.{key} is a filter this check does not "
-                    f"read; teach tools/check_repo.py about it before relying on it")
-        branches = trigger.get("branches")
-        if not isinstance(branches, list) or not all(isinstance(b, str) for b in branches):
-            findings.append(f"{rel}: on.{event}.branches must be a list of branch "
-                            f"names")
-            continue
-        for branch in required:
-            if branch not in branches:
-                findings.append(f"{rel}: on.{event}.branches does not include "
-                                f"{branch!r}")
+        else:
+            findings += codeql_trigger_findings(rel, event, triggers[event], required)
+    return findings
+
+
+def codeql_trigger_findings(rel: str, event: str, trigger: YamlValue,
+                            required: tuple[str, ...]) -> list[str]:
+    """Return the problems with one CodeQL event's branch filter.
+
+    GitHub evaluates branch patterns in order, and a later negative pattern
+    ('!main') excludes a branch an earlier one included. Membership alone
+    would then report coverage that does not exist, so a negative pattern is
+    rejected rather than evaluated.
+    """
+    if trigger is None:
+        return []                    # no filter: every branch is analysed
+    if not isinstance(trigger, dict):
+        return [f"{rel}: on.{event} must be a mapping with a branches list"]
+
+    findings = [
+        f"{rel}: on.{event}.{key} is a filter this check does not read; teach "
+        f"tools/check_repo.py about it before relying on it"
+        for key in trigger if key not in CODEQL_FILTER_KEYS
+    ]
+    branches = trigger.get("branches")
+    if not isinstance(branches, list) or not all(isinstance(b, str) for b in branches):
+        findings.append(f"{rel}: on.{event}.branches must be a list of branch names")
+        return findings
+    for branch in branches:
+        assert isinstance(branch, str)
+        if branch.startswith(NEGATIVE_PATTERN_PREFIX):
+            findings.append(
+                f"{rel}: on.{event}.branches has the negative pattern {branch!r}; "
+                f"it can exclude a branch listed before it, and the check does "
+                f"not evaluate pattern order")
+    for branch in required:
+        if branch not in branches:
+            findings.append(f"{rel}: on.{event}.branches does not include {branch!r}")
     return findings
 
 
@@ -1546,6 +1565,14 @@ CODEQL_SELFTEST_CASES = [
     ("a flow sequence of branches is reported, not guessed at",
      CODEQL_TRIGGERS.replace("    branches:\n      - main\n      - 'release/**'\n  push:",
                              "    branches: [main, 'release/**']\n  push:"),
+     1),
+    ("a negative pattern after main is rejected",
+     CODEQL_TRIGGERS.replace("      - 'release/**'\n  push:",
+                             "      - 'release/**'\n      - '!main'\n  push:"),
+     1),
+    ("a negative pattern after release/** is rejected",
+     CODEQL_TRIGGERS.replace("      - 'release/**'\n  schedule:",
+                             "      - 'release/**'\n      - '!release/**'\n  schedule:"),
      1),
     ("a missing on block is reported",
      CODEQL_TRIGGERS.replace("on:\n", "triggers:\n"),
