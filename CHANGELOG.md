@@ -543,6 +543,17 @@ measured against that baseline.
 - Rebuilt the feature-request template around a user problem, testable
   acceptance criteria, targeting and ownership, compatibility, failure policy,
   recovery, verification, alternatives and explicit non-goals.
+- Replaced the separate static-check commands with one entry point,
+  **tools/verify.py**
+  ([#154](https://github.com/danielep71/VBA-EXCEL_UI/issues/154)). It runs the
+  gate, the formatter check, the label script self-tests, the issue-form check,
+  the unit tests, Ruff and `mypy --strict` in one declared order, prints one
+  result line per check and a final `RESULT` line, and appends a Markdown table
+  to a job summary with `--summary`. A missing Node.js, Ruff or mypy is
+  reported as skipped, or fails the run with `--ci`. Both jobs of
+  **.github/workflows/static-checks.yml** now run it, the minimum-Python job
+  without Ruff and mypy, and **AGENTS.md**, **CONTRIBUTING.md** and the
+  pull-request template name the one command.
 
 ### 🐛 Fixed
 
