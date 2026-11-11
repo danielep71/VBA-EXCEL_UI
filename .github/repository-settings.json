@@ -1,0 +1,35 @@
+{
+  "actions": {
+    "allowed_actions": "selected",
+    "can_approve_pull_request_reviews": false,
+    "default_workflow_permissions": "read",
+    "enabled": true,
+    "selected_actions": {
+      "github_owned_allowed": true,
+      "patterns_allowed": [],
+      "verified_allowed": false
+    }
+  },
+  "general": {
+    "allow_auto_merge": false,
+    "allow_forking": true,
+    "allow_merge_commit": true,
+    "allow_rebase_merge": true,
+    "allow_squash_merge": true,
+    "allow_update_branch": true,
+    "delete_branch_on_merge": true,
+    "has_discussions": false,
+    "has_issues": true,
+    "has_projects": false,
+    "has_wiki": true,
+    "visibility": "public",
+    "web_commit_signoff_required": false
+  },
+  "security_and_analysis": {
+    "dependabot_alerts": "enabled",
+    "dependabot_security_updates": "enabled",
+    "private_vulnerability_reporting": "enabled",
+    "secret_scanning": "enabled",
+    "secret_scanning_push_protection": "enabled"
+  }
+}
