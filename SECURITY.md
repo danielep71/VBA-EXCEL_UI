@@ -357,7 +357,11 @@ pull-request code. **Detect issue-label drift** and **Issue triage** are
 read-only.
 
 **Ruleset drift** compares the live repository rulesets with
-`.github/rulesets/` using the job's read-only token and never changes them.
+`.github/rulesets/` using the job's read-only token and never changes them. It
+also compares the repository settings with `.github/repository-settings.json`;
+the security and Actions settings, which only administrators can read, are
+reported there as not verifiable and are checked with an administrator token,
+as [CONTRIBUTING.md](CONTRIBUTING.md) describes.
 
 **External links** requests the public URLs already published in the tracked
 Markdown files, weekly and on demand, with a read-only token and no secrets.
