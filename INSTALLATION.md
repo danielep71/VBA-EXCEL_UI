@@ -293,7 +293,8 @@ owns and document anything intentionally retained.
 
 - [README.md](README.md) — capabilities, requirements, and public API
 - [CHANGELOG.md](CHANGELOG.md) — version history and compatibility
-- [CONTRIBUTING.md](CONTRIBUTING.md) — source and validation standards
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution and validation standards
+- [docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md) — source standards
 - [RELEASING.md](RELEASING.md) — release and provenance procedure
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting
 - [LICENSE](LICENSE) — MIT licence terms
