@@ -497,8 +497,8 @@ call is allowed to conclude that there is nothing to do.
 
 The WinAPI path remains Windows-only and best effort. The source contains VBA7
 32-bit, VBA7 64-bit, and legacy 32-bit declaration arms. The supported host
-requirement is VBA7; the legacy arm is retained and statically checked for
-compile integrity but is not current runtime-certification evidence.
+requirement is VBA7 on 64-bit Office. The 32-bit arms are retained and
+statically checked for compile integrity, but they are not runtime-certified.
 
 ---
 
@@ -722,8 +722,9 @@ to tagged GitHub Releases.
 - a macro-enabled workbook or add-in host;
 - VBA project access for importing `.bas` modules;
 - VBA7;
-- 64-bit Office, on which releases are certified. The WinAPI declarations also
-  compile for 32-bit Office, but no release has been certified there yet
+- 64-bit Office, the only bitness on which I certify releases. I have no
+  32-bit host: the 32-bit WinAPI declarations are kept and checked statically,
+  but 32-bit Office is not certified
   ([#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51));
 - host policy permitting the required WinAPI calls.
 

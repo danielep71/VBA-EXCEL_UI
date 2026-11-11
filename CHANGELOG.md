@@ -469,6 +469,10 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- Narrowed the supported Office bitness to 64-bit. I certify releases only on
+  64-bit Office and have no 32-bit host, so 32-bit Office is not certified. The
+  32-bit WinAPI declarations stay in the source and the static gate still checks
+  every compilation branch (#51).
 - While a release branch is open, every change now targets it and reaches
   `main` with the certified release; non-VBA changes are no longer copied to
   `main` by separate pull requests. Only CI, security and dependency fixes that
@@ -1168,7 +1172,7 @@ Dispositions are as of 2026-11-02 and are updated with the issues.
 | `ICR-UI-112-P3-05` | v1.1.2 | [#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27) | — | Corrected on `release/v1.1.3`; not yet certified |
 | `ICR-UI-112-P3-06` | v1.1.2 | [#28](https://github.com/danielep71/VBA-EXCEL_UI/issues/28) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-07` | v1.1.2 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | — | Open (v1.1.3) |
-| `ICR-UI-112-P3-08` | v1.1.2 | [#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51) | — | Open (v1.1.3); the x86 and second-build finding, not `ICR-UI-111-P3-08` |
+| `ICR-UI-112-P3-08` | v1.1.2 | [#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51) | — | Not planned: support narrowed to 64-bit Office, the only certified bitness; the x86 and second-build finding, not `ICR-UI-111-P3-08` |
 | `ICR-UI-112-P3-09` | v1.1.2 | [#52](https://github.com/danielep71/VBA-EXCEL_UI/issues/52) | — | Corrected on `release/v1.1.3`; not yet certified |
 | `ICR-UI-112-P3-10` | v1.1.2 | [#29](https://github.com/danielep71/VBA-EXCEL_UI/issues/29) | — | Corrected on `release/v1.1.3`; not yet certified |
 | `ICR-UI-112-P3-11` | v1.1.2 | [#53](https://github.com/danielep71/VBA-EXCEL_UI/issues/53) | — | Open (v1.1.3) |

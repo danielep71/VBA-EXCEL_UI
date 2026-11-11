@@ -33,7 +33,7 @@ This guide covers installation, validation, upgrade, recovery, and removal of
 | Item | Requirement |
 |---|---|
 | Host | Desktop Microsoft Excel for Windows |
-| Office bitness | 64-bit Office is certified; 32-bit declarations compile but no release has been certified on 32-bit Office yet ([#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51)) |
+| Office bitness | 64-bit Office only. I certify releases on 64-bit Office and have no 32-bit host; the 32-bit declarations are kept and checked statically, but 32-bit Office is not certified ([#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51)) |
 | Version identity | Root `VERSION` file and the selected tag/commit |
 | Source policy | Exported repository source is authoritative |
 | Licence | MIT |

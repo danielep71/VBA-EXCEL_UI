@@ -227,4 +227,4 @@ changed and still owns. Cleanup must not conceal the original failure.
 | **Snapshot lifecycle** | Document partial capture, failure ordering, reset behavior, and emergency recovery. |
 | **Title-bar ownership** | Restore only the style bits owned; capture `Err.LastDllError` immediately after each WinAPI call; handle valid zero returns, handle changes, and frame refresh. |
 | **Failure behavior** | Production entry points are fail-soft unless documented otherwise; never silently discard failures or leave screen updating suppressed. |
-| **Platform support** | Validate affected 32-bit and 64-bit declarations on a real Windows Excel host. |
+| **Platform support** | Keep the 32-bit and 64-bit declarations correct in every compilation branch; the static gate checks all three. Run affected changes on a real 64-bit Windows Excel host, the only certified bitness. |
