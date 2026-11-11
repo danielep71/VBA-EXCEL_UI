@@ -68,10 +68,10 @@ pre-release and no production version is security-supported.
 
 Security fixes follow the
 [base-branch rule](CONTRIBUTING.md#base-branch): they start from **main**, except
-that while a release branch `release/vX.Y.Z` is open, a VBA correction for that
-release targets the release branch and reaches **main** with the release, and a
-non-VBA repository change is made on the release branch and mirrored to
-**main**. Each fix is included in a new tagged release. Older releases are not
+that while a release branch `release/vX.Y.Z` is open they target the release
+branch and reach **main** with the release. A fix that cannot wait for the
+release goes to **main** directly, and **main** is then merged into the release
+branch. Each fix is included in a new tagged release. Older releases are not
 normally patched in place unless I state otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such

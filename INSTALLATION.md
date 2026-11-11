@@ -94,7 +94,7 @@ Optional material is not part of the normal runtime unless stated otherwise:
 | `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | Regression and release certification |
 | `demo/M_EXCEL_UI_DEMO.bas` | Demonstration actions |
 | `demo/M_DEMO_BUILDER.bas` | Demo worksheet construction |
-| `demo/M_DEMO_CLEANUP_TESTS.bas` | Excel harness for demo sheet reset and template cleanup (on `release/v1.1.3` only until v1.1.3 is released) |
+| `demo/M_DEMO_CLEANUP_TESTS.bas` | Excel harness for demo sheet reset and template cleanup |
 
 > [!CAUTION]
 > A `.frm` and its `.frx` companion are one logical component. Keep them in
