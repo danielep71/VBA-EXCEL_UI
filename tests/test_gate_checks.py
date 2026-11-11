@@ -63,12 +63,25 @@ class ModuleInventory(GateTestCase):
 
     def test_fails_on_an_undocumented_production_module(self) -> None:
         self.repo.write("src/M_EXCEL_UI_EXTRA.bas", 'Attribute VB_Name = "M_EXCEL_UI_EXTRA"\r\n')
-        self.assertFails("src/M_EXCEL_UI_EXTRA.bas: production module is not in EXPECTED_PRODUCTION_MODULES",
+        self.assertFails("src/M_EXCEL_UI_EXTRA.bas: production module is not in the production configuration",
                          "src/M_EXCEL_UI_EXTRA.bas: production module in no public API section")
 
     def test_fails_on_a_documented_production_module_that_is_not_tracked(self) -> None:
         self.repo.remove("src/M_EXCEL_UI_SNAPSHOT.bas")
-        self.assertFails("src/M_EXCEL_UI_SNAPSHOT.bas: listed in EXPECTED_PRODUCTION_MODULES but not tracked")
+        self.assertFails("src/M_EXCEL_UI_SNAPSHOT.bas: listed in the production configuration of "
+                         "tools/vba-projects.json but not tracked")
+
+    def test_fails_when_the_installation_import_order_differs_from_the_manifest(self) -> None:
+        self.repo.replace("INSTALLATION.md", "| 1 | `src/M_EXCEL_UI_RUNTIME.bas`", "| 1 | `src/M_EXCEL_UI.bas`")
+        self.assertFails("INSTALLATION.md: the production import order is src/M_EXCEL_UI.bas, ")
+
+    def test_fails_when_the_installation_import_order_is_not_generated(self) -> None:
+        self.repo.replace("INSTALLATION.md", "<!-- generated:modules:production -->\n", "")
+        self.assertFails("INSTALLATION.md: no generated:modules:production block")
+
+    def test_fails_when_the_manifest_cannot_be_read(self) -> None:
+        self.repo.write("tools/vba-projects.json", "{ not json\n")
+        self.assertFails("tools/vba-projects.json is not valid JSON")
 
 
 class VbaProjectManifest(GateTestCase):
@@ -118,6 +131,20 @@ class VbaProjectManifest(GateTestCase):
         self.assertFails("document_modules must be an empty list",
                          "configuration 'demo' has no list of module paths",
                          f"{BUILDER}: tracked module is in no configuration")
+
+    def test_fails_on_a_missing_or_unusable_module_description(self) -> None:
+        def change(manifest: dict[str, Any]) -> None:
+            del manifest["module_descriptions"][TESTS]
+            manifest["module_descriptions"][RUNTIME] = "Host | operations"
+            manifest["module_descriptions"]["src/M_GONE.bas"] = "Gone"
+        self.edit(change)
+        self.assertFails(f"module_descriptions has no description for {TESTS}",
+                         f"the description of {RUNTIME} must be one line without '|'",
+                         "module_descriptions describes src/M_GONE.bas, which no configuration lists")
+
+    def test_fails_when_module_descriptions_is_not_a_map(self) -> None:
+        self.edit(lambda m: m.update(module_descriptions=[]))
+        self.assertFails("module_descriptions must map each module path to its description")
 
     def test_fails_on_an_invalid_pattern(self) -> None:
         self.edit(lambda m: m["project_name_patterns"].append("^M_("))
@@ -551,6 +578,59 @@ class MarkdownEscapeSelfTest(GateTestCase):
     def test_fails_when_no_escape_is_recognised(self) -> None:
         with patch.object(check_repo, "ESCAPE_RE", NEVER):
             self.assertFails("an escaped underscore is reported")
+
+
+class DocumentedCommands(GateTestCase):
+    check = "documented commands"
+    DOC = "docs/RIBBON_SDI_BEHAVIOR.md"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_on_a_missing_script(self) -> None:
+        self.repo.append(self.DOC, "\n```text\npython3 tools/no_such_tool.py --check\n```\n")
+        self.assertFails(f"{self.DOC}:", "tools/no_such_tool.py: no such tool is tracked")
+
+    def test_fails_on_an_unknown_option(self) -> None:
+        self.repo.append(self.DOC, "\nRun `python3 tools/render_docs.py --verify` first.\n")
+        self.assertFails("tools/render_docs.py accepts no option --verify")
+
+    def test_fails_on_an_option_the_tool_no_longer_accepts(self) -> None:
+        self.repo.replace("tools/check_issues.py", '"--check-config"', '"--check-forms"')
+        self.assertFails("CONTRIBUTING.md:", "tools/check_issues.py accepts no option --check-config")
+
+    def test_fails_on_an_unknown_powershell_parameter(self) -> None:
+        self.repo.append(self.DOC, "\n```powershell\n"
+                                   ".\\tools\\Sync-EXCEL_UI-VBA.ps1 -workbookpath x -Configuration Demo\n```\n")
+        found = self.assertFails("tools\\Sync-EXCEL_UI-VBA.ps1 declares no parameter -Configuration")
+        self.assertFalse([f for f in found if "-workbookpath" in f], found)
+
+    def test_fails_on_a_parameter_the_script_no_longer_declares(self) -> None:
+        self.repo.replace("tools/Sync-EXCEL_UI-VBA.ps1", "[switch]$NewWorkbook", "[switch]$CreateWorkbook")
+        self.assertFails("docs/WORKBOOK_SYNC.md:", "declares no parameter -NewWorkbook")
+
+    def test_fails_on_a_parameter_given_through_a_cmd_launcher(self) -> None:
+        self.repo.append(self.DOC, "\nRun `tools\\Certify-EXCEL_UI.cmd -AllowDirty -Bundle x`.\n")
+        self.assertFails("tools/Certify-EXCEL_UI.ps1 declares no parameter -Bundle")
+
+    def test_passes_on_a_changelog_entry_that_names_an_old_option(self) -> None:
+        self.repo.append("CHANGELOG.md", "\n`python3 tools/render_docs.py --verify`\n")
+        self.assertPasses()
+
+
+class DocumentedCommandsSelfTest(GateTestCase):
+    check = "documented commands self-test"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_no_tool_path_is_recognised(self) -> None:
+        with patch.object(check_repo, "TOOL_PATH_RE", NEVER):
+            self.assertFails("a missing script is reported", "an inline-code invocation is read")
+
+    def test_fails_when_powershell_parameters_are_not_read(self) -> None:
+        with patch.object(check_repo, "powershell_parameters", lambda source: set()):
+            self.assertFails("a valid PowerShell invocation passes")
 
 
 class LabelCatalogue(GateTestCase):
