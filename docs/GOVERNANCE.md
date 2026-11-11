@@ -17,11 +17,15 @@ corrections, tooling, workflows and documentation alike. `main` receives that
 work in one merge, once the release is certified, so I never copy a change to
 both branches.
 
-While a release branch is open, a change goes to `main` directly only when it
-fixes CI, security or a dependency and cannot wait for the release, such as a
-Dependabot update of a pinned Action. After such a change, merge `main` into
-the release branch in a pull request, so the release still contains everything
-on `main`.
+The one exception is a Dependabot update. While a release branch is open,
+Dependabot opens each update against both `main` and the release branch, as
+[Dependabot](#dependabot) describes, so I review and merge it on each branch
+and neither falls behind.
+
+Any other change goes to `main` directly only when it fixes CI, security or a
+dependency and cannot wait for the release. After such a change, merge `main`
+into the release branch in a pull request, so the release still contains
+everything on `main`.
 
 <a id="rulesets"></a>
 
@@ -68,7 +72,7 @@ request that explains why, and run the command again.
 Every `uses:` reference in `.github/workflows/` is pinned to a full 40-character
 commit SHA with a trailing comment naming the release it is, and
 `tools/check_repo.py` fails on anything else. A version tag is a mutable
-pointer: `actions/checkout@v4` moved to a different commit as recently as the
+pointer: `actions/checkout@v7` moved to a different commit as recently as the
 pin currently in the tree, so a workflow referencing it runs whatever the
 upstream account publishes next, including whatever an attacker publishes after
 compromising it.
@@ -80,15 +84,15 @@ states the claim, and resolving the tag is what checks it.
 To move a pin:
 
 1. Find the intended release in the official Action repository and note its tag,
-   for example `v4.4.0`. Read its release notes; a pin bump is a dependency
+   for example `v7.0.1`. Read its release notes; a pin bump is a dependency
    change, not housekeeping.
 2. Resolve that tag to a commit without trusting a web page:
 
    ```text
-   git ls-remote https://github.com/actions/checkout.git refs/tags/v4.4.0
+   git ls-remote https://github.com/actions/checkout.git refs/tags/v7.0.1
    ```
 
-   If the tag is annotated, resolve `refs/tags/v4.4.0^{}` as well and pin the
+   If the tag is annotated, resolve `refs/tags/v7.0.1^{}` as well and pin the
    commit it dereferences to, not the tag object.
 3. Replace the SHA and the version comment **together**, in one edit. A SHA
    updated without its comment, or a comment updated without its SHA, is worse
