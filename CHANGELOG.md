@@ -423,6 +423,12 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- While a release branch is open, every change now targets it and reaches
+  `main` with the certified release; non-VBA changes are no longer copied to
+  `main` by separate pull requests. Only CI, security and dependency fixes that
+  cannot wait go to `main` directly, after which `main` is merged into the
+  release branch. The release merge must leave `main` identical to the release
+  branch (#155).
 - Replaced the Markdown issue templates with issue forms (bug, enhancement,
   documentation, private security contact) that require the exact commit, the
   Excel build and bitness, expected and observed behaviour, and the recovery

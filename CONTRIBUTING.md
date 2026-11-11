@@ -139,10 +139,17 @@ the gate until the entry is updated in the same change.
 
 ### Base branch
 
-Start everyday work and governance changes from the current `main`. While a
-release branch `release/vX.Y.Z` is open, VBA corrections for that release
-target the release branch and reach `main` with the release; non-VBA repository
-changes are made on the release branch and mirrored to `main`.
+While no release branch is open, start from the current `main`. While a
+release branch `release/vX.Y.Z` is open, every change targets it: VBA
+corrections, tooling, workflows and documentation alike. `main` receives that
+work in one merge, once the release is certified, so I never copy a change to
+both branches.
+
+While a release branch is open, a change goes to `main` directly only when it
+fixes CI, security or a dependency and cannot wait for the release, such as a
+Dependabot update of a pinned Action. After such a change, merge `main` into
+the release branch in a pull request, so the release still contains everything
+on `main`.
 
 Every change to `main` and `release/**` goes through a pull request, including
 mine. Repository rulesets enforce it: on `main` and `release/**` a pull request
@@ -364,12 +371,6 @@ cannot observe the error a call leaves, so
 `TST_Case_TitleBarApiErrorCapture` must still pass on a real Excel host. The
 demo modules in `demo/` are not yet held to this rule (#144).
 
-The VBA that follows this rule, the gate check and the regression case exist
-only on `release/v1.1.3` until v1.1.3 is released. On `main`, the title-bar
-module still declares `GetLastError`, the check is not registered in
-`tools/check_repo.py` and the case is absent, so a passing gate on `main` does
-not enforce this sequence.
-
 ### Public contracts and compatibility
 
 Demo cleanup (#71) is single-pass, not a host watchdog. With
@@ -389,9 +390,8 @@ Before closure, use disposable worksheets and a bounded host harness to test
 ordinary failure, missing/wrong password, reprotection and selection failure,
 and read back every captured option at the exact tested commit.
 
-`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness; it exists only on
-`release/v1.1.3` until v1.1.3 is released. Build a new demo workbook from the
-commit under test:
+`demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
+from the commit under test:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath "C:\work\EXCEL_UI_Demo.xlsm" -Mode Demo -NewWorkbook
