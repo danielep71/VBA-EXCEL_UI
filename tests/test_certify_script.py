@@ -230,6 +230,23 @@ class EvidencePolicyTests(unittest.TestCase):
             self.policy.unlink()
             self.assertIn("The evidence policy is missing", self.run_body(self.READ_ERROR)["error"])
 
+    def test_the_build_mode_comes_from_the_synchronizer(self) -> None:
+        sync = str(SCRIPT.parent / "Sync-EXCEL_UI-VBA.ps1")
+        result = self.run_body(
+            f"$s = '{sync}'\n"
+            "$m = ''\ntry { $null = Get-SyncMode -Configuration 'staging' -SyncScript $s } "
+            "catch { $m = $_.Exception.Message }\n"
+            "@{ development = (Get-SyncMode -Configuration 'development' -SyncScript $s); "
+            "demo = (Get-SyncMode -Configuration 'DEMO' -SyncScript $s); error = $m }" + self.WRITE)
+        self.assertEqual(result["development"], "Development")
+        self.assertEqual(result["demo"], "Demo")
+        self.assertIn("names configuration staging", result["error"])
+        self.assertIn("Production, Development, Demo", result["error"])
+        text = SCRIPT.read_text(encoding="utf-8")
+        build = text.split("# --- build", 1)[1].split("# ---", 1)[0]
+        self.assertNotIn("-Mode Development", build)
+        self.assertIn("-Mode $syncMode", build)
+
     def test_set_step_records_a_policy_step_and_refuses_any_other(self) -> None:
         self.write_policy(lambda document: document.update(steps=["first", "second"]))
         result = self.run_body(
@@ -247,7 +264,7 @@ class EvidencePolicyTests(unittest.TestCase):
         repo = self.temp / "repo"
         repo.mkdir()
         manifest = {"schema_version": 1, "configurations": {
-            "certified": {"modules": ["lib/M_ONE.bas"]},
+            "demo": {"modules": ["lib/M_ONE.bas"]},
             "development": {"modules": ["lib/M_ONE.bas", "lib/M_TWO.bas"]}}}
         files = {"config/projects.json": json.dumps(manifest) + "\n",
                  "lib/M_ONE.bas": 'Attribute VB_Name = "M_ONE"\nOption Explicit\n',
@@ -261,7 +278,7 @@ class EvidencePolicyTests(unittest.TestCase):
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "fixture")
         self.write_policy(lambda document: document.update(
-            manifest="config/projects.json", configuration="certified", evidence_schema=3))
+            manifest="config/projects.json", configuration="demo", evidence_schema=3))
         result = self.run_body(
             "$script:Policy = Read-EvidencePolicy $env:POLICY\n"
             "$sha = $Utf8NoBom.GetString((Invoke-Git @('rev-parse', 'HEAD'))).Trim()\n"
@@ -271,7 +288,7 @@ class EvidencePolicyTests(unittest.TestCase):
         sha = evidence.resolve_commit(repo, "HEAD")
         expected = evidence.source_inventory(repo, sha, evidence.load_policy(self.policy))
         self.assertEqual(expected["schema"], 3)
-        self.assertEqual(expected["configuration"], "certified")
+        self.assertEqual(expected["configuration"], "demo")
         self.assertEqual(result, expected)
 
 

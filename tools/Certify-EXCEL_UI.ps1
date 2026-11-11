@@ -216,6 +216,28 @@ function Invoke-Git([string[]]$Arguments) {
     return ,$result.Output
 }
 
+function Get-SyncMode {
+    # The Sync-EXCEL_UI-VBA.ps1 -Mode value that builds the policy's
+    # configuration. The accepted values come from the synchronizer's own
+    # ValidateSet, so a configuration it cannot build stops the run here,
+    # before anything starts Excel.
+    param(
+        [Parameter(Mandatory = $true)][string]$Configuration,
+        [Parameter(Mandatory = $true)][string]$SyncScript
+    )
+    $parameter = (Get-Command -Name $SyncScript -CommandType ExternalScript).Parameters['Mode']
+    $modes = @($parameter.Attributes |
+        Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } |
+        ForEach-Object { $_.ValidValues })
+    foreach ($mode in $modes) {
+        if ($mode -ieq $Configuration) {
+            return [string]$mode
+        }
+    }
+    throw ('The evidence policy names configuration {0}, which {1} cannot build; its -Mode accepts {2}.' -f
+           $Configuration, $SyncScript, ($modes -join ', '))
+}
+
 function Read-EvidencePolicy([string]$Path) {
     # Reads .github\excel-evidence-policy.json and checks the entries this
     # script uses. tools\check_excel_evidence.py validates the whole file.
@@ -674,16 +696,17 @@ try {
     if (-not (Test-Path -LiteralPath $syncScript -PathType Leaf)) {
         throw "The synchronizer is missing: $syncScript"
     }
+    $syncMode = Get-SyncMode -Configuration ([string]$script:Policy.configuration) -SyncScript $syncScript
     Write-JsonFile $Files.source_digests (Get-SourceDigests $sha)
     Set-Step 'preflight' 'PASS' ('Commit {0}; {1} written' -f $sha, $Files.source_digests)
 
     # --- build --------------------------------------------------------------
-    Set-Step 'build' 'RUNNING' 'tools\Sync-EXCEL_UI-VBA.ps1 -Mode Development -NewWorkbook'
+    Set-Step 'build' 'RUNNING' ('tools\Sync-EXCEL_UI-VBA.ps1 -Mode {0} -NewWorkbook' -f $syncMode)
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript `
-            -WorkbookPath $workbookPath -Mode Development -NewWorkbook -Force -NoBackup 2>&1 |
+            -WorkbookPath $workbookPath -Mode $syncMode -NewWorkbook -Force -NoBackup 2>&1 |
             ForEach-Object { Write-Log ('  sync: ' + [string]$_) }
         $syncCode = $LASTEXITCODE
     }
