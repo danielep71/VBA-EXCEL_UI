@@ -323,6 +323,7 @@ The repository currently contains these workflows:
 .github/workflows/labels-sync.yml
 .github/workflows/pr-milestones.yml
 .github/workflows/rulesets-drift.yml
+.github/workflows/scorecard.yml
 .github/workflows/static-checks.yml
 .github/workflows/wiki-badges.yml
 ~~~
@@ -359,6 +360,11 @@ read-only.
 **Ruleset drift** compares the live repository rulesets with
 `.github/rulesets/` using the job's read-only token and never changes them.
 
+**OpenSSF Scorecard** scores `main` weekly, on pushes to `main`, when branch
+protection changes and on demand, and runs only while the repository is
+public. It publishes its SARIF to code scanning and signs the published
+results, so its one job holds `security-events: write` and `id-token: write`.
+
 **External links** requests the public URLs already published in the tracked
 Markdown files, weekly and on demand, with a read-only token and no secrets.
 
@@ -370,10 +376,11 @@ operate from the default branch.
 #53 and #49 retain the requirement for a runnable final-repository/final-Wiki
 check before release readiness.
 
-Three jobs hold a write permission, each confined to that job: **Sync issue
+Four jobs hold a write permission, each confined to that job: **Sync issue
 labels** (`issues: write`, reconciling only from the default branch), **Keep
-milestones issue-only** (`pull-requests: write`), and the push and scheduled
-**CodeQL** job (`security-events: write`). None reads or publishes release
+milestones issue-only** (`pull-requests: write`), the push and scheduled
+**CodeQL** job (`security-events: write`), and the **OpenSSF Scorecard** job
+(`security-events: write` and `id-token: write`). None reads or publishes release
 artifacts, and their permissions must not be copied into static or Wiki jobs.
 
 This is intentionally a low-privilege automation surface.

@@ -536,6 +536,8 @@ Other workflows run alongside the gate and are not required checks:
 - **Workflow lint** runs a checksum-verified actionlint release on every
   workflow, after proving that it rejects `.github/actionlint/invalid-workflow.yml`.
 - **Ruleset drift** compares the live rulesets with `.github/rulesets/`.
+- **OpenSSF Scorecard** scores the supply-chain posture of `main` weekly and
+  publishes the findings to code scanning.
 - **External links** checks the public URLs in the tracked Markdown weekly and
   on demand.
 - **Wiki badges** checks the Wiki against `VERSION`.

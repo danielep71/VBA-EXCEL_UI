@@ -151,6 +151,11 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added the **OpenSSF Scorecard** workflow (`.github/workflows/scorecard.yml`).
+  It scores the supply-chain posture of `main` weekly and on pushes to `main`,
+  and publishes the results to code scanning. Its one job holds
+  `security-events: write` and `id-token: write`; every action is pinned to a
+  full SHA (#156).
 - Added the demo cleanup harness `Demo_Test_RunCleanupChecks` in the new
   **M_DEMO_CLEANUP_TESTS** module of the demo workbook, with a cleanup probe
   and one-shot fault seams in **M_DEMO_BUILDER**

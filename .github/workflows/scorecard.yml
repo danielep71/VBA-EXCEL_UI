@@ -1,0 +1,70 @@
+name: OpenSSF Scorecard
+
+# Scores the repository's supply-chain posture with OpenSSF Scorecard: pinned
+# dependencies, token permissions, dangerous workflow patterns, branch
+# protection and security policy. It is not a required check; it reports a
+# regression of that hardening instead of blocking a merge.
+#
+# Scorecard reads the default branch only, so it runs from main: weekly, on
+# pushes to main, when branch protection changes, and on demand. The results
+# go to Security -> Code scanning and are kept as an artifact. The job runs
+# only while the repository is public, because Scorecard can publish only
+# public results.
+#
+# Only the analysis job holds write permissions: security-events: write to
+# upload the SARIF, and id-token: write so that Scorecard can sign the
+# published results. Scorecard refuses to publish when the workflow holds
+# other write permissions or runs steps other than its own.
+
+on:
+  branch_protection_rule:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '29 5 * * 3'
+  workflow_dispatch:
+
+permissions: read-all
+
+# Each run has a group of its own: GitHub replaces a pending run when a newer
+# one joins the same group, so a shared group could drop a queued analysis.
+concurrency:
+  group: scorecard-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      id-token: write
+
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Keep the Scorecard SARIF
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: scorecard.sarif
+          retention-days: 30
+
+      - name: Publish to code scanning
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard
