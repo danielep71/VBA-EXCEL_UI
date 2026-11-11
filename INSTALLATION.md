@@ -80,6 +80,8 @@ or copied workbooks.
 
 ## 📂 Production source package
 
+<!-- generated:modules:production -->
+
 | Order | Repository source | VBE component | Responsibility |
 |---:|---|---|---|
 | 1 | `src/M_EXCEL_UI_RUNTIME.bas` | `M_EXCEL_UI_RUNTIME` | Host operations, diagnostics, result buffers, and quiet-update scope |
@@ -87,14 +89,30 @@ or copied workbooks.
 | 3 | `src/M_EXCEL_UI_SNAPSHOT.bas` | `M_EXCEL_UI_SNAPSHOT` | Snapshot state, capture/restore, and window identity |
 | 4 | `src/M_EXCEL_UI.bas` | `M_EXCEL_UI` | Public `UI_*` facade and targeting orchestration |
 
-Optional material is not part of the normal runtime unless stated otherwise:
+<!-- /generated:modules:production -->
 
-| Source | Purpose |
-|---|---|
-| `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | Regression and release certification |
-| `demo/M_EXCEL_UI_DEMO.bas` | Demonstration actions |
-| `demo/M_DEMO_BUILDER.bas` | Demo worksheet construction |
-| `demo/M_DEMO_CLEANUP_TESTS.bas` | Excel harness for demo sheet reset and template cleanup |
+Optional material is not part of the normal runtime unless stated otherwise.
+The development configuration adds the regression module to the production
+package, and the demo configuration adds the demo modules; their Order
+continues the production import order:
+
+<!-- generated:modules:development -->
+
+| Order | Repository source | VBE component | Responsibility |
+|---:|---|---|---|
+| 5 | `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | `M_EXCEL_UI_REGRESSION_TESTS` | Regression and release certification |
+
+<!-- /generated:modules:development -->
+
+<!-- generated:modules:demo -->
+
+| Order | Repository source | VBE component | Responsibility |
+|---:|---|---|---|
+| 5 | `demo/M_EXCEL_UI_DEMO.bas` | `M_EXCEL_UI_DEMO` | Demonstration actions |
+| 6 | `demo/M_DEMO_BUILDER.bas` | `M_DEMO_BUILDER` | Demo worksheet construction |
+| 7 | `demo/M_DEMO_CLEANUP_TESTS.bas` | `M_DEMO_CLEANUP_TESTS` | Excel harness for demo sheet reset and template cleanup |
+
+<!-- /generated:modules:demo -->
 
 > [!CAUTION]
 > A `.frm` and its `.frx` companion are one logical component. Keep them in
