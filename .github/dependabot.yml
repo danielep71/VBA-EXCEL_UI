@@ -12,7 +12,9 @@
 # Each ecosystem is listed twice: once for main and once for the open release
 # branch, so both branches receive the same updates without porting them by
 # hand. Dependabot reads this file from main only. When the release branch is
-# merged and deleted, remove its two entries.
+# merged and deleted, remove its two entries. The "branch coverage" check in
+# tools/check_repo.py requires the release entries to mirror the main entries
+# and to name the release that follows VERSION.
 version: 2
 updates:
   - package-ecosystem: github-actions
