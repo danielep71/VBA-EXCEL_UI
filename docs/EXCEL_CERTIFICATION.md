@@ -18,8 +18,8 @@ release gate, so its output is not part of a bundle.
 
 ## ✅ Requirements
 
-- Desktop Microsoft Excel for Windows, as in the
-  [support baseline](../INSTALLATION.md).
+- Desktop Microsoft Excel for Windows on 64-bit Office, as in the
+  [support baseline](../INSTALLATION.md). 32-bit Office is not certified.
 - **Trust access to the VBA project object model** turned on in
   **File → Options → Trust Center → Trust Center Settings → Macro Settings**.
   The workbook is built and compiled through the VBA object model, so the
@@ -217,8 +217,10 @@ the release.
 - The validator binds the files to each other and to the commit. It cannot
   prove that Excel wrote them. Read `certification.txt` before you rely on a
   bundle, as you would read the Immediate window.
-- One run certifies one host and one Office bitness. Certify each environment
-  you claim support for with a run of its own.
+- One run certifies one host and one Office bitness. I certify releases on
+  64-bit Office only: the validator also accepts an `x86` bundle, but a run on
+  32-bit Office is not release evidence
+  ([#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51)).
 - The script runs only `Test_EXCEL_UI_RunReleaseCertification`. The manual
   checks of [RELEASING.md](../RELEASING.md) and
   [the regression section of the README](../README.md#regression-testing)
