@@ -1304,7 +1304,7 @@ practical closure status of any item that has since been reopened.
 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | Accurate v1.1.2/v1.1.3 closure documentation | Open |
 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | Exact-head review and certification gate | Open |
 | [#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150) | Markdown scanner handles fenced code inside list containers | Open |
-| [#175](https://github.com/danielep71/VBA-EXCEL_UI/issues/175) | Release guides verify the tag before pushing it and name `tools/verify.py` and 64-bit-only certification | Open |
+| [#175](https://github.com/danielep71/VBA-EXCEL_UI/issues/175) | Release guides verify the tag before pushing it and name `tools/verify.py` and 64-bit-only certification | Closed (#179) |
 
 P1 and P2 items block release until implementation, regression coverage,
 documentation, static checks, runtime certification and final exact-source
