@@ -51,7 +51,7 @@ Windows Excel host and is tracked on the linked issue.
 
 | Area | v1.1.2 boundary | v1.1.3 branch state |
 |---|---|---|
-| Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Fail-closed restore merged and certified on Excel 16.0 build 20430 (64-bit); README and Wiki follow at release: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
+| Ribbon restore | A changed active window can make restore target the wrong window instead of failing closed. | Fail-closed restore merged and certified on Excel 16.0 build 20430 (64-bit); README describes it as release-branch state, and the Wiki follows at release: [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) |
 | Title-bar identity | The retained Window and native handle were proved independently, without proving that they still form the captured pair. | Pairing correction merged; public-path no-write evidence and final documentation remain open: [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45). |
 | Recycled hWnd | Equal owned style bits could let a recycled numeric handle retrieve stale registry state. | Retained-Window identity merged; the current test changes the stored numeric handle and does not prove unchanged-hWnd generation reuse: [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32). |
 | Captionless baseline | A non-zero captionless baseline could bypass the all-zero recovery fallback. | Partial correction merged; any-bit tests still accept incomplete composite WS_CAPTION masks. Complete-mask correction and bounded negative-control evidence remain open: [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6), [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66). |
@@ -114,11 +114,6 @@ continues the production import order:
 
 <!-- /generated:modules:demo -->
 
-> [!CAUTION]
-> A `.frm` and its `.frx` companion are one logical component. Keep them in
-> the same directory during import, never import the `.frx` separately, and
-> never process it as text.
-
 ---
 
 ## 🚀 Fresh installation
@@ -134,7 +129,7 @@ continues the production import order:
 
 1. Open the destination workbook or add-in and press `Alt+F11`.
 2. Select the intended project in Project Explorer.
-3. Use **File → Import File…** for exported modules, classes, and forms.
+3. Use **File → Import File…** for each exported `.bas` module.
 4. Confirm component names match the repository source.
 5. Run **Debug → Compile VBAProject**.
 6. Save in a macro-capable format such as `.xlsm`, `.xlsb`, or `.xlam`
@@ -142,8 +137,8 @@ continues the production import order:
 7. Close and reopen the host before the clean-session smoke test.
 
 Do not paste source into arbitrarily named modules when an exported component is
-available. VBE attributes, component identity, form resources, and line endings
-are part of a reproducible source installation.
+available. VBE attributes, component identity, and line endings are part of a
+reproducible source installation.
 
 From a clone of the repository on Windows, `tools\Sync-EXCEL_UI-VBA.cmd`
 imports the modules of one configuration (production, development or demo)
@@ -202,8 +197,7 @@ Before upgrading:
 1. read the complete version-to-version changelog;
 2. back up the host and export any local modifications;
 3. stop or clean up active component state;
-4. identify every required production component;
-5. decide whether stored configuration or generated assets are compatible.
+4. identify every required production component.
 
 - Replace all four production modules together from the same tag.
 - Re-import the matching optional regression module when validating an upgrade.
@@ -265,14 +259,12 @@ must therefore coordinate ownership explicitly.
 
 | Symptom | Check |
 |---|---|
-| Compile error or missing procedure | Confirm every required component was imported from one version and optional dependencies are present. |
+| Compile error or missing procedure | Confirm all four production modules were imported from one version, and the regression or demo modules from that same version when they are present. |
 | Ambiguous name | Remove duplicate/legacy modules; do not paste new source beside old components. |
-| Form missing controls or corrupt UI | Re-import the `.frm` with its exact adjacent `.frx`. |
-| Behavior differs by workbook | Check caller, active-object, settings namespace, references, locale, and date-system assumptions. |
+| Behavior differs by workbook | Check which window was active and which `UIWindowTargetScope` the call used: all windows, the active window, or the active workbook's windows. |
 | 32/64-bit failure | Confirm the tested Office bitness and conditional WinAPI declarations. |
 | Excel left altered after failure | Run the documented recovery/cleanup path; do not blindly force global state. |
 | Security warning | Verify source origin, signature/hash where provided, trusted location policy, and macro settings. |
-| Output differs from reference | Confirm exact version, inputs, parameterization, tolerance, environment, and reference independence. |
 
 If recovery is uncertain, save user data separately, close Excel, reopen a clean
 session, and reproduce with a minimal sanitized workbook before changing code.
@@ -287,10 +279,13 @@ Report suspected vulnerabilities privately under [SECURITY.md](SECURITY.md).
 2. Remove all four production modules and optional demo/test modules.
 3. Compile the remaining project and reopen Excel to confirm the normal shell is visible.
 
-Removing files does not automatically remove workbook formulas, Ribbon XML,
-registry settings, trusted-location configuration, cached add-ins, shortcuts,
-scheduled callbacks, or other integrations. Remove only state the component
-owns and document anything intentionally retained.
+The production modules write no files, registry settings or workbook content.
+Their only state is the in-memory snapshot and the UI state of the running Excel
+instance, which steps 1 and 3 return to normal. The regression module writes
+its evidence to `%TEMP%\EXCEL_UI_certification_*`; delete those files if you
+do not keep them. Removing the modules does not undo trusted-location, add-in
+or macro-security settings you changed to install them; revert those separately
+if you no longer need them.
 
 ---
 

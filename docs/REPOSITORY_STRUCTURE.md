@@ -32,6 +32,9 @@ VBA-EXCEL_UI/
 │  └─ M_EXCEL_UI_REGRESSION_TESTS.bas
 ├─ tests/
 ├─ tools/
+├─ .editorconfig
+├─ .gitattributes
+├─ .gitignore
 ├─ AGENTS.md
 ├─ CHANGELOG.md
 ├─ CODE_OF_CONDUCT.md
@@ -59,11 +62,15 @@ binaries are attached to tagged GitHub Releases.
 | `src/` | Authoritative production modules for UI, runtime, snapshots, and title-bar control |
 | `test/` | Regression and release-certification source |
 | `demo/` | Demo and reproducible host setup |
-| `tools/` | Repository/static validation |
-| `tests/` | Unit tests for the static validation in `tools/` |
+| `tools/` | Static validation, documentation rendering, the release tool (`release.py`), and the Windows workbook scripts for synchronization, export and certification |
+| `tests/` | Unit tests for the tools in `tools/` |
 | `docs/` | VBA house style, governance, this page, issue and label rules, workbook synchronization, Excel certification, the VBA call checker, and measured Ribbon SDI behaviour |
 | `images/` | Documentation images, the only approved home for binary files |
-| `.github/` | Workflows, rulesets, repository settings, issue and pull-request templates, the label catalogue and its scripts |
+| `.github/` | Workflows, rulesets, repository settings, issue and pull-request templates, the label catalogue and its scripts, the Excel evidence policy (`excel-evidence-policy.json`), the Dependabot configuration (`dependabot.yml`), and the negative probe that tests the actionlint job (`actionlint/`) |
+
+The root also holds `.editorconfig` (editor formatting settings),
+`.gitattributes` (line endings and which files Git treats as binary) and
+`.gitignore`.
 
 The current tree is authoritative if a listed optional directory is not
 present.
