@@ -73,7 +73,7 @@ byte-identical does not create a new Excel runtime result.
 
 ## Bounded VBA analyzer (#31)
 
-`python tools/vba_analyze.py` checks all `.bas` files in `src/`, `test/` and
+`python3 tools/vba_analyze.py` checks all `.bas` files in `src/`, `test/` and
 `demo/`. The static gate runs it and its independent malformed/benign fixtures
 on configured pushes and pull requests. Diagnostics identify the source path,
 physical start line, rule and compilation configuration. A continued statement

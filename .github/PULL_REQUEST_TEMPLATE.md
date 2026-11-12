@@ -94,7 +94,7 @@ Evidence from another commit does not certify this candidate.
 | --- | --- |
 | Hosted required checks | <!-- PASS / FAIL / NOT RUN + workflow URL --> |
 | Local static command | <!-- python3 tools/verify.py --ci — its RESULT line, or NOT RUN --> |
-| Formatting / `git diff --check` | <!-- PASS / FAIL --> |
+| `git diff --check` | <!-- PASS / FAIL; house-style formatting is part of verify.py --> |
 | Machine-readable artifact | <!-- Name / URL / not produced --> |
 
 ### Excel and VBA execution
@@ -107,18 +107,21 @@ Evidence from another commit does not certify this candidate.
 | --- | --- |
 | Tested commit SHA | <!-- Full SHA or N/A --> |
 | `Debug → Compile VBAProject` | <!-- PASS / FAIL / NOT RUN / N/A --> |
-| Regression/certification entry point | <!-- Test_EXCEL_UI_RunReleaseCertification, or the focused Test_EXCEL_UI_* runner --> |
-| Completion state | <!-- PASS / FAIL / INCOMPLETE / NOT RUN --> |
-| Cases / assertions / failures | <!-- Counts or N/A --> |
-| Skipped / cleanup outcome | <!-- Counts and state or N/A --> |
-| Focused and manual checks | <!-- UI_HideExcelUI / UI_ShowExcelUI, capture/hide/reset scenarios + result --> |
+| Certification entry point | <!-- Test_EXCEL_UI_RunReleaseCertification, or NOT RUN / N/A with a reason --> |
+| Focused and manual checks | <!-- Focused Test_EXCEL_UI_* runners, UI_HideExcelUI / UI_ShowExcelUI, capture/hide/reset scenarios + result --> |
 | Evidence file or workflow | <!-- Name / URL / N/A --> |
+
+```text
+Certification verdict line:
+```
+
+Production changes require `Test_EXCEL_UI_RunReleaseCertification`; a focused runner does not substitute for it. Quote its verdict line exactly as printed, in the form `RESULT: PASS|FAIL | COMPLETE|INCOMPLETE | units= failed= skipped= cleanup=`. Only `PASS | COMPLETE` with `skipped=0` and `cleanup=OK` is a pass.
 
 ### Validation environment
 
 ```text
 Excel product, version, and build:
-Office bitness:                    32-bit / 64-bit
+Office bitness:                    64-bit (32-bit Office is not certified)
 Windows version/build:
 Workbook or add-in host:
 Deployment model:
