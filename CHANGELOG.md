@@ -101,10 +101,12 @@ Use only the categories needed by a release.
 > 🩹 **Planned patch** · v1.1.3 correctness and hardening · not yet certified
 
 > [!NOTE]
-> This section describes the work merged into `release/v1.1.3`. `main` already
-> carries that branch's repository tooling, workflows and documentation; the
-> VBA corrections listed here reach `main` only when v1.1.3 is certified and
-> released.
+> This section describes the work merged into `release/v1.1.3`. All of it
+> reaches `main` when v1.1.3 is certified and released. Tooling and
+> documentation merged before #155 were also copied to `main`; later work, such
+> as `tools/verify.py`, `tools/release.py`, the Scorecard and Release workflows,
+> `docs/GOVERNANCE.md` and `docs/VBA_HOUSE_STYLE.md`, is on the release branch
+> only.
 
 ### 🧭 Release intent
 
@@ -115,16 +117,29 @@ failures, strengthen snapshot ownership, and make cleanup, mandatory-case,
 public-API, exact-source, documentation and exact-head evidence genuine release
 gates.
 
-Work completed so far includes the Wave 1 repository and contract gates plus two
-Wave 2 corrections: destructive test runners now preserve caller-owned
-snapshots, and the quiet-update scope claims only a suppression confirmed by
-readback. Title-bar capture and persistent frame state now pair each native hWnd
-with the Excel Window that owns it. Show now uses baseline state and readback,
-but the complete caption-mask correction and bounded control remain open under
-#6/#66; #32 and #45 also retain proof/documentation gaps.
-`M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`,
-`M_EXCEL_UI_TITLEBAR` and the regression module have therefore changed. The
-supported public facade remains unchanged.
+Work completed so far includes the repository and contract gates and these
+corrections:
+
+- destructive test runners preserve caller-owned snapshots (#43), and the
+  quiet-update scope claims only a suppression confirmed by readback (#26);
+- Ribbon snapshot restore fails closed on another active window (#23), and
+  title-bar WinAPI failures report the error their own call left (#27); both
+  are certified on Excel 16.0 build 20430, 64-bit;
+- certification isolates a failed unit and shows the failure list of a failed
+  capture (#135);
+- the demo template and sheet reset no longer recatch their own re-raised
+  errors (#71), and a demo button without a macro no longer names a missing
+  one (#129).
+
+Title-bar capture and persistent frame state now pair each native hWnd with the
+Excel Window that owns it. Show now uses baseline state and readback, but the
+complete caption-mask correction and bounded control remain open under #6/#66;
+#32 and #45 also retain proof/documentation gaps.
+
+`M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`, `M_EXCEL_UI_TITLEBAR`, the
+regression module and the demo modules have therefore changed; `M_EXCEL_UI`
+and `M_EXCEL_UI_DEMO` changed in their comments only, and
+`M_DEMO_CLEANUP_TESTS` is new. The supported public facade remains unchanged.
 
 The API contract gate was implemented first and deliberately. It records the
 shipped v1.1.2 declarations while the production tree is still byte-identical to
@@ -136,17 +151,18 @@ measured against that baseline.
 
 | Area | Current state |
 |---|---|
-| Production VBA | Runtime quiet-scope ownership and title-bar Window/hWnd identity, registry generation and show verification implemented with #6/#32/#45 proof/correction gaps |
+| Production VBA | Runtime quiet-scope ownership, Ribbon fail-closed restore and title-bar WinAPI error capture implemented; title-bar Window/hWnd identity, registry generation and show verification implemented with #6/#32/#45 proof/correction gaps |
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
-| Runtime correctness fixes | #26 complete; remaining title-bar and Ribbon defects open |
-| Regression and certification fixes | #43 complete; remaining certification gates open |
-| Regression VBA | Caller-owned snapshot refusal and ownership-failure coverage added |
+| Runtime correctness fixes | #26 and #27 complete; #23 certified and open until the README and Wiki describe it; remaining title-bar defects open |
+| Regression and certification fixes | #43 and #135 complete; remaining certification gates open |
+| Regression VBA | Caller-owned snapshot refusal, ownership-failure, Ribbon wrong-window refusal, WinAPI error-capture and certification unit-isolation coverage added |
+| Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); remaining demo defects open |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | Every check `python3 tools/check_repo.py` lists; the release branch passes |
+| Static validation | `python3 tools/verify.py --ci` runs every static check, including the 37 checks of `tools/check_repo.py`; the release branch passes |
 | Wiki | Last recorded track is v1.1.2; the badge workflow runs from the default branch, with final evidence still pending under #53 |
-| Excel runtime certification | Not yet run for v1.1.3 |
+| Excel runtime certification | Candidate heads certified on Excel 16.0 build 20430, 64-bit (2026-11-06); the final v1.1.3 head is not yet certified |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
 ### ➕ Added
@@ -165,7 +181,9 @@ measured against that baseline.
   existing tag and publishes nothing. Only the publish job holds
   `contents: write`; every action is pinned to a full SHA. Excel certification
   and the evidence record stay manual, and **RELEASING.md** now says which
-  steps are automated (#162).
+  steps are automated. The workflow has not run yet: GitHub dispatches only
+  workflows on the default branch, so it can be tested only once it reaches
+  `main` with this release (#162).
 - Added the **branch coverage** check to `tools/check_repo.py`, with its own
   self-test fixtures (#159). Every ecosystem in `.github/dependabot.yml` needs
   one entry for the default branch and, while a release is open, one entry for
@@ -177,10 +195,11 @@ measured against that baseline.
   a narrow standard-library reader and reports any shape it does not
   understand instead of guessing.
 - Added the **OpenSSF Scorecard** workflow (`.github/workflows/scorecard.yml`).
-  It scores the supply-chain posture of `main` weekly and on pushes to `main`,
-  and publishes the results to code scanning. Its one job holds
+  It is set to score the supply-chain posture of `main` weekly and on pushes to
+  `main`, and to publish the results to code scanning. Its one job holds
   `security-events: write` and `id-token: write`; every action is pinned to a
-  full SHA (#156).
+  full SHA. It has not run yet: it starts once it reaches `main` with this
+  release (#156).
 - Held the documentation to the repository (#160):
   - the static gate gained a **documented commands** check, with a self-test.
     It reads the tracked Markdown, except this changelog, for invocations of
@@ -203,8 +222,9 @@ measured against that baseline.
   ([#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71)). Its fourteen
   scenarios cover reset success with protection readback, ordinary errors,
   wrong and missing passwords, reprotection and selection-restoration
-  failures, and template errors. **Not yet certified.** No Excel run is
-  recorded yet. The supported API is unchanged.
+  failures, and template errors. **Checked on Excel 16.0 build 20430, 64-bit
+  (2026-11-06):** all 14 scenarios and 89 checks passed. The supported API is
+  unchanged.
 - Added `UI_TryGetActiveFramePair` and `UI_InternalInjectFramePairFault` to
   **M_EXCEL_UI_TITLEBAR**, and the four-branch
   `TST_Case_ActiveFramePairRefusesMismatch` case registered in both
@@ -302,27 +322,27 @@ measured against that baseline.
   Keeping the baseline in the file rather than deriving it from Git history is
   deliberate: continuous integration checks out a single commit and has no
   history to compare against.
-- Added a sixteenth static check requiring a Semantic Versioning statement
-  whenever the supported facade differs from that baseline. `CHANGELOG.md` must
-  carry a `Supported API contract` row, and when the facade has moved the row
-  must name patch, minor or major. Regenerating the manifest no longer clears
-  the gate on its own, so the manifest records the change and the changelog
-  declares what it means.
-- Added **tools/vba_api.py --selftest** and registered it as a fifteenth static
-  check. Its fixtures cover parameter reorder, parameter rename, `ByVal` to
-  `ByRef`, parameter type change, dropped `Optional`, changed default, changed
-  return type, changed enum value, added and removed enum members, a standalone
-  member addition, and removed and renamed members, alongside formatting-only
-  changes — continuation reflow, indentation, trailing comments and added header
-  examples — that must normalize identically. Property fixtures cover an
-  accessor kind changing from `Get` to `Let` and to `Set`, a changed property
-  return type and an added companion accessor. Conditional fixtures cover a
-  matched and a divergent VBA7 pair, nested VBA7 and `Win64` arms, identical
-  `Win64` arms that must not read as a divergence, an `#ElseIf` chain, and two
-  duplicate-declaration forms, separate overlapping `#If VBA7` and `#If Win64`
-  blocks, complementary `#If X` and `#If Not X` blocks that must fold, an
-  `#Else` arm overlapping a separately negated block, a declaration nested
-  inside its own branch, a three-arm block that must fold, and six
+- Added the **supported API declaration** check, requiring a Semantic Versioning
+  statement whenever the supported facade differs from that baseline.
+  `CHANGELOG.md` must carry a `Supported API contract` row, and when the facade
+  has moved the row must name patch, minor or major. Regenerating the manifest
+  no longer clears the gate on its own, so the manifest records the change and
+  the changelog declares what it means.
+- Added **tools/vba_api.py --selftest** and registered it as the **public API
+  self-test** check. Its fixtures cover parameter reorder, parameter rename,
+  `ByVal` to `ByRef`, parameter type change, dropped `Optional`, changed
+  default, changed return type, changed enum value, added and removed enum
+  members, a standalone member addition, and removed and renamed members,
+  alongside formatting-only changes — continuation reflow, indentation, trailing
+  comments and added header examples — that must normalize identically. Property
+  fixtures cover an accessor kind changing from `Get` to `Let` and to `Set`, a
+  changed property return type and an added companion accessor. Conditional
+  fixtures cover a matched and a divergent VBA7 pair, nested VBA7 and `Win64`
+  arms, identical `Win64` arms that must not read as a divergence, an `#ElseIf`
+  chain, and two duplicate-declaration forms, separate overlapping `#If VBA7`
+  and `#If Win64` blocks, complementary `#If X` and `#If Not X` blocks that must
+  fold, an `#Else` arm overlapping a separately negated block, a declaration
+  nested inside its own branch, a three-arm block that must fold, and six
   arm-structure pairs whose declarations are identical and whose recorded
   contracts must differ.
 - Added isolated fixtures for a member declared only in an `#ElseIf` arm and
@@ -355,14 +375,14 @@ measured against that baseline.
   nothing — without the timer, drift introduced in the wiki editor stays
   invisible until the next commit lands here, which is the window the pre-1.1.2
   drift lived in.
-- Added fixtures for the `VERSION` rules, run as a twentieth check: a plain
-  release number, a pre-release suffix, a missing or doubled trailing newline, a
-  leading `v`, a two-part version, an empty file and prose. Badge fixtures now
-  also cover the same badge twice on one page, a badge missing its `v` prefix, a
-  badge with a truncated colour, a malformed badge beside a valid one, and the
-  inventory naming every page including navigation. Two other checks
-  derive from that file, so a rule that quietly accepted anything would weaken
-  them without ever reporting a thing.
+- Added fixtures for the `VERSION` rules, run as the **release state self-test**
+  check: a plain release number, a pre-release suffix, a missing or doubled
+  trailing newline, a leading `v`, a two-part version, an empty file and prose.
+  Badge fixtures now also cover the same badge twice on one page, a badge
+  missing its `v` prefix, a badge with a truncated colour, a malformed badge
+  beside a valid one, and the inventory naming every page including navigation.
+  Two other checks derive from that file, so a rule that quietly accepted
+  anything would weaken them without ever reporting a thing.
 - Added duplicate and malformed badge detection. A page carrying the same badge
   twice passed, because the rule compared distinct values rather than counting
   them; the second badge is the one nobody reviewed, and the next release moves
@@ -377,11 +397,12 @@ measured against that baseline.
   checked against the wiki before it reaches a branch. During a release that is
   the moment the two legitimately disagree, and seeing it in the pull request is
   the difference between a planned wiki update and a surprise.
-- Added the badge rules to the static gate as a nineteenth check. It runs the
-  fixtures, not the wiki: `tools/check_repo.py` never touches the network, so a
-  machine without wiki access still gets a meaningful gate, and the policy
-  cannot rot between the rare occasions the workflow reports something.
-- Added a fence-aware escaped-Markdown check as a twenty-first gate check,
+- Added the badge rules to the static gate as the **wiki badge self-test**
+  check. It runs the fixtures, not the wiki: `tools/check_repo.py` never touches
+  the network, so a machine without wiki access still gets a meaningful gate,
+  and the policy cannot rot between the rare occasions the workflow reports
+  something.
+- Added a fence-aware escaped-Markdown check, the **markdown escapes** check,
   landed together with the archive repair so the documents are corrected under
   the rule that prevents it recurring. It ignores fenced blocks and inline code
   spans, where a backslash is data rather than markup — a Windows path or a
@@ -396,21 +417,21 @@ measured against that baseline.
   path, a regular expression, a VBA listing, a URL and a table row. Fence
   handling is the part that can silently invert — a rule treating the whole file
   as fenced would report nothing and look healthy.
-- Added sixteen fixtures for the private-document denylist, run as a
-  twenty-fourth check. They cover the withdrawn archives, the private v1.1.2
-  review, a future review admitted only by the family pattern, lowercase and
-  mixed-case variants, a review at the repository root and in an unexpected
-  directory, and documents marked private or confidential — alongside five that
-  must be allowed, including a checklist whose name contains "review" and a
-  module note whose name contains "private". A denylist with no fixtures is a
-  list of strings nobody has seen reject anything, and a pattern that denies
-  everything looks identical to one that works.
-- Added an explicit private-document denylist as a twenty-third check. The
-  v1.1.2 independent review is private, and the public archives are named for
-  the release they reviewed, so the pattern admitting them is the pattern that
-  would admit the private one. The denylist is checked against both the Git
-  index and the working tree: the index catches the file after a commit, the
-  working tree before one, which is the only moment the mistake is cheap.
+- Added sixteen fixtures for the private-document denylist, run as the **private
+  review denylist self-test** check. They cover the withdrawn archives, the
+  private v1.1.2 review, a future review admitted only by the family pattern,
+  lowercase and mixed-case variants, a review at the repository root and in an
+  unexpected directory, and documents marked private or confidential — alongside
+  five that must be allowed, including a checklist whose name contains "review"
+  and a module note whose name contains "private". A denylist with no fixtures
+  is a list of strings nobody has seen reject anything, and a pattern that
+  denies everything looks identical to one that works.
+- Added an explicit private-document denylist as the **private review denylist**
+  check. The v1.1.2 independent review is private, and the public archives are
+  named for the release they reviewed, so the pattern admitting them is the
+  pattern that would admit the private one. The denylist is checked against both
+  the Git index and the working tree: the index catches the file after a commit,
+  the working tree before one, which is the only moment the mistake is cheap.
 - Added a push trigger on `v*` tags to **.github/workflows/static-checks.yml**.
   A tag is the artefact people install from, and until now nothing ran against
   one: `v1.1.1` and `v1.1.2` were published from commits carrying no automated
@@ -494,8 +515,10 @@ measured against that baseline.
 - Corrected demo template/reset cleanup (#71) so saved errors do not re-enter
   their own handlers. Reset re-protects only after an owned successful
   unprotect, reuses captured protection options, and reports cleanup failures.
-  Source fixtures guard these paths; Excel fault-injection and protection
-  readback remain outstanding. Reset is still destructive, not transactional.
+  Source fixtures guard these paths, and the `Demo_Test_RunCleanupChecks`
+  harness exercised fault injection and protection readback on Excel 16.0
+  build 20430, 64-bit (2026-11-06). Reset is still destructive, not
+  transactional.
 
 - Added stage diagnostics to the captionless-baseline regression (#66) and
   disabled its local handler before the saved-error re-raise, preventing that
@@ -613,7 +636,8 @@ measured against that baseline.
 - Replaced the separate static-check commands with one entry point,
   **tools/verify.py**
   ([#154](https://github.com/danielep71/VBA-EXCEL_UI/issues/154)). It runs the
-  gate, the formatter check, the label script self-tests, the issue-form check,
+  gate, the formatter check, the generated-documentation check
+  (`render-docs`), the label script self-tests, the issue-form check,
   the unit tests, Ruff and `mypy --strict` in one declared order, prints one
   result line per check and a final `RESULT` line, and appends a Markdown table
   to a job summary with `--summary`. A missing Node.js, Ruff or mypy is
@@ -637,8 +661,8 @@ measured against that baseline.
   on Excel 16.0 build 20430). Otherwise it reports an ordered
   `Ribbon | …` failure, writes nothing, and activates no window. The
   same-window capture and restore path is unchanged, and no public procedure,
-  parameter, enum value or default changes. 32-bit Office is not yet
-  certified (#51).
+  parameter, enum value or default changes. 32-bit Office was not run, and
+  its certification is not planned (#51).
 - Fixed release certification hiding why a structured-result assertion failed,
   and reporting one failed case as every later unit failing
   ([#135](https://github.com/danielep71/VBA-EXCEL_UI/issues/135)).
@@ -781,9 +805,9 @@ measured against that baseline.
   forbidden artifact entering version control.
 - Fixed the opposite policy gap by detecting tracked files that the current
   ignore rules would hide from an ordinary working-tree review.
-- **Not yet certified.** Title-bar WinAPI failures now report the error their
-  own call left, captured before anything else could replace it
-  ([#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27),
+- **Certified on Excel 16.0 build 20430, 64-bit (2026-11-06).** Title-bar
+  WinAPI failures now report the error their own call left, captured before
+  anything else could replace it ([#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27),
   `ICR-UI-112-P3-05`). **M_EXCEL_UI_TITLEBAR** and the regression helpers
   clear the thread last-error immediately before each `GetWindowLong[Ptr]`,
   `SetWindowLong[Ptr]` and `SetWindowPos` call and copy the result and
@@ -806,6 +830,11 @@ measured against that baseline.
 
 ### 📖 Documentation
 
+- Corrected the Markdown documents for accuracy against the repository, its
+  tooling and the issue states: the release guides (#175), this changelog's
+  Unreleased section (#176), the README, INSTALLATION, the repository
+  structure and the code of conduct (#177), and the contributor, governance and
+  security documents (#178).
 - Gave reference material its own documents (#157). `docs/VBA_HOUSE_STYLE.md`
   holds the rules for the source that `CONTRIBUTING.md` used to carry: line
   endings, exported-source rules, formatter verification, the bounded VBA
@@ -846,7 +875,7 @@ measured against that baseline.
   legitimately disagree. `wiki_tracks-v1.1.3` means a page was written against
   the v1.1.3 contract, not that the tag exists — the wiki is reviewed before the
   tag is cut, so a badge that could only be written afterwards would make the
-  gate impossible to satisfy at the moment it matters. The resulting wave 7
+  gate impossible to satisfy at the moment it matters. The resulting release
   window is now written down in order: bump `VERSION`, watch the gate go red,
   re-badge the wiki, and do all of it before the release freeze, because
   `VERSION` is tracked and wiki edits are not.
@@ -887,10 +916,6 @@ measured against that baseline.
   source state being presented as certification of the final PR head.
 - Kept confidential, credential-bearing, client and other private material out
   of issue, pull-request, certification and release-artifact guidance.
-- Added **docs/VBA-EXCEL_UI_v1.1.3_IMPLEMENTATION_SEQUENCE.md** as the executable
-  milestone plan. It records dependencies, exact-head release steps, closure
-  discipline, private-review boundaries and a dated snapshot of every open
-  v1.1.3 issue body.
 - Realigned the issue templates with current policy, so intake reflects the
   snapshot-precondition and ownership rules the destructive runners now
   enforce rather than the behavior they had at v1.1.2.
@@ -958,11 +983,29 @@ measured against that baseline.
 
 ### ✅ Validation
 
-The `release/v1.1.3` branch passes the complete static gate. The checks below
-are those the gate ran on 2026-11-06. An earlier version of this list predated
-the newer checks and named three (procedure structure, `PtrSafe` declarations,
-duplicate procedures) that the VBA analyzer has since replaced (#31). The
-inventory and fixture-count lines are omitted:
+The `release/v1.1.3` branch passes `python3 tools/verify.py --ci`, the single
+command that runs every static check in one declared order. The run below is
+from 2026-11-11:
+
+~~~text
+python3 tools/verify.py --ci
+
+PASS     check-repo
+PASS     reformat
+PASS     render-docs
+PASS     labels
+PASS     check-issues
+PASS     unittest
+PASS     ruff
+PASS     mypy
+RESULT: PASS | checks=8 passed=8 failed=0 skipped=0
+~~~
+
+Its first step is the static gate, which runs these 37 checks in this order.
+An earlier version of this list predated the newer checks and named three
+(procedure structure, `PtrSafe` declarations, duplicate procedures) that the
+VBA analyzer has since replaced (#31). The inventory and fixture-count lines
+are omitted:
 
 ~~~text
 python3 tools/check_repo.py
@@ -980,12 +1023,15 @@ python3 tools/check_repo.py
   ok    VBA analyzer
   ok    VBA analyzer self-test
   ok    title-bar control regression
+  ok    WinAPI error capture
   ok    demo cleanup regression
   ok    public API manifest
   ok    public API self-test
   ok    supported API declaration
   ok    workflow pin policy
   ok    workflow policy self-test
+  ok    branch coverage
+  ok    branch coverage self-test
   ok    wiki badge self-test
   ok    release state
   ok    review finding crosswalk
@@ -994,6 +1040,8 @@ python3 tools/check_repo.py
   ok    markdown links
   ok    markdown escapes
   ok    markdown escape self-test
+  ok    documented commands
+  ok    documented commands self-test
   ok    label catalogue
   ok    private review denylist
   ok    private review denylist self-test
@@ -1058,17 +1106,39 @@ This is **static validation**, not release certification:
 
 - hosted static checks are not an exact-source certification of a release head;
 - hosted static checks do not execute Excel or VBA;
-- no v1.1.3 runtime certification has been performed;
-- no claim is made for Win32 or Office 32-bit runtime execution;
+- the Excel certifications recorded below cover candidate heads, not the final
+  v1.1.3 head;
+- no claim is made for Win32 or Office 32-bit runtime execution, and none is
+  planned (#51);
 - final evidence must be regenerated against the exact reviewed release head.
 
 #### Excel runtime evidence
 
-Static checks do not execute the Excel behavior under test. Recorded Excel
-16.0 x64 runs cover five correction areas: #43 caller-snapshot preservation,
-#26 quiet-scope ownership, #45 object/native frame pairing, #32 frame-registry
-generation identity, and #6 captionless show recovery. Positive runs do not
-establish that every defect has a valid negative control or is ready to close.
+Static checks do not execute the Excel behavior under test.
+
+On 2026-11-06, `Test_EXCEL_UI_RunReleaseCertification` passed on four
+candidate heads on Excel 16.0 build 20430 x64, Windows 11 10.0.26200, each
+with `RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK`, and
+`tools/check_excel_evidence.py` accepted each evidence folder (9/9):
+
+| Head | What it certified |
+|---|---|
+| `e43837d` | The Ribbon owner identified by its frame handle (#23), run through `tools\Certify-EXCEL_UI.cmd` (#128) |
+| `fdaf91b` | Certification unit isolation (#135) and buttons without a macro (#129), in evidence folder `EXCEL_UI-certification-fdaf91b6d2db-20261106-143828` |
+| `ea50bfc` | The merged Ribbon fail-closed restore (#23), in evidence folder `EXCEL_UI-certification-ea50bfc13efc-20261106-150346` |
+| `02965d7` | WinAPI error capture (#27), in evidence folder `EXCEL_UI-certification-02965d76e353-20261106-154555` |
+
+On the same host, `Demo_Test_RunCleanupChecks` of the `02965d7` demo
+configuration reported
+`DEMO CLEANUP CHECKS: PASS | scenarios 14, failed 0 | checks 89, failed 0`
+(#71). The VBA export of `fdaf91b` matched its commit:
+`RESULT=PASS; modules=5; differences=0; binding=VERIFIED` (#128).
+
+Earlier recorded Excel 16.0 x64 runs cover five correction areas: #43
+caller-snapshot preservation, #26 quiet-scope ownership, #45 object/native
+frame pairing, #32 frame-registry generation identity, and #6 captionless show
+recovery. Positive runs do not establish that every defect has a valid negative
+control or is ready to close.
 
 `Test_EXCEL_UI_RunAll` passed with the caller-snapshot and quiet-scope cases;
 `Test_EXCEL_UI_RunOwnershipCleanupChecks` passed standalone at the #43 closure
@@ -1095,9 +1165,9 @@ has insufficient isolation, and one attempt hangs. #6 has no completed negative
 control and also still needs the complete composite `WS_CAPTION` mask correction.
 #45, #32 and #6 remain open despite their positive runs and merged code.
 
-This is runtime evidence across five correction areas, not final release
-certification. No frozen v1.1.3 head or cross-bitness release matrix is certified
-by these results. Disposable source belongs in `/.mutation-scratch/`; reviewed
+This is runtime evidence for candidate heads, not final release certification.
+No frozen v1.1.3 head is certified by these results, and 32-bit Office is not
+certified (#51). Disposable source belongs in `/.mutation-scratch/`; reviewed
 results must be preserved separately.
 
 ### 🔗 Compatibility
@@ -1106,8 +1176,9 @@ results must be preserved separately.
 |---|---|
 | Existing VBA calls affected | None so far |
 | Public API changed | No |
-| Production modules changed | Yes — runtime, snapshot and title-bar modules |
-| Runtime behavior changed | Quiet-update ownership and title-bar identity/recovery paths; remaining title-bar corrections and proof are tracked explicitly |
+| Production modules changed | Yes — runtime, snapshot and title-bar modules; `M_EXCEL_UI` in comments only |
+| Demo modules changed | Yes — `M_DEMO_BUILDER` (#71, #129); `M_EXCEL_UI_DEMO` in comments only; `M_DEMO_CLEANUP_TESTS` is new (#71) |
+| Runtime behavior changed | Quiet-update ownership; Ribbon restore fails closed when the captured window is closed or not active (#23); title-bar WinAPI failure text names the API, the operation, `LastDllError` and the hWnd (#27); title-bar identity/recovery paths; remaining title-bar corrections and proof are tracked explicitly |
 | Workbook migration required for this batch | Replace all four production modules together; no caller-code edit |
 | Developer tooling behavior changed | Yes — repository hygiene evaluates the Git index, and the public API gate now protects full declarations |
 | Intended release type | Patch |
@@ -1133,7 +1204,7 @@ The v1.1.2 and v1.1.1 entries below still name the withdrawn review documents
 (`docs/INDEPENDENT_CODE_REVIEW_V1.1.*.md`) as published. Those paths no longer
 exist in the tree; use this table instead.
 
-Dispositions are as of 2026-11-02 and are updated with the issues.
+Dispositions are as of 2026-11-11 and are updated with the issues.
 
 | Cited identifier | Review | Issue | Current identifier | Disposition |
 |---|---|---|---|---|
@@ -1145,8 +1216,8 @@ Dispositions are as of 2026-11-02 and are updated with the issues.
 | `ICR-UI-P2-05` | v1.1.0 | [#20](https://github.com/danielep71/VBA-EXCEL_UI/issues/20) | — | Corrected in v1.1.1 |
 | `ICR-UI-P2-06` | v1.1.0 | [#19](https://github.com/danielep71/VBA-EXCEL_UI/issues/19) | — | Corrected in v1.1.1 |
 | `ICR-UI-P2-07` | v1.1.0 | [#18](https://github.com/danielep71/VBA-EXCEL_UI/issues/18) | — | Corrected in v1.1.1 |
-| `ICR-UI-P3-03` | v1.1.0 | [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) | — | Corrected on `release/v1.1.3`; not yet certified |
-| `ICR-UI-111-P1-01` | v1.1.1 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | `ICR-UI-112-P1-01` | Open (v1.1.3); fail-closed restore implemented on `release/v1.1.3`, awaiting certification |
+| `ICR-UI-P3-03` | v1.1.0 | [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) | — | Corrected on `release/v1.1.3`; closed |
+| `ICR-UI-111-P1-01` | v1.1.1 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | `ICR-UI-112-P1-01` | Open (v1.1.3); fail-closed restore certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
 | `ICR-UI-111-P2-01` | v1.1.1 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | `ICR-UI-112-P2-02` | Reopened (v1.1.3): the v1.1.2 closure was incomplete; see the erratum below |
 | `ICR-UI-111-P2-02` | v1.1.1 | [#33](https://github.com/danielep71/VBA-EXCEL_UI/issues/33) | — | Corrected in v1.1.2 |
 | `ICR-UI-111-P2-03` | v1.1.1 | [#34](https://github.com/danielep71/VBA-EXCEL_UI/issues/34) | — | Corrected in v1.1.2 |
@@ -1154,11 +1225,11 @@ Dispositions are as of 2026-11-02 and are updated with the issues.
 | `ICR-UI-111-P3-03` | v1.1.1 | [#36](https://github.com/danielep71/VBA-EXCEL_UI/issues/36) | `ICR-UI-112-P3-01` | Open (v1.1.3) |
 | `ICR-UI-111-P3-07` | v1.1.1 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | `ICR-UI-112-P3-04` | Open (v1.1.3) |
 | `ICR-UI-111-P3-08` | v1.1.1 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | `ICR-UI-112-P3-07` | Open (v1.1.3); the CI supply-chain finding, not `ICR-UI-112-P3-08` |
-| `ICR-UI-112-P1-01` | v1.1.2 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | — | Open (v1.1.3); fail-closed restore implemented on `release/v1.1.3`, awaiting certification |
+| `ICR-UI-112-P1-01` | v1.1.2 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | — | Open (v1.1.3); fail-closed restore certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
 | `ICR-UI-112-P2-01` | v1.1.2 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | — | Open (v1.1.3) |
 | `ICR-UI-112-P2-02` | v1.1.2 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | — | Reopened (v1.1.3) |
 | `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Reopened (v1.1.3); bounded negative control blocked by #66 |
-| `ICR-UI-112-P2-04` | v1.1.2 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | — | Corrected on `release/v1.1.3`; not yet certified (`32baef384ee306082483ea5dcaf40abfe3224118`) |
+| `ICR-UI-112-P2-04` | v1.1.2 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | — | Corrected on `release/v1.1.3` (`32baef384ee306082483ea5dcaf40abfe3224118`); closed |
 | `ICR-UI-112-P2-05` | v1.1.2 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | — | Open (v1.1.3) |
 | `ICR-UI-112-P2-06` | v1.1.2 | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | — | Reopened (v1.1.3) |
 | `ICR-UI-112-P2-07` | v1.1.2 | [#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46) | — | Open (v1.1.3) |
@@ -1169,12 +1240,12 @@ Dispositions are as of 2026-11-02 and are updated with the issues.
 | `ICR-UI-112-P3-02` | v1.1.2 | [#31](https://github.com/danielep71/VBA-EXCEL_UI/issues/31) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-03` | v1.1.2 | [#50](https://github.com/danielep71/VBA-EXCEL_UI/issues/50) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-04` | v1.1.2 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | — | Open (v1.1.3) |
-| `ICR-UI-112-P3-05` | v1.1.2 | [#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27) | — | Corrected on `release/v1.1.3`; not yet certified |
+| `ICR-UI-112-P3-05` | v1.1.2 | [#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27) | — | Corrected on `release/v1.1.3`; certified on Excel 16.0 build 20430 x64 (2026-11-06); closed |
 | `ICR-UI-112-P3-06` | v1.1.2 | [#28](https://github.com/danielep71/VBA-EXCEL_UI/issues/28) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-07` | v1.1.2 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-08` | v1.1.2 | [#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51) | — | Not planned: support narrowed to 64-bit Office, the only certified bitness; the x86 and second-build finding, not `ICR-UI-111-P3-08` |
-| `ICR-UI-112-P3-09` | v1.1.2 | [#52](https://github.com/danielep71/VBA-EXCEL_UI/issues/52) | — | Corrected on `release/v1.1.3`; not yet certified |
-| `ICR-UI-112-P3-10` | v1.1.2 | [#29](https://github.com/danielep71/VBA-EXCEL_UI/issues/29) | — | Corrected on `release/v1.1.3`; not yet certified |
+| `ICR-UI-112-P3-09` | v1.1.2 | [#52](https://github.com/danielep71/VBA-EXCEL_UI/issues/52) | — | Corrected on `release/v1.1.3`; tooling only, no Excel run needed; closed |
+| `ICR-UI-112-P3-10` | v1.1.2 | [#29](https://github.com/danielep71/VBA-EXCEL_UI/issues/29) | — | Corrected on `release/v1.1.3`; tooling only, no Excel run needed; closed |
 | `ICR-UI-112-P3-11` | v1.1.2 | [#53](https://github.com/danielep71/VBA-EXCEL_UI/issues/53) | — | Open (v1.1.3) |
 
 ### 📝 Erratum to v1.1.2
@@ -1210,13 +1281,13 @@ practical closure status of any item that has since been reopened.
 
 | Issue | Required v1.1.3 outcome | Current status |
 |:---:|---|---|
-| [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | Ribbon wrong-target restoration fails closed | Implemented on branch; awaiting certification |
+| [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | Ribbon wrong-target restoration fails closed | Certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | Pair Excel Window and native hWnd identity defensibly | Open |
 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened |
 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Reopened |
 | [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) | Bounded title-bar mutation control that fails instead of hanging | Open |
 | [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Open |
-| [#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71) | Demo template and sheet-reset handlers do not recatch their own re-raised errors | Open |
+| [#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71) | Demo template and sheet-reset handlers do not recatch their own re-raised errors | Closed; Excel harness passed 14 scenarios and 89 checks on build 20430 x64 (2026-11-06) |
 | [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Open |
 | [#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74) | Demo template validates its layout inputs before resetting the worksheet | Open |
 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | Preserve caller-owned snapshots across all destructive-runner refusals | Closed; implementation, regression and mutation evidence verified |
@@ -1232,6 +1303,8 @@ practical closure status of any item that has since been reopened.
 | [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | Full public API contract gate | Implemented; open until the release diff shows no supported facade change |
 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | Accurate v1.1.2/v1.1.3 closure documentation | Open |
 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | Exact-head review and certification gate | Open |
+| [#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150) | Markdown scanner handles fenced code inside list containers | Open |
+| [#175](https://github.com/danielep71/VBA-EXCEL_UI/issues/175) | Release guides verify the tag before pushing it and name `tools/verify.py` and 64-bit-only certification | Closed (#179) |
 
 P1 and P2 items block release until implementation, regression coverage,
 documentation, static checks, runtime certification and final exact-source
