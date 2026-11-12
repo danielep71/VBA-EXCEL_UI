@@ -311,8 +311,11 @@ Other workflows run alongside the gate and are not required checks:
   workflow, after proving that it rejects `.github/actionlint/invalid-workflow.yml`.
 - **Ruleset drift** compares the live rulesets with `.github/rulesets/`, and
   the repository settings it can read with `.github/repository-settings.json`.
-- **OpenSSF Scorecard** scores the supply-chain posture of `main` weekly and
-  publishes the findings to code scanning.
+- **OpenSSF Scorecard** scores the supply-chain posture of `main` and
+  publishes the findings to code scanning. It runs from `main` only: weekly, on
+  every push to `main`, when branch protection changes and on demand, and only
+  while the repository is public. It does not run until the v1.1.3 release
+  merge brings it to `main`.
 - **Release** runs when a `v*` tag is pushed: it verifies the tag with
   `tools/release.py`, builds the source archives and `SHA256SUMS`, and
   publishes the GitHub Release, as [RELEASING.md](RELEASING.md#automation)
@@ -341,10 +344,13 @@ current tree) and at least one failing fixture (a named defect).
 `tests/test_coverage.py` fails when a check has no test in either direction, so
 a new check needs a `GateTestCase` subclass in `tests/test_gate_checks.py`
 before it can merge. Like the gate, the tests use only the standard library,
-except that `tests/test_check_issues.py` also needs Node.js. The Python tools
-run their self-tests with `--selftest`; the Node.js label scripts under
-`.github/scripts/` use `--self-test`. `test/` is a different directory: it
-holds the VBA regression suite.
+except that `tests/test_check_issues.py` also needs Node.js, and
+`tests/test_certify_script.py` and most of `tests/test_sync_script.py` need
+PowerShell 7 (`pwsh`); those tests are skipped where `pwsh` is not installed.
+`tools/check_repo.py`, `tools/reformat.py`, `tools/vba_api.py` and
+`tools/wiki_badges.py` run their self-tests with `--selftest`; the Node.js
+label scripts under `.github/scripts/` use `--self-test`. `test/` is a
+different directory: it holds the VBA regression suite.
 
 The Python code under `tools/` and `tests/` must also be clean under Ruff and
 `mypy --strict`, both configured in `pyproject.toml` against Python 3.11, the
@@ -366,9 +372,10 @@ beside them.
 
 The demo cleanup contract is stated in
 [docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md#demo-cleanup-contract-71).
-Before closure, use disposable worksheets and a bounded host harness to test
-ordinary failure, missing/wrong password, reprotection and selection failure,
-and read back every captured option at the exact tested commit.
+When you change the demo cleanup paths, use disposable worksheets and a
+bounded host harness to test ordinary failure, missing/wrong password,
+reprotection and selection failure, and read back every captured option at the
+exact tested commit.
 
 `demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
 from the commit under test:
@@ -525,9 +532,8 @@ Two things about that arrangement are deliberate. The expected version comes
 from this repository and not from the wiki, because deriving it from the first
 page read would make the check circular: fourteen pages agreeing on a stale
 release would pass. The workflow declares scheduled and push triggers because a Wiki edit does
-not touch this repository. The workflow is on both `main` and
-`release/v1.1.3`, so its scheduled and manual runs operate from the default
-branch. Do not treat a declared trigger
+not touch this repository. Scheduled runs use the workflow as it is on the
+default branch, `main`. Do not treat a declared trigger
 or the historical badge run as a fresh Wiki check. #53 and #49 require a runnable
 check bound to the final repository and Wiki SHAs before release readiness.
 
@@ -548,7 +554,7 @@ has to be, because the wiki is reviewed before the tag is cut rather than after
 — a badge that could only be written post-tag would make the gate impossible to
 satisfy at the moment it matters.
 
-That produces one deliberate window per release, in wave 7:
+That produces one deliberate window per release, before the release freeze:
 
 1. Review the governed Wiki pages against the candidate contract, update every
    badge to `wiki_tracks-v1.1.3`, and record the Wiki SHA first, as required by
@@ -601,8 +607,6 @@ detects the editor rather than every symptom.
 
 ---
 
-<a id="pull-requests"></a>
-
 ### Independent reviews are internal
 
 From v1.1.3 onward this repository does not carry independent review documents.
@@ -631,6 +635,8 @@ against the review finding crosswalk in `CHANGELOG.md` (under
 [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48)). When you cite an
 identifier that is not in the table yet, add its row in the same pull request:
 `check_repo.py` fails on a cited identifier without exactly one row.
+
+<a id="pull-requests"></a>
 
 ## 🚀 Pull requests
 

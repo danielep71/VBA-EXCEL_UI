@@ -308,8 +308,6 @@ explicit, least-privilege authorization.
 
 ---
 
-<a id="safe-use"></a>
-
 ### Current automation surface
 
 The repository currently contains these workflows:
@@ -334,7 +332,8 @@ The static workflow:
 - runs on a GitHub-hosted Ubuntu runner;
 - checks exported source as text;
 - uses the repository’s Python tooling;
-- installs no project package dependencies;
+- sets up a pinned Node.js release and installs only Ruff, mypy and their
+  dependencies, hash-locked in `tools/requirements-quality-ci.txt`;
 - declares contents: read;
 - does not require repository secrets;
 - does not execute Excel or VBA;
@@ -365,10 +364,12 @@ the security and Actions settings, which only administrators can read, are
 reported there as not verifiable and are checked with an administrator token,
 as [docs/GOVERNANCE.md](docs/GOVERNANCE.md#repository-settings) describes.
 
-**OpenSSF Scorecard** scores `main` weekly, on pushes to `main`, when branch
-protection changes and on demand, and runs only while the repository is
-public. It publishes its SARIF to code scanning and signs the published
-results, so its one job holds `security-events: write` and `id-token: write`.
+**OpenSSF Scorecard** is configured to score `main` weekly, on pushes to
+`main`, when branch protection changes and on demand, and only while the
+repository is public. It runs from `main` only, so it does not run until the
+v1.1.3 release merge brings it there. It publishes its SARIF to code scanning
+and signs the published results, so its one job holds `security-events: write`
+and `id-token: write`.
 
 **Release** runs when a `v*` tag is pushed, and by hand for an existing tag.
 Its verify job checks the tag, `VERSION`, `CHANGELOG.md`, reachability from
@@ -386,9 +387,8 @@ Markdown files, weekly and on demand, with a read-only token and no secrets.
 
 **Wiki badges** checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly
-schedule and relevant-change triggers and cannot write to the Wiki. It is
-present on both `main` and `release/v1.1.3`, so its scheduled and manual runs
-operate from the default branch.
+schedule and relevant-change triggers and cannot write to the Wiki. Its
+scheduled runs use the workflow as it is on the default branch, `main`.
 #53 and #49 retain the requirement for a runnable final-repository/final-Wiki
 check before release readiness.
 
@@ -463,6 +463,7 @@ immutability does not prove that the selected upstream commit is trustworthy.
 
 ---
 
+<a id="safe-use"></a>
 
 ## ✅ Safe-use guidance
 
