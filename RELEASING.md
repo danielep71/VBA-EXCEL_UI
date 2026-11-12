@@ -68,7 +68,7 @@ Pushing a `vX.Y.Z` tag starts the **Release** workflow
 | Verify | `verify vX.Y.Z --repository danielep71/VBA-EXCEL_UI` | Checks that the tag is annotated and equals `v` + `VERSION` at the tagged commit, that `CHANGELOG.md` there has a dated section for the version, that the commit is reachable from `origin/main`, and that the required check **Repository and module checks** concluded success on that exact commit |
 | Notes | `notes vX.Y.Z` | Prints that changelog section, which becomes the release body |
 | Classify | `is-prerelease vX.Y.Z` | Prints `true` when the version has a pre-release suffix, such as `1.2.0-rc.1`, and `false` otherwise |
-| Bundle | `bundle vX.Y.Z --out DIR` | Writes `git archive` output of the tag as `VBA-EXCEL_UI-X.Y.Z.zip` and `VBA-EXCEL_UI-X.Y.Z.tar.gz`, plus `SHA256SUMS`, and refuses an archive that still holds a path `.gitattributes` marks `export-ignore`, such as `AGENTS.md` |
+| Bundle | `bundle vX.Y.Z --out DIR` | Writes `git archive` output of the tag as `VBA-EXCEL_UI-X.Y.Z.zip` and `VBA-EXCEL_UI-X.Y.Z.tar.gz`, plus `SHA256SUMS`, and refuses an archive that still holds `AGENTS.md` or a path under `.github/`, two of the paths `.gitattributes` marks `export-ignore` |
 | Publish | (workflow only) | Creates the GitHub Release from the tag with `gh release create`, using the notes and the bundle, and marks it as a pre-release when `is-prerelease` prints `true` |
 | Verify after publication | `verify-published vX.Y.Z --repository danielep71/VBA-EXCEL_UI --dir DIR [--asset NAME=SHA256]` | Checks that the release exists and is not a draft, that its pre-release flag matches the version, that its body equals the notes, and that its assets are exactly the files in `SHA256SUMS`, that file, and each asset declared with `--asset`, all with matching SHA-256 values |
 
@@ -88,7 +88,8 @@ These steps stay manual, and each must be complete before the tag is pushed:
   [evidence record](#evidence-record), which no workflow can produce;
 - any workbook artifact (section 7), which the workflow neither builds nor
   uploads, and the `verify-published` run that includes it (section 11);
-- the merge into `main` (section 8) and creating the annotated tag (section 9);
+- the merge into `main` (section 8), and creating and verifying the annotated
+  tag (section 9);
 - the post-publication checks the workflow cannot run (section 11).
 
 <a id="versioning"></a>
@@ -121,7 +122,7 @@ in the same change.
 - The working tree and exported VBA sources are reproducible.
 - I am available for the release, together with any required reviewers.
 
-Record which Windows and Office-bitness combinations were exercised; do not generalize beyond the tested matrix.
+I certify releases on 64-bit Office only; 32-bit Office is not certified ([#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51)). Record which Windows versions and Excel builds were exercised; do not generalize beyond them.
 
 ## 1. Freeze and identify the candidate
 
@@ -187,9 +188,13 @@ Move relevant entries from **Unreleased** into a dated `[MAJOR.MINOR.PATCH] - YY
 
 ## 5. Run static gates
 
-- Run the repository Markdown, link, and exported-source checks.
-- Run the repository formatter or formatting verification.
-- Validate 32-bit and 64-bit declarations and scan for secrets or generated files.
+- Run `python3 tools/verify.py --ci` on the candidate. It runs every static
+  check of the required **Repository and module checks** job, including the
+  gate's checks of the 32-bit and 64-bit declaration arms and the house-style
+  normal form. It needs Node.js, plus Ruff and mypy from
+  `tools/requirements-quality-ci.txt`; with `--ci`, a check whose tool is
+  missing fails instead of being skipped.
+- Scan for secrets or generated files.
 
 Capture commands, tool versions, timestamps, and complete results. Rerun affected gates after any change.
 
@@ -209,7 +214,8 @@ Certification rules:
 - Use a clean workbook or documented clean fixture.
 - Import only candidate files.
 - Record Excel version, Windows version, and Office bitness.
-- Test the advertised environment matrix.
+- Certify on 64-bit Office, the only bitness the
+  [support baseline](INSTALLATION.md) claims; 32-bit Office is not certified.
 - Treat warnings, repairs, or unexplained numerical deltas as failures.
 - If code changes after certification, restart static and Excel validation.
 
@@ -287,7 +293,9 @@ the merge commit as its source identity.
 
 ## 9. Create the annotated tag
 
-Tag only the certified commit on `main`.
+Tag only the certified commit on `main`. A pushed `v*` tag cannot be deleted
+or moved, and pushing it starts publication, so create the tag in your clone
+and verify it there first:
 
 ```bash
 git switch main
@@ -295,19 +303,31 @@ git pull --ff-only
 git rev-parse HEAD
 git tag -a vX.Y.Z -m "VBA Excel UI X.Y.Z"
 git show --no-patch --decorate vX.Y.Z
-git push origin vX.Y.Z
-```
-
-Before pushing, confirm the tag equals `VERSION`, targets the certified commit, and has a matching dated changelog section:
-
-```bash
 git fetch origin main
 python3 tools/release.py verify vX.Y.Z --repository danielep71/VBA-EXCEL_UI
 ```
 
-Pushing the tag starts the Release workflow, which runs the same verification
-again before it publishes anything. Never delete and recreate a public tag to
-hide a mistake.
+`verify` reads the tag from your clone, so it runs before the tag is pushed. It
+checks that the tag is annotated and equals `VERSION` at the tagged commit, that
+`CHANGELOG.md` there has a dated section for the version, and that the commit is
+reachable from `origin/main`, which is why `git fetch origin main` comes first.
+It then asks GitHub for the **Repository and module checks** run on the tagged
+commit's SHA. That commit is already on `main`, and every push to `main` runs
+the check, so wait until that run has concluded.
+
+Push the tag only when `verify` ends with `RESULT: PASS`:
+
+```bash
+git push origin vX.Y.Z
+```
+
+When it ends with `RESULT: FAIL`, do not push. If the check run on `main` was
+only still in progress, run `verify` again once it has concluded. Otherwise
+delete the local tag with `git tag -d vX.Y.Z` and fix the candidate; the new
+`main` commit needs sections 5–8 again before you tag it.
+
+The Release workflow runs the same verification again before it publishes
+anything. Never delete and recreate a public tag to hide a mistake.
 
 <a id="evidence-record"></a>
 ## 🧾 Evidence record
@@ -390,9 +410,15 @@ Fix the branch or pull request, update evidence, and rerun affected gates. Rebui
 ### After tag, before GitHub Release
 
 If the verify job fails, nothing was published. The tag is protected and must
-not be moved, so fix the cause in a new patch candidate. If only the publish
-job failed, delete any draft release it left behind and re-run the failed jobs
-from the workflow run.
+not be moved, so fix the cause in a new patch candidate. If the publish job
+failed before **Create the GitHub release** finished, delete any draft release
+it left behind and re-run the failed jobs from the workflow run.
+
+If the release was created and only **Verify the published release** failed,
+the release is already published, not a draft. Do not re-run the job: it
+cannot create the release a second time. Download the bundle artifact and run
+`verify-published` locally, as section 11 describes, and handle any finding
+as **After public release** describes.
 
 Pause publication and document the correction. Prefer a new patch candidate whenever the tag may have propagated.
 
