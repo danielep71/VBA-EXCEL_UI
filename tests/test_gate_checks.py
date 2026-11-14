@@ -63,12 +63,25 @@ class ModuleInventory(GateTestCase):
 
     def test_fails_on_an_undocumented_production_module(self) -> None:
         self.repo.write("src/M_EXCEL_UI_EXTRA.bas", 'Attribute VB_Name = "M_EXCEL_UI_EXTRA"\r\n')
-        self.assertFails("src/M_EXCEL_UI_EXTRA.bas: production module is not in EXPECTED_PRODUCTION_MODULES",
+        self.assertFails("src/M_EXCEL_UI_EXTRA.bas: production module is not in the production configuration",
                          "src/M_EXCEL_UI_EXTRA.bas: production module in no public API section")
 
     def test_fails_on_a_documented_production_module_that_is_not_tracked(self) -> None:
         self.repo.remove("src/M_EXCEL_UI_SNAPSHOT.bas")
-        self.assertFails("src/M_EXCEL_UI_SNAPSHOT.bas: listed in EXPECTED_PRODUCTION_MODULES but not tracked")
+        self.assertFails("src/M_EXCEL_UI_SNAPSHOT.bas: listed in the production configuration of "
+                         "tools/vba-projects.json but not tracked")
+
+    def test_fails_when_the_installation_import_order_differs_from_the_manifest(self) -> None:
+        self.repo.replace("INSTALLATION.md", "| 1 | `src/M_EXCEL_UI_RUNTIME.bas`", "| 1 | `src/M_EXCEL_UI.bas`")
+        self.assertFails("INSTALLATION.md: the production import order is src/M_EXCEL_UI.bas, ")
+
+    def test_fails_when_the_installation_import_order_is_not_generated(self) -> None:
+        self.repo.replace("INSTALLATION.md", "<!-- generated:modules:production -->\n", "")
+        self.assertFails("INSTALLATION.md: no generated:modules:production block")
+
+    def test_fails_when_the_manifest_cannot_be_read(self) -> None:
+        self.repo.write("tools/vba-projects.json", "{ not json\n")
+        self.assertFails("tools/vba-projects.json is not valid JSON")
 
 
 class VbaProjectManifest(GateTestCase):
@@ -118,6 +131,20 @@ class VbaProjectManifest(GateTestCase):
         self.assertFails("document_modules must be an empty list",
                          "configuration 'demo' has no list of module paths",
                          f"{BUILDER}: tracked module is in no configuration")
+
+    def test_fails_on_a_missing_or_unusable_module_description(self) -> None:
+        def change(manifest: dict[str, Any]) -> None:
+            del manifest["module_descriptions"][TESTS]
+            manifest["module_descriptions"][RUNTIME] = "Host | operations"
+            manifest["module_descriptions"]["src/M_GONE.bas"] = "Gone"
+        self.edit(change)
+        self.assertFails(f"module_descriptions has no description for {TESTS}",
+                         f"the description of {RUNTIME} must be one line without '|'",
+                         "module_descriptions describes src/M_GONE.bas, which no configuration lists")
+
+    def test_fails_when_module_descriptions_is_not_a_map(self) -> None:
+        self.edit(lambda m: m.update(module_descriptions=[]))
+        self.assertFails("module_descriptions must map each module path to its description")
 
     def test_fails_on_an_invalid_pattern(self) -> None:
         self.edit(lambda m: m["project_name_patterns"].append("^M_("))
@@ -374,6 +401,122 @@ class WorkflowPolicySelfTest(GateTestCase):
             self.assertFails("a version series is not an audited version")
 
 
+class BranchCoverage(GateTestCase):
+    """The branch coverage check, independent of whether a release is open.
+
+    The tracked configuration has release entries while a release is open and
+    none after it ships. Each test that needs release entries builds them from
+    the tracked default-branch entries, so the tests hold in both states.
+    """
+
+    check = "branch coverage"
+    DEPENDABOT = ".github/dependabot.yml"
+    CODEQL = ".github/workflows/codeql.yml"
+    ENTRY = re.compile(r"^  - package-ecosystem:", re.M)
+
+    def version(self) -> str:
+        return self.repo.read_text("VERSION").strip()
+
+    def next_release(self) -> str:
+        branches = check_repo.open_release_branches(self.version())
+        assert branches is not None, "VERSION does not hold a release number"
+        return branches[0]
+
+    def configuration(self, release: str | None) -> str:
+        """Return the tracked configuration with release entries for one branch.
+
+        Every tracked release entry is dropped. With a release, each default
+        entry is followed by a copy that targets it.
+        """
+        text = self.repo.read_text(self.DEPENDABOT)
+        starts = [m.start() for m in self.ENTRY.finditer(text)]
+        self.assertTrue(starts, "the tracked configuration has no entries")
+        chunks = [text[i:j].rstrip("\n") + "\n"
+                  for i, j in zip(starts, [*starts[1:], len(text)], strict=True)]
+        defaults = [c for c in chunks if "target-branch:" not in c]
+        entries: list[str] = []
+        for chunk in defaults:
+            entries.append(chunk)
+            if release:
+                directory = re.search(r"^    directory: .*\n", chunk, re.M)
+                assert directory is not None
+                entries.append(chunk.replace(
+                    directory[0], directory[0] + f"    target-branch: {release}\n", 1))
+        return text[:starts[0]] + "\n".join(entries)
+
+    def write_configuration(self, release: str | None) -> str:
+        text = self.configuration(release)
+        self.repo.write(self.DEPENDABOT, text)
+        return text
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_passes_without_release_entries(self) -> None:
+        self.write_configuration(None)
+        self.assertPasses()
+
+    def test_passes_with_entries_for_the_next_release(self) -> None:
+        self.write_configuration(self.next_release())
+        self.assertPasses()
+
+    def test_fails_on_a_missing_release_entry(self) -> None:
+        release = self.next_release()
+        text = self.write_configuration(release)
+        head, _, tail = text.rpartition(f"    target-branch: {release}\n")
+        self.repo.write(self.DEPENDABOT, head + tail)
+        self.assertFails(f"pip has no entry for {release}",
+                         "pip has 2 entries without target-branch")
+
+    def test_fails_on_a_stale_release_branch(self) -> None:
+        stale = f"release/v{self.version()}"
+        self.write_configuration(stale)
+        self.assertFails(f"targets {stale}, but VERSION is {self.version()}")
+
+    def test_fails_on_an_extra_branch(self) -> None:
+        self.write_configuration("develop")
+        self.assertFails("(github-actions) targets develop, which is not a release")
+
+    def test_fails_on_a_mismatched_schedule(self) -> None:
+        release = self.next_release()
+        text = self.write_configuration(release)
+        head, _, tail = text.rpartition("interval: monthly")
+        self.repo.write(self.DEPENDABOT, head + "interval: weekly" + tail)
+        self.assertFails(f"pip entry for {release}: schedule differs")
+
+    def test_fails_when_codeql_skips_release_pull_requests(self) -> None:
+        self.repo.replace(self.CODEQL, "      - 'release/**'\n  push:", "  push:")
+        self.assertFails("on.pull_request.branches does not include 'release/**'")
+
+    def test_fails_when_codeql_excludes_main_after_including_it(self) -> None:
+        self.repo.replace(self.CODEQL, "      - 'release/**'\n  push:",
+                          "      - 'release/**'\n      - '!main'\n  push:")
+        self.assertFails("on.pull_request.branches has the negative pattern '!main'")
+
+    def test_fails_when_a_file_is_missing(self) -> None:
+        self.repo.remove(self.CODEQL)
+        self.assertFails(f"{self.CODEQL} is missing")
+
+
+class BranchCoverageSelfTest(GateTestCase):
+    check = "branch coverage self-test"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_no_setting_is_compared(self) -> None:
+        with patch.object(check_repo, "MIRRORED_KEYS", ()):
+            self.assertFails("a mismatched schedule is rejected: expected 1 finding(s), got 0")
+
+    def test_fails_when_negative_patterns_are_ignored(self) -> None:
+        with patch.object(check_repo, "NEGATIVE_PATTERN_PREFIX", "\0"):
+            self.assertFails("a negative pattern after main is rejected")
+
+    def test_fails_when_codeql_requires_no_branch(self) -> None:
+        with patch.object(check_repo, "CODEQL_BRANCHES", {}):
+            self.assertFails("a missing pull-request trigger is rejected")
+
+
 class WikiBadgeSelfTest(GateTestCase):
     check = "wiki badge self-test"
 
@@ -551,6 +694,59 @@ class MarkdownEscapeSelfTest(GateTestCase):
     def test_fails_when_no_escape_is_recognised(self) -> None:
         with patch.object(check_repo, "ESCAPE_RE", NEVER):
             self.assertFails("an escaped underscore is reported")
+
+
+class DocumentedCommands(GateTestCase):
+    check = "documented commands"
+    DOC = "docs/RIBBON_SDI_BEHAVIOR.md"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_on_a_missing_script(self) -> None:
+        self.repo.append(self.DOC, "\n```text\npython3 tools/no_such_tool.py --check\n```\n")
+        self.assertFails(f"{self.DOC}:", "tools/no_such_tool.py: no such tool is tracked")
+
+    def test_fails_on_an_unknown_option(self) -> None:
+        self.repo.append(self.DOC, "\nRun `python3 tools/render_docs.py --verify` first.\n")
+        self.assertFails("tools/render_docs.py accepts no option --verify")
+
+    def test_fails_on_an_option_the_tool_no_longer_accepts(self) -> None:
+        self.repo.replace("tools/check_issues.py", '"--check-config"', '"--check-forms"')
+        self.assertFails("CONTRIBUTING.md:", "tools/check_issues.py accepts no option --check-config")
+
+    def test_fails_on_an_unknown_powershell_parameter(self) -> None:
+        self.repo.append(self.DOC, "\n```powershell\n"
+                                   ".\\tools\\Sync-EXCEL_UI-VBA.ps1 -workbookpath x -Configuration Demo\n```\n")
+        found = self.assertFails("tools\\Sync-EXCEL_UI-VBA.ps1 declares no parameter -Configuration")
+        self.assertFalse([f for f in found if "-workbookpath" in f], found)
+
+    def test_fails_on_a_parameter_the_script_no_longer_declares(self) -> None:
+        self.repo.replace("tools/Sync-EXCEL_UI-VBA.ps1", "[switch]$NewWorkbook", "[switch]$CreateWorkbook")
+        self.assertFails("docs/WORKBOOK_SYNC.md:", "declares no parameter -NewWorkbook")
+
+    def test_fails_on_a_parameter_given_through_a_cmd_launcher(self) -> None:
+        self.repo.append(self.DOC, "\nRun `tools\\Certify-EXCEL_UI.cmd -AllowDirty -Bundle x`.\n")
+        self.assertFails("tools/Certify-EXCEL_UI.ps1 declares no parameter -Bundle")
+
+    def test_passes_on_a_changelog_entry_that_names_an_old_option(self) -> None:
+        self.repo.append("CHANGELOG.md", "\n`python3 tools/render_docs.py --verify`\n")
+        self.assertPasses()
+
+
+class DocumentedCommandsSelfTest(GateTestCase):
+    check = "documented commands self-test"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_no_tool_path_is_recognised(self) -> None:
+        with patch.object(check_repo, "TOOL_PATH_RE", NEVER):
+            self.assertFails("a missing script is reported", "an inline-code invocation is read")
+
+    def test_fails_when_powershell_parameters_are_not_read(self) -> None:
+        with patch.object(check_repo, "powershell_parameters", lambda source: set()):
+            self.assertFails("a valid PowerShell invocation passes")
 
 
 class LabelCatalogue(GateTestCase):

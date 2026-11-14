@@ -260,6 +260,7 @@ in a corrective patch release.
 - Two hosts, both 64-bit, are two data points. Ribbon behaviour can vary by
   Office channel, update ring and administrative policy; two matching blocks do
   not establish behaviour for the supported range, and 32-bit Office is not
-  measured (#51).
+  measured. I have no 32-bit host and closed #51, which asked for that
+  evidence, as not planned, so 32-bit Office is not certified.
 - Any add-in that manipulates the Ribbon can influence these readings. Prefer a
   clean Excel session with other add-ins disabled.

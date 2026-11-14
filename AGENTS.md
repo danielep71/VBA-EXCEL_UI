@@ -39,13 +39,6 @@ Describe the finding with its file and line, the evidence, why it matters, and t
 
 ## Validation
 
-Before pushing, run these and fix every finding:
-
-- `python3 tools/check_repo.py`
-- `python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas` (fix drift with `--write`)
-- `node .github/scripts/labels-sync.mjs --self-test` and `node .github/scripts/labels-drift.mjs --self-test`
-- `python3 tools/check_issues.py --check-config`
-- `python3 -m unittest discover -s tests`
-- `ruff check tools tests`, `mypy --strict tools` and `mypy --strict tests`, installed from `tools/requirements-quality-ci.txt`
+Before pushing, run `python3 tools/verify.py --ci` and fix every finding. It runs every static check in one declared order (`--list` shows them) and needs Node.js, plus Ruff and mypy installed from `tools/requirements-quality-ci.txt`. Fix formatting drift with `python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas`.
 
 Keep `tools/public_api_manifest.txt` in sync with the public `UI_*` API (`python3 tools/vba_api.py --write`). Code that changes VBA behaviour also needs `Test_EXCEL_UI_RunReleaseCertification` on a real Excel host; static checks cannot replace it.

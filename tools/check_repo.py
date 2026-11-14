@@ -16,6 +16,7 @@ Exit status is 0 when every check passed, 1 otherwise. --help prints the usage
 and exits 0 without running a check.
 """
 
+import ast
 import fnmatch
 import hashlib
 import html
@@ -28,6 +29,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Iterator
 from datetime import date
 from types import ModuleType
+from typing import TypeAlias
 from urllib.parse import unquote
 
 from vba_lex import code_only
@@ -47,20 +49,16 @@ TEST_MODULES: list[str] = []
 DEMO_MODULES: list[str] = []
 ALL_MODULES: list[str] = []
 
-# The production set as I document it, in the INSTALLATION.md import order.
-# It is data, not the list the checks iterate: the module-inventory check fails
-# when the discovered src/ set disagrees with it, so adding or removing a
-# production module has to be a deliberate change here and in INSTALLATION.md.
-EXPECTED_PRODUCTION_MODULES = [
+# Modules that other checks read by name: the title-bar, WinAPI and
+# demo-cleanup regressions and the public API manifest inspect these files
+# directly, so they must exist. Which modules make up each configuration is not
+# written here: tools/vba-projects.json lists them, and the module-inventory
+# and VBA-project-manifest checks hold the tracked modules to it.
+REQUIRED_MODULES = [
     "src/M_EXCEL_UI_RUNTIME.bas",
     "src/M_EXCEL_UI_TITLEBAR.bas",
     "src/M_EXCEL_UI_SNAPSHOT.bas",
     "src/M_EXCEL_UI.bas",
-]
-
-# Modules that other checks read by name: the title-bar and demo-cleanup
-# regressions inspect these files directly, so they must exist.
-REQUIRED_MODULES = EXPECTED_PRODUCTION_MODULES + [
     "test/M_EXCEL_UI_REGRESSION_TESTS.bas",
     "demo/M_DEMO_BUILDER.bas",
     "demo/M_EXCEL_UI_DEMO.bas",
@@ -91,9 +89,15 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/public_api_manifest.txt",
     "tools/binary_allowlist.txt",
     "tools/check_issues.py",
+    "tools/verify.py",
+    "tools/render_docs.py",
     "tools/vba-projects.json",
     ".github/labels.json",
+    ".github/excel-evidence-policy.json",
+    "docs/GOVERNANCE.md",
     "docs/ISSUE_LABELS.md",
+    "docs/REPOSITORY_STRUCTURE.md",
+    "docs/VBA_HOUSE_STYLE.md",
 ]
 
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-+]*)?$")
@@ -233,35 +237,72 @@ def load_modules() -> list[str]:
     return misplaced
 
 
+INSTALLATION_GUIDE = "INSTALLATION.md"
+PRODUCTION_BLOCK_RE = re.compile(
+    r"^<!-- generated:modules:production -->$(?P<body>.*?)^<!-- /generated:modules:production -->$",
+    re.M | re.S)
+TABLE_SOURCE_RE = re.compile(r"^\|[^|\n]*\|\s*`([^`]+)`", re.M)
+
+
+def documented_import_order() -> list[str] | None:
+    """The module paths of the production table of INSTALLATION.md, in order.
+
+    Returns None after recording why the table cannot be read.
+    """
+    if not os.path.isfile(os.path.join(REPO, INSTALLATION_GUIDE)):
+        fail("module-inventory", f"{INSTALLATION_GUIDE} is missing")
+        return None
+    m = PRODUCTION_BLOCK_RE.search(read(INSTALLATION_GUIDE).decode("utf-8"))
+    if m is None:
+        fail("module-inventory",
+             f"{INSTALLATION_GUIDE}: no generated:modules:production block; the import "
+             f"order must be generated from {VBA_PROJECT_MANIFEST} by tools/render_docs.py")
+        return None
+    return TABLE_SOURCE_RE.findall(m.group("body"))
+
+
 def check_module_inventory() -> None:
     """Discover the modules every other module check iterates, and audit them.
 
-    Three things fail here: a VBA module tracked outside src/, test/ or demo/;
-    a production set that disagrees with EXPECTED_PRODUCTION_MODULES; and a
-    production module that tools/vba_api.py assigns to no public API section,
-    whose public declarations would otherwise never reach the manifest.
+    Four things fail here: a VBA module tracked outside src/, test/ or demo/;
+    a src/ set that disagrees with the production configuration of
+    tools/vba-projects.json; an INSTALLATION.md import order that is not the
+    order of that configuration; and a production module that tools/vba_api.py
+    assigns to no public API section, whose public declarations would
+    otherwise never reach the manifest.
     """
+    check = "module-inventory"
     for rel in load_modules():
-        fail("module-inventory",
+        fail(check,
              f"{rel}: VBA module tracked outside src/, test/ or demo/; it "
              f"would escape every module check")
 
     discovered = set(PRODUCTION_MODULES)
-    expected = set(EXPECTED_PRODUCTION_MODULES)
-    for rel in sorted(discovered - expected):
-        fail("module-inventory",
-             f"{rel}: production module is not in EXPECTED_PRODUCTION_MODULES; "
-             f"add it there and to the INSTALLATION.md import order")
-    for rel in sorted(expected - discovered):
-        fail("module-inventory",
-             f"{rel}: listed in EXPECTED_PRODUCTION_MODULES but not tracked")
+    manifest = load_vba_project_manifest(check)
+    production = configuration_modules(manifest, "production", check) if manifest is not None else None
+    if production is not None:
+        for rel in sorted(discovered - set(production)):
+            fail(check,
+                 f"{rel}: production module is not in the production configuration of "
+                 f"{VBA_PROJECT_MANIFEST}; add it there in import order and run "
+                 f"python3 tools/render_docs.py --write")
+        for rel in sorted(set(production) - discovered):
+            fail(check,
+                 f"{rel}: listed in the production configuration of {VBA_PROJECT_MANIFEST} "
+                 f"but not tracked in src/")
+        documented = documented_import_order()
+        if documented is not None and documented != production:
+            fail(check,
+                 f"{INSTALLATION_GUIDE}: the production import order is "
+                 f"{', '.join(documented) or 'empty'}, but {VBA_PROJECT_MANIFEST} lists "
+                 f"{', '.join(production)}; run python3 tools/render_docs.py --write")
 
     vba_api = import_vba_api()
     if vba_api is None:
         return
     sectioned = {rel for _, modules in vba_api.SECTIONS for rel in modules}
     for rel in sorted(discovered - sectioned):
-        fail("module-inventory",
+        fail(check,
              f"{rel}: production module in no public API section of "
              f"tools/vba_api.py; its declarations would never be recorded")
 
@@ -285,9 +326,8 @@ def expected_configurations() -> dict[str, set[str]]:
     }
 
 
-def load_vba_project_manifest() -> dict[str, object] | None:
+def load_vba_project_manifest(check: str = "vba-project-manifest") -> dict[str, object] | None:
     """Parse the manifest, or record why it cannot be read and return None."""
-    check = "vba-project-manifest"
     path = os.path.join(REPO, VBA_PROJECT_MANIFEST)
     if not os.path.isfile(path):
         fail(check, f"{VBA_PROJECT_MANIFEST} is missing")
@@ -303,14 +343,14 @@ def load_vba_project_manifest() -> dict[str, object] | None:
     return manifest
 
 
-def configuration_modules(manifest: dict[str, object], name: str) -> list[str] | None:
+def configuration_modules(manifest: dict[str, object], name: str,
+                          check: str = "vba-project-manifest") -> list[str] | None:
     """The module list of one configuration, or None after recording why not."""
     configurations = manifest.get("configurations")
     entry = configurations.get(name) if isinstance(configurations, dict) else None
     modules = entry.get("modules") if isinstance(entry, dict) else None
     if not isinstance(modules, list) or not all(isinstance(rel, str) for rel in modules):
-        fail("vba-project-manifest",
-             f"{VBA_PROJECT_MANIFEST}: configuration {name!r} has no list of module paths")
+        fail(check, f"{VBA_PROJECT_MANIFEST}: configuration {name!r} has no list of module paths")
         return None
     return modules
 
@@ -322,8 +362,11 @@ def check_vba_project_manifest() -> None:
     read their module sets from this manifest. It must parse; each tracked
     standard module of src/, test/ and demo/ must be in a configuration; each
     listed path must be tracked; the three configurations must hold exactly
-    the sets of expected_configurations(), each path once; and it must list
-    no document modules, since this repository has none.
+    the sets of expected_configurations(), each path once; it must list no
+    document modules, since this repository has none; and module_descriptions
+    must give every listed module a one-line description, which
+    tools/render_docs.py writes into the module tables, and describe nothing
+    else.
     """
     check = "vba-project-manifest"
     manifest = load_vba_project_manifest()
@@ -362,6 +405,30 @@ def check_vba_project_manifest() -> None:
 
     for rel in sorted(set().union(*expected.values()) - listed):
         fail(check, f"{rel}: tracked module is in no configuration of {VBA_PROJECT_MANIFEST}")
+
+    for finding in module_description_findings(manifest.get("module_descriptions"), listed):
+        fail(check, f"{VBA_PROJECT_MANIFEST}: {finding}")
+
+
+def module_description_findings(descriptions: object, listed: set[str]) -> list[str]:
+    """Every listed module needs a one-line description, and nothing else has one.
+
+    tools/render_docs.py writes each description into a table cell, so a
+    description must hold neither a line break nor a '|'.
+    """
+    if not isinstance(descriptions, dict):
+        return ["module_descriptions must map each module path to its description"]
+    findings: list[str] = []
+    for rel in sorted(listed):
+        text = descriptions.get(rel)
+        if not isinstance(text, str) or not text.strip():
+            findings.append(f"module_descriptions has no description for {rel}")
+        elif "|" in text or "\n" in text:
+            findings.append(f"the description of {rel} must be one line without '|', "
+                            f"since it becomes a table cell")
+    findings.extend(f"module_descriptions describes {rel}, which no configuration lists"
+                    for rel in sorted(set(descriptions) - listed))
+    return findings
 
 
 # --------------------------------------------------------------------------
@@ -948,6 +1015,654 @@ def check_workflow_policy_selftest() -> None:
 
 
 # --------------------------------------------------------------------------
+# Branch coverage. Which branches Dependabot updates and CodeQL analyses is
+# configured by hand, and a branch that is renamed, added or forgotten loses
+# its updates or its analysis without anything turning red.
+
+DEPENDABOT_CONFIG = ".github/dependabot.yml"
+CODEQL_WORKFLOW = ".github/workflows/codeql.yml"
+
+# The settings a release-branch entry must share with its ecosystem's
+# default-branch entry, so both branches receive the same updates.
+MIRRORED_KEYS = ("directory", "schedule", "groups", "labels")
+
+# The branch filters CodeQL must include, per event.
+CODEQL_BRANCHES = {
+    "push": ("main",),
+    "pull_request": ("main", "release/**"),
+}
+
+# The only filter the check reads. Another one (paths, branches-ignore, types)
+# can narrow what runs in ways the check cannot judge, so it is reported.
+CODEQL_FILTER_KEYS = ("branches",)
+
+# GitHub reads a branch pattern starting with this as an exclusion.
+NEGATIVE_PATTERN_PREFIX = "!"
+
+VERSION_CORE_RE = re.compile(
+    r"^(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)(?P<suffix>[-+].*)?$")
+
+RELEASE_BRANCH_RE = re.compile(r"^release/v(?P<core>[0-9]+\.[0-9]+\.[0-9]+)$")
+
+YamlValue: TypeAlias = "str | list[YamlValue] | dict[str, YamlValue] | None"
+
+# One structural line: (line number, indentation, content without comment).
+YamlLine = tuple[int, int, str]
+
+YAML_KEY_RE = re.compile(
+    r"""^(?P<key>"[^"\\]*"|'[^']*'|[^\s"'#\-?:,\[\]{}&*!|>%@`][^:]*?)\s*:"""
+    r"""(?:\s+(?P<value>.*))?$""")
+
+# A plain scalar starting with one of these is a flow collection, an anchor,
+# an alias, a tag, a block scalar or a reserved indicator.
+YAML_UNSUPPORTED_START = "[]{}&*!|>%@`"
+
+
+class YamlShapeError(ValueError):
+    """The text uses YAML that the narrow reader below does not understand."""
+
+
+def strip_yaml_comment(line: str) -> str:
+    """Remove a trailing comment, leaving a # inside a quoted scalar alone."""
+    quote = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == quote:
+                if quote == "'" and line[i + 1:i + 2] == "'":
+                    i += 2
+                    continue
+                quote = ""
+        elif ch in "'\"" and (i == 0 or line[i - 1] == " "):
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i].rstrip()
+        i += 1
+    return line
+
+
+def yaml_lines(text: str) -> list[YamlLine]:
+    """Return the lines that carry structure, with comments removed."""
+    out: list[YamlLine] = []
+    for n, raw in enumerate(text.split("\n"), 1):
+        body = strip_yaml_comment(raw.rstrip())
+        if not body.strip():
+            continue
+        indent = len(body) - len(body.lstrip(" "))
+        out.append((n, indent, body[indent:]))
+    return out
+
+
+class YamlReader:
+    """A deliberately narrow reader for block-style YAML.
+
+    It reads block mappings, block sequences and single-line plain or quoted
+    scalars, and keeps every scalar as a string. Anything else — flow
+    collections, anchors, aliases, tags, block scalars, multi-document
+    streams, tab indentation — raises YamlShapeError rather than being guessed
+    at: a reader that silently misread a shape would let the check pass a
+    configuration it never really read. The gate uses only the standard
+    library, so there is no full YAML parser to fall back on.
+    """
+
+    def __init__(self, rel: str, lines: list[YamlLine]) -> None:
+        self.rel = rel
+        self.lines = list(lines)
+
+    def error(self, i: int, message: str) -> YamlShapeError:
+        n = self.lines[min(i, len(self.lines) - 1)][0] if self.lines else 0
+        return YamlShapeError(
+            f"{self.rel}:{n}: {message}; the check reads block mappings, block "
+            f"sequences and single-line scalars only")
+
+    def parse(self) -> YamlValue:
+        if not self.lines:
+            return None
+        value, end = self.block(0, self.lines[0][1])
+        if end != len(self.lines):
+            raise self.error(end, "inconsistent indentation")
+        return value
+
+    @staticmethod
+    def is_item(content: str) -> bool:
+        return content == "-" or content.startswith("- ")
+
+    def nested(self, i: int, indent: int) -> tuple[YamlValue, int]:
+        """Return the block nested under line i, or None when there is none."""
+        if i + 1 < len(self.lines) and self.lines[i + 1][1] > indent:
+            return self.block(i + 1, self.lines[i + 1][1])
+        return None, i + 1
+
+    def block(self, i: int, indent: int) -> tuple[YamlValue, int]:
+        if self.is_item(self.lines[i][2]):
+            return self.sequence(i, indent)
+        return self.mapping(i, indent)
+
+    def mapping(self, i: int, indent: int) -> tuple[YamlValue, int]:
+        out: dict[str, YamlValue] = {}
+        while i < len(self.lines):
+            _, ind, content = self.lines[i]
+            if ind < indent:
+                break
+            if ind > indent:
+                raise self.error(i, "unexpected indentation")
+            if self.is_item(content):
+                raise self.error(i, "a sequence item where a mapping key was expected")
+            m = YAML_KEY_RE.match(content)
+            if not m:
+                raise self.error(i, f"cannot read {content!r} as a mapping key")
+            key = self.scalar(i, m.group("key"))
+            if key in out:
+                raise self.error(i, f"duplicate key {key!r}")
+            if m.group("value"):
+                out[key] = self.scalar(i, m.group("value"))
+                i += 1
+            else:
+                out[key], i = self.nested(i, ind)
+        return out, i
+
+    def sequence(self, i: int, indent: int) -> tuple[YamlValue, int]:
+        out: list[YamlValue] = []
+        while i < len(self.lines):
+            n, ind, content = self.lines[i]
+            if ind < indent:
+                break
+            if ind > indent:
+                raise self.error(i, "unexpected indentation")
+            if not self.is_item(content):
+                raise self.error(i, "a mapping key where a sequence item was expected")
+            rest = content[1:].lstrip(" ")
+            if not rest:
+                item, i = self.nested(i, ind)
+            elif YAML_KEY_RE.match(rest):
+                # "- key: value" opens a mapping whose keys align with "key".
+                column = ind + len(content) - len(rest)
+                self.lines[i] = (n, column, rest)
+                item, i = self.mapping(i, column)
+            else:
+                item = self.scalar(i, rest)
+                i += 1
+            out.append(item)
+        return out, i
+
+    def scalar(self, i: int, text: str) -> str:
+        if text.startswith('"'):
+            inner = text[1:-1]
+            if len(text) < 2 or not text.endswith('"') or '"' in inner or "\\" in inner:
+                raise self.error(i, f"cannot read the double-quoted scalar {text}")
+            return inner
+        if text.startswith("'"):
+            inner = text[1:-1]
+            if len(text) < 2 or not text.endswith("'") or "'" in inner.replace("''", ""):
+                raise self.error(i, f"cannot read the single-quoted scalar {text}")
+            return inner.replace("''", "'")
+        if text[0] in YAML_UNSUPPORTED_START or text[0] == "\t":
+            raise self.error(i, f"{text!r} is a flow collection, anchor, alias, tag "
+                                f"or block scalar")
+        if ": " in text or text in ("---", "..."):
+            raise self.error(i, f"cannot read {text!r} as a plain scalar")
+        return text
+
+
+def parse_yaml(rel: str, text: str) -> YamlValue:
+    """Parse a whole block-style YAML document, or raise YamlShapeError."""
+    lines = yaml_lines(text)
+    if lines and lines[0][1] != 0:
+        raise YamlReader(rel, lines).error(0, "the document must start at column 0")
+    return YamlReader(rel, lines).parse()
+
+
+def open_release_branches(version: str) -> list[str] | None:
+    """Return the release branches that may be open while VERSION is current.
+
+    VERSION names the newest shipped release: the release-state check holds it
+    to the newest dated CHANGELOG.md section, and it moves only in the change
+    that dates the next one. While a release is being prepared, VERSION still
+    names the previous release, so the open branch is the next patch, minor or
+    major release after it. A pre-release VERSION may also be followed by its
+    own final release.
+    """
+    m = VERSION_CORE_RE.match(version)
+    if not m:
+        return None
+    major, minor, patch = (int(m.group(k)) for k in ("major", "minor", "patch"))
+    branches: list[str] = []
+    if (m.group("suffix") or "").startswith("-"):
+        branches.append(f"release/v{major}.{minor}.{patch}")
+    branches += [
+        f"release/v{major}.{minor}.{patch + 1}",
+        f"release/v{major}.{minor + 1}.0",
+        f"release/v{major + 1}.0.0",
+    ]
+    return branches
+
+
+def is_shipped_release(branch: str, version: str) -> bool:
+    """Return True when the branch names VERSION or an earlier release."""
+    branch_m = RELEASE_BRANCH_RE.match(branch)
+    version_m = VERSION_CORE_RE.match(version)
+    if not branch_m or not version_m:
+        return False
+    core = tuple(int(part) for part in branch_m.group("core").split("."))
+    current = tuple(int(version_m.group(k)) for k in ("major", "minor", "patch"))
+    return core <= current
+
+
+DependabotEntry = dict[str, YamlValue]
+
+
+def classify_dependabot_entries(
+        rel: str, updates: list[YamlValue], version: str, candidates: list[str],
+) -> tuple[dict[str, list[DependabotEntry]],
+           dict[str, dict[str, list[DependabotEntry]]], list[str]]:
+    """Sort entries into default-branch and release-branch entries per ecosystem.
+
+    Returns the default entries, the release entries keyed by target branch,
+    and a finding for every entry that names no branch the check accepts.
+    """
+    findings: list[str] = []
+    defaults: dict[str, list[DependabotEntry]] = {}
+    releases: dict[str, dict[str, list[DependabotEntry]]] = {}
+
+    for k, entry in enumerate(updates):
+        assert isinstance(entry, dict)
+        ecosystem = entry.get("package-ecosystem")
+        target = entry.get("target-branch")
+        if not isinstance(ecosystem, str):
+            findings.append(f"{rel}: updates[{k}] has no package-ecosystem")
+            continue
+        where = f"{rel}: updates[{k}] ({ecosystem})"
+        if "directories" in entry:
+            findings.append(f"{where} uses 'directories'; the check compares a "
+                            f"single 'directory'")
+        elif target is None:
+            defaults.setdefault(ecosystem, []).append(entry)
+        elif not isinstance(target, str):
+            findings.append(f"{where} has a target-branch that is not a branch name")
+        elif target in candidates:
+            releases.setdefault(ecosystem, {}).setdefault(target, []).append(entry)
+        elif is_shipped_release(target, version):
+            findings.append(
+                f"{where} targets {target}, but VERSION is {version}: that release "
+                f"has shipped, so the entry is stale. Point it at the release "
+                f"branch that is open now, or remove it when none is")
+        else:
+            findings.append(
+                f"{where} targets {target}, which is not a release that can "
+                f"follow VERSION {version} ({', '.join(candidates)}); the "
+                f"default-branch entry names no target-branch")
+    return defaults, releases, findings
+
+
+def release_entry_findings(rel: str, ecosystem: str, target: str,
+                           entries: list[DependabotEntry],
+                           defaults: list[DependabotEntry]) -> list[str]:
+    """Return the problems with one ecosystem's entries for the open release."""
+    if not entries:
+        return [f"{rel}: {ecosystem} has no entry for {target}, which other "
+                f"ecosystems target; every ecosystem must cover the open "
+                f"release branch"]
+    findings: list[str] = []
+    if len(entries) > 1:
+        findings.append(f"{rel}: {ecosystem} has {len(entries)} entries for "
+                        f"{target}; it needs exactly one")
+    if len(defaults) != 1:
+        return findings              # reported as a default-entry count
+    for key in MIRRORED_KEYS:
+        if any(entry.get(key) != defaults[0].get(key) for entry in entries):
+            findings.append(
+                f"{rel}: {ecosystem} entry for {target}: {key} differs from the "
+                f"default-branch entry; both branches must receive the same "
+                f"updates")
+    return findings
+
+
+def dependabot_findings(rel: str, text: str, version: str) -> list[str]:
+    """Return every branch-coverage problem in a Dependabot configuration.
+
+    Each ecosystem needs exactly one entry without target-branch, which
+    Dependabot applies to the default branch. While a release is open, each
+    ecosystem also needs one entry for that release branch, mirroring the
+    default entry's settings, and no entry may name any other branch. After a
+    release ships, the default entries alone are the correct configuration.
+    """
+    candidates = open_release_branches(version)
+    if candidates is None:
+        return [f"VERSION does not hold a release number ({version!r}), so the "
+                f"open release branch cannot be derived"]
+
+    try:
+        config = parse_yaml(rel, text)
+    except YamlShapeError as exc:
+        return [str(exc)]
+
+    updates = config.get("updates") if isinstance(config, dict) else None
+    if not isinstance(updates, list) or not all(isinstance(e, dict) for e in updates):
+        return [f"{rel}: 'updates' must be a block sequence of mappings"]
+
+    defaults, releases, findings = classify_dependabot_entries(
+        rel, updates, version, candidates)
+
+    ecosystems = sorted(set(defaults) | set(releases))
+    for ecosystem in ecosystems:
+        count = len(defaults.get(ecosystem, []))
+        if count != 1:
+            findings.append(
+                f"{rel}: {ecosystem} has {count} entries without target-branch; it "
+                f"needs exactly one, for the default branch")
+
+    targets = sorted({t for by_target in releases.values() for t in by_target})
+    if len(targets) > 1:
+        findings.append(
+            f"{rel}: entries target {', '.join(targets)}; only one release "
+            f"branch is open at a time")
+        return findings
+
+    for ecosystem in ecosystems:
+        for target in targets:
+            findings += release_entry_findings(
+                rel, ecosystem, target, releases.get(ecosystem, {}).get(target, []),
+                defaults.get(ecosystem, []))
+    return findings
+
+
+def codeql_findings(rel: str, text: str) -> list[str]:
+    """Return every branch-coverage problem in the CodeQL workflow triggers."""
+    lines = yaml_lines(text)
+    on_at = next((i for i, (_, ind, content) in enumerate(lines)
+                  if ind == 0 and ON_KEY_RE.match(content)), None)
+    if on_at is None:
+        return [f"{rel}: no 'on:' block mapping; the triggers cannot be read"]
+
+    block: list[YamlLine] = []
+    for line in lines[on_at + 1:]:
+        if line[1] == 0:
+            break
+        block.append(line)
+
+    try:
+        triggers = YamlReader(rel, block).parse()
+    except YamlShapeError as exc:
+        return [str(exc)]
+
+    if not isinstance(triggers, dict):
+        return [f"{rel}: 'on' must be a block mapping of events"]
+
+    findings: list[str] = []
+    for event, required in CODEQL_BRANCHES.items():
+        if event not in triggers:
+            findings.append(f"{rel}: on.{event} is missing; CodeQL must analyse "
+                            f"{event} events for {', '.join(required)}")
+        else:
+            findings += codeql_trigger_findings(rel, event, triggers[event], required)
+    return findings
+
+
+def codeql_trigger_findings(rel: str, event: str, trigger: YamlValue,
+                            required: tuple[str, ...]) -> list[str]:
+    """Return the problems with one CodeQL event's branch filter.
+
+    GitHub evaluates branch patterns in order, and a later negative pattern
+    ('!main') excludes a branch an earlier one included. Membership alone
+    would then report coverage that does not exist, so a negative pattern is
+    rejected rather than evaluated.
+    """
+    if trigger is None:
+        return []                    # no filter: every branch is analysed
+    if not isinstance(trigger, dict):
+        return [f"{rel}: on.{event} must be a mapping with a branches list"]
+
+    findings = [
+        f"{rel}: on.{event}.{key} is a filter this check does not read; teach "
+        f"tools/check_repo.py about it before relying on it"
+        for key in trigger if key not in CODEQL_FILTER_KEYS
+    ]
+    branches = trigger.get("branches")
+    if not isinstance(branches, list) or not all(isinstance(b, str) for b in branches):
+        findings.append(f"{rel}: on.{event}.branches must be a list of branch names")
+        return findings
+    for branch in branches:
+        assert isinstance(branch, str)
+        if branch.startswith(NEGATIVE_PATTERN_PREFIX):
+            findings.append(
+                f"{rel}: on.{event}.branches has the negative pattern {branch!r}; "
+                f"it can exclude a branch listed before it, and the check does "
+                f"not evaluate pattern order")
+    for branch in required:
+        if branch not in branches:
+            findings.append(f"{rel}: on.{event}.branches does not include {branch!r}")
+    return findings
+
+
+def check_branch_coverage() -> None:
+    """Hold Dependabot and CodeQL to the default and the open release branch."""
+    if not os.path.isfile(os.path.join(REPO, "VERSION")):
+        return                       # already reported by required files
+
+    version = read("VERSION").decode("utf-8").strip()
+
+    for rel in (DEPENDABOT_CONFIG, CODEQL_WORKFLOW):
+        if not os.path.isfile(os.path.join(REPO, rel)):
+            fail("branch-coverage", f"{rel} is missing")
+            continue
+        text = read(rel).decode("utf-8")
+        found = (dependabot_findings(rel, text, version) if rel == DEPENDABOT_CONFIG
+                 else codeql_findings(rel, text))
+        for finding in found:
+            fail("branch-coverage", finding)
+
+
+def dependabot_entry(template: str, target: str | None = None) -> str:
+    """Return one fixture entry, for the default branch or for a target."""
+    line = f"    target-branch: {target}\n" if target else ""
+    return template.replace("    schedule:\n", line + "    schedule:\n", 1)
+
+
+DEPENDABOT_ACTIONS = """\
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:23"
+      timezone: Europe/Rome
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - ci
+      - P3
+    commit-message:
+      prefix: ci
+"""
+
+DEPENDABOT_PIP = """\
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: monthly
+    groups:
+      python-quality-tools:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    labels:
+      - ci
+      - P3
+"""
+
+
+def dependabot_doc(*entries: str) -> str:
+    return "# Fixture.\nversion: 2\nupdates:\n" + "\n".join(entries)
+
+
+def dependabot_pair(release: str | None, actions: str = DEPENDABOT_ACTIONS,
+                    pip: str = DEPENDABOT_PIP) -> str:
+    """Return the shape of the tracked configuration with one release open."""
+    entries = [dependabot_entry(DEPENDABOT_ACTIONS)]
+    if release:
+        entries.append(dependabot_entry(actions, release))
+    entries.append(dependabot_entry(DEPENDABOT_PIP))
+    if release:
+        entries.append(dependabot_entry(pip, release))
+    return dependabot_doc(*entries)
+
+
+DEPENDABOT_SELFTEST_CASES = [
+    ("the tracked shape passes", "1.1.2", dependabot_pair("release/v1.1.3"), 0),
+    ("no release entry passes while no release is open", "1.1.2",
+     dependabot_pair(None), 0),
+    ("a minor release branch passes", "1.1.2", dependabot_pair("release/v1.2.0"), 0),
+    ("a major release branch passes", "1.1.2", dependabot_pair("release/v2.0.0"), 0),
+    ("a pre-release VERSION may be followed by its final release", "1.2.0-rc.1",
+     dependabot_pair("release/v1.2.0"), 0),
+    ("a missing release entry is rejected", "1.1.2",
+     dependabot_doc(dependabot_entry(DEPENDABOT_ACTIONS),
+                    dependabot_entry(DEPENDABOT_ACTIONS, "release/v1.1.3"),
+                    dependabot_entry(DEPENDABOT_PIP)),
+     1),
+    ("a stale release branch is rejected", "1.1.3",
+     dependabot_pair("release/v1.1.3"), 2),
+    ("an older release branch is rejected", "1.1.3",
+     dependabot_pair("release/v1.1.2"), 2),
+    ("a release two patches ahead is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.4"), 2),
+    ("an extra branch is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3")
+     + "\n" + dependabot_entry(DEPENDABOT_ACTIONS, "develop"),
+     1),
+    ("two open release branches are rejected", "1.1.2",
+     dependabot_doc(dependabot_entry(DEPENDABOT_ACTIONS),
+                    dependabot_entry(DEPENDABOT_ACTIONS, "release/v1.1.3"),
+                    dependabot_entry(DEPENDABOT_PIP),
+                    dependabot_entry(DEPENDABOT_PIP, "release/v1.2.0")),
+     1),
+    ("a second default entry is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3") + "\n" + dependabot_entry(DEPENDABOT_PIP),
+     1),
+    ("a second release entry is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3")
+     + "\n" + dependabot_entry(DEPENDABOT_PIP, "release/v1.1.3"),
+     1),
+    ("a mismatched directory is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3",
+                     pip=DEPENDABOT_PIP.replace("directory: /tools", "directory: /")),
+     1),
+    ("a mismatched schedule is rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3",
+                     actions=DEPENDABOT_ACTIONS.replace("day: monday", "day: friday")),
+     1),
+    ("mismatched groups are rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3",
+                     pip=DEPENDABOT_PIP.replace("python-quality-tools:", "tools:")),
+     1),
+    ("mismatched labels are rejected", "1.1.2",
+     dependabot_pair("release/v1.1.3",
+                     actions=DEPENDABOT_ACTIONS.replace("      - P3\n", "      - P2\n")),
+     1),
+    ("a malformed VERSION is reported", "next", dependabot_pair("release/v1.1.3"), 1),
+    ("a flow sequence is reported, not guessed at", "1.1.2",
+     dependabot_pair("release/v1.1.3").replace("    labels:\n      - ci\n      - P3\n",
+                                               "    labels: [ci, P3]\n", 1),
+     1),
+    ("an alias is reported, not guessed at", "1.1.2",
+     dependabot_pair("release/v1.1.3").replace('time: "05:23"', "time: *at", 1),
+     1),
+    ("tab indentation is reported, not guessed at", "1.1.2",
+     dependabot_pair("release/v1.1.3").replace("      day: monday", "\tday: monday", 1),
+     1),
+    ("a directories list is reported", "1.1.2",
+     dependabot_pair(None).replace("    directory: /tools\n",
+                                   "    directories:\n      - /tools\n"),
+     1),
+]
+
+CODEQL_TRIGGERS = """\
+name: CodeQL
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+  push:
+    branches:
+      - main
+      - 'release/**'
+  schedule:
+    - cron: '41 4 * * 2'
+  workflow_dispatch:
+
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "a block scalar outside 'on' is not read"
+"""
+
+CODEQL_SELFTEST_CASES = [
+    ("the tracked triggers pass", CODEQL_TRIGGERS, 0),
+    ("an unfiltered push trigger passes",
+     CODEQL_TRIGGERS.replace("  push:\n    branches:\n      - main\n      - 'release/**'\n",
+                             "  push:\n"),
+     0),
+    ("a pull-request trigger without release/** is rejected",
+     CODEQL_TRIGGERS.replace("      - main\n      - 'release/**'\n  push:",
+                             "      - main\n  push:"),
+     1),
+    ("a push trigger without main is rejected",
+     CODEQL_TRIGGERS.replace("  push:\n    branches:\n      - main\n",
+                             "  push:\n    branches:\n"),
+     1),
+    ("a missing pull-request trigger is rejected",
+     CODEQL_TRIGGERS.replace("  pull_request:\n    branches:\n      - main\n"
+                             "      - 'release/**'\n", ""),
+     1),
+    ("an unread filter is reported",
+     CODEQL_TRIGGERS.replace("  push:\n", "  push:\n    paths:\n      - tools/**\n"),
+     1),
+    ("a flow sequence of branches is reported, not guessed at",
+     CODEQL_TRIGGERS.replace("    branches:\n      - main\n      - 'release/**'\n  push:",
+                             "    branches: [main, 'release/**']\n  push:"),
+     1),
+    ("a negative pattern after main is rejected",
+     CODEQL_TRIGGERS.replace("      - 'release/**'\n  push:",
+                             "      - 'release/**'\n      - '!main'\n  push:"),
+     1),
+    ("a negative pattern after release/** is rejected",
+     CODEQL_TRIGGERS.replace("      - 'release/**'\n  schedule:",
+                             "      - 'release/**'\n      - '!release/**'\n  schedule:"),
+     1),
+    ("a missing on block is reported",
+     CODEQL_TRIGGERS.replace("on:\n", "triggers:\n"),
+     1),
+]
+
+
+def check_branch_coverage_selftest() -> None:
+    """Run the branch-coverage rules against their own fixtures.
+
+    A rule that read nothing would report nothing, and a green gate would then
+    say every branch is covered when none is checked.
+    """
+    for label, version, text, expected in DEPENDABOT_SELFTEST_CASES:
+        found = dependabot_findings("fixture.yml", text, version)
+        if len(found) != expected:
+            fail("branch-coverage-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
+
+    for label, text, expected in CODEQL_SELFTEST_CASES:
+        found = codeql_findings("fixture.yml", text)
+        if len(found) != expected:
+            fail("branch-coverage-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
+
+# --------------------------------------------------------------------------
 # Characters a Markdown renderer treats as escapable. A backslash before any of
 # them is markup, not text.
 ESCAPABLE = r"[\\`*_{}\[\]()#+\-.!|<>&\"'~=:;,/$%^?@]"
@@ -1100,6 +1815,379 @@ def check_markdown_escape_selftest() -> None:
         found = escape_findings("fixture.md", text)
         if len(found) != expected:
             fail("markdown-escape-selftest",
+                 f"{label}: expected {expected} finding(s), got {len(found)}"
+                 + (f" | {found}" if found else ""))
+
+
+# --------------------------------------------------------------------------
+# Documented commands. A renamed tool or option leaves instructions that fail
+# on the reader's machine, often a Windows host where finding out costs an
+# Excel session. Every invocation of a repository tool that the documentation
+# quotes as code is held to the tool itself. The changelog is history: it may
+# name a tool or an option as it was when the entry was written.
+DOCUMENTED_COMMANDS_EXCLUDED = ("CHANGELOG.md",)
+
+TOOL_PATH_RE = re.compile(
+    r"(?<![\w./\\-])(?:\.[\\/])?tools[\\/][\w.-]+\.(?:py|ps1|cmd)(?![\w.\\/-])")
+COMMAND_TOKEN_RE = re.compile(r"\"[^\"]*\"|'[^']*'|\S+")
+COMMAND_STOP_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "2>", "2>&1", "<"})
+PYTHON_OPTION_RE = re.compile(r"--[A-Za-z][\w-]*")
+POWERSHELL_PARAMETER_RE = re.compile(r"-[A-Za-z]\w*")
+POWERSHELL_SCRIPT_PARAM_RE = re.compile(
+    r"^\s*(?:\[CmdletBinding\((?P<binding>[^)]*)\)\]\s*)?param\s*\(", re.I | re.M)
+POWERSHELL_VARIABLE_RE = re.compile(r"\$\{?([A-Za-z_]\w*)")
+# The parameters PowerShell adds to every advanced script.
+POWERSHELL_COMMON_PARAMETERS = frozenset(name.casefold() for name in (
+    "Verbose", "Debug", "ErrorAction", "WarningAction", "InformationAction",
+    "ProgressAction", "ErrorVariable", "WarningVariable", "InformationVariable",
+    "OutVariable", "OutBuffer", "PipelineVariable"))
+CMD_SCRIPT_RE = re.compile(r"%~dp0(?P<script>[\w.-]+\.ps1)", re.I)
+
+# Repository path -> source text, or None when no such tool is tracked.
+SourceReader = Callable[[str], "str | None"]
+
+
+def code_segments(text: str) -> Iterator[tuple[int, str]]:
+    """Yield (line number, code) for each fenced code line and inline code span.
+
+    A fenced line that ends in a continuation (a space and then a backslash or
+    PowerShell's backtick) is joined with the next one and yielded at the line
+    where it starts. HTML comment blocks are skipped, like everything GitHub
+    does not render; prose is not read at all.
+    """
+    fence: tuple[str, int] | None = None
+    in_comment = False
+    pending: tuple[int, str] | None = None
+    for n, line in enumerate(text.split("\n"), 1):
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        if fence is not None:
+            if closes_fence(line, fence):
+                fence = None
+                if pending is not None:
+                    yield pending
+                    pending = None
+                continue
+            start, joined = pending if pending is not None else (n, "")
+            joined += line.rstrip("\r")
+            if re.search(r"\s[\\`]$", joined):
+                pending = (start, joined[:-1])
+                continue
+            pending = None
+            yield start, joined
+            continue
+        fence = fence_opener(line)
+        if fence is not None:
+            continue
+        if HTML_COMMENT_BLOCK_START_RE.match(line):
+            in_comment = "-->" not in line[line.index("<!--") + 4:]
+            continue
+        for m in INLINE_CODE_RE.finditer(line):
+            yield n, m.group(0).strip("`")
+    if pending is not None:
+        yield pending
+
+
+def command_arguments(tail: str) -> list[str]:
+    """The arguments after a tool path, up to the end of its command."""
+    arguments: list[str] = []
+    for token in COMMAND_TOKEN_RE.findall(tail):
+        if token in COMMAND_STOP_TOKENS or token.startswith("#"):
+            break
+        arguments.append(token)
+    return arguments
+
+
+def python_tool_options(source: str) -> set[str]:
+    """The options a Python tool accepts, read from its source without running it.
+
+    Importing a tool to build its parser would run its module code inside the
+    gate, so the source is parsed instead. A tool that uses argparse accepts the
+    option strings of its add_argument calls, plus -h and --help unless its
+    ArgumentParser sets add_help=False. A tool that reads sys.argv by hand
+    accepts the option-shaped string literals of its comparisons (== and in),
+    which is how such a parser recognises an argument.
+    An option assembled at run time is not seen, and is reported as unknown
+    rather than passed unchecked. Raises SyntaxError for unparsable source.
+    """
+    tree = ast.parse(source)
+    declared: set[str] = set()
+    uses_argparse = False
+    adds_help = True
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+        if name == "add_argument":
+            uses_argparse = True
+            declared.update(arg.value for arg in node.args
+                            if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                            and arg.value.startswith("-"))
+        elif name == "ArgumentParser":
+            adds_help = adds_help and not any(
+                keyword.arg == "add_help" and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is False for keyword in node.keywords)
+    if uses_argparse:
+        return declared | ({"-h", "--help"} if adds_help else set())
+    return {constant.value for node in ast.walk(tree) if isinstance(node, ast.Compare)
+            for operand in (node.left, *node.comparators) for constant in ast.walk(operand)
+            if isinstance(constant, ast.Constant) and isinstance(constant.value, str)
+            and PYTHON_OPTION_RE.fullmatch(constant.value)}
+
+
+def powershell_code(source: str) -> str:
+    """Return PowerShell source without comments and with every string emptied.
+
+    What is left is code only, so a comma, a bracket or a $name inside a
+    comment or a string cannot be taken for part of a parameter list.
+    """
+    out: list[str] = []
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        if source.startswith("<#", i):
+            end = source.find("#>", i + 2)
+            i = n if end < 0 else end + 2
+            out.append(" ")
+        elif c == "#":
+            end = source.find("\n", i)
+            i = n if end < 0 else end
+        elif c in "\"'":
+            j = i + 1
+            while j < n and source[j] != c:
+                j += 2 if source[j] == "`" and c == '"' else 1
+            out.append(c + c)
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def split_top_level(text: str) -> list[str]:
+    """Split text at the commas outside every (), [] and {}."""
+    pieces: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for c in text:
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        if c == "," and depth == 0:
+            pieces.append("".join(current))
+            current = []
+        else:
+            current.append(c)
+    pieces.append("".join(current))
+    return pieces
+
+
+def powershell_parameters(source: str) -> set[str]:
+    """The parameters a PowerShell script declares, lower-cased.
+
+    Read from the script's own param() block, the first one in the code once
+    comments are removed: a function's param() block comes later and declares
+    the function's parameters, not the script's. An advanced script (one with
+    [CmdletBinding()] or a [Parameter()] attribute) also accepts the common
+    parameters, and -WhatIf and -Confirm when it supports ShouldProcess. A
+    script without a param() block takes no parameters.
+    """
+    code = powershell_code(source)
+    m = POWERSHELL_SCRIPT_PARAM_RE.search(code)
+    if m is None:
+        return set()
+    depth, end = 1, m.end()
+    while end < len(code) and depth:
+        depth += {"(": 1, ")": -1}.get(code[end], 0)
+        end += 1
+    block = code[m.end():end - 1]
+    names: set[str] = set()
+    for piece in split_top_level(block):
+        while True:
+            stripped = re.sub(r"\[[^\[\]]*\]", " ", piece)
+            if stripped == piece:
+                break
+            piece = stripped
+        variable = POWERSHELL_VARIABLE_RE.search(piece)
+        if variable:
+            names.add(variable.group(1).casefold())
+    binding = m.group("binding")
+    if binding is not None or re.search(r"\[Parameter\b", block, re.I):
+        names |= POWERSHELL_COMMON_PARAMETERS
+    if binding is not None and re.search(r"SupportsShouldProcess", binding, re.I):
+        names |= {"whatif", "confirm"}
+    return names
+
+
+def cmd_forward_target(rel: str, source: str) -> str | None:
+    """The PowerShell script a .cmd launcher passes its own arguments (%*) to."""
+    targets = set(CMD_SCRIPT_RE.findall(source))
+    if "%*" not in source or len(targets) != 1:
+        return None
+    directory = os.path.dirname(rel)
+    return f"{directory}/{targets.pop()}" if directory else targets.pop()
+
+
+def powershell_findings(script: str, rel: str, source: str, arguments: list[str],
+                        read_source: SourceReader) -> list[str]:
+    """Report each -Parameter that the script, or the script a .cmd runs, does not declare."""
+    used = [token.split(":")[0] for token in arguments
+            if POWERSHELL_PARAMETER_RE.fullmatch(token.split(":")[0])]
+    if not used:
+        return []
+    if rel.endswith(".cmd"):
+        target = cmd_forward_target(rel, source)
+        if target is None:
+            return [f"{script} passes no arguments on, so {name} does nothing" for name in used]
+        forwarded = read_source(target)
+        if forwarded is None:
+            return [f"{script} runs {target}, which is not tracked"]
+        script, source = target, forwarded
+    declared = powershell_parameters(source)
+    return [f"{script} declares no parameter {name}" for name in used
+            if name[1:].casefold() not in declared]
+
+
+def invocation_findings(script: str, tail: str, read_source: SourceReader) -> list[str]:
+    """Check one documented invocation of a tool: the tool, then its options."""
+    rel = script.replace("\\", "/").removeprefix("./")
+    source = read_source(rel)
+    if source is None:
+        return [f"{script}: no such tool is tracked"]
+    arguments = command_arguments(tail)
+    if not rel.endswith(".py"):
+        return powershell_findings(script, rel, source, arguments, read_source)
+    try:
+        accepted = python_tool_options(source)
+    except SyntaxError as exc:
+        return [f"{script} cannot be parsed to read its options: {exc.msg}"]
+    return [f"{script} accepts no option {option}" for option in
+            (token.split("=")[0] for token in arguments) if PYTHON_OPTION_RE.fullmatch(option)
+            and option not in accepted]
+
+
+def documented_command_findings(rel: str, text: str, read_source: SourceReader) -> list[str]:
+    """Report every quoted tool invocation of a document that would not run as written."""
+    findings: list[str] = []
+    for n, segment in code_segments(text):
+        matches = list(TOOL_PATH_RE.finditer(segment))
+        for index, m in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(segment)
+            findings.extend(f"{rel}:{n}: {finding}"
+                            for finding in invocation_findings(m.group(0), segment[m.end():end], read_source))
+    return findings
+
+
+def check_documented_commands() -> None:
+    """Hold every tool invocation the documentation quotes as code to the tool.
+
+    Each tracked Markdown file except the changelog is read for tools/*.py,
+    tools/*.ps1 and tools/*.cmd paths in fenced code and inline code. The tool
+    must be tracked; each --option given to a Python tool must be one it
+    accepts (python_tool_options); each -Parameter given to a PowerShell
+    script, directly or through a .cmd launcher that passes its arguments on,
+    must be declared in the script's param() block, in any letter case.
+    Values, placeholders such as <sha> and the options of the program that
+    runs the tool (powershell.exe -File, python3) are not checked.
+    """
+    tracked = git_tracked_files()
+    if tracked is None:
+        return
+    known = set(tracked)
+
+    def read_source(rel: str) -> str | None:
+        if rel not in known or not os.path.isfile(os.path.join(REPO, rel)):
+            return None
+        return read(rel).decode("utf-8-sig", errors="replace")
+
+    for rel in sorted(r for r in tracked if r.endswith(".md") and r not in DOCUMENTED_COMMANDS_EXCLUDED):
+        for finding in documented_command_findings(rel, read(rel).decode("utf-8"), read_source):
+            fail("documented-commands", finding)
+
+
+DOCUMENTED_COMMANDS_SELFTEST_TOOLS = {
+    "tools/run_check.py": (
+        "import argparse\n"
+        "parser = argparse.ArgumentParser()\n"
+        "parser.add_argument('--check', action='store_true')\n"
+        "parser.add_argument('-r', '--root')\n"),
+    "tools/by_hand.py": (
+        "import subprocess, sys\n"
+        "if sys.argv[1:] == ['--selftest']:\n"
+        "    subprocess.run(['git', 'ls-files', '--stage'])\n"),
+    "tools/Run-Thing.ps1": (
+        "<#\n.SYNOPSIS\nparam($NotAParameter)\n#>\n"
+        "[CmdletBinding()]\n"
+        "param(\n"
+        "    [Parameter(Mandatory = $true)]\n"
+        "    [ValidateSet(\"A, $B\", \"C)\")]\n"
+        "    [string]$WorkbookPath,  # $Commented, too\n"
+        "    [switch]$NewWorkbook = $false\n"
+        ")\n"
+        "function Inner { param($Inner) }\n"),
+    "tools/Run-Thing.cmd": "@echo off\npowershell.exe -File \"%~dp0Run-Thing.ps1\" %*\n",
+    "tools/Fixed.cmd": "@echo off\npowershell.exe -File \"%~dp0Run-Thing.ps1\" -NewWorkbook\n",
+}
+
+DOCUMENTED_COMMANDS_SELFTEST_CASES = [
+    ("a valid invocation passes",
+     "```text\npython3 tools/run_check.py --check --root <dir>\n```\n", 0),
+    ("an inline-code invocation is read",
+     "Run `python3 tools/run_check.py --chek` first.\n", 1),
+    ("a valid inline-code invocation passes",
+     "Run `py -3 tools\\run_check.py --check` first.\n", 0),
+    ("a missing script is reported",
+     "```text\npython3 tools/gone.py --check\n```\n", 1),
+    ("an unknown option is reported",
+     "```text\npython tools/run_check.py --check --chek\n```\n", 1),
+    ("an option given with = is checked by its name",
+     "`python3 tools/run_check.py --root=C:\\x --rot=y`\n", 1),
+    ("argparse adds --help", "`python3 tools/run_check.py --help`\n", 0),
+    ("an option a hand-written parser compares with passes",
+     "`python3 tools/by_hand.py --selftest`\n", 0),
+    ("an option a hand-written parser never compares with is reported",
+     "`python3 tools/by_hand.py --write --stage`\n", 2),
+    ("values, placeholders and short options are not options",
+     "```text\npython3 tools/run_check.py <bundle> -r \"--quoted\" --check ...\n```\n", 0),
+    ("a valid PowerShell invocation passes",
+     "```powershell\npowershell.exe -NoProfile -File .\\tools\\Run-Thing.ps1 "
+     "-WorkbookPath \"C:\\w.xlsm\" -NewWorkbook\n```\n", 0),
+    ("PowerShell parameters are case-insensitive and include the common ones",
+     "`tools/Run-Thing.ps1 -workbookpath x -NewWorkbook:$true -Verbose`\n", 0),
+    ("an unknown PowerShell parameter is reported",
+     "```powershell\n.\\tools\\Run-Thing.ps1 -WorkbookPath x -Mode Demo\n```\n", 1),
+    ("comments, strings and inner functions declare no script parameter",
+     "`tools\\Run-Thing.ps1 -Inner 1 -NotAParameter 2 -Commented 3 -B 4`\n", 4),
+    ("a .cmd passes its arguments on to its script",
+     "`tools\\Run-Thing.cmd -NewWorkbook`\n", 0),
+    ("an unknown parameter through a .cmd is reported",
+     "`tools\\Run-Thing.cmd -Bogus`\n", 1),
+    ("a .cmd that passes nothing on takes no parameters",
+     "`tools\\Fixed.cmd -NewWorkbook`\n", 1),
+    ("a missing .cmd is reported", "Double-click `tools\\Gone.cmd`.\n", 1),
+    ("two commands on one line are read apart",
+     "```text\npython3 tools/run_check.py --check && python3 tools/by_hand.py --selftest\n```\n", 0),
+    ("a continued fenced line is one command",
+     "```bash\npython3 tools/run_check.py \\\n  --chek\n```\n", 1),
+    ("prose is not code", "Run python3 tools/gone.py --check by hand.\n", 0),
+    ("a path that merely ends in tools/ is not a tool", "`docs/tools/gone.py`\n", 0),
+    ("an HTML comment is not code", "<!-- `python3 tools/gone.py` -->\n", 0),
+]
+
+
+def check_documented_commands_selftest() -> None:
+    """Run the documented-command rules against their own fixtures.
+
+    A rule that stopped finding invocations would report nothing and look
+    healthy on the real documentation; the failing fixtures catch that.
+    """
+    for label, text, expected in DOCUMENTED_COMMANDS_SELFTEST_CASES:
+        found = documented_command_findings("fixture.md", text, DOCUMENTED_COMMANDS_SELFTEST_TOOLS.get)
+        if len(found) != expected:
+            fail("documented-commands-selftest",
                  f"{label}: expected {expected} finding(s), got {len(found)}"
                  + (f" | {found}" if found else ""))
 
@@ -2000,6 +3088,8 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("supported API declaration", check_supported_api_declaration),
     ("workflow pin policy", check_workflow_policy),
     ("workflow policy self-test", check_workflow_policy_selftest),
+    ("branch coverage", check_branch_coverage),
+    ("branch coverage self-test", check_branch_coverage_selftest),
     ("wiki badge self-test", check_wiki_badge_selftest),
     ("release state", check_release_state),
     ("review finding crosswalk", check_review_crosswalk),
@@ -2008,6 +3098,8 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("markdown links", check_markdown_links),
     ("markdown escapes", check_markdown_escapes),
     ("markdown escape self-test", check_markdown_escape_selftest),
+    ("documented commands", check_documented_commands),
+    ("documented commands self-test", check_documented_commands_selftest),
     ("label catalogue", check_label_catalogue),
     ("private review denylist", check_private_review_denylist),
     ("private review denylist self-test", check_private_review_denylist_selftest),

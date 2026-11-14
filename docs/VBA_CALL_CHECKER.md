@@ -171,9 +171,9 @@ I run the checker in the `Static checks` workflow as a non-blocking step after
 the required checks, and I keep it out of `tools/check_repo.py`. A static model
 of VBA name resolution can be wrong where the compiler is not, and a false
 defect must not block a merge that Excel would accept. Its verdict goes to the
-job summary and to the `check-vba-calls` artifact, where I review it; its unit
-tests are part of the required job, so a checker that stopped detecting a
-defect still fails the build.
+job summary and to the `check-vba-calls-<run id>-<attempt>` artifact, where I
+review it; its unit tests are part of the required job, so a checker that
+stopped detecting a defect still fails the build.
 
 When it reports a defect, confirm it by compiling the affected configuration in
 Excel. If Excel agrees, fix the VBA. If Excel compiles and runs the code, the
