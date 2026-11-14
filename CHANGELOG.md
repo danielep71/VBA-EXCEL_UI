@@ -884,8 +884,9 @@ measured against that baseline.
   items and reads a fence up to three columns past its item's content column;
   outside every list, four spaces still make indented code that opens no
   fence. An item whose marker line is empty ends at the blank line after it,
-  as in CommonMark. The self-test and unit tests cover both cases, a nested
-  list, an empty item, a top-level fence and indented code.
+  and a setext underline (`===` or `---`) ends a paragraph, as in CommonMark.
+  The self-test and unit tests cover both cases, a nested list, an empty item,
+  the lines that end a paragraph, a top-level fence and indented code.
 
 ### 📖 Documentation
 

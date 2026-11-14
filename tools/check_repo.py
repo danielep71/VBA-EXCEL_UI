@@ -1780,6 +1780,8 @@ ESCAPE_SELFTEST_CASES = [
      "- Outer\n  - Inner\n    ```text\n    A\\_B\n    ```\n  - Next\n\nM\\_EXCEL\\_UI in prose\n", 1),
     ("an empty item ends at the blank line after it, so its fence is top level",
      "-\n\n  ```text\nA\\_B\n  ```\n", 0),
+    ("a setext underline ends an item's paragraph, so the next line ends the item",
+     "- Item\n  ===\nOutside\n\n  ```text\nA\\_B\n  ```\n", 0),
     ("a fence indented four spaces in an ordered item is code",
      "1. Step\n\n    ```text\n    C:\\_scratch\\file\n    ```\n", 0),
     ("a top-level fence is code", "```text\nC:\\_scratch\\file\n```\n", 0),
@@ -2887,6 +2889,10 @@ LIST_MARKER_RE = re.compile(r" {0,3}(?P<marker>[-+*]|(?P<start>[0-9]{1,9})[.)])(
 
 THEMATIC_BREAK_RE = re.compile(r" {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$")
 
+# A setext heading underline: under a paragraph line in the same container,
+# a run of = or - completes that paragraph as a heading.
+SETEXT_UNDERLINE_RE = re.compile(r" {0,3}(?:=+|-+)[ \t]*$")
+
 # A block quote or an HTML comment block also interrupts a paragraph, so a
 # line that starts one cannot continue it lazily.
 OTHER_BLOCK_START_RE = re.compile(r" {0,3}(?:>|<!--)")
@@ -2949,7 +2955,8 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
 
     The rest of the container model is deliberately narrow. An ordered item
     that would interrupt a paragraph must start at 1, as in CommonMark, and a
-    paragraph line indented less than its item continues it lazily. An item
+    paragraph line indented less than its item continues it lazily, until a
+    blank line, a setext underline or another block ends the paragraph. An item
     whose marker line is empty ends at a following blank line. Block
     quotes are not tracked and tabs count to the next multiple of four. Each
     line is yielded whole, container prefix included.
@@ -3026,6 +3033,12 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
                 break
         rest = work[col:]
 
+        if paragraph and not opened and not closed and SETEXT_UNDERLINE_RE.match(rest):
+            # The underline ends the paragraph as a heading, so the next line
+            # cannot continue it lazily. It is never itself a lazy line.
+            paragraph = False
+            yield n, line, "text"
+            continue
         if paragraph and not opened and closed and not _starts_block(rest):
             # A lazy continuation line: the paragraph keeps its items.
             items.extend(closed)

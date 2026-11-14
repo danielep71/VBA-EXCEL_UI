@@ -115,6 +115,48 @@ class ListContainedFences(unittest.TestCase):
         self.assertEqual(kinds("- <!-- note -->", "## After"), ["comment", "text"])
 
 
+# After each block below, an unindented line cannot continue the list item's
+# paragraph lazily, so it ends the item and the top-level fence after it hides
+# its heading. Were the paragraph still open, the line would keep the item, the
+# fence would take the item's column and the heading would end it early.
+AFTER_ITEM = ("Outside", "", "  ```text", "## Hidden", "  ```", "## After")
+
+
+class ParagraphTransitions(unittest.TestCase):
+    """Which lines end a paragraph, read against CommonMark 0.31.2."""
+
+    def test_a_setext_underline_ends_the_paragraph(self) -> None:
+        for underline in ("  ===", "  =", "  ---", "  --", "  -", "  ===   "):
+            with self.subTest(underline=underline):
+                self.assertEqual(anchors("- Item", underline, *AFTER_ITEM), ["after"])
+
+    def test_after_a_top_level_setext_heading_an_ordered_list_can_start_at_two(self) -> None:
+        lines = ("Para", "===", "2. Step", "", "    ```text", "    C:\\_scratch\\file", "    ```")
+        self.assertEqual(kinds(*lines), ["text", "text", "text", "text", "fence", "code", "fence"])
+        self.assertEqual(escapes(*lines), [])
+
+    def test_a_lazy_underline_is_paragraph_text(self) -> None:
+        # A setext underline cannot be a lazy line, so "===" continues "Item".
+        self.assertEqual(escapes("- Item", "===", "    ```text", "    C:\\_x", "    ```"), [])
+
+    def test_other_blocks_end_the_paragraph(self) -> None:
+        cases = {
+            "an ATX heading": ("- Item", "  # Heading"),
+            "a thematic break": ("- Item", "  ***"),
+            "a spaced thematic break": ("- Item", "  - - -"),
+            "a fence": ("- Item", "  ```", "  code", "  ```"),
+            "an HTML comment block": ("- Item", "  <!--", "  note", "  -->"),
+        }
+        for label, lines in cases.items():
+            with self.subTest(label):
+                found = anchors(*lines, *AFTER_ITEM)
+                self.assertEqual(found[-1:], ["after"])
+                self.assertNotIn("hidden", found)
+
+    def test_a_blank_line_ends_the_paragraph(self) -> None:
+        self.assertEqual(anchors("- Item", "", *AFTER_ITEM), ["after"])
+
+
 class TopLevelBlocks(unittest.TestCase):
 
     def test_a_top_level_fence_still_hides_its_content(self) -> None:
