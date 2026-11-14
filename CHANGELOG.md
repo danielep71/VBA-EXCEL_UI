@@ -896,6 +896,28 @@ measured against that baseline.
   `WinAPI error capture` check rejects, in each compilation, a capture that
   follows another statement or an `On Error`, an ambiguous-zero call without
   an adjacent `SetLastError 0`, and a `GetLastError` declaration.
+- Fixed the Markdown scanner behind the **markdown links**, **markdown
+  escapes**, **documented commands** and release-state checks reading fenced
+  code blocks inside list items as if they were at the top level
+  ([#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150)). A fence
+  after a list marker (`` - ```text ``) was missed, and its closing fence then
+  opened a block that hid every heading after it, so a working link to a later
+  heading was reported as broken. A fence indented four spaces under an ordered
+  item was read as prose, so a path such as `C:\_scratch\file` in it was
+  reported as escaped Markdown. The scanner now tracks bullet and ordered list
+  items and reads a fence up to three columns past its item's content column;
+  outside every list, four spaces still make indented code that opens no
+  fence. Items end where CommonMark 0.31.2 ends them: an empty item at the
+  blank line after it, an item before a marker of another list type,
+  delimiter or bullet whatever its number, and a comment block with its item;
+  a setext underline (`===` or `---`) ends a paragraph unless the paragraph
+  holds only link reference definitions. Where the specification's reference
+  parser and GitHub's renderer disagree, the scanner follows GitHub. The unit
+  tests check the item boundaries of every list example in the specification
+  (253 to 325) except four lists inside block quotes, and every link reference
+  definition example (192 to 218); block quotes, HTML blocks other than
+  comments and headings inside list items stay out of scope, and tests pin
+  that behaviour.
 
 ### 📖 Documentation
 
@@ -1373,7 +1395,7 @@ practical closure status of any item that has since been reopened.
 | [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | Full public API contract gate | Implemented; open until the release diff shows no supported facade change |
 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | Accurate v1.1.2/v1.1.3 closure documentation | Open |
 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | Exact-head review and certification gate | Open |
-| [#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150) | Markdown scanner handles fenced code inside list containers | Open |
+| [#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150) | Markdown scanner handles fenced code inside list containers | Implemented; open until merged |
 | [#175](https://github.com/danielep71/VBA-EXCEL_UI/issues/175) | Release guides verify the tag before pushing it and name `tools/verify.py` and 64-bit-only certification | Closed (#179) |
 
 P1 and P2 items block release until implementation, regression coverage,

@@ -1771,6 +1771,25 @@ ESCAPE_SELFTEST_CASES = [
     ("a longer closing fence still closes the block",
      "```text\nA\\_B\n`````\nM\\_EXCEL\\_UI in prose\n", 1),
 
+    # Fences inside list items are read at the item's content column.
+    ("a fence indented to a bullet item's content is code",
+     "- Example:\n  ```text\n  A\\_B\n  ```\n\nM\\_EXCEL\\_UI in prose\n", 1),
+    ("a fence after a list marker is code, and its closing fence opens nothing",
+     "- ```text\n  A\\_B\n  ```\n\nM\\_EXCEL\\_UI in prose\n", 1),
+    ("a nested item's fence is code",
+     "- Outer\n  - Inner\n    ```text\n    A\\_B\n    ```\n  - Next\n\nM\\_EXCEL\\_UI in prose\n", 1),
+    ("an empty item ends at the blank line after it, so its fence is top level",
+     "-\n\n  ```text\nA\\_B\n  ```\n", 0),
+    ("a setext underline ends an item's paragraph, so the next line ends the item",
+     "- Item\n  ===\nOutside\n\n  ```text\nA\\_B\n  ```\n", 0),
+    ("a marker of another list type ends the item before it, whatever its number",
+     "- Item\n2. Two\n\n  ```text\nA\\_B\n  ```\n", 0),
+    ("a fence indented four spaces in an ordered item is code",
+     "1. Step\n\n    ```text\n    C:\\_scratch\\file\n    ```\n", 0),
+    ("a top-level fence is code", "```text\nC:\\_scratch\\file\n```\n", 0),
+    ("indented code is not a fence and hides nothing after it",
+     "Text\n\n    ```\n\nM\\_EXCEL\\_UI in prose\n", 1),
+
     # Content that legitimately contains backslashes or looks like it does.
     ("a URL is not an escape", "See https://example.com/a_b/c-d.html for more.\n", 0),
     ("a bare Windows path in a fence is data",
@@ -1855,20 +1874,9 @@ def code_segments(text: str) -> Iterator[tuple[int, str]]:
     where it starts. HTML comment blocks are skipped, like everything GitHub
     does not render; prose is not read at all.
     """
-    fence: tuple[str, int] | None = None
-    in_comment = False
     pending: tuple[int, str] | None = None
-    for n, line in enumerate(text.split("\n"), 1):
-        if in_comment:
-            in_comment = "-->" not in line
-            continue
-        if fence is not None:
-            if closes_fence(line, fence):
-                fence = None
-                if pending is not None:
-                    yield pending
-                    pending = None
-                continue
+    for n, line, kind in markdown_line_kinds(text):
+        if kind == "code":
             start, joined = pending if pending is not None else (n, "")
             joined += line.rstrip("\r")
             if re.search(r"\s[\\`]$", joined):
@@ -1877,14 +1885,12 @@ def code_segments(text: str) -> Iterator[tuple[int, str]]:
             pending = None
             yield start, joined
             continue
-        fence = fence_opener(line)
-        if fence is not None:
-            continue
-        if HTML_COMMENT_BLOCK_START_RE.match(line):
-            in_comment = "-->" not in line[line.index("<!--") + 4:]
-            continue
-        for m in INLINE_CODE_RE.finditer(line):
-            yield n, m.group(0).strip("`")
+        if pending is not None:
+            yield pending
+            pending = None
+        if kind == "text":
+            for m in INLINE_CODE_RE.finditer(line):
+                yield n, m.group(0).strip("`")
     if pending is not None:
         yield pending
 
@@ -2879,11 +2885,134 @@ HTML_COMMENT_BLOCK_START_RE = re.compile(r"^ {0,3}<!--")
 INLINE_HTML_COMMENT_RE = re.compile(r"<!--.*?-->")
 
 
-def rendered_markdown_lines(text: str) -> Iterator[tuple[int, str]]:
-    """Yield (line number, line) for each line GitHub renders as Markdown.
+# A list item's marker: a bullet, or up to nine digits and "." or ")",
+# followed by spaces or the end of the line.
+LIST_MARKER_RE = re.compile(r" {0,3}(?P<marker>[-+*]|(?P<start>[0-9]{1,9})[.)])(?:(?P<gap> +)(?P<rest>.*))?$")
 
-    Read in one pass over fences and comments, so it serves both the heading
-    anchors and the changelog's release headings and link references.
+THEMATIC_BREAK_RE = re.compile(r" {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$")
+
+# A setext heading underline: under a paragraph line in the same container,
+# a run of = or - completes that paragraph as a heading.
+SETEXT_UNDERLINE_RE = re.compile(r" {0,3}(?:=+|-+)[ \t]*$")
+
+# A block quote or an HTML comment block also interrupts a paragraph, so a
+# line that starts one cannot continue it lazily.
+OTHER_BLOCK_START_RE = re.compile(r" {0,3}(?:>|<!--)")
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+# Link reference definitions (CommonMark 0.31.2, section 4.7), read the way
+# the reference parser reads them from a paragraph's text.
+LINK_LABEL_RE = re.compile(r"\[(?:[^\\\[\]]|\\.){0,999}\]", re.S)
+LINK_DESTINATION_BRACES_RE = re.compile(r"<(?:[^<>\n\\\x00]|\\.)*>")
+LINK_TITLE_RE = re.compile(r'"(?:\\.|[^\\"\x00])*"' r"|'(?:\\.|[^\\'\x00])*'" r"|\((?:\\.|[^\\()\x00])*\)", re.S)
+SPACES_AND_NEWLINE_RE = re.compile(r"[ \t]*(?:\n[ \t]*)?")
+SPACE_AT_LINE_END_RE = re.compile(r"[ \t]*(?:\n|$)")
+ASCII_PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+
+
+def _link_destination_end(s: str, pos: int) -> int | None:
+    """Return where a link destination starting at pos ends, or None.
+
+    This follows cmark-gfm, the parser GitHub renders with: an unmatched
+    "(" is accepted, an unmatched ")" ends the destination, and more than 32
+    nested parentheses reject it.
+    """
+    m = LINK_DESTINATION_BRACES_RE.match(s, pos)
+    if m:
+        return m.end()
+    if s.startswith("<", pos):
+        return None
+    start, depth = pos, 0
+    while pos < len(s):
+        c = s[pos]
+        if c == "\\" and pos + 1 < len(s) and s[pos + 1] in ASCII_PUNCTUATION:
+            pos += 2
+        elif c == "(":
+            pos, depth = pos + 1, depth + 1
+            if depth > 32:
+                return None
+        elif c == ")":
+            if depth < 1:
+                break
+            pos, depth = pos + 1, depth - 1
+        elif c in " \t\n\x0b\x0c\r":
+            break
+        else:
+            pos += 1
+    return None if pos == start else pos
+
+
+def _link_definition_length(s: str) -> int:
+    """Return the length of the link reference definition s starts with, or 0."""
+    label = LINK_LABEL_RE.match(s)
+    if not label or not s.startswith(":", label.end()) or not label.group(0)[1:-1].strip():
+        return 0
+    pos = SPACES_AND_NEWLINE_RE.match(s, label.end() + 1).end()  # type: ignore[union-attr]
+    end = _link_destination_end(s, pos)
+    if end is None:
+        return 0
+    before_title = end
+    pos = SPACES_AND_NEWLINE_RE.match(s, end).end()  # type: ignore[union-attr]
+    title = LINK_TITLE_RE.match(s, pos) if pos != before_title else None
+    if title:
+        line_end = SPACE_AT_LINE_END_RE.match(s, title.end())
+        if line_end:
+            return line_end.end()
+    line_end = SPACE_AT_LINE_END_RE.match(s, before_title)
+    return line_end.end() if line_end else 0
+
+
+def _only_link_definitions(lines: list[str]) -> bool:
+    """Return whether a paragraph's lines are all link reference definitions."""
+    text = "".join(line + "\n" for line in lines)
+    while text.startswith("["):
+        length = _link_definition_length(text)
+        if not length:
+            break
+        text = text[length:]
+    return not text
+
+
+def _interrupts_paragraph(marker: re.Match[str]) -> bool:
+    """Return whether a list marker may start a list in the middle of a paragraph.
+
+    CommonMark lets it only when the item has content and, if ordered, starts at 1.
+    """
+    start = marker.group("start")
+    return bool((marker.group("rest") or "").strip()) and (start is None or int(start) == 1)
+
+
+def _marker_lines(items: list[tuple[int, int]]) -> tuple[int, ...]:
+    return tuple(line for _, line in items)
+
+
+def _starts_block(rest: str) -> bool:
+    """Return whether a line that is not a list item starts a block that ends a paragraph."""
+    return bool(fence_opener(rest) or ATX_HEADING_RE.match(rest) or THEMATIC_BREAK_RE.match(rest)
+                or OTHER_BLOCK_START_RE.match(rest))
+
+
+def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:
+    """Yield (line number, line, kind) for each line of a Markdown document.
+
+    See markdown_line_blocks, which also reports the open list items.
+    """
+    for n, line, kind, _ in markdown_line_blocks(text):
+        yield n, line, kind
+
+
+def markdown_line_blocks(text: str) -> Iterator[tuple[int, str, str, tuple[int, ...]]]:  # noqa: C901
+    """Yield (line number, line, kind, open items) for each line of a Markdown document.
+
+    The kind is "text" for a line GitHub renders as Markdown, "fence" for an
+    opening or closing fence, "code" for a line inside a fenced block, and
+    "comment" for a line of an HTML comment block. The open items are the
+    list items open after the line is read, outermost first, each named by the
+    number of the line its marker is on.
 
     Two kinds of block hide their lines, and each one's delimiters are plain
     content inside the other:
@@ -2896,24 +3025,195 @@ def rendered_markdown_lines(text: str) -> Iterator[tuple[int, str]]:
     that line only and hides nothing below it, even if it is never closed,
     because the next line's block structure is read first. So <!-- inside a
     code span, or after other text, never changes the state.
+
+    Fences are read inside their list items, as CommonMark reads them. A list
+    item's content starts at the column after its marker and the spaces that
+    follow it, and a fence inside the item may be indented up to three columns
+    past that column. So "- ```text" opens a fence, and so does a fence
+    indented four spaces under "1. Step". A fenced block inside an item ends
+    at its closing fence or at the first line that is not indented to the
+    item's content, which ends the item too, and so does a comment block.
+    Outside every list, four spaces still make a line indented code, whose
+    backticks open nothing.
+
+    List items end where CommonMark 0.31.2 (sections 5.2 and 5.3) ends them.
+    A marker inside a paragraph of the innermost open item starts a list only
+    if the item has content and, when ordered, starts at 1; a marker outside
+    a closed item starts a new item or list whatever its type, delimiter,
+    number or content. A paragraph line indented less than its item continues
+    it lazily, until a blank line, a setext underline or another block ends
+    the paragraph. An item whose marker line is empty ends at a following
+    blank line. Tabs count to the next multiple of four.
+
+    A paragraph of only link reference definitions (section 4.7) is still a
+    paragraph for these rules, but it has no text to make a setext heading
+    of, so an underline below it is paragraph text. Where commonmark.js and
+    cmark-gfm disagree, the scanner follows cmark-gfm, which renders Markdown
+    on GitHub: a definition may use tabs and an unmatched "(" in its
+    destination, a lazy line keeps its indentation, an item whose only
+    paragraph was definitions ends at its second blank line, and a blank
+    line of spaces up to an empty item's content column continues it.
+
+    The model is deliberately narrow, and tests pin each limit:
+
+    - block quotes are not containers, so a list inside a block quote (spec
+      examples 259, 260, 292 and 293) and a fence after ">" are read as
+      text, though a ">" line still ends a paragraph;
+    - HTML blocks other than comments are not tracked, so a fence inside a
+      <div> block (spec example 161) is read as a fence;
+    - list types and tight or loose lists are not reported;
+    - each line is yielded whole, container prefix included, so a heading
+      inside a list item gives no anchor.
     """
+    items: list[tuple[int, int]] = []  # (content column, marker line) of each open item
     fence: tuple[str, int] | None = None
     in_comment = False
+    block_col = 0  # content column of the item holding the open fence or comment
+    paragraph = False
+    paragraph_lines: list[str] = []  # the open paragraph's text, line by line
+    paragraph_alone = False  # the paragraph is its item's first block
+    starts_empty = False  # the innermost item has no block yet
     for n, line in enumerate(text.split("\n"), 1):
+        work = line.rstrip("\r").expandtabs(4)
+        blank = not work.strip()
+        indent = _indent(work)
         if in_comment:
-            in_comment = "-->" not in line
-            continue
+            if blank or indent >= block_col:
+                in_comment = "-->" not in line
+                yield n, line, "comment", _marker_lines(items)
+                continue
+            # A line outside the item's content ends the item and its block.
+            in_comment = False
         if fence is not None:
-            if closes_fence(line, fence):
-                fence = None
+            if blank:
+                yield n, line, "code", _marker_lines(items)
+                continue
+            if indent >= block_col:
+                if closes_fence(work[block_col:], fence):
+                    fence = None
+                    yield n, line, "fence", _marker_lines(items)
+                else:
+                    yield n, line, "code", _marker_lines(items)
+                continue
+            # A line outside the item's content ends the item and its block.
+            fence = None
+        if blank:
+            if starts_empty:
+                # An item may begin with at most one blank line, so an item
+                # whose marker line was empty ends at the blank line after it.
+                # cmark-gfm still continues it when the blank line holds
+                # spaces up to the item's content column.
+                if indent < items[-1][0]:
+                    items.pop()
+                    starts_empty = False
+            elif paragraph and paragraph_alone and _only_link_definitions(paragraph_lines):
+                # cmark-gfm drops a paragraph of only link reference
+                # definitions when it closes, so the item is left with no
+                # block and ends at the next blank line, like an empty one.
+                starts_empty = True
+            paragraph = False
+            yield n, line, "text", _marker_lines(items)
             continue
-        fence = fence_opener(line)
-        if fence is not None:
+
+        # Close the items this line is not indented into, then open the
+        # items its markers start. The restrictions on interrupting a
+        # paragraph apply only to a paragraph in the innermost item still
+        # open: a marker outside a closed item starts a new item or list,
+        # whatever its type, number or content.
+        kept = 0
+        while kept < len(items) and indent >= items[kept][0]:
+            kept += 1
+        closed = items[kept:]
+        del items[kept:]
+        col = items[-1][0] if items else 0
+        opened = False
+        was_empty = starts_empty and not closed
+        starts_empty = False
+        while True:
+            rest = work[col:]
+            if _indent(rest) > 3 or THEMATIC_BREAK_RE.match(rest):
+                break
+            m = LIST_MARKER_RE.match(rest)
+            if not m:
+                break
+            marker = m.group("marker")
+            empty = not (m.group("rest") or "").strip()
+            if paragraph and not closed and not opened and not _interrupts_paragraph(m):
+                break
+            marker_end = col + m.start("marker") + len(marker)
+            gap = len(m.group("gap") or "")
+            col = marker_end + 1 if empty or gap > 4 else marker_end + gap
+            items.append((col, n))
+            opened = True
+            paragraph = False
+            if empty:
+                starts_empty = True
+                break
+        rest = work[col:]
+
+        if paragraph and not opened and not closed and SETEXT_UNDERLINE_RE.match(rest):
+            if not _only_link_definitions(paragraph_lines):
+                # The underline ends the paragraph as a heading, so the next
+                # line cannot continue it lazily. It is never itself a lazy line.
+                paragraph = False
+                yield n, line, "text", _marker_lines(items)
+                continue
+            # Link reference definitions leave no text to make a heading of,
+            # so the underline is paragraph text, even "---": GitHub's parser
+            # tries no other block once the line reads as an underline.
+            paragraph_lines = [rest.lstrip(" ")]
+            yield n, line, "text", _marker_lines(items)
             continue
-        if HTML_COMMENT_BLOCK_START_RE.match(line):
-            in_comment = "-->" not in line[line.index("<!--") + 4:]
+        if paragraph and not opened and closed and not _starts_block(rest):
+            # A lazy continuation line: the paragraph keeps its items.
+            items.extend(closed)
+            # cmark-gfm keeps a lazy line's indentation, so a definition on
+            # it no longer starts the paragraph's remaining text.
+            paragraph_lines.append(rest)
+            yield n, line, "text", _marker_lines(items)
             continue
-        yield n, line
+        if not rest.strip():
+            paragraph = False
+            yield n, line, "text", _marker_lines(items)
+            continue
+        if _indent(rest) > 3:
+            # Indented code, unless it continues a paragraph; either way it
+            # is read as text and opens no fence.
+            if paragraph:
+                paragraph_lines.append(rest.lstrip(" "))
+            yield n, line, "text", _marker_lines(items)
+            continue
+        opener = fence_opener(rest)
+        if opener is not None:
+            fence, block_col, paragraph = opener, col, False
+            yield n, line, "fence", _marker_lines(items)
+            continue
+        if HTML_COMMENT_BLOCK_START_RE.match(rest):
+            in_comment = "-->" not in rest[rest.index("<!--") + 4:]
+            block_col = col
+            paragraph = False
+            yield n, line, "comment", _marker_lines(items)
+            continue
+        continues = paragraph
+        paragraph = not (ATX_HEADING_RE.match(rest) or THEMATIC_BREAK_RE.match(rest))
+        if paragraph and not continues:
+            paragraph_lines = [rest.lstrip(" ")]
+            paragraph_alone = opened or was_empty
+        elif paragraph:
+            paragraph_lines.append(rest.lstrip(" "))
+        yield n, line, "text", _marker_lines(items)
+
+
+def rendered_markdown_lines(text: str) -> Iterator[tuple[int, str]]:
+    """Yield (line number, line) for each line GitHub renders as Markdown.
+
+    Read in one pass over fences, comments and list items by
+    markdown_line_kinds, so it serves the heading anchors, the escape check
+    and the changelog's release headings and link references alike.
+    """
+    for n, line, kind in markdown_line_kinds(text):
+        if kind == "text":
+            yield n, line
 
 
 def heading_anchors(text: str) -> list[str]:
