@@ -234,9 +234,13 @@ OK = UI_SetExcelUI_WithResult( _
         TargetScope:=UI_TargetActiveWindow)
 
 If Not OK Then
-    For i = 1 To FailureCount
-        Debug.Print FailureList(i)
-    Next i
+    Debug.Print FailureCount & " failure(s)"
+
+    If IsArray(FailureList) Then
+        For i = LBound(FailureList) To UBound(FailureList)
+            Debug.Print FailureList(i)
+        Next i
+    End If
 End If
 ```
 
@@ -245,6 +249,10 @@ Failure entries use:
 ```text
 Stage | Detail
 ```
+
+Loop over the list's own bounds, not up to `FailureCount`. The list can hold
+fewer entries than the count, and it can be `Empty` while the count is not; see
+[Execution and diagnostics](#execution-and-diagnostics).
 
 ### 5. Hide or show the complete managed shell
 
@@ -510,6 +518,8 @@ statically checked for compile integrity, but they are not runtime-certified.
 
 ---
 
+<a id="execution-and-diagnostics"></a>
+
 ## 🛡️ Execution and diagnostics
 
 The component deliberately uses best-effort processing:
@@ -545,13 +555,22 @@ The `WithResult` APIs return:
 
 Output buffers are cleared deterministically on entry.
 
-`FailureCount` is authoritative and `FailureList` is best effort. When a later
-growth fails, an existing list slot is replaced with a `Diagnostics` truncation
-marker. If the **first** allocation fails, however, no slot exists in which to
-write that marker; the count still reports the failure but the list can remain
-unavailable. That remaining degradation case is tracked by
-[#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38). Recording a failure
-never raises to the caller, because the accumulator runs inside error handlers
+`FailureCount` is authoritative and `FailureList` is best effort. When you pass
+`FailureList`, read the two outputs together:
+
+| `FailureCount` | `FailureList` | Meaning |
+|---|---|---|
+| `0` | `Empty` | No failure was recorded |
+| Greater than `0` | `Empty` | The first entry could not be allocated, so no failure is listed |
+| Greater than the number of entries | Array | The list is degraded or truncated |
+
+When a later growth fails, the last existing entry is replaced with a
+`Diagnostics | failure list could not be grown; …` marker, which needs no new
+memory. A failed first allocation has no entry to replace, so the list stays
+`Empty` and the count still reports every failure. Neither case guarantees any
+diagnostic text when Excel runs out of memory; the count is the reliable signal.
+When you omit `FailureList`, no list is built, so an `Empty` variable then says
+nothing about allocation. Recording a failure never raises to the caller, because the accumulator runs inside error handlers
 and a diagnostic that replaces the failure it was invoked to describe is worse
 than no diagnostic at all.
 
@@ -635,7 +654,9 @@ The suite covers:
 - a failed non-client frame refresh being recorded and retried instead of
   short-circuited as a no-op;
 - failure accumulation degrading visibly instead of raising when an existing
-  failure list cannot grow; first-allocation visibility remains tracked by #38.
+  failure list cannot grow, and a failed first allocation leaving a counted
+  failure with an `Empty` list (`TST_Case_FirstFailureAllocationKeepsContract`,
+  on `release/v1.1.3`).
 
 > [!IMPORTANT]
 > Tests manipulate the real Excel UI of the current process. Run them in a controlled Excel instance.
@@ -859,7 +880,8 @@ observable and are described in
 previous build silently applied a captured value to whichever window was active,
 and `FailureList` may hold fewer entries than `FailureCount` under memory
 pressure. An existing list can record a `Diagnostics` truncation marker; a
-first-allocation failure cannot yet do so and is tracked by #38.
+failed first allocation leaves the list `Empty` while `FailureCount` still
+counts the failure.
 
 ---
 
