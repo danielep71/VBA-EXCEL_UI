@@ -212,6 +212,50 @@ the exact commit being released. A bundle for any other commit, including the
 pull-request head of a release that merges into a new commit, does not certify
 the release.
 
+## 🪪 Title-bar refusal coverage
+
+A title-bar refusal is correct only if nothing reaches a frame. Each case
+below records the complete `GWL_STYLE` of the frame that is active when the
+refused call runs, through the harness WinAPI helpers, and fails unless the
+value afterwards is identical. The caption bit, and with it title-bar
+visibility, is part of that value. Where the captured state and the active
+frame would otherwise agree, the case first changes the active frame through
+the harness, so that a redirected write would show.
+
+The table maps the identity scenarios of
+[#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) to the cases that
+exercise them and to the certification unit that dispatches those cases. It
+describes source coverage at the commit you check out: a row says that a case
+exists and that `Test_EXCEL_UI_RunReleaseCertification` runs it, not that it
+passed.
+
+| Scenario | Refusal in the source | Cases and assertions | Certification unit |
+| --- | --- | --- | --- |
+| Active window changed after capture | None for the title bar: restore writes the captured frame through its retained handle, and the active frame must not change. The Ribbon is refused (`captured Ribbon window is not the active window`). | `TST_Case_TitleBarSdiRestoreTargetsCapturedFrame` (`.AnchorRestored`, `.SecondFrameUntouched`, active frame hidden first); `TST_Case_RibbonRestoreRefusesOtherActiveWindow` (`.SecondFrameUntouched`) | `TitleBarSdiIdentity` |
+| Closed captured window | The captured hWnd no longer names a window (`captured title-bar window is no longer open`) | `TST_Case_TitleBarCapturedFrameClosedIsReported` (`.Reported`, `.SurvivorFrameUntouched`); `TST_Case_RibbonRestoreRefusesClosedWindow` (`.SurvivorFrameUntouched`) | `TitleBarSdiIdentity` |
+| Object/handle mismatch at capture or show/hide | `UI_TryGetActiveFramePair`: `Application.hWnd` disagrees with the active Window's `Window.hWnd`, reached through `UI_InternalInjectFramePairFault` | `TST_Case_ActiveFramePairRefusesMismatch` (helper and wrapper only; no frame is compared) | `RegressionPack` |
+| | | `TST_Case_TitleBarPairRefusalLeavesFrameUntouched` (`.Set`, `.FireAndForget`, `.Capture`, `.RestoreEntryFrame`, `.RestoreInvertedFrame`) | `TitleBarSdiIdentity` |
+| Object/handle mismatch at restore | The retained Window no longer responds, or its `Window.hWnd` differs from the captured hWnd | No seam reaches these branches. `TST_Case_TitleBarClosedFrameReopenedIsRefused` reaches one of them only when Windows gives the closed frame's handle to the new window, and logs `handle reused=True` when it does. Otherwise this is source coverage only. | `TitleBarSdiIdentity`, when the handle is reused |
+| Close and reopen | The liveness check, or the retained-Window checks when the handle is reused | `TST_Case_TitleBarClosedFrameReopenedIsRefused` (`.Reported`, `.ReplacementFrameUntouched` with the new active frame hidden first, `.SurvivorFrameUntouched`) | `TitleBarSdiIdentity` |
+| Restore without a snapshot | `NoSnapshot` | `TST_Case_SnapshotResetResultNoSnapshot`, `TST_Case_ResetWithoutSnapshot_NoOp` (`.FrameUntouched`) | `RegressionPack` |
+
+Two restore refusals cannot be reached from any public entry point:
+`no captured title-bar frame identity` and
+`captured title-bar Window identity is unavailable`. Capture records the title-bar state as known only together with
+a live handle and its Window, so these branches guard a state that capture
+never produces. They have source coverage only.
+
+Execution evidence is recorded per certification run, not here. A unit passes
+only when every case it dispatches ran and passed, because each case raises on
+its first failed assertion and the unit stops there. A validated bundle whose
+`certification.json` reports a unit as passed is therefore execution evidence
+for every row that names that unit, for that commit and that host only. The
+Immediate window holds each case's `PASS` or `FAIL` line and the `OBSERVED`
+line of the close-and-reopen case. The bundle does not collect them, so record
+them with the bundle when you need them. The Excel builds and bitnesses that a
+release must certify are governed by
+[#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51).
+
 ## 🧱 Limits
 
 - The validator binds the files to each other and to the commit. It cannot
