@@ -181,7 +181,7 @@ attempt and the insufficiently isolated generation control):
 | #43 | Cleanup-skipping mutant | Prove the success-path snapshot-release assertion detects leakage |
 | #26 | Two quiet-scope variants | Detect the old entry-read behavior and missing ownership readback; no dedicated End-side mutation |
 | #32 | Retained-Window generation-proof variant | Fails with the current distinct-handle seam; same-numeric-hWnd generation proof is still missing |
-| #6 / #66 | Title-bar module with the v1.1.2 fallback condition restored | Negative control for captionless recovery; the recorded attempt hung, and the bounded rerun below has no recorded result yet |
+| #6 / #66 | Title-bar module with the v1.1.2 fallback condition restored | Negative control for captionless recovery; the first attempt hung. The bounded rerun below failed as intended on 2026-11-14, with Excel usable |
 | #45 | Active-frame-pair comparison control | Prove disagreement fails at `.Disagreed.Refused` |
 
 This inventories recorded types and purposes, not recoverable local filenames:
@@ -195,8 +195,9 @@ This run is the evidence that
 [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) still requires:
 with the v1.1.2 captionless fallback condition restored,
 `TST_Case_TitleBarShowRejectsCaptionlessBaseline` must fail, put the frame
-back and let the pack report, and Excel must stay usable. No such run is
-recorded yet. Never commit the control; the tool below writes it only into
+back and let the pack report, and Excel must stay usable. I recorded this run
+on 2026-11-14 at `22b74c7`, on Excel 16.0 build 20430, 64-bit: it produced exactly the result below, and Excel
+stayed usable without a restart. Never commit the control; the tool below writes it only into
 the ignored scratch folder.
 
 1. Check out the commit under test with a clean `git status`, then write the
@@ -233,7 +234,7 @@ the ignored scratch folder.
 4. Enable macros, run **Debug → Compile VBAProject**, and run
    `Test_EXCEL_UI_RunTitleBarOnly` from the Immediate window.
 
-The expected result follows from the source; it has not been observed. The
+The expected result follows from the source, and the 2026-11-14 run matched it. The
 round-trip, owned-bit and no-baseline cases pass, because the v1.1.2
 condition still recovers an all-zero baseline. In
 `TST_Case_TitleBarShowRejectsCaptionlessBaseline` the show worker keeps the
