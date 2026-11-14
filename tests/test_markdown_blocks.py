@@ -92,6 +92,25 @@ class ListContainedFences(unittest.TestCase):
         self.assertEqual(kinds("* * *", "```", "## Hidden", "```", "## After"),
                          ["text", "fence", "code", "fence", "text"])
 
+    def test_an_empty_item_ends_at_the_blank_line_after_it(self) -> None:
+        # CommonMark example 280: the fence after the blank line is top level.
+        self.assertEqual(anchors("-", "", "  ```text", "## Hidden", "  ```", "", "## After"), ["after"])
+        self.assertEqual(kinds("-", "", "  ```text", "## Hidden", "  ```", "", "## After"),
+                         ["text", "text", "fence", "code", "fence", "text", "text"])
+        self.assertEqual(anchors("- ", "", "  ```", "## Hidden", "  ```", "## After"), ["after"])
+        self.assertEqual(anchors("1.", "", "   ```", "## Hidden", "   ```", "## After"), ["after"])
+        self.assertEqual(escapes("-", "", "  ```text", "C:\\_scratch\\file", "  ```"), [])
+
+    def test_an_empty_nested_item_ends_but_its_parent_does_not(self) -> None:
+        nested = ("- Outer", "", "  -", "", "    ```", "  ## Hidden", "    ```", "## After")
+        self.assertEqual(anchors(*nested), ["after"])
+        self.assertEqual(kinds(*nested), ["text", "text", "text", "text", "fence", "code", "fence", "text"])
+
+    def test_an_empty_item_continued_without_a_blank_line_keeps_its_content(self) -> None:
+        self.assertEqual(kinds("-", "  ```", "  ## Hidden", "  ```", "## After"),
+                         ["text", "fence", "code", "fence", "text"])
+        self.assertEqual(anchors("-", "  Text", "", "  ```", "  ## Hidden", "  ```", "## After"), ["after"])
+
     def test_a_comment_block_inside_an_item_hides_nothing_after_it(self) -> None:
         self.assertEqual(kinds("- <!-- note -->", "## After"), ["comment", "text"])
 

@@ -1778,6 +1778,8 @@ ESCAPE_SELFTEST_CASES = [
      "- ```text\n  A\\_B\n  ```\n\nM\\_EXCEL\\_UI in prose\n", 1),
     ("a nested item's fence is code",
      "- Outer\n  - Inner\n    ```text\n    A\\_B\n    ```\n  - Next\n\nM\\_EXCEL\\_UI in prose\n", 1),
+    ("an empty item ends at the blank line after it, so its fence is top level",
+     "-\n\n  ```text\nA\\_B\n  ```\n", 0),
     ("a fence indented four spaces in an ordered item is code",
      "1. Step\n\n    ```text\n    C:\\_scratch\\file\n    ```\n", 0),
     ("a top-level fence is code", "```text\nC:\\_scratch\\file\n```\n", 0),
@@ -2947,7 +2949,8 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
 
     The rest of the container model is deliberately narrow. An ordered item
     that would interrupt a paragraph must start at 1, as in CommonMark, and a
-    paragraph line indented less than its item continues it lazily, but block
+    paragraph line indented less than its item continues it lazily. An item
+    whose marker line is empty ends at a following blank line. Block
     quotes are not tracked and tabs count to the next multiple of four. Each
     line is yielded whole, container prefix included.
     """
@@ -2956,6 +2959,7 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
     fence_col = 0
     in_comment = False
     paragraph = False
+    starts_empty = False
     for n, line in enumerate(text.split("\n"), 1):
         if in_comment:
             in_comment = "-->" not in line
@@ -2978,6 +2982,11 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
             # A line outside the item's content ends the item and its block.
             fence = None
         if blank:
+            if starts_empty:
+                # An item may begin with at most one blank line, so an item
+                # whose marker line was empty ends at the blank line after it.
+                items.pop()
+                starts_empty = False
             paragraph = False
             yield n, line, "text"
             continue
@@ -2993,6 +3002,7 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
         siblings = {item.kind for item in closed}
         col = items[-1].content if items else 0
         opened = False
+        starts_empty = False
         while True:
             rest = work[col:]
             if _indent(rest) > 3 or THEMATIC_BREAK_RE.match(rest):
@@ -3012,6 +3022,7 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
             opened = True
             paragraph = False
             if empty:
+                starts_empty = True
                 break
         rest = work[col:]
 

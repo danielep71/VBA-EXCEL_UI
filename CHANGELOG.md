@@ -883,8 +883,9 @@ measured against that baseline.
   reported as escaped Markdown. The scanner now tracks bullet and ordered list
   items and reads a fence up to three columns past its item's content column;
   outside every list, four spaces still make indented code that opens no
-  fence. The self-test and unit tests cover both cases, a nested list, a
-  top-level fence and indented code.
+  fence. An item whose marker line is empty ends at the blank line after it,
+  as in CommonMark. The self-test and unit tests cover both cases, a nested
+  list, an empty item, a top-level fence and indented code.
 
 ### 📖 Documentation
 
