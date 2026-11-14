@@ -22,15 +22,17 @@ release gate, so its output is not part of a bundle.
   [support baseline](../INSTALLATION.md). 32-bit Office is not certified.
 - **Trust access to the VBA project object model** turned on in
   **File → Options → Trust Center → Trust Center Settings → Macro Settings**.
-  The workbook is built and compiled through the VBA object model, so the
-  script stops when this is off. It never turns it on for you.
+  The default build and the compile step use the VBA object model, so the
+  script stops when this is off, whichever builder you choose. It never turns
+  it on for you.
 - A macro setting that lets you enable the workbook's macros, such as
   **Disable VBA macros with notification**. The script opens the workbook with
   the Trust Center setting and never changes it. With **Disable VBA macros
   without notification**, Excel offers no **Enable Content** button and the run
   cannot proceed.
 - Git on the `PATH`, and a clean checkout of the commit to certify.
-- `tools/Sync-EXCEL_UI-VBA.ps1`, which builds the workbook.
+- `tools/Sync-EXCEL_UI-VBA.ps1`, which builds the workbook, or, with
+  `-Builder Python`, `tools/build_workbook.py` and Python 3.11 or later.
 - Python 3.11 or later, to validate the bundle at the end of the run. Without
   it the run still produces the bundle; validate it elsewhere.
 
@@ -54,7 +56,8 @@ keeps the window open at the end.
 | --- | --- |
 | `-BundleDir <folder>` | Writes the bundle there instead of the default folder. It must be outside the checkout and new or empty. |
 | `-AllowDirty` | Runs even though the working tree has changes. The bundle records it, and the validator rejects such a bundle. Use it only to try the tooling. |
-| `-Python <exe>` | The Python 3.11+ executable for the validation. By default the script tries `py -3`, `python` and `python3`. |
+| `-Builder Sync` or `-Builder Python` | How the build step creates the workbook. `Sync`, the default, uses the synchronizer. `Python` uses `tools/build_workbook.py`, which is not yet validated in Excel; see [the Python builder](#-the-python-builder). |
+| `-Python <exe>` | The Python 3.11+ executable for the validation and for `-Builder Python`. By default the script tries `py -3`, `python` and `python3`. |
 | `-RepoRoot <folder>` | The repository. By default, the parent of the `tools` folder. |
 
 ## 🔁 What it does
@@ -68,7 +71,8 @@ The script prints each step as it runs and records it in `session.log` and
    Reads the Windows version and the Trust Center settings without changing
    them, and stops if VBA project access is off. Writes `source-digests.json`
    from the commit.
-2. **Build.** Runs `tools\Sync-EXCEL_UI-VBA.ps1 -Mode Development -NewWorkbook`
+2. **Build.** Runs `tools\Sync-EXCEL_UI-VBA.ps1 -Mode Development -NewWorkbook`,
+   or with `-Builder Python` runs `tools/build_workbook.py --mode Development`,
    to create `EXCEL_UI-development.xlsm` in the bundle with the modules of the
    `development` configuration of `tools/vba-projects.json`.
 3. **Open.** Starts a visible Excel instance, opens the workbook with the
@@ -110,17 +114,35 @@ Finally it writes `session.json` and runs the validator.
 
 Keep a failed bundle as it is: it records what happened.
 
+## 🐍 The Python builder
+
+`-Builder Python` builds the workbook with `tools/build_workbook.py`, which
+writes it directly from the source without Excel
+([docs/WORKBOOK_SYNC.md](WORKBOOK_SYNC.md#building-a-workbook-without-excel)).
+Every other step is unchanged, and `session.json` records which builder ran.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Certify-EXCEL_UI.ps1 -Builder Python
+```
+
+The Python builder is not yet validated in Excel. I keep the synchronizer as
+the default until a run with `-Builder Python` has opened, compiled and
+certified the built workbook on a Windows host, and I certify releases with
+the default. The compile step and the component inventory still read the
+workbook's VBA project, so **Trust access to the VBA project object model**
+stays required with either builder.
+
 ## 🗂️ The bundle
 
 | File | Written by | Content |
 | --- | --- | --- |
-| `session.json` | the script | Commit SHA, whether the working tree had changes, start and end times in UTC and local time, each step with its status and detail, the workbook's VBA components, the SHA-256 of each collected evidence file, the result and the exit code of the run. |
+| `session.json` | the script | The builder that built the workbook, commit SHA, whether the working tree had changes, start and end times in UTC and local time, each step with its status and detail, the workbook's VBA components, the SHA-256 of each collected evidence file, the result and the exit code of the run. |
 | `host.json` | the script | Windows caption, version, build and architecture; Excel version, build, `Application.OperatingSystem` and bitness (read from the Excel process); the Click-to-Run version; the macro setting and VBA project access as found. |
 | `source-digests.json` | the script | For each module of the `development` configuration at the commit: its path, module name, SHA-256 of the commit's content with CRLF line endings as a checkout writes it, and SHA-256 of the file the build imported. |
 | `certification.json` | the workbook | The certification document: Excel version and build, bitness, unit counts and results, skips, cleanup and the verdict. |
 | `certification.txt` | the workbook | The text report with its `RESULT:` line. |
-| `session.log` | the script | Everything the script printed, including the synchronizer's output. |
-| `EXCEL_UI-development.xlsm` | the synchronizer | The workbook that ran. It is not part of the validation. |
+| `session.log` | the script | Everything the script printed, including the builder's output. |
+| `EXCEL_UI-development.xlsm` | the builder | The workbook that ran. It is not part of the validation. |
 
 `session.log` contains local paths, such as your `%TEMP%` folder, which can
 include your user name. Review it before you publish it.

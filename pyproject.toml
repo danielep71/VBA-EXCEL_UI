@@ -42,6 +42,7 @@ max-complexity = 15
 # The gate's modules import one another by bare name from tools/, as the
 # tests do, so Ruff has to treat them as first-party.
 known-first-party = [
+    "build_workbook",
     "check_excel_evidence",
     "check_external_links",
     "check_issues",
@@ -52,6 +53,7 @@ known-first-party = [
     "compare_vba_export",
     "demo_cleanup_fixtures",
     "gate_fixture",
+    "lo_smoke",
     "reformat",
     "reformat_fixtures",
     "release",
@@ -62,6 +64,7 @@ known-first-party = [
     "vba_analyze_fixtures",
     "vba_api",
     "vba_lex",
+    "vba_project",
     "verify",
     "wiki_badges",
     "winapi_capture_fixtures",

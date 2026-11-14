@@ -167,6 +167,23 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added **tools/build_workbook.py**, which writes the `.xlsm` of one
+  configuration of `tools/vba-projects.json` directly from the source, with
+  the Python standard library only, so a build needs neither Excel nor
+  **Trust access to the VBA project object model** (#163). This work targets
+  v1.2.0. The workbook holds the configuration's modules in manifest order,
+  with the sheet and workbook code names of a new Excel workbook (`Sheet1`,
+  `ThisWorkbook`), and a VBA project written by the new `tools/vba_project.py`
+  that holds the module source and no compiled code, for Excel to compile when
+  it opens the workbook. `--override DIR` replaces modules by their
+  `Attribute VB_Name` for negative controls, and the output is byte-identical
+  for the same source. The new `tools/lo_smoke.py` opens a built workbook in
+  headless LibreOffice and checks that every module is present with its
+  source; a separate, non-required job of the static-checks workflow runs it
+  for every configuration. `tools/Certify-EXCEL_UI.ps1 -Builder Python` builds
+  the certification workbook with the new tool; the default stays the
+  synchronizer. The built workbook is **not yet validated in Excel**: no run
+  has opened, compiled or certified it, and LibreOffice runs no VBA.
 - Added **tools/release.py** and the **Release** workflow
   (`.github/workflows/release.yml`). On a pushed `v*` tag, the workflow checks
   that the tag is annotated and equals `VERSION`, that `CHANGELOG.md` has a

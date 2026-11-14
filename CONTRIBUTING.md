@@ -287,6 +287,12 @@ On Windows, the workbook tools shorten that step:
   `tools/check_excel_evidence.py` validates
   ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
 
+On any platform, `tools/build_workbook.py` writes a workbook of one
+configuration from the source without Excel, and `tools/lo_smoke.py` checks it
+in headless LibreOffice, as a separate, non-required CI job does. The built
+workbook is not yet validated in Excel, so it is not evidence
+([docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md#building-a-workbook-without-excel)).
+
 The required job also runs `tools/check_vba_calls.py`, which resolves calls
 across the modules of each configuration
 ([docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md)). It is advisory: its
