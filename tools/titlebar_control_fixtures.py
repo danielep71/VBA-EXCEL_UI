@@ -1,4 +1,10 @@
-"""Narrow #66 source regression; not an Excel or native-call timeout test."""
+"""Narrow #66 source regressions; not an Excel or native-call timeout test.
+
+findings() holds the captionless-baseline case to one saved-error re-raise
+with its handler disabled. discarded_restores() requires every call of the
+entry-style restoration helper to use the result it returns, so a failed
+restoration cannot be dropped on a cleanup path.
+"""
 import re
 from pathlib import Path
 
@@ -6,6 +12,7 @@ from vba_analyze import CONFIGS, active_lines, statements
 from vba_lex import code_only
 
 CASE = 'TST_Case_TitleBarShowRejectsCaptionlessBaseline'
+RESTORE = 'TST_RestoreTitleBarStyle'
 
 
 def findings(source: str, case: str = CASE, cleanup_label: str = 'safe_exit',
@@ -43,6 +50,24 @@ def findings(source: str, case: str = CASE, cleanup_label: str = 'safe_exit',
     return errors
 
 
+def discarded_restores(source: str, helper: str = RESTORE) -> list[str]:
+    """Report each statement that calls the restoration helper and drops its result.
+
+    Assigning the result, testing it in an If and assigning the function's own
+    return value inside its body all start with something else, or with the
+    name followed by '=', so only a bare call or a Call statement matches.
+    """
+    errors: list[str] = []
+    bare = re.compile(r'(?:call\s+)?' + re.escape(helper.lower()) + r'\b(?!\s*=)')
+    for config_name, config in CONFIGS.items():
+        for line, raw in active_lines(source, config):
+            for part in statements(raw):
+                if bare.match(code_only(part).strip().lower()):
+                    errors.append(f'{config_name}:{line}: {helper} result discarded; '
+                                  'check it and report a failed restoration')
+    return errors
+
+
 def selftest(root: str | Path) -> list[str]:
     source = f'''Private Sub {CASE}()
 On Error GoTo Err_Handler
@@ -67,6 +92,20 @@ End Sub
     for name, text, expected_failure in cases:
         if bool(findings(text)) != expected_failure:
             errors.append(f'#66 fixture {name}: unexpected result')
+    restore_cases = [
+        ('assigned result', f'RestoreOK = {RESTORE}(h, s, c, m)\n', False),
+        ('tested result', f'If Not {RESTORE}( _\n    h, s, c, m) Then\nEnd If\n', False),
+        ('own return value', f'{RESTORE} = True\n', False),
+        ('bare call', f'{RESTORE} h, s, c, m\n', True),
+        ('continued bare call', f'{RESTORE} _\n    h, s, c, m\n', True),
+        ('Call statement', f'Call {RESTORE}(h, s, c, m)\n', True),
+        ('call after a colon', f'x = 1: {RESTORE} h, s, c, m\n', True),
+    ]
+    for name, text, expected_failure in restore_cases:
+        if bool(discarded_restores(text)) != expected_failure:
+            errors.append(f'#66 restore fixture {name}: unexpected result')
     path = Path(root) / 'test/M_EXCEL_UI_REGRESSION_TESTS.bas'
-    errors.extend(findings(path.read_text(encoding='ascii')))
+    source = path.read_text(encoding='ascii')
+    errors.extend(findings(source))
+    errors.extend(discarded_restores(source))
     return errors

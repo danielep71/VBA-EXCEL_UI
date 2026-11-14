@@ -274,6 +274,15 @@ class TitleBarControlRegression(GateTestCase):
         self.repo.write(TESTS, text.encode("ascii"))
         self.assertFails("cleanup re-raise must disable its handler")
 
+    def test_fails_when_a_restore_result_is_discarded(self) -> None:
+        text = self.repo.read_bytes(TESTS).decode("ascii")
+        start = text.index("Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline")
+        checked = "        RestoreOK = TST_RestoreTitleBarStyle( _\r\n"
+        call = text.index(checked, start)
+        text = text[:call] + "        TST_RestoreTitleBarStyle _\r\n" + text[call + len(checked):]
+        self.repo.write(TESTS, text.encode("ascii"))
+        self.assertFails("TST_RestoreTitleBarStyle result discarded; check it and report a failed restoration")
+
 
 class WinApiErrorCapture(GateTestCase):
     check = "WinAPI error capture"

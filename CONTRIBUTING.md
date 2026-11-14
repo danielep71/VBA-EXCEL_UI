@@ -181,13 +181,102 @@ attempt and the insufficiently isolated generation control):
 | #43 | Cleanup-skipping mutant | Prove the success-path snapshot-release assertion detects leakage |
 | #26 | Two quiet-scope variants | Detect the old entry-read behavior and missing ownership readback; no dedicated End-side mutation |
 | #32 | Retained-Window generation-proof variant | Fails with the current distinct-handle seam; same-numeric-hWnd generation proof is still missing |
-| #6 / #66 | Title-bar module with the v1.1.2 fallback condition restored | Negative control for captionless recovery; currently hangs, not passing evidence |
+| #6 / #66 | Title-bar module with the v1.1.2 fallback condition restored | Negative control for captionless recovery; the first attempt hung. The bounded rerun below failed as intended on 2026-11-14, with Excel usable |
 | #45 | Active-frame-pair comparison control | Prove disagreement fails at `.Disagreed.Refused` |
 
 This inventories recorded types and purposes, not recoverable local filenames:
 the historical throwaway files were not committed. For #32, a true unchanged-
 hWnd generation control remains outstanding; do not count the distinct-handle
 seam as that evidence. Preserve reviewed results separately from disposable code.
+
+#### Title-bar negative control (#6, #66)
+
+This run is the evidence that
+[#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) still requires:
+with the v1.1.2 captionless fallback condition restored,
+`TST_Case_TitleBarShowRejectsCaptionlessBaseline` must fail, put the frame
+back and let the pack report, and Excel must stay usable. I recorded this run
+on 2026-11-14 at `22b74c7`, on Excel 16.0 build 20430, 64-bit: it produced exactly the result below, and Excel
+stayed usable without a restart. Never commit the control; the tool below writes it only into
+the ignored scratch folder.
+
+1. Check out the commit under test with a clean `git status`, then write the
+   control:
+
+   ```powershell
+   py -3 tools\make_titlebar_mutant.py
+   ```
+
+   It writes `.mutation-scratch\titlebar-6\M_EXCEL_UI_TITLEBAR.bas`, which
+   differs from `src\M_EXCEL_UI_TITLEBAR.bas` only in the fallback condition of
+   `UI_TrySetTitleBarVisibleForHwndWorker`: the two lines
+   `If Not m_FrameStates(Slot).HasBaseline _` and
+   `Or (RestoreBits And WS_CAPTION) = 0 Then` become
+   `If RestoreBits = 0 Then`. It keeps the module's `Attribute VB_Name` and
+   CRLF line endings, prints the line it changed and the SHA-256 of the source
+   and of the control, and fails without writing anything when the condition
+   is not found exactly once or the folder holds any other file. Record its
+   output.
+2. Build a new development workbook from the commit, then overlay the
+   control. The synchronizer imports from `-SourceDir` only the modules it
+   finds there, identified by `Attribute VB_Name`, so this replaces
+   `M_EXCEL_UI_TITLEBAR` and nothing else. Confirm with `Y` when the listing
+   names that one module:
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath ".\.mutation-scratch\EXCEL_UI_TitleBar6.xlsm" -Mode Development -NewWorkbook
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VBA.ps1 -WorkbookPath ".\.mutation-scratch\EXCEL_UI_TitleBar6.xlsm" -SourceDir ".\.mutation-scratch\titlebar-6"
+   ```
+
+3. Save and close your work and quit every Excel instance. Start a dedicated
+   instance, for example with `excel.exe /x`, and open only
+   `EXCEL_UI_TitleBar6.xlsm`. No other workbook may be open in it.
+4. Enable macros, run **Debug → Compile VBAProject**, and run
+   `Test_EXCEL_UI_RunTitleBarOnly` from the Immediate window.
+
+The expected result follows from the source, and the 2026-11-14 run matched it. The
+round-trip, owned-bit and no-baseline cases pass, because the v1.1.2
+condition still recovers an all-zero baseline. In
+`TST_Case_TitleBarShowRejectsCaptionlessBaseline` the show worker keeps the
+non-zero captionless baseline, finds nothing to write and reports that no
+caption is visible, so:
+
+- the case logs `TRACE` lines up to `show worker returned; assertions: enter`,
+  then `restoration helper returned | owned bits read back=True`, then
+  `@ FAIL | CaptionlessBaseline.ShowReportsSuccess | CaptionlessBaseline.ShowReportsSuccess expected=True actual=False`;
+- `Test_EXCEL_UI_RunTitleBarOnly @ FAIL` follows with error `-2147216803`
+  (`TEST_ERR_BASE + 1`, hex `8004125D`) and source
+  `CaptionlessBaseline.ShowReportsSuccess`, and Excel shows that run-time
+  error; choose **End**;
+- the title bar is visible, because the case put the entry style back through
+  the harness and read the owned bits back, and Excel responds normally.
+
+Any other first failure means the control did not run as intended. A failure
+at `TST_Case_TitleBarShowRejectsCaptionlessBaseline.Precondition` means
+Windows did not keep the captionless frame on that host, so the case cannot
+detect the defect there. A `TST_Case_TitleBarRoundTrip` or
+`TST_Case_TitleBarShowRecoversWithoutBaseline` failure means the workbook
+does not hold the control described above. Record the commit, the tool's
+output, the Excel version, build and bitness, the Immediate window output
+and whether Excel stayed usable without a restart, and attach them to #66.
+Then close the workbook without saving, quit the instance and delete the
+scratch files.
+
+If Excel stops responding anyway, do not run the control again. VBA cleanup
+cannot run once execution has stopped, so recover outside VBA and outside the
+API under test:
+
+1. Press **Ctrl+Break** once. If the VBE opens in break mode, record the
+   highlighted line and the last `TRACE` line in the Immediate window.
+2. End that Excel process alone in Task Manager, under **Details**. The
+   title-bar style belongs to that process's windows and disappears with
+   them, and no other workbook was open in it, so nothing else is lost.
+3. Record the last `TRACE` line: it names the stage that did not return
+   (style write, frame refresh, baseline reset, show worker or restoration).
+   Report it on #66 with the commit and the tool's output.
+
+Ending the process recovers the machine; it is not the bounded,
+host-restoring result #66 asks for.
 
 ---
 
