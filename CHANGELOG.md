@@ -129,7 +129,10 @@ corrections:
   capture (#135);
 - the demo template and sheet reset no longer recatch their own re-raised
   errors (#71), and a demo button without a macro no longer names a missing
-  one (#129).
+  one (#129);
+- not yet checked on Excel: demo fast mode restores every setting it changed
+  (#70), the demo check-box helpers reach ActiveX check boxes (#73), and the
+  demo template checks its layout before resetting a worksheet (#74).
 
 Title-bar capture and persistent frame state now pair each native hWnd with the
 Excel Window that owns it. Show now uses baseline state and readback, but the
@@ -139,8 +142,8 @@ equal-handle proof gap.
 
 `M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`, `M_EXCEL_UI_TITLEBAR`, the
 regression module and the demo modules have therefore changed; `M_EXCEL_UI`
-and `M_EXCEL_UI_DEMO` changed in their comments only, and
-`M_DEMO_CLEANUP_TESTS` is new. The supported public facade remains unchanged.
+changed in its comments only, and `M_DEMO_CLEANUP_TESTS` is new. The supported
+public facade remains unchanged.
 
 The API contract gate was implemented first and deliberately. It records the
 shipped v1.1.2 declarations while the production tree is still byte-identical to
@@ -158,7 +161,7 @@ measured against that baseline.
 | Runtime correctness fixes | #26 and #27 complete; #23 certified and open until the README and Wiki describe it; remaining title-bar defects open |
 | Regression and certification fixes | #43 and #135 complete; remaining certification gates open |
 | Regression VBA | Caller-owned snapshot refusal, ownership-failure, Ribbon wrong-window refusal, WinAPI error-capture and certification unit-isolation coverage added |
-| Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); remaining demo defects open |
+| Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); fast-mode state (#70), ActiveX check boxes (#73) and template validation (#74) implemented with harness scenarios, not yet checked on Excel |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
 | Static validation | `python3 tools/verify.py --ci` runs every static check, including the 37 checks of `tools/check_repo.py`; the release branch passes |
@@ -757,6 +760,55 @@ measured against that baseline.
   "Cannot run the macro" error. No current demo button takes that path. The
   advisory call checker (`tools/check_vba_calls.py`) found the defect and now
   reports no defect on the repository.
+- **Not yet checked on Excel.** The demo builder's fast mode no longer leaks
+  Application state after a partial entry or a failed restoration
+  ([#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70)).
+  `DEMO_FastMode_Begin` reads `ScreenUpdating`, `EnableEvents`,
+  `DisplayAlerts`, `Calculation` and the cursor before its first write and
+  marks each setting as owned before writing it; a failed write rolls back
+  every marked setting and raises the original error. `DEMO_FastMode_End`
+  attempts every restoration even after one fails and names each failure,
+  where it used to stop at the first. `Demo_CreateDemoSheet` now appends a
+  failed restoration to its original error, or raises it, instead of
+  discarding it, and returns the cursor to its entry value instead of forcing
+  `xlDefault`. Fast mode does not own `DisplayFormulaBar`: the template sets it
+  as part of the demo view and leaves it set. Scenarios S15-S30 of
+  `Demo_Test_RunCleanupChecks` fail each entry and restoration write in turn
+  through new one-shot seams and read the settings back; the source fixtures
+  of the gate check the capture, ownership and restoration order.
+- **Not yet checked on Excel.** The demo check-box helpers no longer refuse an
+  ActiveX check box before reaching it
+  ([#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73)). An ActiveX
+  control is also a worksheet shape with the same name, and the old helpers
+  refused every shape that was not a Forms control. They now dispatch on the
+  shape type: a Forms check box is read through `ControlFormat`, an ActiveX
+  check box through its `OLEObject`, and any other shape, a Forms or ActiveX
+  control that is not a check box, or a missing name is refused with a
+  diagnostic. A mixed check box (`xlMixed`, or an ActiveX `Value` of `Null`)
+  is refused on read, so the demo leaves its UI element unchanged and logs
+  why. The helpers moved from `M_EXCEL_UI_DEMO` to `M_DEMO_BUILDER` as
+  `DEMO_CB_TryGetState` and `DEMO_CB_TrySetState`, where the harness can call
+  them; scenarios S31-S34 write and read both kinds of check box, both states,
+  and every refusal. `Demo_CreateDemoSheet` still builds Forms check boxes,
+  and nothing here describes the controls of a published demo workbook.
+- **Not yet checked on Excel.** The demo template no longer resets an existing
+  worksheet before checking its layout inputs
+  ([#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74)). An empty
+  `ContentColumns`, for example, used to be refused only after the sheet's
+  shapes, tables and cells had been deleted. `DEMO_Sheet_BuildTemplate` now
+  checks the sheet name against Excel's naming rules, the content and
+  left-margin columns, and the body, freeze and hidden rows before it creates
+  or resets anything, reading the worksheet grid from the workbook, and
+  refuses a name that a chart sheet already holds. Column specifications are
+  now parsed as column letters, so a value such as `C1`, which Excel used to
+  read as a cell, is refused. `DEMO_Sheet_GetOrCreate` checks the name before
+  adding a sheet and deletes the new sheet when the rename fails, and the
+  template deletes a worksheet it created when it fails later. Rebuilding an
+  existing worksheet remains destructive once the inputs are valid. Scenarios
+  S35-S44 of `Demo_Test_RunCleanupChecks` cover invalid content columns and
+  hidden rows on a populated sheet, an invalid name, a failed rename, a chart
+  sheet holding the name and a valid rebuild; S13 now injects its template
+  error and checks that the created sheet is removed.
 - Fixed the active title-bar frame being trusted without the host agreeing it
   is active. Resolving `Window.hWnd` from the `Window` that
   `Application.ActiveWindow` just returned makes the pair internally
@@ -1269,7 +1321,7 @@ results must be preserved separately.
 | Existing VBA calls affected | None so far |
 | Public API changed | No |
 | Production modules changed | Yes — runtime, snapshot and title-bar modules; `M_EXCEL_UI` in comments only |
-| Demo modules changed | Yes — `M_DEMO_BUILDER` (#71, #129); `M_EXCEL_UI_DEMO` in comments only; `M_DEMO_CLEANUP_TESTS` is new (#71) |
+| Demo modules changed | Yes — `M_DEMO_BUILDER` (#70, #71, #73, #74, #129); `M_EXCEL_UI_DEMO` (#70, #73); `M_DEMO_CLEANUP_TESTS` is new (#71) and extended (#70, #73, #74) |
 | Runtime behavior changed | Quiet-update ownership; Ribbon restore fails closed when the captured window is closed or not active (#23); title-bar WinAPI failure text names the API, the operation, `LastDllError` and the hWnd (#27); title-bar identity/recovery paths; remaining title-bar corrections and proof are tracked explicitly |
 | Workbook migration required for this batch | Replace all four production modules together; no caller-code edit |
 | Developer tooling behavior changed | Yes — repository hygiene evaluates the Git index, and the public API gate now protects full declarations |
@@ -1378,10 +1430,10 @@ practical closure status of any item that has since been reopened.
 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened |
 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Reopened |
 | [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) | Bounded title-bar mutation control that fails instead of hanging | Closed |
-| [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Open |
+| [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Implemented with harness scenarios S15-S30; not yet checked on Excel |
 | [#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71) | Demo template and sheet-reset handlers do not recatch their own re-raised errors | Closed; Excel harness passed 14 scenarios and 89 checks on build 20430 x64 (2026-11-06) |
-| [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Open |
-| [#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74) | Demo template validates its layout inputs before resetting the worksheet | Open |
+| [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Implemented with harness scenarios S31-S34; not yet checked on Excel |
+| [#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74) | Demo template validates its layout inputs before resetting the worksheet | Implemented with harness scenarios S35-S44; not yet checked on Excel |
 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | Preserve caller-owned snapshots across all destructive-runner refusals | Closed; implementation, regression and mutation evidence verified |
 
 #### Certification and release assurance

@@ -23,6 +23,7 @@ Option Private Module
 '     - helper-list storage
 '     - placeholder DEMO buttons
 '     - table / log setup
+'     - reading and writing Forms and ActiveX check boxes
 '
 '   Centralizing that logic in one module keeps DEMO-sheet construction:
 '     - more consistent
@@ -37,12 +38,21 @@ Option Private Module
 '   - Button creation supports an optional action macro so the helper is not
 '     hard-wired to one single placeholder routine.
 '   - Fast-mode helpers centralize temporary Application-state changes used
-'     during sheet-building operations.
+'     during sheet-building operations. They own five settings only:
+'     ScreenUpdating, EnableEvents, DisplayAlerts, Calculation and Cursor.
 '   - DEMO_Sheet_BuildTemplate and DEMO_Sheet_Reset carry a cleanup probe and
-'     one-shot fault seams. They are inert until M_DEMO_CLEANUP_TESTS arms
-'     them through DEMO_InternalCleanupProbeBegin.
+'     one-shot fault seams, and so do the fast-mode writes. They are inert
+'     until M_DEMO_CLEANUP_TESTS arms them through
+'     DEMO_InternalCleanupProbeBegin.
 '
 ' UPDATED
+'   2026-11-14 - DEMO_Sheet_BuildTemplate validates its layout before any
+'                reset or creation; a sheet created by a failed call is
+'                removed (#74).
+'   2026-11-14 - Check-box state helpers DEMO_CB_TryGetState and
+'                DEMO_CB_TrySetState, dispatching on the control type (#73).
+'   2026-11-14 - Fast-mode rollback, entry cursor and reported restoration
+'                failures (#70).
 '   2026-11-06 - Cleanup probe and one-shot fault seams for the #71 harness.
 '   2026-09-10 - Single-pass demo cleanup and owned protection restoration.
 '
@@ -88,12 +98,31 @@ Option Private Module
     Private Const DEMO_PROBE_RESET_SELECTION As Long = 4    'Reset EnableSelection restores reached
     Private Const DEMO_PROBE_BUILD_HANDLER   As Long = 5    'BuildTemplate Clean_Fail entries
     Private Const DEMO_PROBE_BUILD_CLEANUP   As Long = 6    'BuildTemplate Clean_Exit passes
-    Private Const DEMO_PROBE_SITE_COUNT      As Long = 6    'Highest probe site
+    Private Const DEMO_PROBE_FM_ENTRY        As Long = 7    'Fast-mode entry writes reached
+    Private Const DEMO_PROBE_FM_RESTORE      As Long = 8    'Fast-mode restoration writes reached
+    Private Const DEMO_PROBE_SITE_COUNT      As Long = 8    'Highest probe site
 
     'One-shot cleanup fault bits; mirrored by M_DEMO_CLEANUP_TESTS
     Private Const DEMO_FAULT_RESET_BODY      As Long = 1    'Operation error after unprotect
     Private Const DEMO_FAULT_RESET_PROTECT   As Long = 2    'Reprotect statement fails
     Private Const DEMO_FAULT_RESET_SELECTION As Long = 4    'EnableSelection restore fails
+    Private Const DEMO_FAULT_BUILD_FORMULABAR As Long = 8   'BuildTemplate DisplayFormulaBar write fails
+    Private Const DEMO_FAULT_SHEET_NAME      As Long = 16   'GetOrCreate naming of a new sheet fails
+    Private Const DEMO_FAULT_FM_ENTRY_UNIT   As Long = 256  'Times a DEMO_FM_* bit: its entry write fails
+    Private Const DEMO_FAULT_FM_RESTORE_UNIT As Long = 8192 'Times a DEMO_FM_* bit: its restoration fails
+
+    'Fast-mode settings, one bit each; mirrored by M_DEMO_CLEANUP_TESTS
+    Private Const DEMO_FM_SCREENUPDATING     As Long = 1    'Application.ScreenUpdating
+    Private Const DEMO_FM_ENABLEEVENTS       As Long = 2    'Application.EnableEvents
+    Private Const DEMO_FM_DISPLAYALERTS      As Long = 4    'Application.DisplayAlerts
+    Private Const DEMO_FM_CALCULATION        As Long = 8    'Application.Calculation
+    Private Const DEMO_FM_CURSOR             As Long = 16   'Application.Cursor
+
+    'Check-box kinds resolved by DEMO_CB_ResolveControl
+    Private Const DEMO_CB_KIND_NONE          As Long = 0    'Missing or refused
+    Private Const DEMO_CB_KIND_FORMS         As Long = 1    'Forms check box
+    Private Const DEMO_CB_KIND_ACTIVEX       As Long = 2    'ActiveX check box
+    Private Const DEMO_CB_MIXED_STATE        As String = "check box state is mixed: neither checked nor unchecked"
 
 '------------------------------------------------------------------------------
 ' PRIVATE VARIABLES
@@ -114,6 +143,9 @@ Option Private Module
         EnableEvents    As Boolean       'Saved Application.EnableEvents
         DisplayAlerts   As Boolean       'Saved Application.DisplayAlerts
         Calculation     As XlCalculation 'Saved Application.Calculation
+        Cursor          As XlMousePointer 'Saved Application.Cursor
+        Captured        As Boolean       'TRUE once all five entry values were read
+        Applied         As Long          'DEMO_FM_* bits written and not yet restored
     End Type
 
 '------------------------------------------------------------------------------
@@ -251,7 +283,13 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   None
 '
 ' BEHAVIOR
+'   - Validates every layout input first: the worksheet name, the content and
+'     left-margin columns, the body, freeze and hidden rows, widths, heights
+'     and zoom. Checks that need the worksheet grid read its limits from the
+'     target or another worksheet of the workbook. An invalid request raises
+'     before any worksheet is created or reset.
 '   - Uses the requested workbook or defaults to ThisWorkbook
+'   - Refuses a name already used by a chart or other non-worksheet sheet
 '   - Gets or creates the requested worksheet
 '   - Resets the sheet before rebuilding it
 '   - Derives the separator column from ContentColumns
@@ -260,11 +298,25 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   - Applies configurable row/column sizing and view normalization
 '
 ' ERROR POLICY
-'   Raises errors normally
+'   Raises errors normally. When the call created the worksheet and then
+'   fails, it deletes that worksheet before re-raising; a failed deletion is
+'   appended to the description as a "Cleanup failure: " line.
+'
+' DESTRUCTIVE SCOPE
+'   A rebuild of an existing worksheet is destructive by design: once the
+'   inputs are valid, DEMO_Sheet_Reset deletes its shapes and tables and
+'   clears its cells, formats, validation, comments, sizes, hidden rows and
+'   columns, tab colour and page breaks. A failure after that point is
+'   reported, but nothing is rolled back; only a worksheet this call created
+'   is removed.
 '
 ' DEPENDENCIES
+'   - DEMO_Sheet_FindWorksheet
 '   - DEMO_Sheet_GetOrCreate
 '   - DEMO_Sheet_Reset
+'   - DEMO_Sheet_DeleteOwned
+'   - DEMO_SheetNameProblem
+'   - DEMO_ParseColumnSpec
 '   - DEMO_Write_BandHeader
 '   - DEMO_ColumnLetter
 '   - DEMO_CleanupProbeHit
@@ -274,9 +326,19 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   - SeparatorColumns and HideColumnsFrom are retained in the signature only
 '     for backward compatibility
 '   - The cleanup probe counts handler entries and cleanup passes only while
-'     M_DEMO_CLEANUP_TESTS has armed it
+'     M_DEMO_CLEANUP_TESTS has armed it; an armed one-shot fault can fail the
+'     DisplayFormulaBar write
+'
+' VIEW OWNERSHIP
+'   The window settings and DisplayFormulaBar are applied as the requested
+'   demo view and are not restored afterwards. DisplayFormulaBar is
+'   application-wide: it changes every window of this Excel instance. A
+'   DEMO_FastMode_Begin scope around this call does not capture or restore it.
 '
 ' UPDATED
+'   2026-11-14 - Layout validated before any reset or creation; a worksheet
+'                created by a failed call is removed (#74).
+'   2026-11-14 - Formula-bar ownership documented; fault seam (#70).
 '   2026-11-06
 '==============================================================================
 
@@ -285,14 +347,19 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
     Dim WB                  As Workbook        'Target workbook
     Dim WS                  As Worksheet       'Target worksheet
+    Dim LimitSheet          As Worksheet       'Worksheet the grid limits are read from
+    Dim CreatedSheet        As Boolean         'TRUE when this call created WS
+    Dim NameProblem         As String          'Why WS_Name is not a valid sheet name
+    Dim CleanupFailures     As String          'Failed removal of a created worksheet
 
     Dim MaxRow              As Long            'Last worksheet row
     Dim MaxCol              As Long            'Last worksheet column
 
-    Dim ContentParts        As Variant         'Split ContentColumns parts
     Dim ContentText         As String          'Trimmed ContentColumns text
     Dim ContentFirstColIndex As Long            'Resolved first content-column index
     Dim ContentLastColIndex As Long            'Resolved last content-column index
+    Dim LeftFirstColIndex   As Long            'Resolved first left-margin column, 0 when blank
+    Dim LeftLastColIndex    As Long            'Resolved last left-margin column, 0 when blank
 
     Dim EffectiveSeparatorColIndex As Long            'Derived separator-column index
     Dim EffectiveHideFromColIndex As Long            'Derived first hidden-column index
@@ -306,8 +373,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
     Dim TitleBandRange      As Range           'Resolved title-band range
     Dim SubTitleBandRange   As Range           'Resolved subtitle-band range
 
-    Dim TmpColIndex         As Long            'Temporary column index for normalization
-
     Dim SavedErrNum         As Long            'Captured error number
     Dim SavedErrSrc         As String          'Captured error source
     Dim SavedErrDesc        As String          'Captured error description
@@ -315,11 +380,22 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
 ' VALIDATE
 '------------------------------------------------------------------------------
+    'Every check that needs no workbook runs here, before anything is created
+    'or reset, so an invalid request leaves the workbook as it was
+
     'Reject an empty worksheet name
         If Len(Trim$(WS_Name)) = 0 Then
             Err.Raise vbObjectError + 2000, _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "Worksheet name cannot be blank."
+        End If
+
+    'Reject a name Excel would refuse for a sheet
+        NameProblem = DEMO_SheetNameProblem(WS_Name)
+        If Len(NameProblem) > 0 Then
+            Err.Raise vbObjectError + 2027, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "Worksheet name is not valid: " & NameProblem
         End If
 
     'Reject invalid freeze-row requests when pane freezing is enabled
@@ -365,6 +441,45 @@ Public Sub DEMO_Sheet_BuildTemplate( _
             End If
         End If
 
+    'Reject a blank content-column specification
+        ContentText = Trim$(ContentColumns)
+        If Len(ContentText) = 0 Then
+            Err.Raise vbObjectError + 2021, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "ContentColumns cannot be blank."
+        End If
+
+    'Reject content columns that are not one column or one column range;
+    'reversed ranges come back in ascending order
+        If Not DEMO_ParseColumnSpec(ContentText, ContentFirstColIndex, ContentLastColIndex) Then
+            Err.Raise vbObjectError + 2022, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "ContentColumns must resolve to one column or one contiguous column range."
+        End If
+
+    'Reject content-column blocks that end before column B
+        If ContentLastColIndex < 2 Then
+            Err.Raise vbObjectError + 2024, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "ContentColumns must extend at least through column B."
+        End If
+
+    'Reject left-margin columns that are neither blank nor one column range
+        If Len(Trim$(LeftMarginColumns)) > 0 Then
+            If Not DEMO_ParseColumnSpec(LeftMarginColumns, LeftFirstColIndex, LeftLastColIndex) Then
+                Err.Raise vbObjectError + 2020, _
+                          "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                          "LeftMarginColumns must be blank, one column or one contiguous column range."
+            End If
+        End If
+
+    'Reject row-hide requests before the first row
+        If HideRowsFrom < 1 Then
+            Err.Raise vbObjectError + 2019, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "HideRowsFrom must be between 1 and the worksheet last row."
+        End If
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -387,63 +502,31 @@ Public Sub DEMO_Sheet_BuildTemplate( _
         End If
 
 '------------------------------------------------------------------------------
-' RESET SHEET
+' LOCATE TARGET AND WORKSHEET LIMITS
 '------------------------------------------------------------------------------
-    'Get or create the target worksheet
-        Set WS = DEMO_Sheet_GetOrCreate(WB, WS_Name)
+    'Find an existing worksheet; a chart or other sheet with the name is refused
+        Set WS = DEMO_Sheet_FindWorksheet(WB, WS_Name, "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate")
 
-    'Reset the worksheet to a clean reusable state before rebuilding it
-        DEMO_Sheet_Reset WS
-
-'------------------------------------------------------------------------------
-' INITIALIZE WORKSHEET LIMITS
-'------------------------------------------------------------------------------
-    'Capture the last available worksheet row
-        MaxRow = WS.Rows.Count
-
-    'Capture the last available worksheet column
-        MaxCol = WS.Columns.Count
-
-'------------------------------------------------------------------------------
-' RESOLVE CONTENT COLUMN BLOCK
-'------------------------------------------------------------------------------
-    'Resolve the trimmed content-column specification
-        ContentText = Trim$(ContentColumns)
-
-    'Reject a blank content-column specification
-        If Len(ContentText) = 0 Then
-            Err.Raise vbObjectError + 2021, _
-                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
-                      "ContentColumns cannot be blank."
-        End If
-
-    'Split the content-column specification
-        ContentParts = Split(ContentText, ":")
-
-    'Resolve the content-column range when a single column was supplied
-        If UBound(ContentParts) = 0 Then
-            ContentFirstColIndex = WS.Range(Trim$(ContentParts(0)) & "1").Column
-            ContentLastColIndex = ContentFirstColIndex
-
-    'Resolve the content-column range when a standard two-part range was supplied
-        ElseIf UBound(ContentParts) = 1 Then
-            ContentFirstColIndex = WS.Range(Trim$(ContentParts(0)) & "1").Column
-            ContentLastColIndex = WS.Range(Trim$(ContentParts(1)) & "1").Column
-
-    'Reject invalid multi-part content-column specifications
+    'Every worksheet of a workbook has the same grid; read it from the target,
+    'else from another worksheet. Only a workbook without any worksheet makes
+    'this call create the target first; cleanup removes it if a check fails.
+        If Not WS Is Nothing Then
+            Set LimitSheet = WS
+        ElseIf WB.Worksheets.Count > 0 Then
+            Set LimitSheet = WB.Worksheets(1)
         Else
-            Err.Raise vbObjectError + 2022, _
-                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
-                      "ContentColumns must resolve to one column or one contiguous column range."
+            Set WS = DEMO_Sheet_GetOrCreate(WB, WS_Name)
+            CreatedSheet = True
+            Set LimitSheet = WS
         End If
 
-    'Normalize reversed content-column specifications
-        If ContentLastColIndex < ContentFirstColIndex Then
-            TmpColIndex = ContentFirstColIndex
-            ContentFirstColIndex = ContentLastColIndex
-            ContentLastColIndex = TmpColIndex
-        End If
+    'Capture the last available worksheet row and column
+        MaxRow = LimitSheet.Rows.Count
+        MaxCol = LimitSheet.Columns.Count
 
+'------------------------------------------------------------------------------
+' VALIDATE AGAINST WORKSHEET LIMITS
+'------------------------------------------------------------------------------
     'Reject content-column blocks that do not leave room for separator + hidden block
         If ContentLastColIndex > MaxCol - 2 Then
             Err.Raise vbObjectError + 2023, _
@@ -451,12 +534,48 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                       "ContentColumns must leave room for a separator column and at least one hidden trailing column."
         End If
 
-    'Reject content-column blocks that end before column B
-        If ContentLastColIndex < 2 Then
-            Err.Raise vbObjectError + 2024, _
+    'Reject left-margin columns beyond the last worksheet column
+        If LeftLastColIndex > MaxCol Then
+            Err.Raise vbObjectError + 2020, _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
-                      "ContentColumns must extend at least through column B."
+                      "LeftMarginColumns must be blank, one column or one contiguous column range."
         End If
+
+    'Reject body rows beyond the last worksheet row
+        If BodyRowTo > MaxRow Then
+            Err.Raise vbObjectError + 2014, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "Invalid body-row range."
+        End If
+
+    'Reject a freeze row beyond the last worksheet row
+        If IsFrozenPane Then
+            If FreezeAtRow > MaxRow Then
+                Err.Raise vbObjectError + 2013, _
+                          "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                          "FreezeAtRow must not exceed the worksheet last row."
+            End If
+        End If
+
+    'Reject row-hide requests beyond the last worksheet row
+        If HideRowsFrom > MaxRow Then
+            Err.Raise vbObjectError + 2019, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "HideRowsFrom must be between 1 and the worksheet last row."
+        End If
+
+'------------------------------------------------------------------------------
+' CREATE OR RESET SHEET
+'------------------------------------------------------------------------------
+    'Create the worksheet when it does not exist yet; this call then owns it
+        If WS Is Nothing Then
+            Set WS = DEMO_Sheet_GetOrCreate(WB, WS_Name)
+            CreatedSheet = True
+        End If
+
+    'Reset the worksheet to a clean reusable state before rebuilding it; from
+    'here on an existing worksheet is rebuilt destructively
+        DEMO_Sheet_Reset WS
 
 '------------------------------------------------------------------------------
 ' DERIVE SEPARATOR / HIDDEN COLUMN LOGIC
@@ -473,16 +592,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 
     'Resolve the effective first hidden-column text
         EffectiveHideColumnsFrom = DEMO_ColumnLetter(EffectiveHideFromColIndex)
-
-'------------------------------------------------------------------------------
-' VALIDATE ROW-HIDE REQUEST
-'------------------------------------------------------------------------------
-    'Reject invalid row-hide requests
-        If HideRowsFrom < 1 Or HideRowsFrom > MaxRow Then
-            Err.Raise vbObjectError + 2019, _
-                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
-                      "HideRowsFrom must be between 1 and the worksheet last row."
-        End If
 
 '------------------------------------------------------------------------------
 ' APPLY GLOBAL SHEET FORMATTING
@@ -504,12 +613,14 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 ' APPLY COLUMN / ROW LAYOUT
 '------------------------------------------------------------------------------
     'Apply the configured left-margin column widths
-        If Len(Trim$(LeftMarginColumns)) > 0 Then
-            WS.Columns(LeftMarginColumns).ColumnWidth = LeftMarginColumnWidth
+        If LeftFirstColIndex > 0 Then
+            WS.Range(WS.Columns(LeftFirstColIndex), WS.Columns(LeftLastColIndex)).ColumnWidth = _
+                LeftMarginColumnWidth
         End If
 
     'Apply the configured main content-block widths
-        WS.Columns(ContentColumns).ColumnWidth = ContentColumnWidth
+        WS.Range(WS.Columns(ContentFirstColIndex), WS.Columns(ContentLastColIndex)).ColumnWidth = _
+            ContentColumnWidth
 
     'Apply the derived separator-column width
         WS.Columns(EffectiveSeparatorColumns).ColumnWidth = SeparatorColumnWidth
@@ -623,8 +734,9 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                     End If
                 End With
 
-            'Apply formula-bar visibility
-                Application.DisplayFormulaBar = ShowFormulaBar
+            'Apply formula-bar visibility, an intended demo view change that no
+    'fast-mode scope captures or restores
+                Application.DisplayFormulaBar = DEMO_FormulaBarValue(ShowFormulaBar)
         End If
 
 Clean_Exit:
@@ -634,6 +746,15 @@ Clean_Exit:
     'Re-raise the captured error after cleanup when needed
         On Error GoTo 0
         DEMO_CleanupProbeHit DEMO_PROBE_BUILD_CLEANUP
+
+    'Remove a worksheet this call created before it failed; keep the error
+        If SavedErrNum <> 0 And CreatedSheet Then
+            CleanupFailures = DEMO_Sheet_DeleteOwned(WS)
+            If Len(CleanupFailures) > 0 Then
+                SavedErrDesc = SavedErrDesc & vbCrLf & "Cleanup failure: " & CleanupFailures
+            End If
+        End If
+
         If SavedErrNum <> 0 Then
             Err.Raise SavedErrNum, SavedErrSrc, SavedErrDesc
         End If
@@ -724,6 +845,8 @@ Private Function DEMO_ColumnLetter( _
         DEMO_ColumnLetter = S
 
 End Function
+
+
 Public Sub DEMO_FastMode_Begin( _
     ByRef StateOut As tDEMOFastModeState)
 '
@@ -745,44 +868,126 @@ Public Sub DEMO_FastMode_Begin( _
 '
 ' INPUTS
 '   StateOut
-'     Output structure that receives the saved Application state.
+'     Output structure that receives the saved Application state and the
+'     settings this scope now owns.
 '
 ' RETURNS
 '   None.
 '
 ' BEHAVIOR
-'   - Captures current values for:
+'   - Clears StateOut.Captured and StateOut.Applied first
+'   - Captures all five entry values before the first write:
 '       * ScreenUpdating
 '       * EnableEvents
 '       * DisplayAlerts
 '       * Calculation
-'   - Applies reduced-noise builder settings
+'       * Cursor
+'   - Sets StateOut.Captured once all five are read
+'   - Marks each setting in StateOut.Applied before writing it, so a write
+'     that fails partway is still restored
+'   - Applies ScreenUpdating False, EnableEvents False, DisplayAlerts False,
+'     manual calculation and the wait cursor
 '
 ' ERROR POLICY
-'   Raises errors normally.
+'   - A failed capture raises before anything is written
+'   - A failed write rolls back every setting already marked, each attempted
+'     independently, then raises the original error with its number and
+'     source unchanged. A failed rollback appends a line that starts with
+'     "Cleanup failure: Fast-mode rollback failed: " to the description.
+'   - After a failed Begin, StateOut.Applied is 0, so DEMO_FastMode_End has
+'     nothing left to restore
+'
+' OWNERSHIP
+'   Fast mode owns only these five temporary settings. The window and
+'   Application view settings that DEMO_Sheet_BuildTemplate applies, such as
+'   DisplayFormulaBar, are intended demo view changes; fast mode neither
+'   captures nor restores them.
+'
+' REGRESSION SEAMS
+'   Every write passes its value through DEMO_FastModeValue, which counts the
+'   write and fails it once while M_DEMO_CLEANUP_TESTS has armed a fault for
+'   that setting. Disarmed, the value passes through unchanged.
 '
 ' UPDATED
+'   2026-11-14 - Rollback of a partial entry and the entry cursor (#70).
 '   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RollbackFailures    As String          'Settings the rollback could not restore
+    Dim SavedErrNumber      As Long            'Captured error number
+    Dim SavedErrSource      As String          'Captured error source
+    Dim SavedErrDescription As String          'Captured error description
+
+'------------------------------------------------------------------------------
 ' CAPTURE CURRENT STATE
 '------------------------------------------------------------------------------
-    'Capture the current Excel Application state
+    'Own nothing until every entry value is known
+        StateOut.Captured = False
+        StateOut.Applied = 0
+
+    'Capture the current Excel Application state; a failed read writes nothing
         StateOut.ScreenUpdating = Application.ScreenUpdating
         StateOut.EnableEvents = Application.EnableEvents
         StateOut.DisplayAlerts = Application.DisplayAlerts
         StateOut.Calculation = Application.Calculation
+        StateOut.Cursor = Application.Cursor
+        StateOut.Captured = True
 
 '------------------------------------------------------------------------------
 ' APPLY FAST MODE
 '------------------------------------------------------------------------------
-    'Reduce UI noise while building or rebuilding workbook structures
-        Application.ScreenUpdating = False
-        Application.EnableEvents = False
-        Application.DisplayAlerts = False
-        Application.Calculation = xlCalculationManual
+    'Roll back a partial entry on failure
+        On Error GoTo Clean_Fail
+
+    'Mark each setting before writing it, then reduce UI noise
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_SCREENUPDATING
+        Application.ScreenUpdating = DEMO_FastModeValue(DEMO_FM_SCREENUPDATING, False, False)
+
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_ENABLEEVENTS
+        Application.EnableEvents = DEMO_FastModeValue(DEMO_FM_ENABLEEVENTS, False, False)
+
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_DISPLAYALERTS
+        Application.DisplayAlerts = DEMO_FastModeValue(DEMO_FM_DISPLAYALERTS, False, False)
+
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_CALCULATION
+        Application.Calculation = DEMO_FastModeValue(DEMO_FM_CALCULATION, False, xlCalculationManual)
+
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_CURSOR
+        Application.Cursor = DEMO_FastModeValue(DEMO_FM_CURSOR, False, xlWait)
+
+Clean_Exit:
+'------------------------------------------------------------------------------
+' ROLL BACK A PARTIAL ENTRY
+'------------------------------------------------------------------------------
+    'Restore what was already written, then re-raise the original error
+        On Error GoTo 0
+        If SavedErrNumber <> 0 Then
+            RollbackFailures = DEMO_FastMode_Restore(StateOut)
+            If Len(RollbackFailures) > 0 Then
+                SavedErrDescription = SavedErrDescription & vbCrLf & _
+                    "Cleanup failure: Fast-mode rollback failed: " & RollbackFailures
+            End If
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
+        End If
+
+    Exit Sub
+
+Clean_Fail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Capture the original error before the rollback
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+
+        Resume Clean_Exit
+
 End Sub
+
 
 Public Sub DEMO_FastMode_End( _
     ByRef StateIn As tDEMOFastModeState)
@@ -791,41 +996,379 @@ Public Sub DEMO_FastMode_End( _
 ' END FAST MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Restores a previously saved Excel Application state.
+'   Restores the Application settings a DEMO_FastMode_Begin scope applied.
 '
 ' WHY THIS EXISTS
 '   This is the cleanup companion to DEMO_FastMode_Begin.
 '
 ' INPUTS
 '   StateIn
-'     Previously captured Application-state snapshot.
+'     The state DEMO_FastMode_Begin filled.
 '
 ' RETURNS
 '   None.
 '
 ' BEHAVIOR
-'   Restores:
-'     - ScreenUpdating
-'     - EnableEvents
-'     - DisplayAlerts
-'     - Calculation
+'   - Restores only the settings marked in StateIn.Applied, in reverse order:
+'     Cursor, Calculation, DisplayAlerts, EnableEvents, ScreenUpdating
+'   - Attempts every marked setting, whatever an earlier one did
+'   - Clears StateIn.Applied, so a second call restores nothing
+'   - Does nothing when Begin failed or was never called
 '
 ' ERROR POLICY
-'   Raises errors normally.
+'   Raises vbObjectError + 2026 after every attempt when any restoration
+'   failed. The description names each failed setting with its error number,
+'   source and description.
 '
 ' UPDATED
+'   2026-11-14 - Every restoration attempted; failures reported (#70).
 '   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Failures            As String          'Settings that could not be restored
+
+'------------------------------------------------------------------------------
 ' RESTORE SAVED STATE
 '------------------------------------------------------------------------------
-    'Restore the previously captured Excel Application state
-        Application.ScreenUpdating = StateIn.ScreenUpdating
-        Application.EnableEvents = StateIn.EnableEvents
-        Application.DisplayAlerts = StateIn.DisplayAlerts
-        Application.Calculation = StateIn.Calculation
+    'Attempt every owned restoration, then report the failures together
+        Failures = DEMO_FastMode_Restore(StateIn)
+
+        If Len(Failures) > 0 Then
+            Err.Raise vbObjectError + 2026, _
+                      "M_DEMO_BUILDER.DEMO_FastMode_End", _
+                      "Fast-mode restore failed: " & Failures
+        End If
+
 End Sub
+
+
+Public Sub DEMO_FastMode_EndPreservingError( _
+    ByRef StateIn As tDEMOFastModeState, _
+    ByRef ErrNumber As Long, _
+    ByRef ErrSource As String, _
+    ByRef ErrDescription As String)
+'
+'==============================================================================
+' END FAST MODE PRESERVING AN ERROR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Ends fast mode on a caller's cleanup path and folds a restoration failure
+'   into the caller's saved error instead of discarding it.
+'
+' INPUTS
+'   StateIn
+'     The state DEMO_FastMode_Begin filled.
+'
+'   ErrNumber / ErrSource / ErrDescription
+'     The caller's saved operation error, or 0 when there is none
+'
+' BEHAVIOR
+'   - Calls DEMO_FastMode_End once
+'   - With a saved operation error, keeps its number and source and appends
+'     vbCrLf & "Cleanup failure: <number> | <source> | <description>" of the
+'     restoration failure to its description
+'   - Without one, the restoration failure becomes the saved error
+'
+' ERROR POLICY
+'   Does not raise. The caller re-raises the saved error after disabling its
+'   own handler.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CleanupErrNumber    As Long            'Restoration error number
+    Dim CleanupErrSource    As String          'Restoration error source
+    Dim CleanupErrDescription As String        'Restoration error description
+
+'------------------------------------------------------------------------------
+' END FAST MODE
+'------------------------------------------------------------------------------
+    'Attempt the restoration once and capture its failure
+        On Error Resume Next
+            DEMO_FastMode_End StateIn
+            CleanupErrNumber = Err.Number
+            CleanupErrSource = Err.Source
+            CleanupErrDescription = Err.Description
+            Err.Clear
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' MERGE THE FAILURE
+'------------------------------------------------------------------------------
+    'Keep the operation error first; report the restoration failure with it
+        If CleanupErrNumber <> 0 Then
+            If ErrNumber = 0 Then
+                ErrNumber = CleanupErrNumber
+                ErrSource = CleanupErrSource
+                ErrDescription = CleanupErrDescription
+            Else
+                ErrDescription = ErrDescription & vbCrLf & _
+                    "Cleanup failure: " & CStr(CleanupErrNumber) & _
+                    " | " & CleanupErrSource & " | " & CleanupErrDescription
+            End If
+        End If
+
+End Sub
+
+
+Private Function DEMO_FastMode_Restore( _
+    ByRef State As tDEMOFastModeState) _
+    As String
+'
+'==============================================================================
+' DEMO_FastMode_Restore
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes back every setting marked in State.Applied, each in its own guarded
+'   attempt, and returns the failures.
+'
+' RETURNS
+'   String
+'     Empty when every attempt succeeded; otherwise one
+'     "<Setting>: <number> | <source> | <description>" entry per failed
+'     setting, joined by " || "
+'
+' BEHAVIOR
+'   - Restores in reverse entry order: Cursor, Calculation, DisplayAlerts,
+'     EnableEvents, ScreenUpdating
+'   - A failed attempt does not stop the later ones
+'   - Clears State.Applied afterwards: the scope gives up its ownership once
+'     every restoration has been attempted
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Failures            As String          'Collected failures
+    Dim FailNumber          As Long            'Error number of one attempt
+    Dim FailSource          As String          'Error source of one attempt
+    Dim FailDescription     As String          'Error description of one attempt
+
+'------------------------------------------------------------------------------
+' RESTORE EACH OWNED SETTING
+'------------------------------------------------------------------------------
+        On Error Resume Next
+
+    'Restore the cursor
+        If (State.Applied And DEMO_FM_CURSOR) <> 0 Then
+            Err.Clear
+            Application.Cursor = DEMO_FastModeValue(DEMO_FM_CURSOR, True, State.Cursor)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_CURSOR, FailNumber, FailSource, FailDescription)
+        End If
+
+    'Restore the calculation mode
+        If (State.Applied And DEMO_FM_CALCULATION) <> 0 Then
+            Err.Clear
+            Application.Calculation = DEMO_FastModeValue(DEMO_FM_CALCULATION, True, State.Calculation)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_CALCULATION, FailNumber, FailSource, FailDescription)
+        End If
+
+    'Restore alerts
+        If (State.Applied And DEMO_FM_DISPLAYALERTS) <> 0 Then
+            Err.Clear
+            Application.DisplayAlerts = DEMO_FastModeValue(DEMO_FM_DISPLAYALERTS, True, State.DisplayAlerts)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_DISPLAYALERTS, FailNumber, FailSource, FailDescription)
+        End If
+
+    'Restore events
+        If (State.Applied And DEMO_FM_ENABLEEVENTS) <> 0 Then
+            Err.Clear
+            Application.EnableEvents = DEMO_FastModeValue(DEMO_FM_ENABLEEVENTS, True, State.EnableEvents)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_ENABLEEVENTS, FailNumber, FailSource, FailDescription)
+        End If
+
+    'Restore screen updating last, once everything else is back
+        If (State.Applied And DEMO_FM_SCREENUPDATING) <> 0 Then
+            Err.Clear
+            Application.ScreenUpdating = DEMO_FastModeValue(DEMO_FM_SCREENUPDATING, True, State.ScreenUpdating)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_SCREENUPDATING, FailNumber, FailSource, FailDescription)
+        End If
+
+        Err.Clear
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' RELEASE OWNERSHIP
+'------------------------------------------------------------------------------
+        State.Applied = 0
+        DEMO_FastMode_Restore = Failures
+
+End Function
+
+
+Private Function DEMO_FastMode_AddFailure( _
+    ByVal Failures As String, _
+    ByVal Setting As Long, _
+    ByVal FailNumber As Long, _
+    ByVal FailSource As String, _
+    ByVal FailDescription As String) _
+    As String
+'
+'==============================================================================
+' DEMO_FastMode_AddFailure
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Appends one failed restoration to the failure list; returns the list
+'   unchanged when FailNumber is 0.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        If FailNumber = 0 Then
+            DEMO_FastMode_AddFailure = Failures
+        Else
+            If Len(Failures) > 0 Then
+                Failures = Failures & " || "
+            End If
+            DEMO_FastMode_AddFailure = Failures & DEMO_FastModeSettingName(Setting) & ": " & _
+                CStr(FailNumber) & " | " & FailSource & " | " & FailDescription
+        End If
+
+End Function
+
+
+Private Function DEMO_FastModeSettingName( _
+    ByVal Setting As Long) _
+    As String
+'
+'==============================================================================
+' DEMO_FastModeSettingName
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the Application property name of one DEMO_FM_* setting bit.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        Select Case Setting
+            Case DEMO_FM_SCREENUPDATING
+                DEMO_FastModeSettingName = "ScreenUpdating"
+            Case DEMO_FM_ENABLEEVENTS
+                DEMO_FastModeSettingName = "EnableEvents"
+            Case DEMO_FM_DISPLAYALERTS
+                DEMO_FastModeSettingName = "DisplayAlerts"
+            Case DEMO_FM_CALCULATION
+                DEMO_FastModeSettingName = "Calculation"
+            Case DEMO_FM_CURSOR
+                DEMO_FastModeSettingName = "Cursor"
+            Case Else
+                DEMO_FastModeSettingName = "Setting " & CStr(Setting)
+        End Select
+
+End Function
+
+
+Private Function DEMO_FastModeValue( _
+    ByVal Setting As Long, _
+    ByVal Restoring As Boolean, _
+    ByVal Value As Variant) _
+    As Variant
+'
+'==============================================================================
+' DEMO_FastModeValue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supplies the value of one fast-mode entry or restoration write.
+'
+' WHY THIS EXISTS
+'   No host condition makes an Application setter fail on demand. Raising
+'   while the value is evaluated fails that exact write, so the guarded
+'   rollback and restoration paths run unchanged and Excel is not called.
+'
+' INPUTS
+'   Setting
+'     One DEMO_FM_* setting bit
+'
+'   Restoring
+'     TRUE for a restoration write, FALSE for an entry write
+'
+'   Value
+'     The value to write
+'
+' RETURNS
+'   Variant
+'     Value, unchanged
+'
+' ERROR POLICY
+'   Raises once while M_DEMO_CLEANUP_TESTS has armed a fault for this setting
+'   and phase: vbObjectError + 2193 for an entry write, vbObjectError + 2194
+'   for a restoration write
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FaultBit            As Long            'Fault bit of this setting and phase
+
+'------------------------------------------------------------------------------
+' COUNT AND RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Count the write and resolve its fault bit
+        If Restoring Then
+            DEMO_CleanupProbeHit DEMO_PROBE_FM_RESTORE
+            FaultBit = Setting * DEMO_FAULT_FM_RESTORE_UNIT
+        Else
+            DEMO_CleanupProbeHit DEMO_PROBE_FM_ENTRY
+            FaultBit = Setting * DEMO_FAULT_FM_ENTRY_UNIT
+        End If
+
+    'Fail the write once when armed
+        If (mCleanupFaults And FaultBit) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not FaultBit
+            If Restoring Then
+                Err.Raise vbObjectError + 2194, _
+                          "M_DEMO_BUILDER.DEMO_FastMode.InjectedRestoreFault", _
+                          "Injected fast-mode restore fault: " & DEMO_FastModeSettingName(Setting) & "."
+            Else
+                Err.Raise vbObjectError + 2193, _
+                          "M_DEMO_BUILDER.DEMO_FastMode.InjectedEntryFault", _
+                          "Injected fast-mode entry fault: " & DEMO_FastModeSettingName(Setting) & "."
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Pass the value through unchanged
+        DEMO_FastModeValue = Value
+
+End Function
 
 Public Sub DEMO_Set_RangeBorder( _
     ByVal Target As Range, _
@@ -984,21 +1527,38 @@ Public Function DEMO_Sheet_GetOrCreate( _
 '     Existing or newly created worksheet.
 '
 ' BEHAVIOR
-'   - Searches the workbook for the requested sheet name
+'   - Refuses a name Excel would not accept for a sheet before creating
+'     anything
+'   - Searches the workbook for the requested worksheet name; a chart or other
+'     non-worksheet sheet with that name is refused
 '   - Creates a new worksheet if the name is not found
-'   - Renames the new sheet to the requested name
+'   - Renames the new sheet to the requested name; when the rename fails, the
+'     new sheet is deleted before the error is re-raised, so no unnamed sheet
+'     is left behind
 '
 ' ERROR POLICY
-'   Raises errors normally.
+'   Raises errors normally. A failed deletion after a failed rename is
+'   appended to the rename error's description as a "Cleanup failure: " line.
+'
+' REGRESSION SEAMS
+'   The new name passes through DEMO_SheetNameValue, which fails the rename
+'   once while M_DEMO_CLEANUP_TESTS has armed that fault.
 '
 ' UPDATED
+'   2026-11-14 - Name checked first; a sheet whose rename fails is removed
+'                (#74).
 '   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Worksheet iterator / result
+    Dim WS                  As Worksheet       'Existing or new worksheet
+    Dim NameProblem         As String          'Why SheetName is not a valid sheet name
+    Dim NameErrNumber       As Long            'Rename error number
+    Dim NameErrSource       As String          'Rename error source
+    Dim NameErrDescription  As String          'Rename error description
+    Dim CleanupFailures     As String          'Failed removal of the new sheet
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -1017,31 +1577,430 @@ Public Function DEMO_Sheet_GetOrCreate( _
                       "Worksheet name cannot be blank."
         End If
 
+    'Reject a name Excel would refuse for a sheet
+        NameProblem = DEMO_SheetNameProblem(SheetName)
+        If Len(NameProblem) > 0 Then
+            Err.Raise vbObjectError + 2027, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate", _
+                      "Worksheet name is not valid: " & NameProblem
+        End If
+
 '------------------------------------------------------------------------------
 ' SEARCH EXISTING SHEETS
 '------------------------------------------------------------------------------
-    'Search for an existing worksheet with the requested name
-        For Each WS In WB.Worksheets
-            If StrComp(WS.Name, SheetName, vbTextCompare) = 0 Then
-                Set DEMO_Sheet_GetOrCreate = WS
-                Exit Function
-            End If
-        Next WS
+    'Return an existing worksheet; a non-worksheet sheet with the name raises
+        Set WS = DEMO_Sheet_FindWorksheet(WB, SheetName, "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate")
+        If Not WS Is Nothing Then
+            Set DEMO_Sheet_GetOrCreate = WS
+            Exit Function
+        End If
 
 '------------------------------------------------------------------------------
 ' CREATE SHEET
 '------------------------------------------------------------------------------
-    'Create a new worksheet because the requested one does not yet exist
-        Set WS = WB.Worksheets.Add(After:=WB.Worksheets(WB.Worksheets.Count))
+    'Create a new worksheet after the last worksheet, or after the last sheet
+    'of a workbook that has no worksheet
+        If WB.Worksheets.Count > 0 Then
+            Set WS = WB.Worksheets.Add(After:=WB.Worksheets(WB.Worksheets.Count))
+        Else
+            Set WS = WB.Worksheets.Add(After:=WB.Sheets(WB.Sheets.Count))
+        End If
 
-    'Assign the requested name to the new worksheet
-        WS.Name = SheetName
+'------------------------------------------------------------------------------
+' NAME SHEET
+'------------------------------------------------------------------------------
+    'Assign the requested name; on failure delete the new sheet, then re-raise
+        On Error Resume Next
+            WS.Name = DEMO_SheetNameValue(SheetName)
+            NameErrNumber = Err.Number
+            NameErrSource = Err.Source
+            NameErrDescription = Err.Description
+            Err.Clear
+        On Error GoTo 0
+
+        If NameErrNumber <> 0 Then
+            CleanupFailures = DEMO_Sheet_DeleteOwned(WS)
+            If Len(CleanupFailures) > 0 Then
+                NameErrDescription = NameErrDescription & vbCrLf & "Cleanup failure: " & CleanupFailures
+            End If
+            Err.Raise NameErrNumber, NameErrSource, NameErrDescription
+        End If
 
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
     'Return the existing or newly created worksheet
         Set DEMO_Sheet_GetOrCreate = WS
+End Function
+
+
+Private Function DEMO_Sheet_FindWorksheet( _
+    ByVal WB As Workbook, _
+    ByVal SheetName As String, _
+    ByVal ErrSource As String) _
+    As Worksheet
+'
+'==============================================================================
+' DEMO_Sheet_FindWorksheet
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the worksheet of WB named SheetName, or Nothing when no sheet has
+'   that name
+'
+' WHY THIS EXISTS
+'   Worksheet and chart-sheet names share one namespace. Looking only at
+'   WB.Worksheets would report a chart sheet's name as free, and creating a
+'   worksheet under it would then fail at the rename.
+'
+' INPUTS
+'   ErrSource
+'     Source of the error raised for a name held by another sheet type, so
+'     the error names the public procedure that refused the request
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2028 when a chart or other non-worksheet sheet
+'   already has the name
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Sh                  As Object          'Sheet of any type
+
+'------------------------------------------------------------------------------
+' SEARCH
+'------------------------------------------------------------------------------
+    'Compare names the way Excel does: without regard to case
+        For Each Sh In WB.Sheets
+            If StrComp(Sh.Name, SheetName, vbTextCompare) = 0 Then
+                If TypeOf Sh Is Worksheet Then
+                    Set DEMO_Sheet_FindWorksheet = Sh
+                    Exit Function
+                End If
+                Err.Raise vbObjectError + 2028, ErrSource, _
+                          "The name is already used by a sheet that is not a worksheet: " & SheetName
+            End If
+        Next Sh
+
+End Function
+
+
+Private Function DEMO_Sheet_DeleteOwned( _
+    ByVal WS As Worksheet) _
+    As String
+'
+'==============================================================================
+' DEMO_Sheet_DeleteOwned
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Deletes a worksheet that the calling invocation created, on its failure
+'   path
+'
+' BEHAVIOR
+'   - Turns DisplayAlerts off for the Delete only, so Excel does not ask for
+'     confirmation, and writes back the value it read
+'   - Attempts the Delete once; Excel refuses to delete the last visible sheet
+'
+' RETURNS
+'   String
+'     Empty on success; otherwise "<number> | <source> | <description>" of the
+'     failed Delete, and of a failed DisplayAlerts write-back after " || "
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Failures            As String          'Collected failures
+    Dim AlertsOn            As Boolean         'DisplayAlerts before the Delete
+    Dim AlertsRead          As Boolean         'TRUE when AlertsOn was read
+    Dim FailNumber          As Long            'Error number of one step
+    Dim FailSource          As String          'Error source of one step
+    Dim FailDescription     As String          'Error description of one step
+
+'------------------------------------------------------------------------------
+' DELETE
+'------------------------------------------------------------------------------
+        If WS Is Nothing Then Exit Function
+
+        On Error Resume Next
+
+    'Suppress the confirmation prompt for this Delete only
+        Err.Clear
+        AlertsOn = Application.DisplayAlerts
+        FailNumber = Err.Number
+        AlertsRead = (FailNumber = 0)
+
+        Err.Clear
+        Application.DisplayAlerts = False
+
+    'Delete the owned worksheet once
+        Err.Clear
+        WS.Delete
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        If FailNumber <> 0 Then
+            Failures = CStr(FailNumber) & " | " & FailSource & " | " & FailDescription
+        End If
+
+    'Write back the alert setting that was read
+        If AlertsRead Then
+            Err.Clear
+            Application.DisplayAlerts = AlertsOn
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            If FailNumber <> 0 Then
+                If Len(Failures) > 0 Then
+                    Failures = Failures & " || "
+                End If
+                Failures = Failures & "DisplayAlerts: " & CStr(FailNumber) & _
+                    " | " & FailSource & " | " & FailDescription
+            End If
+        End If
+
+        Err.Clear
+        On Error GoTo 0
+
+        DEMO_Sheet_DeleteOwned = Failures
+
+End Function
+
+
+Private Function DEMO_SheetNameProblem( _
+    ByVal SheetName As String) _
+    As String
+'
+'==============================================================================
+' DEMO_SheetNameProblem
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns why Excel would refuse SheetName as a sheet name, or an empty
+'   string when the name passes these rules
+'
+' BEHAVIOR
+'   Checks the documented sheet-name rules: not blank, at most 31 characters,
+'   none of : \ / ? * [ ], no apostrophe at either end, and not History.
+'   Uniqueness is checked separately against the workbook.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Pos                 As Long            'Character position
+    Dim Ch                  As String          'Character at Pos
+
+'------------------------------------------------------------------------------
+' CHECK
+'------------------------------------------------------------------------------
+        If Len(SheetName) = 0 Then
+            DEMO_SheetNameProblem = "it is blank"
+            Exit Function
+        End If
+
+        If Len(SheetName) > 31 Then
+            DEMO_SheetNameProblem = "it is longer than 31 characters"
+            Exit Function
+        End If
+
+        If Left$(SheetName, 1) = "'" Or Right$(SheetName, 1) = "'" Then
+            DEMO_SheetNameProblem = "it begins or ends with an apostrophe"
+            Exit Function
+        End If
+
+        If StrComp(SheetName, "History", vbTextCompare) = 0 Then
+            DEMO_SheetNameProblem = "History is reserved by Excel"
+            Exit Function
+        End If
+
+        For Pos = 1 To Len(SheetName)
+            Ch = Mid$(SheetName, Pos, 1)
+            If InStr(1, ":\/?*[]", Ch, vbBinaryCompare) > 0 Then
+                DEMO_SheetNameProblem = "it contains the character " & Ch
+                Exit Function
+            End If
+        Next Pos
+
+End Function
+
+
+Private Function DEMO_ParseColumnSpec( _
+    ByVal Spec As String, _
+    ByRef FirstCol As Long, _
+    ByRef LastCol As Long) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_ParseColumnSpec
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Parses "C" or "C:M" (letters only, case-insensitive, each part optionally
+'   prefixed with $) into 1-based column indexes, without touching a worksheet
+'
+' RETURNS
+'   Boolean
+'     TRUE with FirstCol <= LastCol, a reversed range being swapped; FALSE
+'     with both set to 0 when Spec is not one column or one column range
+'
+' NOTES
+'   The indexes are not checked against the worksheet's last column here;
+'   the caller does that once it knows the grid.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Parts               As Variant         'Spec split on ":"
+    Dim Swap                As Long            'Swap buffer
+
+'------------------------------------------------------------------------------
+' PARSE
+'------------------------------------------------------------------------------
+        FirstCol = 0
+        LastCol = 0
+
+        Parts = Split(Trim$(Spec), ":")
+
+        Select Case UBound(Parts)
+            Case 0
+                FirstCol = DEMO_ColumnIndex(Parts(0))
+                LastCol = FirstCol
+            Case 1
+                FirstCol = DEMO_ColumnIndex(Parts(0))
+                LastCol = DEMO_ColumnIndex(Parts(1))
+            Case Else
+                Exit Function
+        End Select
+
+        If FirstCol = 0 Or LastCol = 0 Then
+            FirstCol = 0
+            LastCol = 0
+            Exit Function
+        End If
+
+        If LastCol < FirstCol Then
+            Swap = FirstCol
+            FirstCol = LastCol
+            LastCol = Swap
+        End If
+
+        DEMO_ParseColumnSpec = True
+
+End Function
+
+
+Private Function DEMO_ColumnIndex( _
+    ByVal Part As String) _
+    As Long
+'
+'==============================================================================
+' DEMO_ColumnIndex
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Converts one to three column letters, optionally prefixed with $, to a
+'   1-based column index; returns 0 for anything else
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Letters             As String          'Normalized letters
+    Dim Pos                 As Long            'Letter position
+    Dim Code                As Long            'Character code at Pos
+    Dim Index               As Long            'Accumulated index
+
+'------------------------------------------------------------------------------
+' CONVERT
+'------------------------------------------------------------------------------
+        Letters = UCase$(Trim$(Part))
+        If Left$(Letters, 1) = "$" Then
+            Letters = Mid$(Letters, 2)
+        End If
+
+        If Len(Letters) < 1 Or Len(Letters) > 3 Then Exit Function
+
+        For Pos = 1 To Len(Letters)
+            Code = Asc(Mid$(Letters, Pos, 1))
+            If Code < 65 Or Code > 90 Then Exit Function
+            Index = Index * 26 + (Code - 64)
+        Next Pos
+
+        DEMO_ColumnIndex = Index
+
+End Function
+
+
+Private Function DEMO_SheetNameValue( _
+    ByVal SheetName As String) _
+    As String
+'
+'==============================================================================
+' DEMO_SheetNameValue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supplies the name DEMO_Sheet_GetOrCreate assigns to a sheet it created
+'
+' WHY THIS EXISTS
+'   Names that would fail the rename are refused before the sheet is created,
+'   so no valid request makes the rename fail on demand. Raising while the
+'   value is evaluated fails that exact statement and exercises the removal
+'   of the new sheet.
+'
+' RETURNS
+'   String
+'     SheetName, unchanged
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2196 once when the naming fault is armed
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Fail the rename once when armed
+        If (mCleanupFaults And DEMO_FAULT_SHEET_NAME) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not DEMO_FAULT_SHEET_NAME
+            Err.Raise vbObjectError + 2196, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate.InjectedNameFault", _
+                      "Injected worksheet naming fault."
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Pass the name through unchanged
+        DEMO_SheetNameValue = SheetName
+
 End Function
 
 Public Sub DEMO_Sheet_Reset( _
@@ -1523,6 +2482,15 @@ Public Sub DEMO_InternalCleanupProbeBegin( _
 '       2  The cleanup Protect statement fails while its arguments are
 '          evaluated, so Excel's Protect is not called
 '       4  The cleanup EnableSelection restoration fails the same way
+'       8  The DisplayFormulaBar write of DEMO_Sheet_BuildTemplate fails while
+'          its value is evaluated
+'       16 The rename of a sheet DEMO_Sheet_GetOrCreate has just created
+'          fails the same way
+'       256 times a DEMO_FM_* setting bit (1, 2, 4, 8, 16)
+'          The fast-mode entry write of that setting fails
+'       8192 times a DEMO_FM_* setting bit
+'          The fast-mode restoration write of that setting fails, in
+'          DEMO_FastMode_End or in the rollback of DEMO_FastMode_Begin
 '     Unrecognised bits are stored and never fire.
 '
 ' RETURNS
@@ -1586,6 +2554,8 @@ Public Function DEMO_InternalCleanupProbeCount( _
 '     4  DEMO_Sheet_Reset cleanup EnableSelection restorations reached
 '     5  DEMO_Sheet_BuildTemplate handler entries
 '     6  DEMO_Sheet_BuildTemplate cleanup passes
+'     7  Fast-mode entry writes reached
+'     8  Fast-mode restoration writes reached
 '
 ' RETURNS
 '   Long
@@ -1825,6 +2795,53 @@ Private Function DEMO_CleanupSelectionValue( _
 '------------------------------------------------------------------------------
     'Pass the selection policy through unchanged
         DEMO_CleanupSelectionValue = SelectionPolicy
+
+End Function
+
+
+Private Function DEMO_FormulaBarValue( _
+    ByVal ShowFormulaBar As Boolean) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_FormulaBarValue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supplies the value of the DisplayFormulaBar write of
+'   DEMO_Sheet_BuildTemplate.
+'
+' WHY THIS EXISTS
+'   No host condition makes that write fail on demand. Raising while the value
+'   is evaluated fails that exact statement inside the guarded body, so the
+'   template's cleanup path runs unchanged and the formula bar is not touched.
+'
+' RETURNS
+'   Boolean
+'     ShowFormulaBar, unchanged
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2195 once when the formula-bar fault is armed
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Fail the write once when armed
+        If (mCleanupFaults And DEMO_FAULT_BUILD_FORMULABAR) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not DEMO_FAULT_BUILD_FORMULABAR
+            Err.Raise vbObjectError + 2195, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate.InjectedFormulaBarFault", _
+                      "Injected DisplayFormulaBar fault."
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Pass the value through unchanged
+        DEMO_FormulaBarValue = ShowFormulaBar
 
 End Function
 
@@ -4571,3 +5588,327 @@ Private Sub DEMO_AddOneFormsCheckBox( _
         Cb.PrintObject = True
 
 End Sub
+
+
+Public Function DEMO_CB_TryGetState( _
+    ByVal WS As Worksheet, _
+    ByVal ControlName As String, _
+    ByRef IsChecked As Boolean, _
+    ByRef FailMsg As String) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_CB_TryGetState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reads the checked state of a Forms or ActiveX check box on a worksheet
+'
+' INPUTS
+'   WS
+'     Worksheet containing the control
+'
+'   ControlName
+'     Name of the control; for an ActiveX control, the shape and the
+'     OLEObject share it
+'
+'   IsChecked
+'     Receives TRUE when the check box is checked, FALSE otherwise
+'
+'   FailMsg
+'     Receives a diagnostic reason when the function returns FALSE
+'
+' RETURNS
+'   TRUE  => control found and state read successfully
+'   FALSE => control missing, not a check box, mixed, or unreadable
+'
+' BEHAVIOR
+'   - Dispatches on the control type through DEMO_CB_ResolveControl, so an
+'     ActiveX check box reaches the OLEObject path
+'   - A mixed state (a Forms value other than xlOn or xlOff, or an ActiveX
+'     Value of Null) is refused: the caller treats the box as unavailable and
+'     leaves the UI element unchanged
+'
+' ERROR POLICY
+'   - Does NOT raise to callers
+'   - Returns FALSE and populates FailMsg on failure
+'
+' UPDATED
+'   2026-11-14 - Moved from M_EXCEL_UI_DEMO; ActiveX dispatch and mixed
+'                state (#73).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Shp                 As Shape           'Resolved Forms control
+    Dim CheckBoxOle         As OLEObject       'Resolved ActiveX control
+    Dim ValueOut            As Variant         'Control value
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        DEMO_CB_TryGetState = False
+        IsChecked = False
+        FailMsg = vbNullString
+
+'------------------------------------------------------------------------------
+' READ BY CONTROL TYPE
+'------------------------------------------------------------------------------
+        Select Case DEMO_CB_ResolveControl(WS, ControlName, Shp, CheckBoxOle, FailMsg)
+            Case DEMO_CB_KIND_FORMS
+                ValueOut = Shp.ControlFormat.Value
+            Case DEMO_CB_KIND_ACTIVEX
+                ValueOut = CallByName(CheckBoxOle.Object, "Value", VbGet)
+            Case Else
+                GoTo Safe_Exit
+        End Select
+
+'------------------------------------------------------------------------------
+' MAP THE VALUE
+'------------------------------------------------------------------------------
+    'Refuse a mixed state; accept only a definite checked or unchecked value
+        If IsNull(ValueOut) Then
+            FailMsg = DEMO_CB_MIXED_STATE
+        ElseIf Shp Is Nothing Then
+            IsChecked = CBool(ValueOut)
+            DEMO_CB_TryGetState = True
+        ElseIf ValueOut = xlOn Then
+            IsChecked = True
+            DEMO_CB_TryGetState = True
+        ElseIf ValueOut = xlOff Then
+            IsChecked = False
+            DEMO_CB_TryGetState = True
+        Else
+            FailMsg = DEMO_CB_MIXED_STATE
+        End If
+
+Safe_Exit:
+        Exit Function
+
+Err_Handler:
+        FailMsg = DEMO_CB_ErrorText(Err.Number, Err.Source, Err.Description)
+        IsChecked = False
+        DEMO_CB_TryGetState = False
+
+End Function
+
+
+Public Function DEMO_CB_TrySetState( _
+    ByVal WS As Worksheet, _
+    ByVal ControlName As String, _
+    ByVal IsChecked As Boolean, _
+    ByRef FailMsg As String) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_CB_TrySetState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes the checked state of a Forms or ActiveX check box on a worksheet
+'
+' INPUTS
+'   WS
+'     Worksheet containing the control
+'
+'   ControlName
+'     Name of the control; for an ActiveX control, the shape and the
+'     OLEObject share it
+'
+'   IsChecked
+'     Requested state
+'
+'   FailMsg
+'     Receives a diagnostic reason when the function returns FALSE
+'
+' RETURNS
+'   TRUE  => control found and updated successfully
+'   FALSE => control missing, not a check box, or not writable
+'
+' BEHAVIOR
+'   - Dispatches on the control type through DEMO_CB_ResolveControl
+'   - Writes xlOn / xlOff to a Forms check box and True / False to an
+'     ActiveX check box; either write replaces a mixed state
+'
+' ERROR POLICY
+'   - Does NOT raise to callers
+'   - Returns FALSE and populates FailMsg on failure
+'
+' UPDATED
+'   2026-11-14 - Moved from M_EXCEL_UI_DEMO; ActiveX dispatch (#73).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Shp                 As Shape           'Resolved Forms control
+    Dim CheckBoxOle         As OLEObject       'Resolved ActiveX control
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        DEMO_CB_TrySetState = False
+        FailMsg = vbNullString
+
+'------------------------------------------------------------------------------
+' WRITE BY CONTROL TYPE
+'------------------------------------------------------------------------------
+        Select Case DEMO_CB_ResolveControl(WS, ControlName, Shp, CheckBoxOle, FailMsg)
+            Case DEMO_CB_KIND_FORMS
+                If IsChecked Then
+                    Shp.ControlFormat.Value = xlOn
+                Else
+                    Shp.ControlFormat.Value = xlOff
+                End If
+                DEMO_CB_TrySetState = True
+            Case DEMO_CB_KIND_ACTIVEX
+                CallByName CheckBoxOle.Object, "Value", VbLet, IsChecked
+                DEMO_CB_TrySetState = True
+        End Select
+
+Safe_Exit:
+        Exit Function
+
+Err_Handler:
+        FailMsg = DEMO_CB_ErrorText(Err.Number, Err.Source, Err.Description)
+        DEMO_CB_TrySetState = False
+
+End Function
+
+
+Private Function DEMO_CB_ResolveControl( _
+    ByVal WS As Worksheet, _
+    ByVal ControlName As String, _
+    ByRef Shp As Shape, _
+    ByRef CheckBoxOle As OLEObject, _
+    ByRef FailMsg As String) _
+    As Long
+'
+'==============================================================================
+' DEMO_CB_ResolveControl
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Finds a check box by name and reports whether it is a Forms or an ActiveX
+'   check box
+'
+' WHY THIS EXISTS
+'   An ActiveX control is also a worksheet shape with the same name. Testing
+'   the shape for a Forms control first and refusing anything else would
+'   reject every ActiveX check box before its OLEObject is reached, so the
+'   shape type decides the path.
+'
+' RETURNS
+'   Long
+'     DEMO_CB_KIND_FORMS with Shp set, DEMO_CB_KIND_ACTIVEX with CheckBoxOle
+'     set, or DEMO_CB_KIND_NONE with FailMsg set
+'
+' BEHAVIOR
+'   - msoFormControl shape: accepted when its FormControlType is xlCheckBox
+'   - msoOLEControlObject shape: resolved through WS.OLEObjects and accepted
+'     when its progID names a CheckBox
+'   - any other shape: refused
+'   - no shape: WS.OLEObjects is still tried, then "check box not found"
+'
+' ERROR POLICY
+'   Raises only when Excel fails while reading a control it found; the
+'   callers turn that into FailMsg
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+        DEMO_CB_ResolveControl = DEMO_CB_KIND_NONE
+        Set Shp = Nothing
+        Set CheckBoxOle = Nothing
+
+        If WS Is Nothing Then
+            FailMsg = "worksheet reference is Nothing"
+            Exit Function
+        End If
+
+        If Len(Trim$(ControlName)) = 0 Then
+            FailMsg = "control name is blank"
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' LOOK UP THE SHAPE
+'------------------------------------------------------------------------------
+    'A missing name is an expected outcome, not an error
+        On Error Resume Next
+            Set Shp = WS.Shapes(ControlName)
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' DISPATCH BY SHAPE TYPE
+'------------------------------------------------------------------------------
+        If Not Shp Is Nothing Then
+            Select Case Shp.Type
+                Case msoFormControl
+                    If Shp.FormControlType <> xlCheckBox Then
+                        FailMsg = "Forms control exists but is not a CheckBox"
+                        Set Shp = Nothing
+                        Exit Function
+                    End If
+                    DEMO_CB_ResolveControl = DEMO_CB_KIND_FORMS
+                    Exit Function
+
+                Case msoOLEControlObject
+                    Set Shp = Nothing
+
+                Case Else
+                    FailMsg = "shape exists but is not a Forms or ActiveX control"
+                    Set Shp = Nothing
+                    Exit Function
+            End Select
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE THE ACTIVEX CONTROL
+'------------------------------------------------------------------------------
+        On Error Resume Next
+            Set CheckBoxOle = WS.OLEObjects(ControlName)
+        On Error GoTo 0
+
+        If CheckBoxOle Is Nothing Then
+            FailMsg = "check box not found"
+            Exit Function
+        End If
+
+        If InStr(1, CheckBoxOle.progID, "CheckBox", vbTextCompare) = 0 Then
+            FailMsg = "ActiveX control exists but is not a CheckBox"
+            Set CheckBoxOle = Nothing
+            Exit Function
+        End If
+
+        DEMO_CB_ResolveControl = DEMO_CB_KIND_ACTIVEX
+
+End Function
+
+
+Private Function DEMO_CB_ErrorText( _
+    ByVal Number As Long, _
+    ByVal Source As String, _
+    ByVal Description As String) _
+    As String
+'
+'==============================================================================
+' DEMO_CB_ErrorText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Formats a runtime error for a check-box FailMsg
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+        DEMO_CB_ErrorText = CStr(Number) & ": " & Description & _
+            IIf(Len(Source) > 0, " | Source: " & Source, vbNullString)
+
+End Function

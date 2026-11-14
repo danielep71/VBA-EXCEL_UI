@@ -200,6 +200,40 @@ across workbook reopening. Source fixtures do not establish Excel outcomes.
 [CONTRIBUTING.md](../CONTRIBUTING.md#demo-cleanup-checks-71) describes the
 host harness that tests this contract.
 
+### Demo fast-mode contract (#70)
+
+`DEMO_FastMode_Begin` owns five Application settings: `ScreenUpdating`,
+`EnableEvents`, `DisplayAlerts`, `Calculation` and `Cursor`. It reads all five
+before its first write and marks each one as owned immediately before writing
+it. When a write fails, Begin writes back every setting it marked, each in its
+own attempt, and raises the original error with its number and source; a
+failed write-back is appended to the description. `DEMO_FastMode_End` attempts
+every owned restoration even after one fails, then gives up ownership and
+raises one error that names each setting it could not restore.
+`DEMO_FastMode_EndPreservingError` adds that failure to a caller's saved error,
+or makes it the error when there is none. The cursor returns to its entry
+value.
+
+The worksheet window settings and `DisplayFormulaBar` that
+`DEMO_Sheet_BuildTemplate` applies are the requested demo view, not temporary
+settings: nothing restores them, and `DisplayFormulaBar` changes every window
+of the Excel instance. Like the cleanup contract, this is single-pass: it does
+not recover from a blocked Excel call or from Reset/End.
+
+### Demo template validation (#74)
+
+`DEMO_Sheet_BuildTemplate` checks every layout input before it creates or
+resets a worksheet: the sheet name against Excel's naming rules, the content
+and left-margin columns, the body, freeze and hidden rows, the widths, heights
+and zoom. The checks that need the worksheet grid read it from the target or
+another worksheet of the workbook, and a name held by a chart sheet is refused.
+An invalid request therefore leaves an existing worksheet and the sheet count
+as they were. `DEMO_Sheet_GetOrCreate` deletes a sheet it added when the rename
+fails, and the template deletes a worksheet it created when it fails later.
+Rebuilding an existing worksheet stays destructive: once the inputs are valid,
+`DEMO_Sheet_Reset` clears it, and a later failure is reported without undoing
+that reset.
+
 ## Excel state ownership
 
 Assume these surfaces belong to the caller or host unless the project explicitly

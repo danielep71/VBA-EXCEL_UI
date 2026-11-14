@@ -339,6 +339,26 @@ class DemoCleanupRegression(GateTestCase):
         self.repo.replace(BUILDER, "DidUnprotect = True", "DidUnprotect = False")
         self.assertFails("ownership must be armed only after Unprotect returns")
 
+    def test_fails_when_a_fast_mode_restoration_is_dropped(self) -> None:
+        restore = "Application.Calculation = DEMO_FastModeValue(DEMO_FM_CALCULATION, True, State.Calculation)"
+        self.repo.replace(BUILDER, restore, "Debug.Print 0")
+        self.assertFails("fast mode: Calculation restoration missing")
+
+    def test_fails_when_a_fast_mode_write_is_not_marked_first(self) -> None:
+        self.repo.replace(BUILDER, "StateOut.Applied = StateOut.Applied Or DEMO_FM_CURSOR\r\n", "")
+        self.assertFails("fast mode: Cursor must be marked owned immediately before its write")
+
+    def test_fails_when_activex_shapes_are_refused_before_their_oleobject(self) -> None:
+        activex = "                Case msoOLEControlObject\r\n                    Set Shp = Nothing\r\n"
+        self.repo.replace(BUILDER, activex, "")
+        self.assertFails("check boxes: the shape type must route Forms and ActiveX controls before refusing a shape")
+
+    def test_fails_when_the_template_resets_before_checking_its_layout(self) -> None:
+        limits = "        MaxCol = LimitSheet.Columns.Count\r\n"
+        self.repo.replace(BUILDER, "        DEMO_Sheet_Reset WS\r\n", "")
+        self.repo.replace(BUILDER, limits, limits + "        DEMO_Sheet_Reset WS\r\n")
+        self.assertFails("template: every layout check must raise before the worksheet is reset")
+
 
 class PublicApiManifest(GateTestCase):
     check = "public API manifest"
