@@ -61,7 +61,9 @@ Option Explicit
 '
 ' COMPATIBILITY
 '   - Supports both Forms check boxes and ActiveX check boxes when reading or
-'     writing control state
+'     writing control state, through DEMO_CB_TryGetState and
+'     DEMO_CB_TrySetState of M_DEMO_BUILDER; a mixed check box is treated as
+'     unavailable and leaves its UI element unchanged
 '   - Relies on the public API exposed by the EXCEL_UI module:
 '       * UIVisibility
 '       * UI_SetExcelUI
@@ -80,6 +82,10 @@ Option Explicit
 '   - Demo_CreateDemoSheet is the canonical builder
 '
 ' UPDATED
+'   2026-11-14 - Check-box reads and writes moved to M_DEMO_BUILDER, which
+'                reaches ActiveX check boxes (#73).
+'   2026-11-14 - Demo_CreateDemoSheet keeps fast-mode restoration failures and
+'                the entry cursor (#70).
 '   2026-11-06 - Header and comments aligned with the code (#114).
 '   2026-08-21 - Captured the Err fields before suppressing errors, so the
 '                runtime-error text describes the error it was given.
@@ -196,16 +202,22 @@ Public Sub Demo_CreateDemoSheet()
 '   - Adds the action, selection, preset, sync, capture, and reset controls
 '   - Writes the scope and restore notes
 '   - Synchronizes the check boxes to the current Excel UI state
-'   - Restores cursor and fast-mode state through a centralized cleanup path
+'   - Restores the five fast-mode settings, the entry cursor included, through
+'     a centralized cleanup path; a partial fast-mode entry is rolled back by
+'     DEMO_FastMode_Begin itself
+'   - Leaves the demo view the template applied, DisplayFormulaBar included,
+'     in place: it is the requested view, not a temporary setting
 '
 ' ERROR POLICY
 '   - Raises errors normally
-'   - Cleanup is best-effort and should not overwrite the original error
+'   - An original error keeps its number and source; a failed restoration is
+'     appended to its description as a "Cleanup failure: " line
+'   - A restoration failure without an original error is raised itself
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_Click
 '   - DEMO_FastMode_Begin
-'   - DEMO_FastMode_End
+'   - DEMO_FastMode_EndPreservingError
 '   - DEMO_Sheet_BuildTemplate
 '   - DEMO_Prepare_LabeledInputSection
 '   - DEMO_Write_NamedInputRow
@@ -217,6 +229,8 @@ Public Sub Demo_CreateDemoSheet()
 '   - Demo_SyncCheckBoxesToUI
 '
 ' UPDATED
+'   2026-11-14 - Fast-mode cleanup restores the entry cursor and reports a
+'                failed restoration (#70).
 '   2026-07-25
 '==============================================================================
 '
@@ -227,8 +241,7 @@ Public Sub Demo_CreateDemoSheet()
     Dim WB                  As Workbook        'Target workbook
     Dim WS                  As Worksheet       'Demo worksheet
     Dim ButtonSpecs         As Variant         'Button name / caption / macro specification
-    Dim FastModeState       As tDEMOFastModeState 'Saved Application-state snapshot
-    Dim FastModeOn          As Boolean         'TRUE when fast mode was entered
+    Dim FastModeState       As tDEMOFastModeState 'Saved Application state and owned settings
     Dim SavedErrNumber      As Long            'Captured error number
     Dim SavedErrSource      As String          'Captured error source
     Dim SavedErrDescription As String          'Captured error description
@@ -244,11 +257,9 @@ Public Sub Demo_CreateDemoSheet()
         Set WB = ThisWorkbook
     'Play the standard demo-button click feedback
         DEMO_Btn_Click
-    'Capture and apply fast-mode Application settings
+    'Capture and apply fast-mode Application settings, the wait cursor
+    'included; a failed entry has already rolled itself back
         DEMO_FastMode_Begin FastModeState
-        FastModeOn = True
-    'Show the wait cursor while rebuilding the demo workbook
-        Application.Cursor = xlWait
     'Build or rebuild the generic template for the demo sheet
         DEMO_Sheet_BuildTemplate DEMO_SHEET_NAME, "EXCEL UI", "Demo Sheet", , , , _
             , , "C:H", , , , , , , , , , 29
@@ -398,15 +409,12 @@ Clean_Exit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Protect cleanup so it cannot overwrite the original error
-        On Error Resume Next
-        Application.Cursor = xlDefault
-    'Restore the original Excel Application state only when fast mode was entered
-        If FastModeOn Then
-            DEMO_FastMode_End FastModeState
-        End If
-    'Restore normal error handling before any re-raise
+    'Disable the handler first, so cleanup can never re-enter it
         On Error GoTo 0
+    'Restore every fast-mode setting this call applied; a failed restoration
+    'joins the original error, or becomes the error, instead of being dropped
+        DEMO_FastMode_EndPreservingError FastModeState, SavedErrNumber, _
+            SavedErrSource, SavedErrDescription
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
@@ -542,7 +550,7 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_TryGetRibbonVisibility
 '   - Demo_TryGetTitleBarVisibility
-'   - Demo_TrySetCheckBoxState
+'   - DEMO_CB_TrySetState
 '   - Demo_LogFailure
 '
 ' NOTES
@@ -579,7 +587,7 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '------------------------------------------------------------------------------
     'Read current Ribbon visibility and update the related check box
         If Demo_TryGetRibbonVisibility(IsVisible, FailMsg) Then
-            If Not Demo_TrySetCheckBoxState(WS, CB_RIBBON, IsVisible, FailMsg) _
+            If Not DEMO_CB_TrySetState(WS, CB_RIBBON, IsVisible, FailMsg) _
                 Then
                 Demo_LogFailure PROC, CB_RIBBON, FailMsg
             End If
@@ -587,17 +595,17 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
             Demo_LogFailure PROC, "RibbonState", FailMsg
         End If
     'Read current StatusBar visibility and update the related check box
-        If Not Demo_TrySetCheckBoxState(WS, CB_STATUSBAR, _
+        If Not DEMO_CB_TrySetState(WS, CB_STATUSBAR, _
             Application.DisplayStatusBar, FailMsg) Then
             Demo_LogFailure PROC, CB_STATUSBAR, FailMsg
         End If
     'Read current ScrollBars visibility and update the related check box
-        If Not Demo_TrySetCheckBoxState(WS, CB_SCROLLBARS, _
+        If Not DEMO_CB_TrySetState(WS, CB_SCROLLBARS, _
             Application.DisplayScrollBars, FailMsg) Then
             Demo_LogFailure PROC, CB_SCROLLBARS, FailMsg
         End If
     'Read current FormulaBar visibility and update the related check box
-        If Not Demo_TrySetCheckBoxState(WS, CB_FORMULABAR, _
+        If Not DEMO_CB_TrySetState(WS, CB_FORMULABAR, _
             Application.DisplayFormulaBar, FailMsg) Then
             Demo_LogFailure PROC, CB_FORMULABAR, FailMsg
         End If
@@ -611,17 +619,17 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
                     "no active window available for window-level sync"
         Else
             'Update the Headings check box from ActiveWindow
-                If Not Demo_TrySetCheckBoxState(WS, CB_HEADINGS, _
+                If Not DEMO_CB_TrySetState(WS, CB_HEADINGS, _
                     ActiveWin.DisplayHeadings, FailMsg) Then
                     Demo_LogFailure PROC, CB_HEADINGS, FailMsg
                 End If
             'Update the WorkbookTabs check box from ActiveWindow
-                If Not Demo_TrySetCheckBoxState(WS, CB_WORKBOOKTABS, _
+                If Not DEMO_CB_TrySetState(WS, CB_WORKBOOKTABS, _
                     ActiveWin.DisplayWorkbookTabs, FailMsg) Then
                     Demo_LogFailure PROC, CB_WORKBOOKTABS, FailMsg
                 End If
             'Update the Gridlines check box from ActiveWindow
-                If Not Demo_TrySetCheckBoxState(WS, CB_GRIDLINES, _
+                If Not DEMO_CB_TrySetState(WS, CB_GRIDLINES, _
                     ActiveWin.DisplayGridlines, FailMsg) Then
                     Demo_LogFailure PROC, CB_GRIDLINES, FailMsg
                 End If
@@ -632,7 +640,7 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '------------------------------------------------------------------------------
     'Read current title-bar visibility and update the related check box
         If Demo_TryGetTitleBarVisibility(IsVisible, FailMsg) Then
-            If Not Demo_TrySetCheckBoxState(WS, CB_TITLEBAR, IsVisible, FailMsg) _
+            If Not DEMO_CB_TrySetState(WS, CB_TITLEBAR, IsVisible, FailMsg) _
                 Then
                 Demo_LogFailure PROC, CB_TITLEBAR, FailMsg
             End If
@@ -1199,7 +1207,7 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 '   - Per-control failures are written to the Immediate Window
 '
 ' DEPENDENCIES
-'   - Demo_TrySetCheckBoxState
+'   - DEMO_CB_TrySetState
 '   - Demo_LogFailure
 '
 ' UPDATED
@@ -1222,35 +1230,35 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 '------------------------------------------------------------------------------
 ' WRITE SELECTION PROFILE
 '------------------------------------------------------------------------------
-        If Not Demo_TrySetCheckBoxState(WS, CB_RIBBON, RibbonSelected, FailMsg) _
+        If Not DEMO_CB_TrySetState(WS, CB_RIBBON, RibbonSelected, FailMsg) _
             Then
             Demo_LogFailure CallerProc, CB_RIBBON, FailMsg
         End If
-        If Not Demo_TrySetCheckBoxState(WS, CB_STATUSBAR, StatusBarSelected, _
+        If Not DEMO_CB_TrySetState(WS, CB_STATUSBAR, StatusBarSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_STATUSBAR, FailMsg
         End If
-        If Not Demo_TrySetCheckBoxState(WS, CB_SCROLLBARS, ScrollBarsSelected, _
+        If Not DEMO_CB_TrySetState(WS, CB_SCROLLBARS, ScrollBarsSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_SCROLLBARS, FailMsg
         End If
-        If Not Demo_TrySetCheckBoxState(WS, CB_FORMULABAR, FormulaBarSelected, _
+        If Not DEMO_CB_TrySetState(WS, CB_FORMULABAR, FormulaBarSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_FORMULABAR, FailMsg
         End If
-        If Not Demo_TrySetCheckBoxState(WS, CB_HEADINGS, HeadingsSelected, _
+        If Not DEMO_CB_TrySetState(WS, CB_HEADINGS, HeadingsSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_HEADINGS, FailMsg
         End If
-        If Not Demo_TrySetCheckBoxState(WS, CB_WORKBOOKTABS, _
+        If Not DEMO_CB_TrySetState(WS, CB_WORKBOOKTABS, _
             WorkbookTabsSelected, FailMsg) Then
             Demo_LogFailure CallerProc, CB_WORKBOOKTABS, FailMsg
         End If
-        If Not Demo_TrySetCheckBoxState(WS, CB_GRIDLINES, GridlinesSelected, _
+        If Not DEMO_CB_TrySetState(WS, CB_GRIDLINES, GridlinesSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_GRIDLINES, FailMsg
         End If
-        If Not Demo_TrySetCheckBoxState(WS, CB_TITLEBAR, TitleBarSelected, _
+        If Not DEMO_CB_TrySetState(WS, CB_TITLEBAR, TitleBarSelected, _
             FailMsg) Then
             Demo_LogFailure CallerProc, CB_TITLEBAR, FailMsg
         End If
@@ -1358,7 +1366,7 @@ Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
 '     treated as UI_LeaveUnchanged
 '
 ' DEPENDENCIES
-'   - Demo_TryGetCheckBoxState
+'   - DEMO_CB_TryGetState
 '   - Demo_LogFailure
 '
 ' UPDATED
@@ -1381,7 +1389,7 @@ Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
 '------------------------------------------------------------------------------
 ' READ CHECK-BOX STATE
 '------------------------------------------------------------------------------
-        If Not Demo_TryGetCheckBoxState(WS, CheckBoxName, IsChecked, FailMsg) _
+        If Not DEMO_CB_TryGetState(WS, CheckBoxName, IsChecked, FailMsg) _
             Then
             'Log the control-resolution failure and keep UI_LeaveUnchanged
                 Demo_LogFailure CallerProc, CheckBoxName, FailMsg
@@ -1397,273 +1405,6 @@ Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
         Else
             Demo_CheckBoxToUIVisibility = UI_LeaveUnchanged
         End If
-
-End Function
-
-Private Function Demo_TryGetCheckBoxState(ByVal WS As Worksheet, ByVal _
-    ControlName As String, ByRef IsChecked As Boolean, ByRef FailMsg As String) As _
-    Boolean
-
-'
-'==============================================================================
-' Demo_TryGetCheckBoxState
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to read the checked state of a demo worksheet check box
-'
-' WHY THIS EXISTS
-'   The demo workbook may use either:
-'     - Forms check boxes
-'     - ActiveX check boxes
-'
-'   This helper supports both models behind a single reader
-'
-' INPUTS
-'   WS
-'     Worksheet containing the control
-'
-'   ControlName
-'     Name of the control to inspect
-'
-'   IsChecked
-'     Receives TRUE when the check box is checked, FALSE otherwise
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => control found and state read successfully
-'   FALSE => control missing or invalid
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim Shp                 As Shape           'Candidate Forms control
-    Dim CheckBoxOle         As OLEObject       'Candidate ActiveX control
-    Dim ValueOut            As Variant         'Late-bound Value property result
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-    'Initialize outputs and default result
-        Demo_TryGetCheckBoxState = False
-        IsChecked = False
-        FailMsg = vbNullString
-'------------------------------------------------------------------------------
-' VALIDATE
-'------------------------------------------------------------------------------
-    'Reject a missing worksheet reference deterministically
-        If WS Is Nothing Then
-            FailMsg = "worksheet reference is Nothing"
-            GoTo Safe_Exit
-        End If
-    'Reject a blank control name deterministically
-        If Len(Trim$(ControlName)) = 0 Then
-            FailMsg = "control name is blank"
-            GoTo Safe_Exit
-        End If
-
-'------------------------------------------------------------------------------
-' TRY FORMS CHECK BOX
-'------------------------------------------------------------------------------
-        On Error Resume Next
-            Set Shp = WS.Shapes(ControlName)
-        On Error GoTo Err_Handler
-        If Not Shp Is Nothing Then
-            'Reject shapes that are not Forms controls
-                If Shp.Type <> msoFormControl Then
-                    FailMsg = "shape exists but is not a Forms control"
-                    GoTo Safe_Exit
-                End If
-            'Reject Forms controls that are not check boxes
-                If Shp.FormControlType <> xlCheckBox Then
-                    FailMsg = "Forms control exists but is not a CheckBox"
-                    GoTo Safe_Exit
-                End If
-                IsChecked = (Shp.ControlFormat.Value = xlOn)
-                Demo_TryGetCheckBoxState = True
-                GoTo Safe_Exit
-        End If
-
-'------------------------------------------------------------------------------
-' TRY ACTIVEX CHECK BOX
-'------------------------------------------------------------------------------
-        On Error Resume Next
-            Set CheckBoxOle = WS.OLEObjects(ControlName)
-        On Error GoTo Err_Handler
-        If Not CheckBoxOle Is Nothing Then
-            'Reject ActiveX controls that are not check boxes
-                If InStr(1, CheckBoxOle.progID, "CheckBox", vbTextCompare) = 0 _
-                    Then
-                    FailMsg = "ActiveX control exists but is not a CheckBox"
-                    GoTo Safe_Exit
-                End If
-                ValueOut = CallByName(CheckBoxOle.Object, "Value", VbGet)
-                IsChecked = CBool(ValueOut)
-                Demo_TryGetCheckBoxState = True
-                GoTo Safe_Exit
-        End If
-
-'------------------------------------------------------------------------------
-' NOT FOUND
-'------------------------------------------------------------------------------
-    'Report that neither a Forms nor an ActiveX check box was found
-        FailMsg = "check box not found"
-
-'------------------------------------------------------------------------------
-' RETURN SUCCESS
-'------------------------------------------------------------------------------
-Safe_Exit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-Err_Handler:
-        FailMsg = Demo_GetRuntimeErrorText
-
-End Function
-
-Private Function Demo_TrySetCheckBoxState(ByVal WS As Worksheet, ByVal _
-    ControlName As String, ByVal IsChecked As Boolean, ByRef FailMsg As String) As _
-    Boolean
-
-'
-'==============================================================================
-' Demo_TrySetCheckBoxState
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to write the checked state of a demo worksheet check box
-'
-' WHY THIS EXISTS
-'   The demo supports selection profiles and current-state synchronization,
-'   both of which need to programmatically set the worksheet controls
-'
-' INPUTS
-'   WS
-'     Worksheet containing the control
-'
-'   ControlName
-'     Name of the control to update
-'
-'   IsChecked
-'     Requested target state
-'
-'   FailMsg
-'     Receives a diagnostic reason when the function returns FALSE
-'
-' RETURNS
-'   TRUE  => control found and updated successfully
-'   FALSE => control missing or invalid
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Returns FALSE and populates FailMsg on failure
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim Shp                 As Shape           'Candidate Forms control
-    Dim CheckBoxOle         As OLEObject       'Candidate ActiveX control
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-    'Initialize default result
-        Demo_TrySetCheckBoxState = False
-        FailMsg = vbNullString
-'------------------------------------------------------------------------------
-' VALIDATE
-'------------------------------------------------------------------------------
-    'Reject a missing worksheet reference deterministically
-        If WS Is Nothing Then
-            FailMsg = "worksheet reference is Nothing"
-            GoTo Safe_Exit
-        End If
-
-    'Reject a blank control name deterministically
-        If Len(Trim$(ControlName)) = 0 Then
-            FailMsg = "control name is blank"
-            GoTo Safe_Exit
-        End If
-
-'------------------------------------------------------------------------------
-' TRY FORMS CHECK BOX
-'------------------------------------------------------------------------------
-        On Error Resume Next
-            Set Shp = WS.Shapes(ControlName)
-        On Error GoTo Err_Handler
-        If Not Shp Is Nothing Then
-            'Reject shapes that are not Forms controls
-                If Shp.Type <> msoFormControl Then
-                    FailMsg = "shape exists but is not a Forms control"
-                    GoTo Safe_Exit
-                End If
-            'Reject Forms controls that are not check boxes
-                If Shp.FormControlType <> xlCheckBox Then
-                    FailMsg = "Forms control exists but is not a CheckBox"
-                    GoTo Safe_Exit
-                End If
-                If IsChecked Then
-                    Shp.ControlFormat.Value = xlOn
-                Else
-                    Shp.ControlFormat.Value = xlOff
-                End If
-                Demo_TrySetCheckBoxState = True
-                GoTo Safe_Exit
-        End If
-
-'------------------------------------------------------------------------------
-' TRY ACTIVEX CHECK BOX
-'------------------------------------------------------------------------------
-        On Error Resume Next
-            Set CheckBoxOle = WS.OLEObjects(ControlName)
-        On Error GoTo Err_Handler
-        If Not CheckBoxOle Is Nothing Then
-            'Reject ActiveX controls that are not check boxes
-                If InStr(1, CheckBoxOle.progID, "CheckBox", vbTextCompare) = 0 _
-                    Then
-                    FailMsg = "ActiveX control exists but is not a CheckBox"
-                    GoTo Safe_Exit
-                End If
-                CallByName CheckBoxOle.Object, "Value", VbLet, IsChecked
-                Demo_TrySetCheckBoxState = True
-                GoTo Safe_Exit
-        End If
-
-'------------------------------------------------------------------------------
-' NOT FOUND
-'------------------------------------------------------------------------------
-    'Report that neither a Forms nor an ActiveX check box was found
-        FailMsg = "check box not found"
-
-'------------------------------------------------------------------------------
-' RETURN SUCCESS
-'------------------------------------------------------------------------------
-Safe_Exit:
-        Exit Function
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-Err_Handler:
-        FailMsg = Demo_GetRuntimeErrorText
 
 End Function
 

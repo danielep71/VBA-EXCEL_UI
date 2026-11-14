@@ -459,12 +459,16 @@ beside them.
 
 ### Demo cleanup checks (#71)
 
-The demo cleanup contract is stated in
+The demo cleanup and fast-mode contracts are stated in
 [docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md#demo-cleanup-contract-71).
 When you change the demo cleanup paths, use disposable worksheets and a
 bounded host harness to test ordinary failure, missing/wrong password,
 reprotection and selection failure, and read back every captured option at the
-exact tested commit.
+exact tested commit. When you change fast mode, fail each entry and
+restoration write in turn and read back the Application settings. When you
+change the check-box helpers, read and write real Forms and ActiveX controls.
+When you change the template's validation, check that an invalid request
+leaves an existing sheet and the sheet count unchanged.
 
 `demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
 from the commit under test:
@@ -475,15 +479,26 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VB
 
 Open it, run **Debug → Compile VBAProject**, and run
 `Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
-creates a temporary workbook, runs fourteen scenarios on sheets of its own,
+creates a temporary workbook, runs forty-four scenarios on sheets of its own,
 closes the workbook without saving and prints one `PASS` or `FAIL` line per
 scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
 `DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
 operation error after a successful unprotect, a failed Protect and a failed
 `EnableSelection` restoration have no worksheet cause that can be produced on
-demand, so the harness injects them through the one-shot
-`DEMO_InternalCleanupProbe*` seams of `M_DEMO_BUILDER`. Those seams stay inert
-unless the harness arms them. Record the commit, Excel build and bitness with
+demand, and neither has a failed fast-mode or `DisplayFormulaBar` write or a
+failed rename of a new sheet, so the harness injects them through the one-shot `DEMO_InternalCleanupProbe*` seams
+of `M_DEMO_BUILDER`. Those seams stay inert unless the harness arms them.
+
+The fast-mode scenarios change Application settings. The harness records
+`ScreenUpdating`, `EnableEvents`, `DisplayAlerts`, `Calculation`, `Cursor` and
+`DisplayFormulaBar` before the first scenario and writes them back on every
+exit; a failed write-back fails the run. Each fast-mode scenario starts from
+screen updating, events and alerts on, the north-west arrow cursor and the
+session's calculation mode, or automatic calculation when the session is
+manual, which recalculates the open workbooks. Scenario S15 prints an `INFO`
+line with the entry, fast-mode and exit values. Scenarios S32-S34 add ActiveX
+controls to the temporary workbook, so they fail when ActiveX controls are
+disabled in the Trust Center. Record the commit, Excel build and bitness with
 the Immediate window output.
 
 ### Evidence principles
