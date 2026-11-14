@@ -460,6 +460,9 @@ Public Function UI_SetExcelUI_WithResult( _
 '   FailureList
 '     Optional ByRef. Receives a 1-based String array of ordered
 '     "Stage | Detail" entries. Populated only when the argument is supplied.
+'     Empty when no failure was recorded. Best effort: it can hold fewer
+'     entries than FailureCount, and a positive FailureCount with an Empty
+'     list means the first entry could not be allocated.
 '
 '   TargetScope
 '     Controls only Headings, Workbook Tabs and Gridlines. The default remains
@@ -495,6 +498,7 @@ Public Function UI_SetExcelUI_WithResult( _
 '   that existing positional callers written against v1.0 are unaffected.
 '
 ' UPDATED
+'   2026-11-14 - FailureList states its degraded forms (#38).
 '   2026-08-18
 '==============================================================================
 '
@@ -689,6 +693,9 @@ Public Function UI_CaptureExcelUIState_WithResult( _
 '   FailureList
 '     Optional ByRef. Receives a 1-based String array of ordered
 '     "Stage | Detail" entries.
+'     Empty when no failure was recorded. Best effort: it can hold fewer
+'     entries than FailureCount, and a positive FailureCount with an Empty
+'     list means the first entry could not be allocated.
 '
 ' RETURNS
 '   Boolean
@@ -722,6 +729,7 @@ Public Function UI_CaptureExcelUIState_WithResult( _
 '   available for restoration; the failure list names what was missed.
 '
 ' UPDATED
+'   2026-11-14 - FailureList states its degraded forms (#38).
 '   2026-08-18
 '==============================================================================
 '
@@ -952,6 +960,9 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
 '   FailureList
 '     Optional ByRef. Receives a 1-based String array of ordered
 '     "Stage | Detail" entries.
+'     Empty when no failure was recorded. Best effort: it can hold fewer
+'     entries than FailureCount, and a positive FailureCount with an Empty
+'     list means the first entry could not be allocated.
 '
 ' RETURNS
 '   Boolean
@@ -986,6 +997,7 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
 '   False with a single NoSnapshot entry.
 '
 ' UPDATED
+'   2026-11-14 - FailureList states its degraded forms (#38).
 '   2026-08-18
 '==============================================================================
 '

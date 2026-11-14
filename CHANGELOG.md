@@ -692,6 +692,30 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- **Not yet certified.** Clarified and tested how diagnostics degrade when the
+  first `FailureList` entry cannot be allocated
+  ([#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38),
+  `ICR-UI-112-P3-04`). This is a documented degradation, not a guarantee of
+  diagnostic text when Excel runs out of memory. When list capture is
+  requested, `FailureCount = 0` with an `Empty` list means no failure,
+  `FailureCount > 0` with an `Empty` list means the first entry could not be
+  allocated, and a count above the number of entries means the list is
+  degraded or truncated. The public `WithResult` APIs already returned `Empty`
+  in that case, because they clear their buffers on entry. The accumulator now
+  also resets a buffer holding a non-array value to `Empty`, where it
+  previously left that value in place. The count still advances, the call
+  still reports failure, and a later growth failure still writes the
+  truncation marker into an existing entry. The `[supported]` facade is
+  unchanged. A new project-public seam,
+  `UI_InternalInjectFailureListFirstAllocationFailure`, fails only the next
+  attempt to start a list. `TST_Case_FirstFailureAllocationKeepsContract`, in
+  the RegressionPack certification unit, asserts the exact result, count, list
+  shape and entry text through `UI_SetExcelUI_WithResult` and through the
+  accumulator, including stale and non-array buffers, a call without a list,
+  and a clean call that reuses the buffers.
+  `TST_Case_FailureAccumulatorDegradesSafely` now asserts the exact truncation
+  marker and an `Empty` list. The README example no longer loops up to
+  `FailureCount`, which raised on an `Empty` or shortened list.
 - **Certified on Excel 16.0 build 20430, 64-bit (2026-11-06).** Ribbon
   snapshot restore now fails closed instead of
   applying the captured value to whichever window is active
