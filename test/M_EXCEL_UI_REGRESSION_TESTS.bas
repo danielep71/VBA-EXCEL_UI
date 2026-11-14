@@ -3595,6 +3595,7 @@ Private Sub TST_RunRegressionPack( _
 '     release is tagged on. Every frame-state case is registered here as well.
 '
 ' UPDATED
+'   2026-11-14 - Registered the first-allocation result-contract case (#38).
 '   2026-11-06 - Put the entry frame's style back through the harness and
 '                failed the pack when it could not (#66).
 '   2026-11-06 - Registered the WinAPI error-capture case (#27).
@@ -3727,6 +3728,9 @@ Private Sub TST_RunRegressionPack( _
 
     'Verify diagnostics degrade rather than raise when the list cannot grow
         TST_Case_FailureAccumulatorDegradesSafely
+
+    'Verify a failed first list allocation leaves a count and an Empty list
+        TST_Case_FirstFailureAllocationKeepsContract
 
     'Verify cleanup is judged against the entry state, not an assumed ideal
         TST_Case_CertificationCleanupUsesBaseline
@@ -7171,7 +7175,7 @@ Private Sub TST_Case_FailureAccumulatorDegradesSafely()
 '   - Asserts the call did not raise, the count still advanced, the list did
 '     not grow, and a truncation marker was written into the existing slot.
 '   - Repeats the growth failure against an empty buffer and asserts the count
-'     still advances with no list and no error.
+'     still advances, the list stays exactly Empty and nothing raises.
 '
 ' ERROR POLICY
 '   - Raises on assertion failure, after disarming the seam.
@@ -7182,6 +7186,7 @@ Private Sub TST_Case_FailureAccumulatorDegradesSafely()
 '   it out of the external automation namespace.
 '
 ' UPDATED
+'   2026-11-14 - Asserts the exact marker text and an Empty list (#38).
 '   2026-08-19
 '==============================================================================
 '
@@ -7200,7 +7205,9 @@ Private Sub TST_Case_FailureAccumulatorDegradesSafely()
     Dim FailDescription     As String          'Captured failure description
 
     Const PROC As String = "TST_Case_FailureAccumulatorDegradesSafely"
-    Const MARKER_PREFIX As String = "Diagnostics |"
+    Const MARKER_TEXT As String = _
+        "Diagnostics | failure list could not be grown; " & _
+        "2 failures were counted and fewer are listed"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -7267,7 +7274,7 @@ Private Sub TST_Case_FailureAccumulatorDegradesSafely()
         MarkerText = CStr(FailureList(UBound(FailureList)))
 
         TST_AssertTrue _
-            (Left$(MarkerText, Len(MARKER_PREFIX)) = MARKER_PREFIX), _
+            (StrComp(MarkerText, MARKER_TEXT, vbBinaryCompare) = 0), _
             "FailureAccumulator.TruncationMarkerWritten"
 
 '------------------------------------------------------------------------------
@@ -7291,7 +7298,7 @@ Private Sub TST_Case_FailureAccumulatorDegradesSafely()
             (FailureCount = 1), "FailureAccumulator.EmptyBufferCountAdvanced"
 
         TST_AssertTrue _
-            Not IsArray(FailureList), "FailureAccumulator.EmptyBufferListUnallocated"
+            (VarType(FailureList) = vbEmpty), "FailureAccumulator.EmptyBufferListEmpty"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
@@ -7305,6 +7312,310 @@ Private Sub TST_Case_FailureAccumulatorDegradesSafely()
 Safe_Exit:
     'Disarm the seam whatever happened above
         On Error Resume Next
+            UI_InternalInjectFailureListGrowthFailure False
+        On Error GoTo 0
+
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        HasFailure = True
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_Case_FirstFailureAllocationKeepsContract()
+
+'
+'==============================================================================
+' TST_Case_FirstFailureAllocationKeepsContract
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify the documented result contract when the FIRST failure-list entry
+'   cannot be allocated: the call still fails, the count stays authoritative,
+'   and the list is exactly Empty.
+'
+' WHY THIS EXISTS
+'   A failed first allocation leaves no slot in which a truncation marker could
+'   be written, so its only visible form is a positive FailureCount with an
+'   Empty FailureList (#38). This case pins that form, through the public
+'   facade as callers see it and through the accumulator for buffers the
+'   facade never passes.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Fails the first allocation of an invalid-Ribbon call made over stale
+'     buffers, and asserts False, a count of 1 and an Empty list.
+'   - Repeats the call without the seam over the same buffers, and asserts the
+'     exact entry text, which also shows the seam was one-shot.
+'   - Fails the first allocation of a two-failure call, and asserts a count of
+'     2 with only the second entry listed.
+'   - Shows that a call without a list attempts no allocation.
+'   - Reuses the buffers for a clean call, and asserts True, 0 and Empty.
+'   - Drives the accumulator over a non-array buffer, with and without the
+'     seam, and asserts an Empty list and then a fresh exact entry.
+'   - Shows that growing an existing list neither fails nor consumes the seam.
+'
+' ERROR POLICY
+'   - Raises on assertion failure, after disarming the seams.
+'
+' NOTES
+'   Uses UI_InternalInjectFailureListFirstAllocationFailure. Invalid
+'   UIVisibility values are rejected before any host write, so the facade
+'   calls change no Excel state.
+'
+' UPDATED
+'   2026-11-14
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OK                  As Boolean         'Result returned by the facade
+    Dim Succeeded           As Boolean         'Accumulator success flag
+    Dim FailureCount        As Long            'Result contract failure count
+    Dim FailureList         As Variant         'Result contract failure list
+    Dim InvalidVisibility   As UIVisibility    'Value the facade must reject
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_FirstFailureAllocationKeepsContract"
+    Const RIBBON_ENTRY As String = "Ribbon | invalid UIVisibility value: 999"
+    Const STATUSBAR_ENTRY As String = _
+        "StatusBar | invalid UIVisibility value: 999"
+    Const CORRUPT_ENTRY As String = "StageCorrupt | corrupt buffer detail"
+    Const GROW_ENTRY As String = "StageGrow | grow detail"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating the result contract when the first list entry fails"
+
+        InvalidVisibility = 999
+
+'------------------------------------------------------------------------------
+' FAIL THE FIRST ALLOCATION THROUGH THE FACADE
+'------------------------------------------------------------------------------
+    'Stale buffers prove the call clears them before it records anything
+        FailureCount = 99
+        FailureList = Array("stale entry")
+
+        UI_InternalInjectFailureListFirstAllocationFailure True
+
+        OK = UI_SetExcelUI_WithResult( _
+            Ribbon:=InvalidVisibility, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertFailureResultExact _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedCount:=1, _
+            ExpectedEntry:=vbNullString, _
+            AssertionName:=PROC & ".FirstAllocationFailed"
+
+'------------------------------------------------------------------------------
+' REPEAT WITHOUT THE SEAM
+'------------------------------------------------------------------------------
+    'The seam was consumed, so the same call over the same buffers now lists
+    'the failure it reports
+        OK = UI_SetExcelUI_WithResult( _
+            Ribbon:=InvalidVisibility, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertFailureResultExact _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedCount:=1, _
+            ExpectedEntry:=RIBBON_ENTRY, _
+            AssertionName:=PROC & ".SeamWasOneShot"
+
+'------------------------------------------------------------------------------
+' FAIL THE FIRST OF TWO ENTRIES
+'------------------------------------------------------------------------------
+    'Recording continues after the failed first allocation: the count covers
+    'both failures and the list holds the second, so the count exceeds it
+        UI_InternalInjectFailureListFirstAllocationFailure True
+
+        OK = UI_SetExcelUI_WithResult( _
+            Ribbon:=InvalidVisibility, _
+            StatusBar:=InvalidVisibility, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertFailureResultExact _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedCount:=2, _
+            ExpectedEntry:=STATUSBAR_ENTRY, _
+            AssertionName:=PROC & ".LaterEntryRecorded"
+
+'------------------------------------------------------------------------------
+' OMIT THE LIST
+'------------------------------------------------------------------------------
+    'Without a list argument nothing is allocated, so the armed seam survives
+    'the call and the caller's variable is untouched
+        UI_InternalInjectFailureListFirstAllocationFailure True
+
+        OK = UI_SetExcelUI_WithResult( _
+            Ribbon:=InvalidVisibility, _
+            FailureCount:=FailureCount)
+
+        TST_AssertBooleanEquals _
+            False, OK, PROC & ".NoListResult"
+
+        TST_AssertTrue _
+            (FailureCount = 1), PROC & ".NoListCount"
+
+        TST_AssertTrue _
+            (UBound(FailureList) = 1), PROC & ".NoListLeftUntouched"
+
+        TST_AssertTrue _
+            (StrComp(FailureList(1), STATUSBAR_ENTRY, vbBinaryCompare) = 0), _
+            PROC & ".NoListEntryUntouched"
+
+    'The next call that does capture a list consumes the seam still armed
+        OK = UI_SetExcelUI_WithResult( _
+            Ribbon:=InvalidVisibility, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertFailureResultExact _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedCount:=1, _
+            ExpectedEntry:=vbNullString, _
+            AssertionName:=PROC & ".SeamSurvivedNoListCall"
+
+'------------------------------------------------------------------------------
+' REUSE THE BUFFERS FOR A CLEAN CALL
+'------------------------------------------------------------------------------
+    'A later success must not be read as carrying the degraded result
+        OK = UI_SetExcelUI_WithResult( _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList)
+
+        TST_AssertResultSuccess _
+            Succeeded:=OK, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            AssertionName:=PROC & ".LaterSuccessCleared"
+
+'------------------------------------------------------------------------------
+' FAIL THE FIRST ALLOCATION OVER A NON-ARRAY BUFFER
+'------------------------------------------------------------------------------
+    'The facade always starts from Empty, so a buffer holding a foreign scalar
+    'can reach only the accumulator. It must come back Empty, not unchanged.
+        Succeeded = True
+        FailureCount = 0
+        FailureList = "corrupt buffer"
+
+        UI_InternalInjectFailureListFirstAllocationFailure True
+
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageCorrupt", "corrupt buffer detail"
+
+        TST_AssertFailureResultExact _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedCount:=1, _
+            ExpectedEntry:=vbNullString, _
+            AssertionName:=PROC & ".CorruptBufferLeftEmpty"
+
+    'Without the seam the same buffer is replaced by a fresh list
+        Succeeded = True
+        FailureCount = 0
+        FailureList = "corrupt buffer"
+
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageCorrupt", "corrupt buffer detail"
+
+        TST_AssertFailureResultExact _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedCount:=1, _
+            ExpectedEntry:=CORRUPT_ENTRY, _
+            AssertionName:=PROC & ".CorruptBufferReplaced"
+
+'------------------------------------------------------------------------------
+' GROW AN EXISTING LIST WHILE ARMED
+'------------------------------------------------------------------------------
+    'Growth is not a first allocation: it must succeed and leave the seam armed
+        UI_InternalInjectFailureListFirstAllocationFailure True
+
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageGrow", "grow detail"
+
+        TST_AssertTrue _
+            (FailureCount = 2), PROC & ".GrowthCount"
+
+        TST_AssertTrue _
+            (UBound(FailureList) = 2), PROC & ".GrowthNotFailed"
+
+        TST_AssertTrue _
+            (StrComp(FailureList(2), GROW_ENTRY, vbBinaryCompare) = 0), _
+            PROC & ".GrowthEntryText"
+
+    'Cleared buffers make the next append a first allocation, which consumes it
+        Succeeded = True
+        UI_RuntimeClearResultBuffer FailureCount, FailureList, True
+
+        UI_RuntimeHandleFailure _
+            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            "StageCorrupt", "corrupt buffer detail"
+
+        TST_AssertFailureResultExact _
+            Succeeded:=Succeeded, _
+            FailureCount:=FailureCount, _
+            FailureList:=FailureList, _
+            ExpectedCount:=1, _
+            ExpectedEntry:=vbNullString, _
+            AssertionName:=PROC & ".SeamSurvivedGrowth"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "A failed first allocation left a counted failure and an Empty list"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Disarm both list seams whatever happened above
+        On Error Resume Next
+            UI_InternalInjectFailureListFirstAllocationFailure False
             UI_InternalInjectFailureListGrowthFailure False
         On Error GoTo 0
 
@@ -11093,6 +11404,116 @@ Private Sub TST_AssertSingleFailurePrefix( _
 End Sub
 
 
+Private Sub TST_AssertFailureResultExact( _
+    ByVal Succeeded As Boolean, _
+    ByVal FailureCount As Long, _
+    ByRef FailureList As Variant, _
+    ByVal ExpectedCount As Long, _
+    ByVal ExpectedEntry As String, _
+    ByVal AssertionName As String)
+
+'
+'==============================================================================
+' TST_AssertFailureResultExact
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Assert a failed structured result exactly: the flag, the count, the shape
+'   of the list and the text of its only entry.
+'
+' WHY THIS EXISTS
+'   The degraded-diagnostics contract is defined by those outputs together. A
+'   prefix or IsArray check would accept a list holding stale, partial or
+'   foreign data.
+'
+' INPUTS
+'   Succeeded / FailureCount / FailureList
+'     Structured-result outputs to validate.
+'
+'   ExpectedCount
+'     Exact FailureCount required.
+'
+'   ExpectedEntry
+'     Exact text of the single list entry, or vbNullString when the list must
+'     be Empty.
+'
+'   AssertionName
+'     Diagnostic source used when an assertion fails.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises on mismatch, with the failure count and list the call returned.
+'
+' DEPENDENCIES
+'   - TST_DescribeResultBuffers
+'
+' UPDATED
+'   2026-11-14
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' ASSERT FAILURE FLAG AND COUNT
+'------------------------------------------------------------------------------
+        If Succeeded Then
+            Err.Raise TEST_ERR_BASE + 90, _
+                      AssertionName, _
+                      AssertionName & " expected=False actual=True | " & _
+                      TST_DescribeResultBuffers(FailureCount, FailureList)
+        End If
+
+        If FailureCount <> ExpectedCount Then
+            Err.Raise TEST_ERR_BASE + 91, _
+                      AssertionName, _
+                      AssertionName & " expected FailureCount=" & _
+                      CStr(ExpectedCount) & " actual=" & CStr(FailureCount) & _
+                      " | " & TST_DescribeResultBuffers(FailureCount, FailureList)
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT AN EMPTY LIST
+'------------------------------------------------------------------------------
+        If Len(ExpectedEntry) = 0 Then
+
+            If VarType(FailureList) <> vbEmpty Then
+                Err.Raise TEST_ERR_BASE + 92, _
+                          AssertionName, _
+                          AssertionName & " expected FailureList=Empty | " & _
+                          TST_DescribeResultBuffers(FailureCount, FailureList)
+            End If
+
+'------------------------------------------------------------------------------
+' ASSERT A SINGLE EXACT ENTRY
+'------------------------------------------------------------------------------
+        Else
+
+            If VarType(FailureList) <> (vbArray Or vbString) Then
+                Err.Raise TEST_ERR_BASE + 93, _
+                          AssertionName, _
+                          AssertionName & " expected a String array | " & _
+                          TST_DescribeResultBuffers(FailureCount, FailureList)
+            End If
+
+            If LBound(FailureList) <> 1 Or UBound(FailureList) <> 1 Then
+                Err.Raise TEST_ERR_BASE + 94, _
+                          AssertionName, _
+                          AssertionName & " expected one 1-based failure entry | " & _
+                          TST_DescribeResultBuffers(FailureCount, FailureList)
+            End If
+
+            If StrComp(FailureList(1), ExpectedEntry, vbBinaryCompare) <> 0 Then
+                Err.Raise TEST_ERR_BASE + 95, _
+                          AssertionName, _
+                          AssertionName & " expected entry='" & ExpectedEntry & _
+                          "' actual='" & CStr(FailureList(1)) & "'"
+            End If
+
+        End If
+
+End Sub
+
+
 Private Function TST_DescribeResultBuffers( _
     ByVal FailureCount As Long, _
     ByRef FailureList As Variant) _
@@ -11137,6 +11558,7 @@ Private Function TST_DescribeResultBuffers( _
 ' CALLED FROM
 '   - TST_AssertResultSuccess
 '   - TST_AssertSingleFailurePrefix
+'   - TST_AssertFailureResultExact
 '   - TST_AssertFailureListContainsPrefix
 '   - TST_Case_WithResult_InvalidVisibility
 '

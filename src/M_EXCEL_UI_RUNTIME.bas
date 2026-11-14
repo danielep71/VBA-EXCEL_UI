@@ -43,6 +43,7 @@ Option Private Module
 '
 '   Regression seams:
 '     - UI_InternalInjectFailureListGrowthFailure
+'     - UI_InternalInjectFailureListFirstAllocationFailure
 '     - UI_InternalInjectQuietUpdateFault
 '
 ' DESIGN PRINCIPLES
@@ -53,9 +54,11 @@ Option Private Module
 '   - A failed read never blocks the corresponding write; it only disables the
 '     no-op short circuit.
 '   - Diagnostics are data, not user interface. Nothing here displays a dialog.
-'   - The only mutable module state is the two one-shot regression seams,
-'     m_InjectFailureListGrowthFailure and m_InjectQuietUpdateFault. Each is
-'     consumed by its next use, so the module has no lifecycle of its own.
+'   - The only mutable module state is the three one-shot regression seams,
+'     m_InjectFailureListGrowthFailure,
+'     m_InjectFailureListFirstAllocationFailure and m_InjectQuietUpdateFault.
+'     Each is consumed by its next use, so the module has no lifecycle of its
+'     own.
 '
 ' DIAGNOSTIC CONTRACT
 '   Failures are recorded in insertion order as:
@@ -100,6 +103,20 @@ Option Private Module
 '   be grown carries a truncation marker written into a slot that already
 '   exists, so no allocation is required to report that allocation failed.
 '
+'   When the FIRST entry cannot be allocated, no slot exists to hold a marker.
+'   The list is then left Empty - never a partial array, and never whatever
+'   non-array value the buffer held - and the count still advances. When list
+'   capture was requested and the buffers were cleared on entry, as every
+'   public WithResult API does, the outputs therefore read:
+'
+'       FailureCount = 0, list Empty      no failure was recorded
+'       FailureCount > 0, list Empty      the first entry could not be
+'                                         allocated or published
+'       FailureCount > entries in list    the list is degraded or truncated
+'
+'   When list capture was not requested the list is never touched, so an
+'   Empty list then says nothing about allocation.
+'
 ' NOTES
 '   - VBA's And and Or are not short-circuit: both operands are always
 '     evaluated. Guards whose right operand can fault must be nested.
@@ -107,6 +124,9 @@ Option Private Module
 '     is attempted, not assumed; see DIAGNOSTIC DURABILITY above.
 '
 ' UPDATED
+'   2026-11-14 - A failed first failure-list allocation leaves the list Empty
+'                instead of a non-array value. Added the
+'                UI_InternalInjectFailureListFirstAllocationFailure seam (#38).
 '   2026-11-06 - Header and comments aligned with the code (#114).
 '   2026-08-29 - The quiet-update scope claims ownership only after a readback
 '                confirms suppression. Added the
@@ -132,6 +152,12 @@ Option Private Module
 'allocating, so the diagnostic-degradation path can be exercised without a way
 'to exhaust memory on demand.
 Private m_InjectFailureListGrowthFailure As Boolean
+
+'Regression seam. When True the next attempt to START a failure list - one made
+'while the buffer holds no array - reports failure without allocating. Growth
+'of an existing list neither fails nor consumes it, so a test can target the
+'first-allocation path exactly.
+Private m_InjectFailureListFirstAllocationFailure As Boolean
 
 'Regression seam for the quiet-update scope. The failures it stands in for are
 'host refusals, which cannot be provoked on demand, so the ownership rule they
@@ -405,6 +431,8 @@ Private Sub UI_RuntimeAddFailure( _
 '     a fixed marker rather than failing.
 '   - Attempts to grow the list; on failure marks the list as truncated using a
 '     slot that already exists, which needs no allocation.
+'   - When the first entry cannot be allocated, leaves the list Empty. No slot
+'     exists for a marker, and assigning Empty allocates nothing.
 '
 ' ERROR POLICY
 '   - Does not raise, under any circumstances.
@@ -419,11 +447,15 @@ Private Sub UI_RuntimeAddFailure( _
 '
 ' NOTES
 '   FailureCount is authoritative and FailureList is best effort. The list can
-'   therefore hold fewer entries than the count, but never silently: a
-'   truncation marker is written whenever growth failed. The buffers are always
-'   cleared together by UI_RuntimeClearResultBuffer.
+'   therefore hold fewer entries than the count. A truncation marker is written
+'   whenever growth failed with a slot in place. A failed first allocation has
+'   no slot, so it shows as a positive count with an Empty list, and an entry
+'   recorded after it shows as a count above the number of entries. The buffers
+'   are always cleared together by UI_RuntimeClearResultBuffer.
 '
 ' UPDATED
+'   2026-11-14 - Leaves the list Empty when the first entry cannot be
+'                allocated (#38).
 '   2026-08-19
 '==============================================================================
 '
@@ -485,9 +517,23 @@ Private Sub UI_RuntimeAddFailure( _
                     FailureList:=FailureList, _
                     EntryText:=EntryText) Then
 
-                    UI_RuntimeMarkFailureListTruncated _
-                        FailureList:=FailureList, _
-                        FailureCount:=FailureCount
+                    If IsArray(FailureList) Then
+
+                        'Growth failed with slots in place: mark one
+                            UI_RuntimeMarkFailureListTruncated _
+                                FailureList:=FailureList, _
+                                FailureCount:=FailureCount
+
+                    Else
+
+                        'The first entry could not be allocated, so there is
+                        'no slot for a marker. Leave the documented Empty
+                        'state, which allocates nothing, rather than whatever
+                        'non-array value the buffer held.
+                            FailureList = Empty
+
+                    End If
+
                 End If
 
         End If
@@ -547,8 +593,11 @@ Private Function UI_RuntimeTryAppendFailureEntry( _
 '     False => the buffer could not be grown; it is left as it was.
 '
 ' BEHAVIOR
-'   - Starts a new 1-based array when the buffer is Empty or unusable.
-'   - Extends an existing 1-based array by one element otherwise.
+'   - Starts a new 1-based array when the buffer holds no array: Empty, or a
+'     non-array value left in it.
+'   - Extends an existing 1-based array by one element otherwise. An array
+'     that cannot be copied into a 1-based String array and grown makes the
+'     attempt fail rather than raise.
 '   - Publishes the grown array only after the write has succeeded.
 '
 ' ERROR POLICY
@@ -561,10 +610,13 @@ Private Function UI_RuntimeTryAppendFailureEntry( _
 '   - UI_RuntimeAddFailure
 '
 ' NOTES
-'   A regression seam can force this to report failure; see
-'   UI_InternalInjectFailureListGrowthFailure.
+'   Two regression seams can force this to report failure without
+'   allocating: UI_InternalInjectFailureListGrowthFailure for the next
+'   attempt of any kind, and UI_InternalInjectFailureListFirstAllocationFailure
+'   for the next attempt that would start a new list.
 '
 ' UPDATED
+'   2026-11-14 - Honours the first-allocation seam (#38).
 '   2026-08-19
 '==============================================================================
 '
@@ -592,6 +644,18 @@ Private Function UI_RuntimeTryAppendFailureEntry( _
         If m_InjectFailureListGrowthFailure Then
             m_InjectFailureListGrowthFailure = False
             GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' CONSUME FIRST-ALLOCATION SEAM
+'------------------------------------------------------------------------------
+    'When armed, fail only an attempt that would start a new list, again
+    'without allocating. Growing an existing list leaves the seam armed.
+        If m_InjectFailureListFirstAllocationFailure Then
+            If Not IsArray(FailureList) Then
+                m_InjectFailureListFirstAllocationFailure = False
+                GoTo Safe_Exit
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -795,6 +859,68 @@ Public Sub UI_InternalInjectFailureListGrowthFailure( _
 '------------------------------------------------------------------------------
     'Record the armed state for the next growth attempt to consume
         m_InjectFailureListGrowthFailure = FailNextGrowth
+
+End Sub
+
+
+Public Sub UI_InternalInjectFailureListFirstAllocationFailure( _
+    ByVal FailNextFirstAllocation As Boolean)
+'
+'==============================================================================
+' UI_InternalInjectFailureListFirstAllocationFailure
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms or disarms a one-shot failure of the next attempt to start a failure
+'   list, that is, to allocate its first entry.
+'
+' WHY THIS EXISTS
+'   A failed first allocation is the one degradation that cannot be reported
+'   inside the list, because no slot exists to hold a marker. Its outcome - a
+'   counted failure with an Empty list - is part of the documented result
+'   contract, and memory cannot be exhausted on demand, so without a seam that
+'   contract could not be tested.
+'
+'   The growth seam fails whichever append comes next. This one fails only an
+'   append that would start a new list, so a test can drive a public WithResult
+'   call, whose buffers are cleared on entry, and know which entry fails.
+'
+' INPUTS
+'   FailNextFirstAllocation
+'     True arms the seam; False disarms it.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - The armed state is consumed by the next append made while the buffer
+'     holds no array, and is not re-armed.
+'   - An append that grows an existing list neither fails nor consumes it.
+'   - While disarmed it has no effect.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - M_EXCEL_UI_REGRESSION_TESTS
+'
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     prevents exposure to external VBA projects.
+'   - Production code must never call it.
+'
+' UPDATED
+'   2026-11-14
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' SET SEAM
+'------------------------------------------------------------------------------
+    'Record the armed state for the next first allocation to consume
+        m_InjectFailureListFirstAllocationFailure = FailNextFirstAllocation
 
 End Sub
 
