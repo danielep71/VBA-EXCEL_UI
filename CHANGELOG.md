@@ -695,6 +695,30 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- **Not yet certified.** Clarified and tested how diagnostics degrade when the
+  first `FailureList` entry cannot be allocated
+  ([#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38),
+  `ICR-UI-112-P3-04`). This is a documented degradation, not a guarantee of
+  diagnostic text when Excel runs out of memory. When list capture is
+  requested, `FailureCount = 0` with an `Empty` list means no failure,
+  `FailureCount > 0` with an `Empty` list means the first entry could not be
+  allocated, and a count above the number of entries means the list is
+  degraded or truncated. The public `WithResult` APIs already returned `Empty`
+  in that case, because they clear their buffers on entry. The accumulator now
+  also resets a buffer holding a non-array value to `Empty`, where it
+  previously left that value in place. The count still advances, the call
+  still reports failure, and a later growth failure still writes the
+  truncation marker into an existing entry. The `[supported]` facade is
+  unchanged. A new project-public seam,
+  `UI_InternalInjectFailureListFirstAllocationFailure`, fails only the next
+  attempt to start a list. `TST_Case_FirstFailureAllocationKeepsContract`, in
+  the RegressionPack certification unit, asserts the exact result, count, list
+  shape and entry text through `UI_SetExcelUI_WithResult` and through the
+  accumulator, including stale and non-array buffers, a call without a list,
+  and a clean call that reuses the buffers.
+  `TST_Case_FailureAccumulatorDegradesSafely` now asserts the exact truncation
+  marker and an `Empty` list. The README example no longer loops up to
+  `FailureCount`, which raised on an `Empty` or shortened list.
 - **Certified on Excel 16.0 build 20430, 64-bit (2026-11-06).** Ribbon
   snapshot restore now fails closed instead of
   applying the captured value to whichever window is active
@@ -924,6 +948,28 @@ measured against that baseline.
   `WinAPI error capture` check rejects, in each compilation, a capture that
   follows another statement or an `On Error`, an ambiguous-zero call without
   an adjacent `SetLastError 0`, and a `GetLastError` declaration.
+- Fixed the Markdown scanner behind the **markdown links**, **markdown
+  escapes**, **documented commands** and release-state checks reading fenced
+  code blocks inside list items as if they were at the top level
+  ([#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150)). A fence
+  after a list marker (`` - ```text ``) was missed, and its closing fence then
+  opened a block that hid every heading after it, so a working link to a later
+  heading was reported as broken. A fence indented four spaces under an ordered
+  item was read as prose, so a path such as `C:\_scratch\file` in it was
+  reported as escaped Markdown. The scanner now tracks bullet and ordered list
+  items and reads a fence up to three columns past its item's content column;
+  outside every list, four spaces still make indented code that opens no
+  fence. Items end where CommonMark 0.31.2 ends them: an empty item at the
+  blank line after it, an item before a marker of another list type,
+  delimiter or bullet whatever its number, and a comment block with its item;
+  a setext underline (`===` or `---`) ends a paragraph unless the paragraph
+  holds only link reference definitions. Where the specification's reference
+  parser and GitHub's renderer disagree, the scanner follows GitHub. The unit
+  tests check the item boundaries of every list example in the specification
+  (253 to 325) except four lists inside block quotes, and every link reference
+  definition example (192 to 218); block quotes, HTML blocks other than
+  comments and headings inside list items stay out of scope, and tests pin
+  that behaviour.
 
 ### 📖 Documentation
 
@@ -1401,7 +1447,7 @@ practical closure status of any item that has since been reopened.
 | [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | Full public API contract gate | Implemented; open until the release diff shows no supported facade change |
 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | Accurate v1.1.2/v1.1.3 closure documentation | Open |
 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | Exact-head review and certification gate | Open |
-| [#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150) | Markdown scanner handles fenced code inside list containers | Open |
+| [#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150) | Markdown scanner handles fenced code inside list containers | Implemented; open until merged |
 | [#175](https://github.com/danielep71/VBA-EXCEL_UI/issues/175) | Release guides verify the tag before pushing it and name `tools/verify.py` and 64-bit-only certification | Closed (#179) |
 
 P1 and P2 items block release until implementation, regression coverage,

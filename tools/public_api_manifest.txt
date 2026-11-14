@@ -66,6 +66,7 @@ M_EXCEL_UI_RUNTIME	Function	UI_RuntimeTryGetBooleanProperty(ByVal Target As Obje
 M_EXCEL_UI_RUNTIME	Function	UI_RuntimeTryGetRibbonVisible(ByRef IsVisible As Boolean, ByRef FailMsg As String) As Boolean
 M_EXCEL_UI_RUNTIME	Function	UI_RuntimeTrySetBooleanPropertyIfNeeded(ByVal Target As Object, ByVal PropertyName As String, ByVal NewValue As Boolean, ByRef FailMsg As String) As Boolean
 M_EXCEL_UI_RUNTIME	Function	UI_RuntimeTrySetRibbonVisibleIfNeeded(ByVal IsVisible As Boolean, ByRef FailMsg As String) As Boolean
+M_EXCEL_UI_RUNTIME	Sub	UI_InternalInjectFailureListFirstAllocationFailure(ByVal FailNextFirstAllocation As Boolean)
 M_EXCEL_UI_RUNTIME	Sub	UI_InternalInjectFailureListGrowthFailure(ByVal FailNextGrowth As Boolean)
 M_EXCEL_UI_RUNTIME	Sub	UI_InternalInjectQuietUpdateFault(ByVal FaultKind As Long)
 M_EXCEL_UI_RUNTIME	Sub	UI_RuntimeBeginQuietUpdate(ByRef OldScreenUpdating As Boolean, ByRef QuietModeChanged As Boolean)
