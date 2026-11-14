@@ -37,11 +37,9 @@ ADMIN: dict[str, dict[str, Any]] = {
     }},
     "private-vulnerability-reporting": {"status": 200, "body": {"enabled": True}},
     "vulnerability-alerts": {"status": 204},
-    "actions/permissions": {"status": 200, "body": {
-        "enabled": True, "allowed_actions": "selected",
-        "selected_actions_url": "https://example.invalid"}},
-    "actions/permissions/selected-actions": {"status": 200, "body": {
-        "github_owned_allowed": True, "verified_allowed": False, "patterns_allowed": []}},
+    "actions/permissions": {"status": 200, "body": {"enabled": True, "allowed_actions": "all"}},
+    # The selected-actions endpoint answers 409 unless the policy is "selected".
+    "actions/permissions/selected-actions": {"status": 409, "body": {"message": "Conflict"}},
     "actions/permissions/workflow": {"status": 200, "body": {
         "default_workflow_permissions": "read", "can_approve_pull_request_reviews": False}},
 }
@@ -129,6 +127,22 @@ class SettingsDriftTests(unittest.TestCase):
         self.assertEqual(code, 1)
         for heading in ("## Differences", "## Not verifiable", "## Matches"):
             self.assertIn(heading, text)
+
+    def test_selected_actions_are_compared_when_the_policy_is_selected(self) -> None:
+        path = self.root / check_settings.SETTINGS_FILE
+        settings = json.loads(path.read_text(encoding="utf-8"))
+        settings["actions"]["allowed_actions"] = "selected"
+        settings["actions"]["selected_actions"] = {
+            "github_owned_allowed": True, "patterns_allowed": [], "verified_allowed": False}
+        path.write_text(check_settings.render(settings), encoding="utf-8")
+        recorded = copy.deepcopy(ADMIN)
+        recorded["actions/permissions"]["body"]["allowed_actions"] = "selected"
+        recorded["actions/permissions/selected-actions"] = {"status": 200, "body": {
+            "github_owned_allowed": True, "verified_allowed": False, "patterns_allowed": []}}
+        results = self.outcomes(recorded)
+        self.assertEqual(results["actions.selected_actions"].outcome, "match")
+        recorded["actions/permissions/selected-actions"]["body"]["patterns_allowed"] = ["ossf/*"]
+        self.assertEqual(self.outcomes(recorded)["actions.selected_actions"].outcome, "differ")
 
     def test_dependabot_alerts_off_is_a_difference_for_an_administrator(self) -> None:
         recorded = copy.deepcopy(ADMIN)
