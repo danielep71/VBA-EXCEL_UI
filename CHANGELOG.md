@@ -886,9 +886,14 @@ measured against that baseline.
   fence. Items end where CommonMark 0.31.2 ends them: an empty item at the
   blank line after it, an item before a marker of another list type,
   delimiter or bullet whatever its number, and a comment block with its item;
-  a setext underline (`===` or `---`) ends a paragraph. The unit tests check
-  the item boundaries of every list example in the specification (253 to 325)
-  except four lists inside block quotes, which the scanner does not track.
+  a setext underline (`===` or `---`) ends a paragraph unless the paragraph
+  holds only link reference definitions. Where the specification's reference
+  parser and GitHub's renderer disagree, the scanner follows GitHub. The unit
+  tests check the item boundaries of every list example in the specification
+  (253 to 325) except four lists inside block quotes, and every link reference
+  definition example (192 to 218); block quotes, HTML blocks other than
+  comments and headings inside list items stay out of scope, and tests pin
+  that behaviour.
 
 ### 📖 Documentation
 

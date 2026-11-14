@@ -1,4 +1,4 @@
-"""List item boundaries checked against CommonMark 0.31.2, sections 5.2 and 5.3 (#150).
+"""List item boundaries checked against CommonMark 0.31.2 (#150).
 
 The Markdown scanner reads fences and comment blocks inside list items, so it
 must close each item where CommonMark closes it. Each case lists, for every
@@ -6,10 +6,13 @@ non-blank line, its kind and the open list items, named by the line their
 marker is on: "code in 1,3" is a line inside a fenced block, within the item
 opened on line 1 and the item opened on line 3 inside it.
 
-SPEC_LIST_EXAMPLES holds every example from 253 to 325 except 259, 260, 292
-and 293, whose lists sit inside block quotes, which the scanner does not
-track. The expected structure is that of the spec's HTML, as the CommonMark
-reference parser reports it with source positions.
+SPEC_LIST_EXAMPLES holds every example of sections 5.2 and 5.3, from 253 to
+325, except 259, 260, 292 and 293, whose lists sit inside block quotes, which
+the scanner does not track. SPEC_LINK_DEFINITION_EXAMPLES holds every example
+of section 4.7, from 192 to 218. The expected structure is the one
+commonmark.js 0.31.2, the specification's reference parser, reports with
+source positions; cmark-gfm, which renders Markdown on GitHub, gives the same
+HTML for every one of them.
 """
 
 import unittest
@@ -29,6 +32,64 @@ def structure(markdown: str) -> list[str]:
 
 def anchors(*lines: str) -> list[str]:
     return check_repo.heading_anchors("\n".join(lines) + "\n")
+
+
+SPEC_LINK_DEFINITION_EXAMPLES: dict[int, tuple[str, list[str]]] = {
+    192: ('[foo]: /url "title"\n\n[foo]',
+          ['text', '', 'text']),
+    193: ("   [foo]: \n      /url  \n           'the title'  \n\n[foo]",
+          ['text', 'text', 'text', '', 'text']),
+    194: ("[Foo*bar\\]]:my_(url) 'title (with parens)'\n\n[Foo*bar\\]]",
+          ['text', '', 'text']),
+    195: ("[Foo bar]:\n<my url>\n'title'\n\n[Foo bar]",
+          ['text', 'text', 'text', '', 'text']),
+    196: ("[foo]: /url '\ntitle\nline1\nline2\n'\n\n[foo]",
+          ['text', 'text', 'text', 'text', 'text', '', 'text']),
+    197: ("[foo]: /url 'title\n\nwith blank line'\n\n[foo]",
+          ['text', '', 'text', '', 'text']),
+    198: ('[foo]:\n/url\n\n[foo]',
+          ['text', 'text', '', 'text']),
+    199: ('[foo]:\n\n[foo]',
+          ['text', '', 'text']),
+    200: ('[foo]: <>\n\n[foo]',
+          ['text', '', 'text']),
+    201: ('[foo]: <bar>(baz)\n\n[foo]',
+          ['text', '', 'text']),
+    202: ('[foo]: /url\\bar\\*baz "foo\\"bar\\baz"\n\n[foo]',
+          ['text', '', 'text']),
+    203: ('[foo]\n\n[foo]: url',
+          ['text', '', 'text']),
+    204: ('[foo]\n\n[foo]: first\n[foo]: second',
+          ['text', '', 'text', 'text']),
+    205: ('[FOO]: /url\n\n[Foo]',
+          ['text', '', 'text']),
+    206: ('[ΑΓΩ]: /φου\n\n[αγω]',
+          ['text', '', 'text']),
+    207: ('[foo]: /url',
+          ['text']),
+    208: ('[\nfoo\n]: /url\nbar',
+          ['text', 'text', 'text', 'text']),
+    209: ('[foo]: /url "title" ok',
+          ['text']),
+    210: ('[foo]: /url\n"title" ok',
+          ['text', 'text']),
+    211: ('    [foo]: /url "title"\n\n[foo]',
+          ['text', '', 'text']),
+    212: ('```\n[foo]: /url\n```\n\n[foo]',
+          ['fence', 'code', 'fence', '', 'text']),
+    213: ('Foo\n[bar]: /baz\n\n[bar]',
+          ['text', 'text', '', 'text']),
+    214: ('# [Foo]\n[foo]: /url\n> bar',
+          ['text', 'text', 'text']),
+    215: ('[foo]: /url\nbar\n===\n[foo]',
+          ['text', 'text', 'text', 'text']),
+    216: ('[foo]: /url\n===\n[foo]',
+          ['text', 'text', 'text']),
+    217: ('[foo]: /foo-url "foo"\n[bar]: /bar-url\n  "bar"\n[baz]: /baz-url\n\n[foo],\n[bar],\n[baz]',
+          ['text', 'text', 'text', 'text', '', 'text', 'text', 'text']),
+    218: ('[foo]\n\n> [foo]: /url',
+          ['text', '', 'text']),
+}
 
 
 SPEC_LIST_EXAMPLES: dict[int, tuple[str, list[str]]] = {
@@ -181,6 +242,14 @@ class SpecListExamples(unittest.TestCase):
                 self.assertEqual(structure(markdown), expected)
 
 
+class SpecLinkDefinitionExamples(unittest.TestCase):
+
+    def test_each_example_reads_as_the_spec_reads_it(self) -> None:
+        for number, (markdown, expected) in SPEC_LINK_DEFINITION_EXAMPLES.items():
+            with self.subTest(example=number):
+                self.assertEqual(structure(markdown), expected)
+
+
 # In each case below, the line after the first item ends it, so the two-space
 # fence that follows is at the top level and hides its heading. Were the
 # first item still open, the fence would take its column, the unindented
@@ -225,6 +294,66 @@ class ListBoundaries(unittest.TestCase):
         self.assertEqual(anchors("- <!--", "## Visible", "-->"), ["visible"])
         self.assertEqual(structure("- <!--\n  ## Hidden\n## Visible\n-->"),
                          ["comment in 1", "comment in 1", "text", "text"])
+
+
+class LinkDefinitions(unittest.TestCase):
+    """A paragraph of only link reference definitions, read as cmark-gfm reads it."""
+
+    def test_an_underline_under_definitions_is_paragraph_text(self) -> None:
+        # No text is left to make a heading of, so the paragraph stays open
+        # and "lazy" continues it inside the item.
+        for underline in ("  ===", "  ---"):
+            with self.subTest(underline=underline):
+                self.assertEqual(structure(f"- [a]: /u\n{underline}\nlazy"),
+                                 ["text in 1", "text in 1", "text in 1"])
+
+    def test_definitions_over_several_lines_or_with_tabs_are_recognised(self) -> None:
+        self.assertEqual(structure('- [a]:\n  /u\n  "t"\n  ===\nlazy'), ["text in 1"] * 5)
+        self.assertEqual(structure("- [a]:\t/u(x\n  ===\nlazy"), ["text in 1"] * 3)
+
+    def test_text_after_a_definition_still_makes_a_heading(self) -> None:
+        self.assertEqual(structure("- [a]: /u 't'x\n  ===\nlazy"), ["text in 1", "text in 1", "text"])
+
+    def test_an_item_of_only_definitions_ends_at_its_second_blank_line(self) -> None:
+        self.assertEqual(structure("- [a]: /u\n\n  x"), ["text in 1", "", "text in 1"])
+        self.assertEqual(structure("- [a]: /u\n\n\n  x"), ["text in 1", "", "", "text"])
+
+    def test_a_lazy_definition_keeps_its_indentation(self) -> None:
+        # The indented lazy line is text, not a definition, so the item has
+        # a block and continues across the blank lines.
+        self.assertEqual(structure("1. [a]: /u\n [b]: /v\n\n\n   y"),
+                         ["text in 1", "text in 1", "", "", "text in 1"])
+
+    def test_a_definition_line_still_counts_as_a_paragraph_for_a_marker(self) -> None:
+        # Both parsers read "2. Step" as paragraph text, so the fence after it
+        # stays inside the bullet item and hides its heading.
+        self.assertEqual(anchors("- [ref]: /url", "  2. Step", "", "     ```text", "  ## Visible",
+                                 "     ```", "## After"), ["after"])
+
+
+class BlankLines(unittest.TestCase):
+
+    def test_spaces_up_to_the_content_column_continue_an_empty_item(self) -> None:
+        self.assertEqual(structure("2.\n   \n   x"), ["text in 1", "", "text in 1"])
+        self.assertEqual(structure("2.\n\n   x"), ["text in 1", "", "text"])
+
+
+class OutOfScope(unittest.TestCase):
+    """The documented limits of the scanner, pinned so a change is deliberate."""
+
+    def test_a_block_quote_is_text_and_hides_no_fence(self) -> None:
+        self.assertEqual(structure("> ```\n> ## Hidden\n> ```\n## After"), ["text"] * 4)
+        self.assertEqual(structure("> - a\n> - b"), ["text", "text"])
+
+    def test_a_block_quote_line_ends_a_paragraph(self) -> None:
+        self.assertEqual(structure("- a\n> b"), ["text in 1", "text"])
+
+    def test_html_blocks_other_than_comments_are_not_tracked(self) -> None:
+        self.assertEqual(structure("<div>\n```\n## Hidden\n```\n## After"),
+                         ["text", "fence", "code", "fence", "text"])
+
+    def test_a_heading_inside_a_list_item_has_no_anchor(self) -> None:
+        self.assertEqual(anchors("- ## In item"), [])
 
 
 if __name__ == "__main__":
