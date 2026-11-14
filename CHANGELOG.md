@@ -883,10 +883,12 @@ measured against that baseline.
   reported as escaped Markdown. The scanner now tracks bullet and ordered list
   items and reads a fence up to three columns past its item's content column;
   outside every list, four spaces still make indented code that opens no
-  fence. An item whose marker line is empty ends at the blank line after it,
-  and a setext underline (`===` or `---`) ends a paragraph, as in CommonMark.
-  The self-test and unit tests cover both cases, a nested list, an empty item,
-  the lines that end a paragraph, a top-level fence and indented code.
+  fence. Items end where CommonMark 0.31.2 ends them: an empty item at the
+  blank line after it, an item before a marker of another list type,
+  delimiter or bullet whatever its number, and a comment block with its item;
+  a setext underline (`===` or `---`) ends a paragraph. The unit tests check
+  the item boundaries of every list example in the specification (253 to 325)
+  except four lists inside block quotes, which the scanner does not track.
 
 ### 📖 Documentation
 

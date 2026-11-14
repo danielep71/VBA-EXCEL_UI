@@ -29,7 +29,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Iterator
 from datetime import date
 from types import ModuleType
-from typing import NamedTuple, TypeAlias
+from typing import TypeAlias
 from urllib.parse import unquote
 
 from vba_lex import code_only
@@ -1782,6 +1782,8 @@ ESCAPE_SELFTEST_CASES = [
      "-\n\n  ```text\nA\\_B\n  ```\n", 0),
     ("a setext underline ends an item's paragraph, so the next line ends the item",
      "- Item\n  ===\nOutside\n\n  ```text\nA\\_B\n  ```\n", 0),
+    ("a marker of another list type ends the item before it, whatever its number",
+     "- Item\n2. Two\n\n  ```text\nA\\_B\n  ```\n", 0),
     ("a fence indented four spaces in an ordered item is code",
      "1. Step\n\n    ```text\n    C:\\_scratch\\file\n    ```\n", 0),
     ("a top-level fence is code", "```text\nC:\\_scratch\\file\n```\n", 0),
@@ -2898,13 +2900,6 @@ SETEXT_UNDERLINE_RE = re.compile(r" {0,3}(?:=+|-+)[ \t]*$")
 OTHER_BLOCK_START_RE = re.compile(r" {0,3}(?:>|<!--)")
 
 
-class ListItem(NamedTuple):
-    """An open list item: the column its content starts at, and its list type."""
-
-    content: int
-    kind: str
-
-
 def _indent(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
 
@@ -2918,19 +2913,33 @@ def _interrupts_paragraph(marker: re.Match[str]) -> bool:
     return bool((marker.group("rest") or "").strip()) and (start is None or int(start) == 1)
 
 
+def _marker_lines(items: list[tuple[int, int]]) -> tuple[int, ...]:
+    return tuple(line for _, line in items)
+
+
 def _starts_block(rest: str) -> bool:
-    """Return whether a line, read inside its containers, starts a block that ends a paragraph."""
-    marker = LIST_MARKER_RE.match(rest)
+    """Return whether a line that is not a list item starts a block that ends a paragraph."""
     return bool(fence_opener(rest) or ATX_HEADING_RE.match(rest) or THEMATIC_BREAK_RE.match(rest)
-                or (marker and _interrupts_paragraph(marker)) or OTHER_BLOCK_START_RE.match(rest))
+                or OTHER_BLOCK_START_RE.match(rest))
 
 
-def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C901
+def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:
     """Yield (line number, line, kind) for each line of a Markdown document.
+
+    See markdown_line_blocks, which also reports the open list items.
+    """
+    for n, line, kind, _ in markdown_line_blocks(text):
+        yield n, line, kind
+
+
+def markdown_line_blocks(text: str) -> Iterator[tuple[int, str, str, tuple[int, ...]]]:  # noqa: C901
+    """Yield (line number, line, kind, open items) for each line of a Markdown document.
 
     The kind is "text" for a line GitHub renders as Markdown, "fence" for an
     opening or closing fence, "code" for a line inside a fenced block, and
-    "comment" for a line of an HTML comment block.
+    "comment" for a line of an HTML comment block. The open items are the
+    list items open after the line is read, outermost first, each named by the
+    number of the line its marker is on.
 
     Two kinds of block hide their lines, and each one's delimiters are plain
     content inside the other:
@@ -2950,41 +2959,53 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
     past that column. So "- ```text" opens a fence, and so does a fence
     indented four spaces under "1. Step". A fenced block inside an item ends
     at its closing fence or at the first line that is not indented to the
-    item's content, which ends the item too. Outside every list, four spaces
-    still make a line indented code, whose backticks open nothing.
+    item's content, which ends the item too, and so does a comment block.
+    Outside every list, four spaces still make a line indented code, whose
+    backticks open nothing.
 
-    The rest of the container model is deliberately narrow. An ordered item
-    that would interrupt a paragraph must start at 1, as in CommonMark, and a
-    paragraph line indented less than its item continues it lazily, until a
-    blank line, a setext underline or another block ends the paragraph. An item
-    whose marker line is empty ends at a following blank line. Block
-    quotes are not tracked and tabs count to the next multiple of four. Each
-    line is yielded whole, container prefix included.
+    List items end where CommonMark 0.31.2 (sections 5.2 and 5.3) ends them.
+    A marker inside a paragraph of the innermost open item starts a list only
+    if the item has content and, when ordered, starts at 1; a marker outside
+    a closed item starts a new item or list whatever its type, delimiter,
+    number or content. A paragraph line indented less than its item continues
+    it lazily, until a blank line, a setext underline or another block ends
+    the paragraph. An item whose marker line is empty ends at a following
+    blank line.
+
+    The model is deliberately narrow. Block quotes are not containers here,
+    so a list inside a block quote (spec examples 259, 260, 292 and 293) and
+    a fence after ">" are read as text. HTML blocks other than comments are
+    not tracked, and tabs count to the next multiple of four. List types and
+    tight or loose lists are not reported. Each line is yielded whole,
+    container prefix included.
     """
-    items: list[ListItem] = []
+    items: list[tuple[int, int]] = []  # (content column, marker line) of each open item
     fence: tuple[str, int] | None = None
-    fence_col = 0
     in_comment = False
+    block_col = 0  # content column of the item holding the open fence or comment
     paragraph = False
     starts_empty = False
     for n, line in enumerate(text.split("\n"), 1):
-        if in_comment:
-            in_comment = "-->" not in line
-            yield n, line, "comment"
-            continue
         work = line.rstrip("\r").expandtabs(4)
         blank = not work.strip()
         indent = _indent(work)
+        if in_comment:
+            if blank or indent >= block_col:
+                in_comment = "-->" not in line
+                yield n, line, "comment", _marker_lines(items)
+                continue
+            # A line outside the item's content ends the item and its block.
+            in_comment = False
         if fence is not None:
             if blank:
-                yield n, line, "code"
+                yield n, line, "code", _marker_lines(items)
                 continue
-            if indent >= fence_col:
-                if closes_fence(work[fence_col:], fence):
+            if indent >= block_col:
+                if closes_fence(work[block_col:], fence):
                     fence = None
-                    yield n, line, "fence"
+                    yield n, line, "fence", _marker_lines(items)
                 else:
-                    yield n, line, "code"
+                    yield n, line, "code", _marker_lines(items)
                 continue
             # A line outside the item's content ends the item and its block.
             fence = None
@@ -2995,19 +3016,20 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
                 items.pop()
                 starts_empty = False
             paragraph = False
-            yield n, line, "text"
+            yield n, line, "text", _marker_lines(items)
             continue
 
         # Close the items this line is not indented into, then open the
-        # items its markers start. A marker of the same type as a closed item
-        # starts a sibling, which may follow a paragraph whatever its number.
+        # items its markers start. The restrictions on interrupting a
+        # paragraph apply only to a paragraph in the innermost item still
+        # open: a marker outside a closed item starts a new item or list,
+        # whatever its type, number or content.
         kept = 0
-        while kept < len(items) and indent >= items[kept].content:
+        while kept < len(items) and indent >= items[kept][0]:
             kept += 1
         closed = items[kept:]
         del items[kept:]
-        siblings = {item.kind for item in closed}
-        col = items[-1].content if items else 0
+        col = items[-1][0] if items else 0
         opened = False
         starts_empty = False
         while True:
@@ -3018,14 +3040,13 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
             if not m:
                 break
             marker = m.group("marker")
-            kind = marker[-1]
             empty = not (m.group("rest") or "").strip()
-            if paragraph and not opened and kind not in siblings and not _interrupts_paragraph(m):
+            if paragraph and not closed and not opened and not _interrupts_paragraph(m):
                 break
             marker_end = col + m.start("marker") + len(marker)
             gap = len(m.group("gap") or "")
             col = marker_end + 1 if empty or gap > 4 else marker_end + gap
-            items.append(ListItem(col, kind))
+            items.append((col, n))
             opened = True
             paragraph = False
             if empty:
@@ -3037,34 +3058,35 @@ def markdown_line_kinds(text: str) -> Iterator[tuple[int, str, str]]:  # noqa: C
             # The underline ends the paragraph as a heading, so the next line
             # cannot continue it lazily. It is never itself a lazy line.
             paragraph = False
-            yield n, line, "text"
+            yield n, line, "text", _marker_lines(items)
             continue
         if paragraph and not opened and closed and not _starts_block(rest):
             # A lazy continuation line: the paragraph keeps its items.
             items.extend(closed)
-            yield n, line, "text"
+            yield n, line, "text", _marker_lines(items)
             continue
         if not rest.strip():
             paragraph = False
-            yield n, line, "text"
+            yield n, line, "text", _marker_lines(items)
             continue
         if _indent(rest) > 3:
             # Indented code, unless it continues a paragraph; either way it
             # is read as text and opens no fence.
-            yield n, line, "text"
+            yield n, line, "text", _marker_lines(items)
             continue
         opener = fence_opener(rest)
         if opener is not None:
-            fence, fence_col, paragraph = opener, col, False
-            yield n, line, "fence"
+            fence, block_col, paragraph = opener, col, False
+            yield n, line, "fence", _marker_lines(items)
             continue
         if HTML_COMMENT_BLOCK_START_RE.match(rest):
             in_comment = "-->" not in rest[rest.index("<!--") + 4:]
+            block_col = col
             paragraph = False
-            yield n, line, "comment"
+            yield n, line, "comment", _marker_lines(items)
             continue
         paragraph = not (ATX_HEADING_RE.match(rest) or THEMATIC_BREAK_RE.match(rest))
-        yield n, line, "text"
+        yield n, line, "text", _marker_lines(items)
 
 
 def rendered_markdown_lines(text: str) -> Iterator[tuple[int, str]]:
