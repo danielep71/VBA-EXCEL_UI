@@ -80,6 +80,8 @@ Option Explicit
 '   - Demo_CreateDemoSheet is the canonical builder
 '
 ' UPDATED
+'   2026-11-14 - Demo_CreateDemoSheet keeps fast-mode restoration failures and
+'                the entry cursor (#70).
 '   2026-11-06 - Header and comments aligned with the code (#114).
 '   2026-08-21 - Captured the Err fields before suppressing errors, so the
 '                runtime-error text describes the error it was given.
@@ -196,16 +198,22 @@ Public Sub Demo_CreateDemoSheet()
 '   - Adds the action, selection, preset, sync, capture, and reset controls
 '   - Writes the scope and restore notes
 '   - Synchronizes the check boxes to the current Excel UI state
-'   - Restores cursor and fast-mode state through a centralized cleanup path
+'   - Restores the five fast-mode settings, the entry cursor included, through
+'     a centralized cleanup path; a partial fast-mode entry is rolled back by
+'     DEMO_FastMode_Begin itself
+'   - Leaves the demo view the template applied, DisplayFormulaBar included,
+'     in place: it is the requested view, not a temporary setting
 '
 ' ERROR POLICY
 '   - Raises errors normally
-'   - Cleanup is best-effort and should not overwrite the original error
+'   - An original error keeps its number and source; a failed restoration is
+'     appended to its description as a "Cleanup failure: " line
+'   - A restoration failure without an original error is raised itself
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_Click
 '   - DEMO_FastMode_Begin
-'   - DEMO_FastMode_End
+'   - DEMO_FastMode_EndPreservingError
 '   - DEMO_Sheet_BuildTemplate
 '   - DEMO_Prepare_LabeledInputSection
 '   - DEMO_Write_NamedInputRow
@@ -217,6 +225,8 @@ Public Sub Demo_CreateDemoSheet()
 '   - Demo_SyncCheckBoxesToUI
 '
 ' UPDATED
+'   2026-11-14 - Fast-mode cleanup restores the entry cursor and reports a
+'                failed restoration (#70).
 '   2026-07-25
 '==============================================================================
 '
@@ -227,8 +237,7 @@ Public Sub Demo_CreateDemoSheet()
     Dim WB                  As Workbook        'Target workbook
     Dim WS                  As Worksheet       'Demo worksheet
     Dim ButtonSpecs         As Variant         'Button name / caption / macro specification
-    Dim FastModeState       As tDEMOFastModeState 'Saved Application-state snapshot
-    Dim FastModeOn          As Boolean         'TRUE when fast mode was entered
+    Dim FastModeState       As tDEMOFastModeState 'Saved Application state and owned settings
     Dim SavedErrNumber      As Long            'Captured error number
     Dim SavedErrSource      As String          'Captured error source
     Dim SavedErrDescription As String          'Captured error description
@@ -244,11 +253,9 @@ Public Sub Demo_CreateDemoSheet()
         Set WB = ThisWorkbook
     'Play the standard demo-button click feedback
         DEMO_Btn_Click
-    'Capture and apply fast-mode Application settings
+    'Capture and apply fast-mode Application settings, the wait cursor
+    'included; a failed entry has already rolled itself back
         DEMO_FastMode_Begin FastModeState
-        FastModeOn = True
-    'Show the wait cursor while rebuilding the demo workbook
-        Application.Cursor = xlWait
     'Build or rebuild the generic template for the demo sheet
         DEMO_Sheet_BuildTemplate DEMO_SHEET_NAME, "EXCEL UI", "Demo Sheet", , , , _
             , , "C:H", , , , , , , , , , 29
@@ -398,15 +405,12 @@ Clean_Exit:
 '------------------------------------------------------------------------------
 ' CLEANUP
 '------------------------------------------------------------------------------
-    'Protect cleanup so it cannot overwrite the original error
-        On Error Resume Next
-        Application.Cursor = xlDefault
-    'Restore the original Excel Application state only when fast mode was entered
-        If FastModeOn Then
-            DEMO_FastMode_End FastModeState
-        End If
-    'Restore normal error handling before any re-raise
+    'Disable the handler first, so cleanup can never re-enter it
         On Error GoTo 0
+    'Restore every fast-mode setting this call applied; a failed restoration
+    'joins the original error, or becomes the error, instead of being dropped
+        DEMO_FastMode_EndPreservingError FastModeState, SavedErrNumber, _
+            SavedErrSource, SavedErrDescription
     'Re-raise the original error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription

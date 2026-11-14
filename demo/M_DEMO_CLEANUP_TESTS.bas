@@ -6,13 +6,16 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Bounded Excel harness for the single-pass cleanup of DEMO_Sheet_Reset and
-'   DEMO_Sheet_BuildTemplate (#71).
+'   DEMO_Sheet_BuildTemplate (#71) and for the fast-mode Application-state
+'   scope of M_DEMO_BUILDER (#70).
 '
 ' WHY THIS EXISTS
 '   The demo-cleanup source fixtures in tools/ check the shape of the cleanup
 '   code, not what Excel does with it. This harness runs both procedures in
 '   Excel through success, ordinary failure, unprotect failure and cleanup
 '   failure, and reads back the protection Excel actually holds afterwards.
+'   It also fails each fast-mode write in turn and reads back the
+'   Application settings Excel holds afterwards.
 '
 ' PUBLIC SURFACE
 '   - Demo_Test_RunCleanupChecks
@@ -32,13 +35,32 @@ Option Explicit
 '   S12  Reset operation, Protect and EnableSelection failures together
 '   S13  BuildTemplate ordinary error inside its guarded body
 '   S14  BuildTemplate propagating a nested Reset failure
+'   S15  Fast mode entered and left; INFO line with entry/fast/exit values
+'   S16  Fast-mode entry fault at ScreenUpdating, rolled back
+'   S17  Fast-mode entry fault at EnableEvents, rolled back
+'   S18  Fast-mode entry fault at DisplayAlerts, rolled back
+'   S19  Fast-mode entry fault at Calculation, rolled back
+'   S20  Fast-mode entry fault at Cursor, rolled back
+'   S21  Fast-mode restore fault at ScreenUpdating; the other four restored
+'   S22  Fast-mode restore fault at EnableEvents; the other four restored
+'   S23  Fast-mode restore fault at DisplayAlerts; the other four restored
+'   S24  Fast-mode restore fault at Calculation; the other four restored
+'   S25  Fast-mode restore fault at Cursor; the other four restored
+'   S26  Fast-mode entry fault whose rollback also fails
+'   S27  Caller cleanup keeps an operation error and adds a restore failure
+'   S28  Caller cleanup raises a restore failure alone; second End is inert
+'   S29  DisplayFormulaBar is not owned by fast mode
+'   S30  BuildTemplate DisplayFormulaBar write failure
 '
 ' EVIDENCE
 '   Each scenario checks the error that reaches the caller (number, source
 '   and description), the M_DEMO_BUILDER cleanup probe counters (handler
 '   entries, cleanup passes, Protect and EnableSelection attempts), whether
 '   the reset body ran, and a readback of the fifteen Protect options and
-'   EnableSelection.
+'   EnableSelection. The fast-mode scenarios check the entry and restoration
+'   writes reached and read back ScreenUpdating, EnableEvents, DisplayAlerts,
+'   Calculation and Cursor; a failed check prints the expected and actual
+'   values.
 '
 ' SAFETY
 '   - Works only in a temporary workbook it creates and closes without saving;
@@ -47,17 +69,27 @@ Option Explicit
 '   - The cleanup probe and its faults are disarmed after every call and on
 '     every exit
 '   - Never calls Unprotect without a password, so Excel never prompts
+'   - Records ScreenUpdating, EnableEvents, DisplayAlerts, Calculation,
+'     Cursor and DisplayFormulaBar before the first scenario and writes them
+'     back on every exit. The fast-mode scenarios set a baseline first:
+'     screen updating, events and alerts on, the session's calculation mode
+'     (automatic when the session is manual) and the north-west arrow cursor.
+'     Switching to automatic calculation recalculates open workbooks.
 '
 ' LIMITATIONS
 '   - Reprotection and EnableSelection failures, and an operation error after
 '     a successful unprotect, are injected through the M_DEMO_BUILDER seams;
 '     no worksheet condition produces them on demand
+'   - Fast-mode and DisplayFormulaBar write failures are injected the same
+'     way, by failing the value of the write; Excel's own setter never fails
+'     here
 '   - The wrong-password error number and text are Excel's; only that an error
 '     arrived without a cleanup diagnostic is checked
 '   - UserInterfaceOnly is read back in the same session only
 '   - Not a watchdog: if Excel blocks inside a call, the harness blocks too
 '
 ' UPDATED
+'   2026-11-14 - Fast-mode and formula-bar scenarios S15-S30 (#70).
 '   2026-11-06 - Added for #71.
 '
 ' AUTHOR
@@ -118,6 +150,46 @@ Option Explicit
     Private Const ERR_BLANK_CONTENT     As Long = vbObjectError + 2021
     Private Const DESC_BLANK_CONTENT    As String = "ContentColumns cannot be blank."
 
+    'Fast-mode settings, probe sites and fault bits; mirror M_DEMO_BUILDER
+    Private Const FM_SCREENUPDATING     As Long = 1
+    Private Const FM_ENABLEEVENTS       As Long = 2
+    Private Const FM_DISPLAYALERTS      As Long = 4
+    Private Const FM_CALCULATION        As Long = 8
+    Private Const FM_CURSOR             As Long = 16
+    Private Const FM_ALL                As Long = 31
+    Private Const PROBE_FM_ENTRY        As Long = 7
+    Private Const PROBE_FM_RESTORE      As Long = 8
+    Private Const FAULT_FORMULABAR      As Long = 8
+    Private Const FAULT_FM_ENTRY_UNIT   As Long = 256
+    Private Const FAULT_FM_RESTORE_UNIT As Long = 8192
+
+    'Fast-mode and formula-bar errors; mirror M_DEMO_BUILDER
+    Private Const ERR_FM_ENTRY          As Long = vbObjectError + 2193
+    Private Const SRC_FM_ENTRY          As String = "M_DEMO_BUILDER.DEMO_FastMode.InjectedEntryFault"
+    Private Const DESC_FM_ENTRY         As String = "Injected fast-mode entry fault: "
+    Private Const ERR_FM_RESTORE        As Long = vbObjectError + 2194
+    Private Const SRC_FM_RESTORE        As String = "M_DEMO_BUILDER.DEMO_FastMode.InjectedRestoreFault"
+    Private Const DESC_FM_RESTORE       As String = "Injected fast-mode restore fault: "
+    Private Const ERR_FM_END            As Long = vbObjectError + 2026
+    Private Const SRC_FM_END            As String = "M_DEMO_BUILDER.DEMO_FastMode_End"
+    Private Const DESC_FM_END           As String = "Fast-mode restore failed: "
+    Private Const ROLLBACK_MARKER       As String = "Cleanup failure: Fast-mode rollback failed: "
+    Private Const ERR_FORMULABAR        As Long = vbObjectError + 2195
+    Private Const SRC_FORMULABAR        As String = "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate.InjectedFormulaBarFault"
+    Private Const DESC_FORMULABAR       As String = "Injected DisplayFormulaBar fault."
+
+    'The operation error a caller's handler holds in S27
+    Private Const ERR_OPERATION         As Long = vbObjectError + 2198
+    Private Const SRC_OPERATION         As String = "M_DEMO_CLEANUP_TESTS.SimulatedOperation"
+    Private Const DESC_OPERATION        As String = "Simulated operation error."
+
+    'Baseline cursor: neither xlDefault nor the fast-mode xlWait
+    Private Const BASELINE_CURSOR       As Long = xlNorthwestArrow
+
+    'A layout every template call accepts
+    Private Const VALID_CONTENT         As String = "C:M"
+    Private Const VALID_HIDE_ROWS       As Long = 200
+
     'Cleanup diagnostic markers written by DEMO_Sheet_Reset
     Private Const CLEANUP_MARKER        As String = "Cleanup failure: "
     Private Const SELECTION_MARKER      As String = " | EnableSelection: "
@@ -133,6 +205,15 @@ Option Explicit
     Private mScenarios        As Long    'Scenarios started in this run
     Private mScenarioFailures As Long    'Scenarios with at least one failure
 
+    Private mSessionCaptured       As Boolean    'Session settings below are valid
+    Private mSessionScreenUpdating As Boolean    'Session Application.ScreenUpdating
+    Private mSessionEnableEvents   As Boolean    'Session Application.EnableEvents
+    Private mSessionDisplayAlerts  As Boolean    'Session Application.DisplayAlerts
+    Private mSessionCalculation    As Long       'Session Application.Calculation
+    Private mSessionCursor         As Long       'Session Application.Cursor
+    Private mSessionFormulaBar     As Boolean    'Session Application.DisplayFormulaBar
+    Private mBaselineCalculation   As Long       'Calculation of the fast-mode baseline
+
 
 Public Sub Demo_Test_RunCleanupChecks()
 '
@@ -140,8 +221,9 @@ Public Sub Demo_Test_RunCleanupChecks()
 ' Demo_Test_RunCleanupChecks
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Runs every #71 cleanup scenario in a temporary workbook and prints one
-'   line per scenario and a PASS/FAIL summary to the Immediate window.
+'   Runs every #71 cleanup scenario and every #70 fast-mode scenario in a
+'   temporary workbook and prints one line per scenario and a PASS/FAIL
+'   summary to the Immediate window.
 '
 ' RETURNS
 '   None
@@ -150,8 +232,9 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   - Creates one temporary workbook; each scenario adds its own sheet to it
 '   - A scenario that fails or raises unexpectedly is reported and the run
 '     continues with the next one
-'   - Disarms the cleanup probe and closes the temporary workbook without
-'     saving on every exit
+'   - Disarms the cleanup probe, closes the temporary workbook without
+'     saving and writes back the session's Application settings on every
+'     exit; a failed write-back is a failed check
 '
 ' ERROR POLICY
 '   Raises vbObjectError + 2199 after cleanup when any check failed, and
@@ -159,13 +242,14 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   mistaken for a passing one
 '
 ' DEPENDENCIES
-'   - M_DEMO_BUILDER (DEMO_Sheet_Reset, DEMO_Sheet_BuildTemplate and the
-'     DEMO_InternalCleanupProbe* seams)
+'   - M_DEMO_BUILDER (DEMO_Sheet_Reset, DEMO_Sheet_BuildTemplate, the
+'     DEMO_FastMode_* scope and the DEMO_InternalCleanupProbe* seams)
 '
 ' CALLED FROM
 '   - Invoked directly, from the Immediate window or the Macros dialog
 '
 ' UPDATED
+'   2026-11-14 - Session settings captured and written back; S15-S30 (#70).
 '   2026-11-06
 '==============================================================================
 
@@ -177,6 +261,7 @@ Public Sub Demo_Test_RunCleanupChecks()
     Dim RaisedNumber        As Long            'Error that stopped the run
     Dim RaisedSource        As String          'Source of that error
     Dim RaisedDescription   As String          'Text of that error
+    Dim SessionFailures     As String          'Session settings not written back
 
     Const PROC As String = "Demo_Test_RunCleanupChecks"
 
@@ -195,7 +280,10 @@ Public Sub Demo_Test_RunCleanupChecks()
 
         Debug.Print PROC & ": START " & Format$(Now, "yyyy-mm-dd hh:nn:ss")
 
-    'Create the only workbook the scenarios touch
+    'Record the Application settings the scenarios change
+        DEMO_CT_CaptureSession
+
+    'Create the only workbook the scenarios touch; it is the active workbook
         Set WB = Workbooks.Add(xlWBATWorksheet)
 
 '------------------------------------------------------------------------------
@@ -225,6 +313,26 @@ Public Sub Demo_Test_RunCleanupChecks()
         DEMO_CT_BuildOrdinaryError WB, "S13_BuildError"
         DEMO_CT_BuildNestedResetError WB, "S14_BuildNested"
 
+    'Fast-mode entry, restoration and ownership (#70)
+        DEMO_CT_FastModeSuccess "S15_FastModeSuccess"
+        DEMO_CT_FastModeEntryFault "S16_EntryScreenUpdating", FM_SCREENUPDATING, 1
+        DEMO_CT_FastModeEntryFault "S17_EntryEnableEvents", FM_ENABLEEVENTS, 2
+        DEMO_CT_FastModeEntryFault "S18_EntryDisplayAlerts", FM_DISPLAYALERTS, 3
+        DEMO_CT_FastModeEntryFault "S19_EntryCalculation", FM_CALCULATION, 4
+        DEMO_CT_FastModeEntryFault "S20_EntryCursor", FM_CURSOR, 5
+        DEMO_CT_FastModeRestoreFault "S21_RestoreScreenUpdating", FM_SCREENUPDATING
+        DEMO_CT_FastModeRestoreFault "S22_RestoreEnableEvents", FM_ENABLEEVENTS
+        DEMO_CT_FastModeRestoreFault "S23_RestoreDisplayAlerts", FM_DISPLAYALERTS
+        DEMO_CT_FastModeRestoreFault "S24_RestoreCalculation", FM_CALCULATION
+        DEMO_CT_FastModeRestoreFault "S25_RestoreCursor", FM_CURSOR
+        DEMO_CT_FastModeRollbackFault "S26_RollbackFault"
+        DEMO_CT_FastModeCallerMerge "S27_CallerMerge"
+        DEMO_CT_FastModeCleanupOnly "S28_CleanupOnly"
+
+    'Formula-bar ownership and failure (#70)
+        DEMO_CT_FormulaBarPolicy "S29_FormulaBarPolicy"
+        DEMO_CT_FormulaBarFault WB, "S30_FormulaBarFault"
+
 Safe_Exit:
 '------------------------------------------------------------------------------
 ' RELEASE AND REPORT
@@ -237,6 +345,12 @@ Safe_Exit:
             End If
             Set WB = Nothing
         On Error GoTo 0
+
+    'Write back the session's Application settings; a failure fails the run
+        SessionFailures = DEMO_CT_RestoreSession()
+        If Len(SessionFailures) > 0 Then
+            DEMO_CT_Fail "Session.Restore", SessionFailures
+        End If
 
     'Print the summary line
         If RaisedNumber = 0 And mFailures = 0 Then
@@ -954,7 +1068,8 @@ Private Sub DEMO_CT_BuildOrdinaryError( _
 
         FailuresBefore = DEMO_CT_BeginScenario()
 
-        DEMO_CT_CallBuild WB, Scenario, RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CallBuild WB, Scenario, vbNullString, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
 
 '------------------------------------------------------------------------------
 ' ASSERT
@@ -1016,7 +1131,8 @@ Private Sub DEMO_CT_BuildNestedResetError( _
 '------------------------------------------------------------------------------
 ' ACT
 '------------------------------------------------------------------------------
-        DEMO_CT_CallBuild WB, Scenario, RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CallBuild WB, Scenario, vbNullString, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
 
 '------------------------------------------------------------------------------
 ' ASSERT
@@ -1027,6 +1143,579 @@ Private Sub DEMO_CT_BuildNestedResetError( _
         DEMO_CT_Check Not DEMO_CT_BodyRan(WS), Scenario & ".BodyNotRun", _
                       "the nested reset body ran although the sheet stayed protected"
         DEMO_CT_CheckOptions Scenario & ".Readback.Options", EntryOptions, DEMO_CT_ReadOptions(WS)
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_FastModeSuccess( _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_FastModeSuccess
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S15: Begin applies the five fast-mode values and End restores the entry
+'   values, the entry cursor included, writing each setting once each way.
+'
+' EVIDENCE
+'   Prints the entry, fast-mode and exit values on one INFO line.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
+    Dim EntryText           As String          'Application state on entry
+    Dim FastText            As String          'Application state inside fast mode
+    Dim ExitText            As String          'Application state after End
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        DEMO_CT_ApplyBaseline
+        EntryText = DEMO_CT_AppStateText()
+        DEMO_CT_CheckText Scenario & ".Setup.Baseline", DEMO_CT_ExpectedState(0), EntryText
+
+        DEMO_InternalCleanupProbeBegin FAULT_NONE
+
+'------------------------------------------------------------------------------
+' ACT AND ASSERT
+'------------------------------------------------------------------------------
+    'Enter fast mode
+        DEMO_CT_CallBegin State, RaisedNumber, RaisedSource, RaisedDescription
+        FastText = DEMO_CT_AppStateText()
+
+        DEMO_CT_CheckNoError Scenario & ".Begin.NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckText Scenario & ".Begin.State", DEMO_CT_ExpectedState(FM_ALL), FastText
+        DEMO_CT_Check State.Captured, Scenario & ".Begin.Captured", "the entry values are not marked as captured"
+        DEMO_CT_CheckLong Scenario & ".Begin.Applied", FM_ALL, State.Applied
+
+    'Leave fast mode
+        DEMO_CT_CallEnd State, RaisedNumber, RaisedSource, RaisedDescription
+        ExitText = DEMO_CT_AppStateText()
+
+        DEMO_CT_CheckNoError Scenario & ".End.NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckText Scenario & ".End.State", EntryText, ExitText
+        DEMO_CT_CheckLong Scenario & ".End.Applied", 0, State.Applied
+        DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
+
+        Debug.Print "    INFO " & Scenario & ": entry [" & EntryText & "] fast [" & FastText & _
+                    "] exit [" & ExitText & "]"
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_FastModeEntryFault( _
+    ByVal Scenario As String, _
+    ByVal Setting As Long, _
+    ByVal WriteIndex As Long)
+'
+'==============================================================================
+' DEMO_CT_FastModeEntryFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S16-S20: the entry write of one setting fails. Begin rolls back every
+'   setting it had marked, the failed one included, raises the entry error
+'   unchanged and leaves nothing owned.
+'
+' INPUTS
+'   Setting
+'     The FM_* bit whose entry write fails
+'
+'   WriteIndex
+'     Its position in the entry order, 1 to 5; also the number of writes
+'     Begin reaches and the number of restorations its rollback attempts
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
+    Dim EntryText           As String          'Application state on entry
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        DEMO_CT_ApplyBaseline
+        EntryText = DEMO_CT_AppStateText()
+
+        DEMO_InternalCleanupProbeBegin Setting * FAULT_FM_ENTRY_UNIT
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBegin State, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ERR_FM_ENTRY, SRC_FM_ENTRY, _
+                           DESC_FM_ENTRY & DEMO_CT_SettingName(Setting) & ".", _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckText Scenario & ".Rollback.State", EntryText, DEMO_CT_AppStateText()
+        DEMO_CT_Check State.Captured, Scenario & ".Captured", "the entry values are not marked as captured"
+        DEMO_CT_CheckLong Scenario & ".Applied", 0, State.Applied
+        DEMO_CT_CheckFastModeProbe Scenario & ".Probe", WriteIndex, WriteIndex
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_FastModeRestoreFault( _
+    ByVal Scenario As String, _
+    ByVal Setting As Long)
+'
+'==============================================================================
+' DEMO_CT_FastModeRestoreFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S21-S25: the restoration of one setting fails. End still attempts all
+'   five, restores the other four, and raises one error that names the
+'   failed setting and its error.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        DEMO_CT_ApplyBaseline
+        DEMO_InternalCleanupProbeBegin Setting * FAULT_FM_RESTORE_UNIT
+
+        DEMO_CT_CallBegin State, RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckNoError Scenario & ".Begin.NoError", RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallEnd State, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ERR_FM_END, SRC_FM_END, _
+                           DESC_FM_END & DEMO_CT_RestoreFailureText(Setting), _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckText Scenario & ".State", DEMO_CT_ExpectedState(Setting), DEMO_CT_AppStateText()
+        DEMO_CT_CheckLong Scenario & ".Applied", 0, State.Applied
+        DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_FastModeRollbackFault( _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_FastModeRollbackFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S26: the Cursor entry write fails and the rollback of ScreenUpdating
+'   fails too. Begin keeps the entry error's number and source, appends one
+'   rollback diagnostic, and still restores the other four settings.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        DEMO_CT_ApplyBaseline
+        DEMO_InternalCleanupProbeBegin FM_CURSOR * FAULT_FM_ENTRY_UNIT + _
+                                       FM_SCREENUPDATING * FAULT_FM_RESTORE_UNIT
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBegin State, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ERR_FM_ENTRY, SRC_FM_ENTRY, _
+                           DESC_FM_ENTRY & "Cursor." & vbCrLf & ROLLBACK_MARKER & _
+                           DEMO_CT_RestoreFailureText(FM_SCREENUPDATING), _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckText Scenario & ".State", DEMO_CT_ExpectedState(FM_SCREENUPDATING), DEMO_CT_AppStateText()
+        DEMO_CT_CheckLong Scenario & ".Applied", 0, State.Applied
+        DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_FastModeCallerMerge( _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_FastModeCallerMerge
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S27: a caller's cleanup path holds an operation error and the Calculation
+'   restoration fails. DEMO_FastMode_EndPreservingError keeps the operation
+'   error's number and source and appends the restoration failure once.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        DEMO_CT_ApplyBaseline
+        DEMO_InternalCleanupProbeBegin FM_CALCULATION * FAULT_FM_RESTORE_UNIT
+
+        DEMO_CT_CallBegin State, RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckNoError Scenario & ".Begin.NoError", RaisedNumber, RaisedSource, RaisedDescription
+
+    'The operation error a caller's handler would have saved
+        RaisedNumber = ERR_OPERATION
+        RaisedSource = SRC_OPERATION
+        RaisedDescription = DESC_OPERATION
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_FastMode_EndPreservingError State, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ERR_OPERATION, SRC_OPERATION, _
+                           DESC_OPERATION & vbCrLf & CLEANUP_MARKER & _
+                           DEMO_CT_ErrText(ERR_FM_END, SRC_FM_END, _
+                                           DESC_FM_END & DEMO_CT_RestoreFailureText(FM_CALCULATION)), _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckText Scenario & ".State", DEMO_CT_ExpectedState(FM_CALCULATION), DEMO_CT_AppStateText()
+        DEMO_CT_CheckLong Scenario & ".Applied", 0, State.Applied
+        DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_FastModeCleanupOnly( _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_FastModeCleanupOnly
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S28: without an operation error, a failed Cursor restoration becomes the
+'   caller's error. A second End then restores nothing, because the first one
+'   released ownership.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        DEMO_CT_ApplyBaseline
+        DEMO_InternalCleanupProbeBegin FM_CURSOR * FAULT_FM_RESTORE_UNIT
+
+        DEMO_CT_CallBegin State, RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckNoError Scenario & ".Begin.NoError", RaisedNumber, RaisedSource, RaisedDescription
+
+        RaisedNumber = 0
+        RaisedSource = vbNullString
+        RaisedDescription = vbNullString
+
+'------------------------------------------------------------------------------
+' ACT AND ASSERT
+'------------------------------------------------------------------------------
+        DEMO_FastMode_EndPreservingError State, RaisedNumber, RaisedSource, RaisedDescription
+
+        DEMO_CT_CheckError Scenario & ".Error", ERR_FM_END, SRC_FM_END, _
+                           DESC_FM_END & DEMO_CT_RestoreFailureText(FM_CURSOR), _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckText Scenario & ".State", DEMO_CT_ExpectedState(FM_CURSOR), DEMO_CT_AppStateText()
+
+    'A second End owns nothing and writes nothing
+        DEMO_CT_CallEnd State, RaisedNumber, RaisedSource, RaisedDescription
+
+        DEMO_CT_CheckNoError Scenario & ".SecondEnd.NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_FormulaBarPolicy( _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_FormulaBarPolicy
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S29: fast mode does not own DisplayFormulaBar. A change made inside a
+'   fast-mode scope, as the template makes it, survives End, while the five
+'   owned settings are restored.
+'
+' NOTES
+'   The scenario toggles the formula bar of this Excel instance and puts it
+'   back on every exit.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
+    Dim EntryText           As String          'Application state on entry
+    Dim EntryFormulaBar     As Boolean         'DisplayFormulaBar on entry
+    Dim Toggled             As Boolean         'TRUE once the formula bar was toggled
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        DEMO_CT_ApplyBaseline
+        EntryText = DEMO_CT_AppStateText()
+        EntryFormulaBar = Application.DisplayFormulaBar
+
+        DEMO_InternalCleanupProbeBegin FAULT_NONE
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBegin State, RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckNoError Scenario & ".Begin.NoError", RaisedNumber, RaisedSource, RaisedDescription
+
+        Toggled = True
+        Application.DisplayFormulaBar = Not EntryFormulaBar
+
+        DEMO_CT_CallEnd State, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckNoError Scenario & ".End.NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_Check Application.DisplayFormulaBar = Not EntryFormulaBar, _
+                      Scenario & ".FormulaBarNotOwned", "End changed DisplayFormulaBar"
+        DEMO_CT_CheckText Scenario & ".State", EntryText, DEMO_CT_AppStateText()
+
+Safe_Exit:
+        On Error GoTo 0
+        If Toggled Then
+            On Error Resume Next
+                Application.DisplayFormulaBar = EntryFormulaBar
+            On Error GoTo 0
+        End If
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_FormulaBarFault( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_FormulaBarFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S30: the DisplayFormulaBar write of the template fails inside its guarded
+'   body, after its reset. The error reaches the caller once and unchanged,
+'   and the formula bar keeps its entry value although the call asked for the
+'   opposite one.
+'
+' NOTES
+'   The template applies view settings only to the active workbook, so this
+'   scenario requires the temporary workbook to be active.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim EntryFormulaBar     As Boolean         'DisplayFormulaBar on entry
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        EntryFormulaBar = Application.DisplayFormulaBar
+
+        DEMO_CT_Check WB Is ActiveWorkbook, Scenario & ".Setup.Active", _
+                      "the temporary workbook is not active, so the template skips its view settings"
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Not EntryFormulaBar, _
+                          FAULT_FORMULABAR, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ERR_FORMULABAR, SRC_FORMULABAR, DESC_FORMULABAR, _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 1, 1
+        DEMO_CT_Check DEMO_CT_BodyRan(WS), Scenario & ".ResetRan", "the template did not reset the sheet first"
+        DEMO_CT_Check Application.DisplayFormulaBar = EntryFormulaBar, _
+                      Scenario & ".FormulaBarUnchanged", "the failed write changed DisplayFormulaBar"
 
 Safe_Exit:
         On Error GoTo 0
@@ -1089,6 +1778,10 @@ End Sub
 Private Sub DEMO_CT_CallBuild( _
     ByVal WB As Workbook, _
     ByVal SheetName As String, _
+    ByVal ContentColumns As String, _
+    ByVal HideRowsFrom As Long, _
+    ByVal ShowFormulaBar As Boolean, _
+    ByVal FaultMask As Long, _
     ByRef RaisedNumber As Long, _
     ByRef RaisedSource As String, _
     ByRef RaisedDescription As String)
@@ -1097,24 +1790,33 @@ Private Sub DEMO_CT_CallBuild( _
 ' DEMO_CT_CallBuild
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Calls DEMO_Sheet_BuildTemplate once for SheetName in WB, with a blank
-'   ContentColumns so that it fails validation after its reset, and returns
-'   the error that reached the caller.
+'   Calls DEMO_Sheet_BuildTemplate once for SheetName in WB with the probe
+'   armed, and returns the error that reached the caller.
+'
+' INPUTS
+'   ContentColumns / HideRowsFrom / ShowFormulaBar
+'     Passed to the template; every other argument keeps its default, and
+'     the title is "CT Title"
+'
+'   FaultMask
+'     The one-shot faults to arm for this call
 '
 ' ERROR POLICY
 '   Does not raise
 '
 ' UPDATED
+'   2026-11-14 - Layout, formula-bar and fault arguments (#70).
 '   2026-11-06
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' CALL
 '------------------------------------------------------------------------------
-        DEMO_InternalCleanupProbeBegin FAULT_NONE
+        DEMO_InternalCleanupProbeBegin FaultMask
 
         On Error Resume Next
-            DEMO_Sheet_BuildTemplate WS_Name:=SheetName, TargetWorkbook:=WB, ContentColumns:=vbNullString
+            DEMO_Sheet_BuildTemplate WS_Name:=SheetName, Title:="CT Title", TargetWorkbook:=WB, _
+                ContentColumns:=ContentColumns, HideRowsFrom:=HideRowsFrom, ShowFormulaBar:=ShowFormulaBar
             RaisedNumber = Err.Number
             RaisedSource = Err.Source
             RaisedDescription = Err.Description
@@ -1122,6 +1824,434 @@ Private Sub DEMO_CT_CallBuild( _
         On Error GoTo 0
 
         DEMO_InternalCleanupProbeEnd
+
+End Sub
+
+
+Private Sub DEMO_CT_CallBegin( _
+    ByRef State As tDEMOFastModeState, _
+    ByRef RaisedNumber As Long, _
+    ByRef RaisedSource As String, _
+    ByRef RaisedDescription As String)
+'
+'==============================================================================
+' DEMO_CT_CallBegin
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Calls DEMO_FastMode_Begin once and returns the error that reached the
+'   caller, if any. The probe is armed by the scenario, not here, so that its
+'   counters cover Begin and End together.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        On Error Resume Next
+            DEMO_FastMode_Begin State
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+            Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+
+Private Sub DEMO_CT_CallEnd( _
+    ByRef State As tDEMOFastModeState, _
+    ByRef RaisedNumber As Long, _
+    ByRef RaisedSource As String, _
+    ByRef RaisedDescription As String)
+'
+'==============================================================================
+' DEMO_CT_CallEnd
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Calls DEMO_FastMode_End once and returns the error that reached the
+'   caller, if any.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        On Error Resume Next
+            DEMO_FastMode_End State
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+            Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+
+Private Sub DEMO_CT_CaptureSession()
+'
+'==============================================================================
+' DEMO_CT_CaptureSession
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records the Application settings the fast-mode scenarios change, so the
+'   runner can put them back on every exit, and chooses the baseline
+'   calculation mode.
+'
+' BEHAVIOR
+'   The baseline keeps the session's calculation mode unless it is manual,
+'   the fast-mode value; then it uses automatic calculation, so that a
+'   restoration is observable.
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        mSessionScreenUpdating = Application.ScreenUpdating
+        mSessionEnableEvents = Application.EnableEvents
+        mSessionDisplayAlerts = Application.DisplayAlerts
+        mSessionCalculation = Application.Calculation
+        mSessionCursor = Application.Cursor
+        mSessionFormulaBar = Application.DisplayFormulaBar
+
+        If mSessionCalculation = xlCalculationManual Then
+            mBaselineCalculation = xlCalculationAutomatic
+        Else
+            mBaselineCalculation = mSessionCalculation
+        End If
+
+        mSessionCaptured = True
+
+End Sub
+
+
+Private Function DEMO_CT_RestoreSession() As String
+'
+'==============================================================================
+' DEMO_CT_RestoreSession
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes back the Application settings DEMO_CT_CaptureSession recorded,
+'   each in its own guarded attempt.
+'
+' RETURNS
+'   String
+'     Empty when every write succeeded or nothing was captured; otherwise
+'     one "<Setting>: <number> | <source> | <description>" entry per failure
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Failures            As String          'Collected failures
+    Dim FailNumber          As Long            'Error number of one write
+    Dim FailSource          As String          'Error source of one write
+    Dim FailDescription     As String          'Error description of one write
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+        If Not mSessionCaptured Then Exit Function
+
+        On Error Resume Next
+
+        Err.Clear
+        Application.Cursor = mSessionCursor
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Failures = DEMO_CT_AddFailure(Failures, "Cursor", FailNumber, FailSource, FailDescription)
+
+        Err.Clear
+        Application.Calculation = mSessionCalculation
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Failures = DEMO_CT_AddFailure(Failures, "Calculation", FailNumber, FailSource, FailDescription)
+
+        Err.Clear
+        Application.DisplayAlerts = mSessionDisplayAlerts
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Failures = DEMO_CT_AddFailure(Failures, "DisplayAlerts", FailNumber, FailSource, FailDescription)
+
+        Err.Clear
+        Application.EnableEvents = mSessionEnableEvents
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Failures = DEMO_CT_AddFailure(Failures, "EnableEvents", FailNumber, FailSource, FailDescription)
+
+        Err.Clear
+        Application.DisplayFormulaBar = mSessionFormulaBar
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Failures = DEMO_CT_AddFailure(Failures, "DisplayFormulaBar", FailNumber, FailSource, FailDescription)
+
+        Err.Clear
+        Application.ScreenUpdating = mSessionScreenUpdating
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        Failures = DEMO_CT_AddFailure(Failures, "ScreenUpdating", FailNumber, FailSource, FailDescription)
+
+        Err.Clear
+        On Error GoTo 0
+
+        mSessionCaptured = False
+        DEMO_CT_RestoreSession = Failures
+
+End Function
+
+
+Private Function DEMO_CT_AddFailure( _
+    ByVal Failures As String, _
+    ByVal Setting As String, _
+    ByVal FailNumber As Long, _
+    ByVal FailSource As String, _
+    ByVal FailDescription As String) _
+    As String
+'
+'==============================================================================
+' DEMO_CT_AddFailure
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Appends one failed write to a failure list; returns the list unchanged
+'   when FailNumber is 0.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        If FailNumber = 0 Then
+            DEMO_CT_AddFailure = Failures
+        Else
+            If Len(Failures) > 0 Then
+                Failures = Failures & " || "
+            End If
+            DEMO_CT_AddFailure = Failures & Setting & ": " & _
+                DEMO_CT_ErrText(FailNumber, FailSource, FailDescription)
+        End If
+
+End Function
+
+
+Private Sub DEMO_CT_ApplyBaseline()
+'
+'==============================================================================
+' DEMO_CT_ApplyBaseline
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Sets the five fast-mode settings to the baseline every fast-mode scenario
+'   starts from. Each baseline value differs from the fast-mode value, and
+'   the cursor differs from xlDefault too, so a restoration to a fixed value
+'   instead of the entry value is detected.
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        Application.ScreenUpdating = True
+        Application.EnableEvents = True
+        Application.DisplayAlerts = True
+        Application.Calculation = mBaselineCalculation
+        Application.Cursor = BASELINE_CURSOR
+
+End Sub
+
+
+Private Function DEMO_CT_AppStateText() As String
+'
+'==============================================================================
+' DEMO_CT_AppStateText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reads the five fast-mode settings back from Excel as one text.
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        DEMO_CT_AppStateText = DEMO_CT_StateText(Application.ScreenUpdating, _
+                                                 Application.EnableEvents, _
+                                                 Application.DisplayAlerts, _
+                                                 Application.Calculation, _
+                                                 Application.Cursor)
+
+End Function
+
+
+Private Function DEMO_CT_ExpectedState( _
+    ByVal FastSettings As Long) _
+    As String
+'
+'==============================================================================
+' DEMO_CT_ExpectedState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the expected state text: the settings in FastSettings hold their
+'   fast-mode value, every other setting its baseline value.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WantScreenUpdating  As Boolean         'Expected ScreenUpdating
+    Dim WantEnableEvents    As Boolean         'Expected EnableEvents
+    Dim WantDisplayAlerts   As Boolean         'Expected DisplayAlerts
+    Dim WantCalculation     As Long            'Expected Calculation
+    Dim WantCursor          As Long            'Expected Cursor
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+        WantScreenUpdating = ((FastSettings And FM_SCREENUPDATING) = 0)
+        WantEnableEvents = ((FastSettings And FM_ENABLEEVENTS) = 0)
+        WantDisplayAlerts = ((FastSettings And FM_DISPLAYALERTS) = 0)
+
+        If (FastSettings And FM_CALCULATION) <> 0 Then
+            WantCalculation = xlCalculationManual
+        Else
+            WantCalculation = mBaselineCalculation
+        End If
+
+        If (FastSettings And FM_CURSOR) <> 0 Then
+            WantCursor = xlWait
+        Else
+            WantCursor = BASELINE_CURSOR
+        End If
+
+        DEMO_CT_ExpectedState = DEMO_CT_StateText(WantScreenUpdating, WantEnableEvents, WantDisplayAlerts, _
+                                                  WantCalculation, WantCursor)
+
+End Function
+
+
+Private Function DEMO_CT_StateText( _
+    ByVal ScreenUpdatingValue As Boolean, _
+    ByVal EnableEventsValue As Boolean, _
+    ByVal DisplayAlertsValue As Boolean, _
+    ByVal CalculationValue As Long, _
+    ByVal CursorValue As Long) _
+    As String
+'
+'==============================================================================
+' DEMO_CT_StateText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Formats the five fast-mode settings for comparison and evidence lines.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        DEMO_CT_StateText = "ScreenUpdating=" & CStr(ScreenUpdatingValue) & _
+                            " EnableEvents=" & CStr(EnableEventsValue) & _
+                            " DisplayAlerts=" & CStr(DisplayAlertsValue) & _
+                            " Calculation=" & CStr(CalculationValue) & _
+                            " Cursor=" & CStr(CursorValue)
+
+End Function
+
+
+Private Function DEMO_CT_SettingName( _
+    ByVal Setting As Long) _
+    As String
+'
+'==============================================================================
+' DEMO_CT_SettingName
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the Application property name of one FM_* bit, as M_DEMO_BUILDER
+'   writes it into its diagnostics.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        Select Case Setting
+            Case FM_SCREENUPDATING
+                DEMO_CT_SettingName = "ScreenUpdating"
+            Case FM_ENABLEEVENTS
+                DEMO_CT_SettingName = "EnableEvents"
+            Case FM_DISPLAYALERTS
+                DEMO_CT_SettingName = "DisplayAlerts"
+            Case FM_CALCULATION
+                DEMO_CT_SettingName = "Calculation"
+            Case FM_CURSOR
+                DEMO_CT_SettingName = "Cursor"
+            Case Else
+                DEMO_CT_SettingName = "Setting " & CStr(Setting)
+        End Select
+
+End Function
+
+
+Private Function DEMO_CT_RestoreFailureText( _
+    ByVal Setting As Long) _
+    As String
+'
+'==============================================================================
+' DEMO_CT_RestoreFailureText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the failure entry M_DEMO_BUILDER writes for an injected
+'   restoration fault of one setting.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        DEMO_CT_RestoreFailureText = DEMO_CT_SettingName(Setting) & ": " & _
+            DEMO_CT_ErrText(ERR_FM_RESTORE, SRC_FM_RESTORE, _
+                            DESC_FM_RESTORE & DEMO_CT_SettingName(Setting) & ".")
+
+End Function
+
+
+Private Sub DEMO_CT_CheckFastModeProbe( _
+    ByVal CheckName As String, _
+    ByVal EntryWrites As Long, _
+    ByVal RestoreWrites As Long)
+'
+'==============================================================================
+' DEMO_CT_CheckFastModeProbe
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Checks how many fast-mode entry and restoration writes were reached since
+'   the probe was armed, failed ones included.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        DEMO_CT_CheckText CheckName, _
+            "entry=" & CStr(EntryWrites) & " restore=" & CStr(RestoreWrites), _
+            "entry=" & CStr(DEMO_InternalCleanupProbeCount(PROBE_FM_ENTRY)) & _
+            " restore=" & CStr(DEMO_InternalCleanupProbeCount(PROBE_FM_RESTORE))
 
 End Sub
 

@@ -733,6 +733,22 @@ measured against that baseline.
   "Cannot run the macro" error. No current demo button takes that path. The
   advisory call checker (`tools/check_vba_calls.py`) found the defect and now
   reports no defect on the repository.
+- **Not yet checked on Excel.** The demo builder's fast mode no longer leaks
+  Application state after a partial entry or a failed restoration
+  ([#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70)).
+  `DEMO_FastMode_Begin` reads `ScreenUpdating`, `EnableEvents`,
+  `DisplayAlerts`, `Calculation` and the cursor before its first write and
+  marks each setting as owned before writing it; a failed write rolls back
+  every marked setting and raises the original error. `DEMO_FastMode_End`
+  attempts every restoration even after one fails and names each failure,
+  where it used to stop at the first. `Demo_CreateDemoSheet` now appends a
+  failed restoration to its original error, or raises it, instead of
+  discarding it, and returns the cursor to its entry value instead of forcing
+  `xlDefault`. Fast mode does not own `DisplayFormulaBar`: the template sets it
+  as part of the demo view and leaves it set. Scenarios S15-S30 of
+  `Demo_Test_RunCleanupChecks` fail each entry and restoration write in turn
+  through new one-shot seams and read the settings back; the source fixtures
+  of the gate check the capture, ownership and restoration order.
 - Fixed the active title-bar frame being trusted without the host agreeing it
   is active. Resolving `Window.hWnd` from the `Window` that
   `Application.ActiveWindow` just returned makes the pair internally
@@ -1332,7 +1348,7 @@ practical closure status of any item that has since been reopened.
 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened |
 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Reopened |
 | [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) | Bounded title-bar mutation control that fails instead of hanging | Closed |
-| [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Open |
+| [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Implemented with harness scenarios S15-S30; not yet checked on Excel |
 | [#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71) | Demo template and sheet-reset handlers do not recatch their own re-raised errors | Closed; Excel harness passed 14 scenarios and 89 checks on build 20430 x64 (2026-11-06) |
 | [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Open |
 | [#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74) | Demo template validates its layout inputs before resetting the worksheet | Open |

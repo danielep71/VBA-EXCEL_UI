@@ -200,6 +200,26 @@ across workbook reopening. Source fixtures do not establish Excel outcomes.
 [CONTRIBUTING.md](../CONTRIBUTING.md#demo-cleanup-checks-71) describes the
 host harness that tests this contract.
 
+### Demo fast-mode contract (#70)
+
+`DEMO_FastMode_Begin` owns five Application settings: `ScreenUpdating`,
+`EnableEvents`, `DisplayAlerts`, `Calculation` and `Cursor`. It reads all five
+before its first write and marks each one as owned immediately before writing
+it. When a write fails, Begin writes back every setting it marked, each in its
+own attempt, and raises the original error with its number and source; a
+failed write-back is appended to the description. `DEMO_FastMode_End` attempts
+every owned restoration even after one fails, then gives up ownership and
+raises one error that names each setting it could not restore.
+`DEMO_FastMode_EndPreservingError` adds that failure to a caller's saved error,
+or makes it the error when there is none. The cursor returns to its entry
+value.
+
+The worksheet window settings and `DisplayFormulaBar` that
+`DEMO_Sheet_BuildTemplate` applies are the requested demo view, not temporary
+settings: nothing restores them, and `DisplayFormulaBar` changes every window
+of the Excel instance. Like the cleanup contract, this is single-pass: it does
+not recover from a blocked Excel call or from Reset/End.
+
 ## Excel state ownership
 
 Assume these surfaces belong to the caller or host unless the project explicitly

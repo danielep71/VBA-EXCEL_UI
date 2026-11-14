@@ -339,6 +339,15 @@ class DemoCleanupRegression(GateTestCase):
         self.repo.replace(BUILDER, "DidUnprotect = True", "DidUnprotect = False")
         self.assertFails("ownership must be armed only after Unprotect returns")
 
+    def test_fails_when_a_fast_mode_restoration_is_dropped(self) -> None:
+        restore = "Application.Calculation = DEMO_FastModeValue(DEMO_FM_CALCULATION, True, State.Calculation)"
+        self.repo.replace(BUILDER, restore, "Debug.Print 0")
+        self.assertFails("fast mode: Calculation restoration missing")
+
+    def test_fails_when_a_fast_mode_write_is_not_marked_first(self) -> None:
+        self.repo.replace(BUILDER, "StateOut.Applied = StateOut.Applied Or DEMO_FM_CURSOR\r\n", "")
+        self.assertFails("fast mode: Cursor must be marked owned immediately before its write")
+
 
 class PublicApiManifest(GateTestCase):
     check = "public API manifest"

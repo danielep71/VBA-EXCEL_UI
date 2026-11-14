@@ -37,12 +37,16 @@ Option Private Module
 '   - Button creation supports an optional action macro so the helper is not
 '     hard-wired to one single placeholder routine.
 '   - Fast-mode helpers centralize temporary Application-state changes used
-'     during sheet-building operations.
+'     during sheet-building operations. They own five settings only:
+'     ScreenUpdating, EnableEvents, DisplayAlerts, Calculation and Cursor.
 '   - DEMO_Sheet_BuildTemplate and DEMO_Sheet_Reset carry a cleanup probe and
-'     one-shot fault seams. They are inert until M_DEMO_CLEANUP_TESTS arms
-'     them through DEMO_InternalCleanupProbeBegin.
+'     one-shot fault seams, and so do the fast-mode writes. They are inert
+'     until M_DEMO_CLEANUP_TESTS arms them through
+'     DEMO_InternalCleanupProbeBegin.
 '
 ' UPDATED
+'   2026-11-14 - Fast-mode rollback, entry cursor and reported restoration
+'                failures (#70).
 '   2026-11-06 - Cleanup probe and one-shot fault seams for the #71 harness.
 '   2026-09-10 - Single-pass demo cleanup and owned protection restoration.
 '
@@ -88,12 +92,24 @@ Option Private Module
     Private Const DEMO_PROBE_RESET_SELECTION As Long = 4    'Reset EnableSelection restores reached
     Private Const DEMO_PROBE_BUILD_HANDLER   As Long = 5    'BuildTemplate Clean_Fail entries
     Private Const DEMO_PROBE_BUILD_CLEANUP   As Long = 6    'BuildTemplate Clean_Exit passes
-    Private Const DEMO_PROBE_SITE_COUNT      As Long = 6    'Highest probe site
+    Private Const DEMO_PROBE_FM_ENTRY        As Long = 7    'Fast-mode entry writes reached
+    Private Const DEMO_PROBE_FM_RESTORE      As Long = 8    'Fast-mode restoration writes reached
+    Private Const DEMO_PROBE_SITE_COUNT      As Long = 8    'Highest probe site
 
     'One-shot cleanup fault bits; mirrored by M_DEMO_CLEANUP_TESTS
     Private Const DEMO_FAULT_RESET_BODY      As Long = 1    'Operation error after unprotect
     Private Const DEMO_FAULT_RESET_PROTECT   As Long = 2    'Reprotect statement fails
     Private Const DEMO_FAULT_RESET_SELECTION As Long = 4    'EnableSelection restore fails
+    Private Const DEMO_FAULT_BUILD_FORMULABAR As Long = 8   'BuildTemplate DisplayFormulaBar write fails
+    Private Const DEMO_FAULT_FM_ENTRY_UNIT   As Long = 256  'Times a DEMO_FM_* bit: its entry write fails
+    Private Const DEMO_FAULT_FM_RESTORE_UNIT As Long = 8192 'Times a DEMO_FM_* bit: its restoration fails
+
+    'Fast-mode settings, one bit each; mirrored by M_DEMO_CLEANUP_TESTS
+    Private Const DEMO_FM_SCREENUPDATING     As Long = 1    'Application.ScreenUpdating
+    Private Const DEMO_FM_ENABLEEVENTS       As Long = 2    'Application.EnableEvents
+    Private Const DEMO_FM_DISPLAYALERTS      As Long = 4    'Application.DisplayAlerts
+    Private Const DEMO_FM_CALCULATION        As Long = 8    'Application.Calculation
+    Private Const DEMO_FM_CURSOR             As Long = 16   'Application.Cursor
 
 '------------------------------------------------------------------------------
 ' PRIVATE VARIABLES
@@ -114,6 +130,9 @@ Option Private Module
         EnableEvents    As Boolean       'Saved Application.EnableEvents
         DisplayAlerts   As Boolean       'Saved Application.DisplayAlerts
         Calculation     As XlCalculation 'Saved Application.Calculation
+        Cursor          As XlMousePointer 'Saved Application.Cursor
+        Captured        As Boolean       'TRUE once all five entry values were read
+        Applied         As Long          'DEMO_FM_* bits written and not yet restored
     End Type
 
 '------------------------------------------------------------------------------
@@ -274,9 +293,17 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   - SeparatorColumns and HideColumnsFrom are retained in the signature only
 '     for backward compatibility
 '   - The cleanup probe counts handler entries and cleanup passes only while
-'     M_DEMO_CLEANUP_TESTS has armed it
+'     M_DEMO_CLEANUP_TESTS has armed it; an armed one-shot fault can fail the
+'     DisplayFormulaBar write
+'
+' VIEW OWNERSHIP
+'   The window settings and DisplayFormulaBar are applied as the requested
+'   demo view and are not restored afterwards. DisplayFormulaBar is
+'   application-wide: it changes every window of this Excel instance. A
+'   DEMO_FastMode_Begin scope around this call does not capture or restore it.
 '
 ' UPDATED
+'   2026-11-14 - Formula-bar ownership documented; fault seam (#70).
 '   2026-11-06
 '==============================================================================
 
@@ -623,8 +650,9 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                     End If
                 End With
 
-            'Apply formula-bar visibility
-                Application.DisplayFormulaBar = ShowFormulaBar
+            'Apply formula-bar visibility, an intended demo view change that no
+    'fast-mode scope captures or restores
+                Application.DisplayFormulaBar = DEMO_FormulaBarValue(ShowFormulaBar)
         End If
 
 Clean_Exit:
@@ -724,6 +752,8 @@ Private Function DEMO_ColumnLetter( _
         DEMO_ColumnLetter = S
 
 End Function
+
+
 Public Sub DEMO_FastMode_Begin( _
     ByRef StateOut As tDEMOFastModeState)
 '
@@ -745,44 +775,126 @@ Public Sub DEMO_FastMode_Begin( _
 '
 ' INPUTS
 '   StateOut
-'     Output structure that receives the saved Application state.
+'     Output structure that receives the saved Application state and the
+'     settings this scope now owns.
 '
 ' RETURNS
 '   None.
 '
 ' BEHAVIOR
-'   - Captures current values for:
+'   - Clears StateOut.Captured and StateOut.Applied first
+'   - Captures all five entry values before the first write:
 '       * ScreenUpdating
 '       * EnableEvents
 '       * DisplayAlerts
 '       * Calculation
-'   - Applies reduced-noise builder settings
+'       * Cursor
+'   - Sets StateOut.Captured once all five are read
+'   - Marks each setting in StateOut.Applied before writing it, so a write
+'     that fails partway is still restored
+'   - Applies ScreenUpdating False, EnableEvents False, DisplayAlerts False,
+'     manual calculation and the wait cursor
 '
 ' ERROR POLICY
-'   Raises errors normally.
+'   - A failed capture raises before anything is written
+'   - A failed write rolls back every setting already marked, each attempted
+'     independently, then raises the original error with its number and
+'     source unchanged. A failed rollback appends a line that starts with
+'     "Cleanup failure: Fast-mode rollback failed: " to the description.
+'   - After a failed Begin, StateOut.Applied is 0, so DEMO_FastMode_End has
+'     nothing left to restore
+'
+' OWNERSHIP
+'   Fast mode owns only these five temporary settings. The window and
+'   Application view settings that DEMO_Sheet_BuildTemplate applies, such as
+'   DisplayFormulaBar, are intended demo view changes; fast mode neither
+'   captures nor restores them.
+'
+' REGRESSION SEAMS
+'   Every write passes its value through DEMO_FastModeValue, which counts the
+'   write and fails it once while M_DEMO_CLEANUP_TESTS has armed a fault for
+'   that setting. Disarmed, the value passes through unchanged.
 '
 ' UPDATED
+'   2026-11-14 - Rollback of a partial entry and the entry cursor (#70).
 '   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RollbackFailures    As String          'Settings the rollback could not restore
+    Dim SavedErrNumber      As Long            'Captured error number
+    Dim SavedErrSource      As String          'Captured error source
+    Dim SavedErrDescription As String          'Captured error description
+
+'------------------------------------------------------------------------------
 ' CAPTURE CURRENT STATE
 '------------------------------------------------------------------------------
-    'Capture the current Excel Application state
+    'Own nothing until every entry value is known
+        StateOut.Captured = False
+        StateOut.Applied = 0
+
+    'Capture the current Excel Application state; a failed read writes nothing
         StateOut.ScreenUpdating = Application.ScreenUpdating
         StateOut.EnableEvents = Application.EnableEvents
         StateOut.DisplayAlerts = Application.DisplayAlerts
         StateOut.Calculation = Application.Calculation
+        StateOut.Cursor = Application.Cursor
+        StateOut.Captured = True
 
 '------------------------------------------------------------------------------
 ' APPLY FAST MODE
 '------------------------------------------------------------------------------
-    'Reduce UI noise while building or rebuilding workbook structures
-        Application.ScreenUpdating = False
-        Application.EnableEvents = False
-        Application.DisplayAlerts = False
-        Application.Calculation = xlCalculationManual
+    'Roll back a partial entry on failure
+        On Error GoTo Clean_Fail
+
+    'Mark each setting before writing it, then reduce UI noise
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_SCREENUPDATING
+        Application.ScreenUpdating = DEMO_FastModeValue(DEMO_FM_SCREENUPDATING, False, False)
+
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_ENABLEEVENTS
+        Application.EnableEvents = DEMO_FastModeValue(DEMO_FM_ENABLEEVENTS, False, False)
+
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_DISPLAYALERTS
+        Application.DisplayAlerts = DEMO_FastModeValue(DEMO_FM_DISPLAYALERTS, False, False)
+
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_CALCULATION
+        Application.Calculation = DEMO_FastModeValue(DEMO_FM_CALCULATION, False, xlCalculationManual)
+
+        StateOut.Applied = StateOut.Applied Or DEMO_FM_CURSOR
+        Application.Cursor = DEMO_FastModeValue(DEMO_FM_CURSOR, False, xlWait)
+
+Clean_Exit:
+'------------------------------------------------------------------------------
+' ROLL BACK A PARTIAL ENTRY
+'------------------------------------------------------------------------------
+    'Restore what was already written, then re-raise the original error
+        On Error GoTo 0
+        If SavedErrNumber <> 0 Then
+            RollbackFailures = DEMO_FastMode_Restore(StateOut)
+            If Len(RollbackFailures) > 0 Then
+                SavedErrDescription = SavedErrDescription & vbCrLf & _
+                    "Cleanup failure: Fast-mode rollback failed: " & RollbackFailures
+            End If
+            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
+        End If
+
+    Exit Sub
+
+Clean_Fail:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+    'Capture the original error before the rollback
+        SavedErrNumber = Err.Number
+        SavedErrSource = Err.Source
+        SavedErrDescription = Err.Description
+
+        Resume Clean_Exit
+
 End Sub
+
 
 Public Sub DEMO_FastMode_End( _
     ByRef StateIn As tDEMOFastModeState)
@@ -791,41 +903,379 @@ Public Sub DEMO_FastMode_End( _
 ' END FAST MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Restores a previously saved Excel Application state.
+'   Restores the Application settings a DEMO_FastMode_Begin scope applied.
 '
 ' WHY THIS EXISTS
 '   This is the cleanup companion to DEMO_FastMode_Begin.
 '
 ' INPUTS
 '   StateIn
-'     Previously captured Application-state snapshot.
+'     The state DEMO_FastMode_Begin filled.
 '
 ' RETURNS
 '   None.
 '
 ' BEHAVIOR
-'   Restores:
-'     - ScreenUpdating
-'     - EnableEvents
-'     - DisplayAlerts
-'     - Calculation
+'   - Restores only the settings marked in StateIn.Applied, in reverse order:
+'     Cursor, Calculation, DisplayAlerts, EnableEvents, ScreenUpdating
+'   - Attempts every marked setting, whatever an earlier one did
+'   - Clears StateIn.Applied, so a second call restores nothing
+'   - Does nothing when Begin failed or was never called
 '
 ' ERROR POLICY
-'   Raises errors normally.
+'   Raises vbObjectError + 2026 after every attempt when any restoration
+'   failed. The description names each failed setting with its error number,
+'   source and description.
 '
 ' UPDATED
+'   2026-11-14 - Every restoration attempted; failures reported (#70).
 '   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Failures            As String          'Settings that could not be restored
+
+'------------------------------------------------------------------------------
 ' RESTORE SAVED STATE
 '------------------------------------------------------------------------------
-    'Restore the previously captured Excel Application state
-        Application.ScreenUpdating = StateIn.ScreenUpdating
-        Application.EnableEvents = StateIn.EnableEvents
-        Application.DisplayAlerts = StateIn.DisplayAlerts
-        Application.Calculation = StateIn.Calculation
+    'Attempt every owned restoration, then report the failures together
+        Failures = DEMO_FastMode_Restore(StateIn)
+
+        If Len(Failures) > 0 Then
+            Err.Raise vbObjectError + 2026, _
+                      "M_DEMO_BUILDER.DEMO_FastMode_End", _
+                      "Fast-mode restore failed: " & Failures
+        End If
+
 End Sub
+
+
+Public Sub DEMO_FastMode_EndPreservingError( _
+    ByRef StateIn As tDEMOFastModeState, _
+    ByRef ErrNumber As Long, _
+    ByRef ErrSource As String, _
+    ByRef ErrDescription As String)
+'
+'==============================================================================
+' END FAST MODE PRESERVING AN ERROR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Ends fast mode on a caller's cleanup path and folds a restoration failure
+'   into the caller's saved error instead of discarding it.
+'
+' INPUTS
+'   StateIn
+'     The state DEMO_FastMode_Begin filled.
+'
+'   ErrNumber / ErrSource / ErrDescription
+'     The caller's saved operation error, or 0 when there is none
+'
+' BEHAVIOR
+'   - Calls DEMO_FastMode_End once
+'   - With a saved operation error, keeps its number and source and appends
+'     vbCrLf & "Cleanup failure: <number> | <source> | <description>" of the
+'     restoration failure to its description
+'   - Without one, the restoration failure becomes the saved error
+'
+' ERROR POLICY
+'   Does not raise. The caller re-raises the saved error after disabling its
+'   own handler.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CleanupErrNumber    As Long            'Restoration error number
+    Dim CleanupErrSource    As String          'Restoration error source
+    Dim CleanupErrDescription As String        'Restoration error description
+
+'------------------------------------------------------------------------------
+' END FAST MODE
+'------------------------------------------------------------------------------
+    'Attempt the restoration once and capture its failure
+        On Error Resume Next
+            DEMO_FastMode_End StateIn
+            CleanupErrNumber = Err.Number
+            CleanupErrSource = Err.Source
+            CleanupErrDescription = Err.Description
+            Err.Clear
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' MERGE THE FAILURE
+'------------------------------------------------------------------------------
+    'Keep the operation error first; report the restoration failure with it
+        If CleanupErrNumber <> 0 Then
+            If ErrNumber = 0 Then
+                ErrNumber = CleanupErrNumber
+                ErrSource = CleanupErrSource
+                ErrDescription = CleanupErrDescription
+            Else
+                ErrDescription = ErrDescription & vbCrLf & _
+                    "Cleanup failure: " & CStr(CleanupErrNumber) & _
+                    " | " & CleanupErrSource & " | " & CleanupErrDescription
+            End If
+        End If
+
+End Sub
+
+
+Private Function DEMO_FastMode_Restore( _
+    ByRef State As tDEMOFastModeState) _
+    As String
+'
+'==============================================================================
+' DEMO_FastMode_Restore
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes back every setting marked in State.Applied, each in its own guarded
+'   attempt, and returns the failures.
+'
+' RETURNS
+'   String
+'     Empty when every attempt succeeded; otherwise one
+'     "<Setting>: <number> | <source> | <description>" entry per failed
+'     setting, joined by " || "
+'
+' BEHAVIOR
+'   - Restores in reverse entry order: Cursor, Calculation, DisplayAlerts,
+'     EnableEvents, ScreenUpdating
+'   - A failed attempt does not stop the later ones
+'   - Clears State.Applied afterwards: the scope gives up its ownership once
+'     every restoration has been attempted
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Failures            As String          'Collected failures
+    Dim FailNumber          As Long            'Error number of one attempt
+    Dim FailSource          As String          'Error source of one attempt
+    Dim FailDescription     As String          'Error description of one attempt
+
+'------------------------------------------------------------------------------
+' RESTORE EACH OWNED SETTING
+'------------------------------------------------------------------------------
+        On Error Resume Next
+
+    'Restore the cursor
+        If (State.Applied And DEMO_FM_CURSOR) <> 0 Then
+            Err.Clear
+            Application.Cursor = DEMO_FastModeValue(DEMO_FM_CURSOR, True, State.Cursor)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_CURSOR, FailNumber, FailSource, FailDescription)
+        End If
+
+    'Restore the calculation mode
+        If (State.Applied And DEMO_FM_CALCULATION) <> 0 Then
+            Err.Clear
+            Application.Calculation = DEMO_FastModeValue(DEMO_FM_CALCULATION, True, State.Calculation)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_CALCULATION, FailNumber, FailSource, FailDescription)
+        End If
+
+    'Restore alerts
+        If (State.Applied And DEMO_FM_DISPLAYALERTS) <> 0 Then
+            Err.Clear
+            Application.DisplayAlerts = DEMO_FastModeValue(DEMO_FM_DISPLAYALERTS, True, State.DisplayAlerts)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_DISPLAYALERTS, FailNumber, FailSource, FailDescription)
+        End If
+
+    'Restore events
+        If (State.Applied And DEMO_FM_ENABLEEVENTS) <> 0 Then
+            Err.Clear
+            Application.EnableEvents = DEMO_FastModeValue(DEMO_FM_ENABLEEVENTS, True, State.EnableEvents)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_ENABLEEVENTS, FailNumber, FailSource, FailDescription)
+        End If
+
+    'Restore screen updating last, once everything else is back
+        If (State.Applied And DEMO_FM_SCREENUPDATING) <> 0 Then
+            Err.Clear
+            Application.ScreenUpdating = DEMO_FastModeValue(DEMO_FM_SCREENUPDATING, True, State.ScreenUpdating)
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_SCREENUPDATING, FailNumber, FailSource, FailDescription)
+        End If
+
+        Err.Clear
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' RELEASE OWNERSHIP
+'------------------------------------------------------------------------------
+        State.Applied = 0
+        DEMO_FastMode_Restore = Failures
+
+End Function
+
+
+Private Function DEMO_FastMode_AddFailure( _
+    ByVal Failures As String, _
+    ByVal Setting As Long, _
+    ByVal FailNumber As Long, _
+    ByVal FailSource As String, _
+    ByVal FailDescription As String) _
+    As String
+'
+'==============================================================================
+' DEMO_FastMode_AddFailure
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Appends one failed restoration to the failure list; returns the list
+'   unchanged when FailNumber is 0.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        If FailNumber = 0 Then
+            DEMO_FastMode_AddFailure = Failures
+        Else
+            If Len(Failures) > 0 Then
+                Failures = Failures & " || "
+            End If
+            DEMO_FastMode_AddFailure = Failures & DEMO_FastModeSettingName(Setting) & ": " & _
+                CStr(FailNumber) & " | " & FailSource & " | " & FailDescription
+        End If
+
+End Function
+
+
+Private Function DEMO_FastModeSettingName( _
+    ByVal Setting As Long) _
+    As String
+'
+'==============================================================================
+' DEMO_FastModeSettingName
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the Application property name of one DEMO_FM_* setting bit.
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+        Select Case Setting
+            Case DEMO_FM_SCREENUPDATING
+                DEMO_FastModeSettingName = "ScreenUpdating"
+            Case DEMO_FM_ENABLEEVENTS
+                DEMO_FastModeSettingName = "EnableEvents"
+            Case DEMO_FM_DISPLAYALERTS
+                DEMO_FastModeSettingName = "DisplayAlerts"
+            Case DEMO_FM_CALCULATION
+                DEMO_FastModeSettingName = "Calculation"
+            Case DEMO_FM_CURSOR
+                DEMO_FastModeSettingName = "Cursor"
+            Case Else
+                DEMO_FastModeSettingName = "Setting " & CStr(Setting)
+        End Select
+
+End Function
+
+
+Private Function DEMO_FastModeValue( _
+    ByVal Setting As Long, _
+    ByVal Restoring As Boolean, _
+    ByVal Value As Variant) _
+    As Variant
+'
+'==============================================================================
+' DEMO_FastModeValue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supplies the value of one fast-mode entry or restoration write.
+'
+' WHY THIS EXISTS
+'   No host condition makes an Application setter fail on demand. Raising
+'   while the value is evaluated fails that exact write, so the guarded
+'   rollback and restoration paths run unchanged and Excel is not called.
+'
+' INPUTS
+'   Setting
+'     One DEMO_FM_* setting bit
+'
+'   Restoring
+'     TRUE for a restoration write, FALSE for an entry write
+'
+'   Value
+'     The value to write
+'
+' RETURNS
+'   Variant
+'     Value, unchanged
+'
+' ERROR POLICY
+'   Raises once while M_DEMO_CLEANUP_TESTS has armed a fault for this setting
+'   and phase: vbObjectError + 2193 for an entry write, vbObjectError + 2194
+'   for a restoration write
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FaultBit            As Long            'Fault bit of this setting and phase
+
+'------------------------------------------------------------------------------
+' COUNT AND RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Count the write and resolve its fault bit
+        If Restoring Then
+            DEMO_CleanupProbeHit DEMO_PROBE_FM_RESTORE
+            FaultBit = Setting * DEMO_FAULT_FM_RESTORE_UNIT
+        Else
+            DEMO_CleanupProbeHit DEMO_PROBE_FM_ENTRY
+            FaultBit = Setting * DEMO_FAULT_FM_ENTRY_UNIT
+        End If
+
+    'Fail the write once when armed
+        If (mCleanupFaults And FaultBit) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not FaultBit
+            If Restoring Then
+                Err.Raise vbObjectError + 2194, _
+                          "M_DEMO_BUILDER.DEMO_FastMode.InjectedRestoreFault", _
+                          "Injected fast-mode restore fault: " & DEMO_FastModeSettingName(Setting) & "."
+            Else
+                Err.Raise vbObjectError + 2193, _
+                          "M_DEMO_BUILDER.DEMO_FastMode.InjectedEntryFault", _
+                          "Injected fast-mode entry fault: " & DEMO_FastModeSettingName(Setting) & "."
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Pass the value through unchanged
+        DEMO_FastModeValue = Value
+
+End Function
 
 Public Sub DEMO_Set_RangeBorder( _
     ByVal Target As Range, _
@@ -1523,6 +1973,13 @@ Public Sub DEMO_InternalCleanupProbeBegin( _
 '       2  The cleanup Protect statement fails while its arguments are
 '          evaluated, so Excel's Protect is not called
 '       4  The cleanup EnableSelection restoration fails the same way
+'       8  The DisplayFormulaBar write of DEMO_Sheet_BuildTemplate fails while
+'          its value is evaluated
+'       256 times a DEMO_FM_* setting bit (1, 2, 4, 8, 16)
+'          The fast-mode entry write of that setting fails
+'       8192 times a DEMO_FM_* setting bit
+'          The fast-mode restoration write of that setting fails, in
+'          DEMO_FastMode_End or in the rollback of DEMO_FastMode_Begin
 '     Unrecognised bits are stored and never fire.
 '
 ' RETURNS
@@ -1586,6 +2043,8 @@ Public Function DEMO_InternalCleanupProbeCount( _
 '     4  DEMO_Sheet_Reset cleanup EnableSelection restorations reached
 '     5  DEMO_Sheet_BuildTemplate handler entries
 '     6  DEMO_Sheet_BuildTemplate cleanup passes
+'     7  Fast-mode entry writes reached
+'     8  Fast-mode restoration writes reached
 '
 ' RETURNS
 '   Long
@@ -1825,6 +2284,53 @@ Private Function DEMO_CleanupSelectionValue( _
 '------------------------------------------------------------------------------
     'Pass the selection policy through unchanged
         DEMO_CleanupSelectionValue = SelectionPolicy
+
+End Function
+
+
+Private Function DEMO_FormulaBarValue( _
+    ByVal ShowFormulaBar As Boolean) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_FormulaBarValue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supplies the value of the DisplayFormulaBar write of
+'   DEMO_Sheet_BuildTemplate.
+'
+' WHY THIS EXISTS
+'   No host condition makes that write fail on demand. Raising while the value
+'   is evaluated fails that exact statement inside the guarded body, so the
+'   template's cleanup path runs unchanged and the formula bar is not touched.
+'
+' RETURNS
+'   Boolean
+'     ShowFormulaBar, unchanged
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2195 once when the formula-bar fault is armed
+'
+' UPDATED
+'   2026-11-14 - Added for #70.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Fail the write once when armed
+        If (mCleanupFaults And DEMO_FAULT_BUILD_FORMULABAR) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not DEMO_FAULT_BUILD_FORMULABAR
+            Err.Raise vbObjectError + 2195, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate.InjectedFormulaBarFault", _
+                      "Injected DisplayFormulaBar fault."
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Pass the value through unchanged
+        DEMO_FormulaBarValue = ShowFormulaBar
 
 End Function
 
