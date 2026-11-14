@@ -67,11 +67,11 @@ If the project has not yet published a functional release, development code is
 pre-release and no production version is security-supported.
 
 Security fixes follow the
-[base-branch rule](CONTRIBUTING.md#base-branch): they start from **main**, except
-that while a release branch `release/vX.Y.Z` is open, a VBA correction for that
-release targets the release branch and reaches **main** with the release, and a
-non-VBA repository change is made on the release branch and mirrored to
-**main**. Each fix is included in a new tagged release. Older releases are not
+[base-branch rule](docs/GOVERNANCE.md#base-branch): they start from **main**, except
+that while a release branch `release/vX.Y.Z` is open they target the release
+branch and reach **main** with the release. A fix that cannot wait for the
+release goes to **main** directly, and **main** is then merged into the release
+branch. Each fix is included in a new tagged release. Older releases are not
 normally patched in place unless I state otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such
@@ -308,8 +308,6 @@ explicit, least-privilege authorization.
 
 ---
 
-<a id="safe-use"></a>
-
 ### Current automation surface
 
 The repository currently contains these workflows:
@@ -322,7 +320,9 @@ The repository currently contains these workflows:
 .github/workflows/labels-drift.yml
 .github/workflows/labels-sync.yml
 .github/workflows/pr-milestones.yml
+.github/workflows/release.yml
 .github/workflows/rulesets-drift.yml
+.github/workflows/scorecard.yml
 .github/workflows/static-checks.yml
 .github/workflows/wiki-badges.yml
 ~~~
@@ -332,7 +332,8 @@ The static workflow:
 - runs on a GitHub-hosted Ubuntu runner;
 - checks exported source as text;
 - uses the repository’s Python tooling;
-- installs no project package dependencies;
+- sets up a pinned Node.js release and installs only Ruff, mypy and their
+  dependencies, hash-locked in `tools/requirements-quality-ci.txt`;
 - declares contents: read;
 - does not require repository secrets;
 - does not execute Excel or VBA;
@@ -357,24 +358,48 @@ pull-request code. **Detect issue-label drift** and **Issue triage** are
 read-only.
 
 **Ruleset drift** compares the live repository rulesets with
-`.github/rulesets/` using the job's read-only token and never changes them.
+`.github/rulesets/` using the job's read-only token and never changes them. It
+also compares the repository settings with `.github/repository-settings.json`;
+the security and Actions settings, which only administrators can read, are
+reported there as not verifiable and are checked with an administrator token,
+as [docs/GOVERNANCE.md](docs/GOVERNANCE.md#repository-settings) describes.
+
+**OpenSSF Scorecard** is configured to score `main` weekly, on pushes to
+`main`, when branch protection changes and on demand, and only while the
+repository is public. It runs from `main` only, so it does not run until the
+v1.1.3 release merge brings it there. It publishes its SARIF to code scanning
+and signs the published results, so its one job holds `security-events: write`
+and `id-token: write`.
+
+**Release** runs when a `v*` tag is pushed, and by hand for an existing tag.
+Its verify job checks the tag, `VERSION`, `CHANGELOG.md`, reachability from
+`main` and the required check on the tagged commit, with `contents: read` and
+`checks: read`. Its bundle job builds the source archives and `SHA256SUMS`
+from the tag with `contents: read`. Only its publish job, which runs after both
+and never on a manual run, holds `contents: write`: it creates the GitHub
+Release with the preinstalled `gh` client and then checks the published notes
+and asset hashes. It needs no repository secrets, and it cannot replace Excel
+certification, which happens before the tag is pushed
+([RELEASING.md](RELEASING.md#automation)).
 
 **External links** requests the public URLs already published in the tracked
 Markdown files, weekly and on demand, with a read-only token and no secrets.
 
 **Wiki badges** checks the separately hosted Wiki against the root `VERSION`
 file and clones the public Wiki without credentials. It declares a weekly
-schedule and relevant-change triggers and cannot write to the Wiki. It is
-present on both `main` and `release/v1.1.3`, so its scheduled and manual runs
-operate from the default branch.
+schedule and relevant-change triggers and cannot write to the Wiki. Its
+scheduled runs use the workflow as it is on the default branch, `main`.
 #53 and #49 retain the requirement for a runnable final-repository/final-Wiki
 check before release readiness.
 
-Three jobs hold a write permission, each confined to that job: **Sync issue
+Five jobs hold a write permission, each confined to that job: **Sync issue
 labels** (`issues: write`, reconciling only from the default branch), **Keep
-milestones issue-only** (`pull-requests: write`), and the push and scheduled
-**CodeQL** job (`security-events: write`). None reads or publishes release
-artifacts, and their permissions must not be copied into static or Wiki jobs.
+milestones issue-only** (`pull-requests: write`), the push and scheduled
+**CodeQL** job (`security-events: write`), the **OpenSSF Scorecard** job
+(`security-events: write` and `id-token: write`), and the **Release** publish
+job (`contents: write`). Only the Release publish job publishes release
+artifacts, and none of these permissions may be copied into static or Wiki
+jobs.
 
 This is intentionally a low-privilege automation surface.
 
@@ -438,6 +463,7 @@ immutability does not prove that the selected upstream commit is trustworthy.
 
 ---
 
+<a id="safe-use"></a>
 
 ## ✅ Safe-use guidance
 
@@ -507,6 +533,7 @@ No paid bug bounty is offered unless I state otherwise in writing.
 
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Contributing Guidelines](CONTRIBUTING.md)
+- [Repository governance](docs/GOVERNANCE.md)
 - The repository README, license, release notes, and project documentation where
   present
 - GitHub's platform security and acceptable-use policies

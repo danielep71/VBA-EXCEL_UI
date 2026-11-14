@@ -6,6 +6,7 @@ test_gate_checks.ModuleInventory. This file proves the other half: that a
 module nobody listed by name is still read by every module check.
 """
 
+import json
 import unittest
 from collections.abc import Callable
 
@@ -75,8 +76,9 @@ class DiscoverModules(unittest.TestCase):
     def test_the_current_tree_matches_the_documented_production_set(self) -> None:
         with fixture() as repo:
             repo.run(lambda: None)
+            manifest = json.loads(repo.read_text("tools/vba-projects.json"))
             self.assertEqual(sorted(check_repo.PRODUCTION_MODULES),
-                             sorted(check_repo.EXPECTED_PRODUCTION_MODULES))
+                             sorted(manifest["configurations"]["production"]["modules"]))
             self.assertEqual(check_repo.TEST_MODULES, ["test/M_EXCEL_UI_REGRESSION_TESTS.bas"])
             self.assertEqual(check_repo.DEMO_MODULES,
                              ["demo/M_DEMO_BUILDER.bas", "demo/M_DEMO_CLEANUP_TESTS.bas",

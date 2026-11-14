@@ -17,7 +17,7 @@
 
 ---
 
-**VBA-EXCEL_UI** is an open-source Excel/VBA project that captures, changes, and restores user-interface state across workbooks, windows, Excel sessions, and Windows configurations.
+**VBA-EXCEL_UI** is an open-source Excel/VBA project that captures, changes, and restores the user-interface state of Excel and its workbook windows within one running Excel session.
 
 Technical rigor and respectful interaction are complementary requirements.
 Neither excuses the absence of the other.
@@ -33,8 +33,8 @@ earlier conclusion when new evidence emerges.
 ## 🤝 Our pledge
 
 Everyone who participates through code, issues, pull requests, reviews,
-documentation, examples, releases, the Wiki, or project discussion is expected
-to help create a harassment-free experience for all.
+documentation, examples, releases, or the Wiki is expected to help create a
+harassment-free experience for all.
 
 That expectation applies regardless of age, body size, disability, ethnicity,
 gender identity or expression, level or type of experience, nationality,
@@ -194,7 +194,7 @@ channel and make that clear.
 This Code of Conduct applies to:
 
 - source code, committed artifacts, documentation, examples, and releases;
-- issues, pull requests, reviews, comments, discussions, and the Wiki;
+- issues, pull requests, reviews, comments, and the Wiki;
 - project-related email and private communication between participants; and
 - public spaces where someone represents the project or its community.
 
@@ -245,7 +245,7 @@ They may include:
 1. clarification or a private reminder;
 2. a formal warning and conditions for continued participation;
 3. editing or removing project content;
-4. closing or locking a discussion;
+4. closing or locking an issue or pull request;
 5. rejecting or reverting a contribution;
 6. temporary restriction from project participation;
 7. permanent exclusion from project spaces; or

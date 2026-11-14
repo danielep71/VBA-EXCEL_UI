@@ -79,82 +79,43 @@ jobs:
         with:
           python-version: '3.12.16'
 
-      # No dependencies are installed on purpose. The gate uses only the
-      # standard library, so it cannot be broken by an upstream release and
-      # runs identically on your machine.
-      - name: Run the static gate
-        run: python3 tools/check_repo.py
-
-      # Reported separately from the gate so that a style-only failure is
-      # obvious at a glance in the checks list, rather than being one finding
-      # among several in a combined log.
-      - name: Verify house-style normal form
-        id: format
-        if: always()
-        run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
-
       # The label scripts and the issue-form check run on Node.js.
       - name: Set up Node.js
-        if: always()
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.22.2"
           package-manager-cache: false
 
-      - name: Self-test the label scripts
-        if: always()
-        run: |
-          node .github/scripts/labels-sync.mjs --self-test
-          node .github/scripts/labels-drift.mjs --self-test
-
-      - name: Check issue forms against the label catalogue
-        if: always()
-        run: python3 tools/check_issues.py --check-config
-
-      - name: Remind how to fix formatting drift
-        if: failure() && steps.format.outcome == 'failure'
-        run: |
-          echo "::notice::Formatting drift is mechanical. Run:"
-          echo "::notice::  python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas"
-          echo "::notice::then re-import the affected modules into the VBE before committing."
-
-      # The gate is only as good as its checks. Each check has a fixture it
-      # must pass and one it must reject; a check that silently stopped
-      # detecting its defect would otherwise still print ok above.
-      - name: Run the gate's unit tests
-        if: always()
-        run: python3 -m unittest discover -s tests
-
-      # Lint and type-check the gate's own Python code. These are the only
-      # third-party tools in this workflow, and they never run the gate: the
-      # steps above still need nothing but the standard library. Every wheel is
-      # hash-locked and source builds are refused, so an upstream file replaced
-      # under the same version fails here instead of executing.
+      # Ruff and mypy are the only third-party tools in this workflow, and they
+      # never run the gate: the gate and its tests still need nothing but the
+      # standard library. Every wheel is hash-locked and source builds are
+      # refused, so an upstream file replaced under the same version fails here
+      # instead of executing.
       - name: Install the hash-locked Python quality tools
-        if: always()
         run: >-
           python3 -m pip install --disable-pip-version-check
           --require-hashes --only-binary=:all:
           -r tools/requirements-quality-ci.txt
 
-      - name: Lint the gate's Python code with Ruff
-        if: always()
-        run: ruff check tools tests
-
-      - name: Type-check the gate's Python code with mypy --strict
-        if: always()
-        run: mypy --strict tools
-
-      - name: Type-check the gate's tests with mypy --strict
-        if: always()
-        run: mypy --strict tests
+      # tools/verify.py holds the one list of static checks: the gate, the
+      # house-style normal form, the generated documentation tables, the label
+      # script self-tests, the issue-form check, the unit tests, Ruff and
+      # mypy --strict. It runs every check even after one fails, prints how to
+      # fix formatting drift, and writes a table of the results to the job
+      # summary. --ci fails a check whose tool is missing instead of skipping
+      # it. It runs even when a set-up step above failed, so every check that
+      # can still run reports its result.
+      - name: Run every static check
+        if: ${{ !cancelled() }}
+        run: python3 tools/verify.py --ci --summary "$GITHUB_STEP_SUMMARY"
 
       # Advisory, not part of the gate: the call checker resolves calls across
       # the modules of each VBA project in tools/vba-projects.json and reports
       # only what it can resolve with certainty (docs/VBA_CALL_CHECKER.md). It
       # is not a compiler, so its verdict goes to the job summary and the JSON
       # report without blocking a merge. Its fixtures are among the unit tests
-      # above, so a checker that stopped detecting a defect still fails the job.
+      # that tools/verify.py runs, so a checker that stopped detecting a defect
+      # still fails the job.
       - name: Check VBA calls across modules (advisory)
         if: always()
         continue-on-error: true
@@ -198,13 +159,7 @@ jobs:
           node-version: "24.22.2"
           package-manager-cache: false
 
-      - name: Run the static gate
-        run: python3 tools/check_repo.py
-
-      - name: Verify house-style normal form
-        if: always()
-        run: python3 tools/reformat.py --check src/*.bas test/*.bas demo/*.bas
-
-      - name: Run the gate's unit tests
-        if: always()
-        run: python3 -m unittest discover -s tests
+      # The same checks as the required job, except Ruff and mypy. The required
+      # job runs both, and pyproject.toml already points them at Python 3.11.
+      - name: Run every static check
+        run: python3 tools/verify.py --ci --skip ruff,mypy --summary "$GITHUB_STEP_SUMMARY"
