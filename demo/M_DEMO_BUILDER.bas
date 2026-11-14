@@ -23,6 +23,7 @@ Option Private Module
 '     - helper-list storage
 '     - placeholder DEMO buttons
 '     - table / log setup
+'     - reading and writing Forms and ActiveX check boxes
 '
 '   Centralizing that logic in one module keeps DEMO-sheet construction:
 '     - more consistent
@@ -45,6 +46,8 @@ Option Private Module
 '     DEMO_InternalCleanupProbeBegin.
 '
 ' UPDATED
+'   2026-11-14 - Check-box state helpers DEMO_CB_TryGetState and
+'                DEMO_CB_TrySetState, dispatching on the control type (#73).
 '   2026-11-14 - Fast-mode rollback, entry cursor and reported restoration
 '                failures (#70).
 '   2026-11-06 - Cleanup probe and one-shot fault seams for the #71 harness.
@@ -110,6 +113,12 @@ Option Private Module
     Private Const DEMO_FM_DISPLAYALERTS      As Long = 4    'Application.DisplayAlerts
     Private Const DEMO_FM_CALCULATION        As Long = 8    'Application.Calculation
     Private Const DEMO_FM_CURSOR             As Long = 16   'Application.Cursor
+
+    'Check-box kinds resolved by DEMO_CB_ResolveControl
+    Private Const DEMO_CB_KIND_NONE          As Long = 0    'Missing or refused
+    Private Const DEMO_CB_KIND_FORMS         As Long = 1    'Forms check box
+    Private Const DEMO_CB_KIND_ACTIVEX       As Long = 2    'ActiveX check box
+    Private Const DEMO_CB_MIXED_STATE        As String = "check box state is mixed: neither checked nor unchecked"
 
 '------------------------------------------------------------------------------
 ' PRIVATE VARIABLES
@@ -5077,3 +5086,327 @@ Private Sub DEMO_AddOneFormsCheckBox( _
         Cb.PrintObject = True
 
 End Sub
+
+
+Public Function DEMO_CB_TryGetState( _
+    ByVal WS As Worksheet, _
+    ByVal ControlName As String, _
+    ByRef IsChecked As Boolean, _
+    ByRef FailMsg As String) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_CB_TryGetState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reads the checked state of a Forms or ActiveX check box on a worksheet
+'
+' INPUTS
+'   WS
+'     Worksheet containing the control
+'
+'   ControlName
+'     Name of the control; for an ActiveX control, the shape and the
+'     OLEObject share it
+'
+'   IsChecked
+'     Receives TRUE when the check box is checked, FALSE otherwise
+'
+'   FailMsg
+'     Receives a diagnostic reason when the function returns FALSE
+'
+' RETURNS
+'   TRUE  => control found and state read successfully
+'   FALSE => control missing, not a check box, mixed, or unreadable
+'
+' BEHAVIOR
+'   - Dispatches on the control type through DEMO_CB_ResolveControl, so an
+'     ActiveX check box reaches the OLEObject path
+'   - A mixed state (a Forms value other than xlOn or xlOff, or an ActiveX
+'     Value of Null) is refused: the caller treats the box as unavailable and
+'     leaves the UI element unchanged
+'
+' ERROR POLICY
+'   - Does NOT raise to callers
+'   - Returns FALSE and populates FailMsg on failure
+'
+' UPDATED
+'   2026-11-14 - Moved from M_EXCEL_UI_DEMO; ActiveX dispatch and mixed
+'                state (#73).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Shp                 As Shape           'Resolved Forms control
+    Dim CheckBoxOle         As OLEObject       'Resolved ActiveX control
+    Dim ValueOut            As Variant         'Control value
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        DEMO_CB_TryGetState = False
+        IsChecked = False
+        FailMsg = vbNullString
+
+'------------------------------------------------------------------------------
+' READ BY CONTROL TYPE
+'------------------------------------------------------------------------------
+        Select Case DEMO_CB_ResolveControl(WS, ControlName, Shp, CheckBoxOle, FailMsg)
+            Case DEMO_CB_KIND_FORMS
+                ValueOut = Shp.ControlFormat.Value
+            Case DEMO_CB_KIND_ACTIVEX
+                ValueOut = CallByName(CheckBoxOle.Object, "Value", VbGet)
+            Case Else
+                GoTo Safe_Exit
+        End Select
+
+'------------------------------------------------------------------------------
+' MAP THE VALUE
+'------------------------------------------------------------------------------
+    'Refuse a mixed state; accept only a definite checked or unchecked value
+        If IsNull(ValueOut) Then
+            FailMsg = DEMO_CB_MIXED_STATE
+        ElseIf Shp Is Nothing Then
+            IsChecked = CBool(ValueOut)
+            DEMO_CB_TryGetState = True
+        ElseIf ValueOut = xlOn Then
+            IsChecked = True
+            DEMO_CB_TryGetState = True
+        ElseIf ValueOut = xlOff Then
+            IsChecked = False
+            DEMO_CB_TryGetState = True
+        Else
+            FailMsg = DEMO_CB_MIXED_STATE
+        End If
+
+Safe_Exit:
+        Exit Function
+
+Err_Handler:
+        FailMsg = DEMO_CB_ErrorText(Err.Number, Err.Source, Err.Description)
+        IsChecked = False
+        DEMO_CB_TryGetState = False
+
+End Function
+
+
+Public Function DEMO_CB_TrySetState( _
+    ByVal WS As Worksheet, _
+    ByVal ControlName As String, _
+    ByVal IsChecked As Boolean, _
+    ByRef FailMsg As String) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_CB_TrySetState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes the checked state of a Forms or ActiveX check box on a worksheet
+'
+' INPUTS
+'   WS
+'     Worksheet containing the control
+'
+'   ControlName
+'     Name of the control; for an ActiveX control, the shape and the
+'     OLEObject share it
+'
+'   IsChecked
+'     Requested state
+'
+'   FailMsg
+'     Receives a diagnostic reason when the function returns FALSE
+'
+' RETURNS
+'   TRUE  => control found and updated successfully
+'   FALSE => control missing, not a check box, or not writable
+'
+' BEHAVIOR
+'   - Dispatches on the control type through DEMO_CB_ResolveControl
+'   - Writes xlOn / xlOff to a Forms check box and True / False to an
+'     ActiveX check box; either write replaces a mixed state
+'
+' ERROR POLICY
+'   - Does NOT raise to callers
+'   - Returns FALSE and populates FailMsg on failure
+'
+' UPDATED
+'   2026-11-14 - Moved from M_EXCEL_UI_DEMO; ActiveX dispatch (#73).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Shp                 As Shape           'Resolved Forms control
+    Dim CheckBoxOle         As OLEObject       'Resolved ActiveX control
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        DEMO_CB_TrySetState = False
+        FailMsg = vbNullString
+
+'------------------------------------------------------------------------------
+' WRITE BY CONTROL TYPE
+'------------------------------------------------------------------------------
+        Select Case DEMO_CB_ResolveControl(WS, ControlName, Shp, CheckBoxOle, FailMsg)
+            Case DEMO_CB_KIND_FORMS
+                If IsChecked Then
+                    Shp.ControlFormat.Value = xlOn
+                Else
+                    Shp.ControlFormat.Value = xlOff
+                End If
+                DEMO_CB_TrySetState = True
+            Case DEMO_CB_KIND_ACTIVEX
+                CallByName CheckBoxOle.Object, "Value", VbLet, IsChecked
+                DEMO_CB_TrySetState = True
+        End Select
+
+Safe_Exit:
+        Exit Function
+
+Err_Handler:
+        FailMsg = DEMO_CB_ErrorText(Err.Number, Err.Source, Err.Description)
+        DEMO_CB_TrySetState = False
+
+End Function
+
+
+Private Function DEMO_CB_ResolveControl( _
+    ByVal WS As Worksheet, _
+    ByVal ControlName As String, _
+    ByRef Shp As Shape, _
+    ByRef CheckBoxOle As OLEObject, _
+    ByRef FailMsg As String) _
+    As Long
+'
+'==============================================================================
+' DEMO_CB_ResolveControl
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Finds a check box by name and reports whether it is a Forms or an ActiveX
+'   check box
+'
+' WHY THIS EXISTS
+'   An ActiveX control is also a worksheet shape with the same name. Testing
+'   the shape for a Forms control first and refusing anything else would
+'   reject every ActiveX check box before its OLEObject is reached, so the
+'   shape type decides the path.
+'
+' RETURNS
+'   Long
+'     DEMO_CB_KIND_FORMS with Shp set, DEMO_CB_KIND_ACTIVEX with CheckBoxOle
+'     set, or DEMO_CB_KIND_NONE with FailMsg set
+'
+' BEHAVIOR
+'   - msoFormControl shape: accepted when its FormControlType is xlCheckBox
+'   - msoOLEControlObject shape: resolved through WS.OLEObjects and accepted
+'     when its progID names a CheckBox
+'   - any other shape: refused
+'   - no shape: WS.OLEObjects is still tried, then "check box not found"
+'
+' ERROR POLICY
+'   Raises only when Excel fails while reading a control it found; the
+'   callers turn that into FailMsg
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+        DEMO_CB_ResolveControl = DEMO_CB_KIND_NONE
+        Set Shp = Nothing
+        Set CheckBoxOle = Nothing
+
+        If WS Is Nothing Then
+            FailMsg = "worksheet reference is Nothing"
+            Exit Function
+        End If
+
+        If Len(Trim$(ControlName)) = 0 Then
+            FailMsg = "control name is blank"
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' LOOK UP THE SHAPE
+'------------------------------------------------------------------------------
+    'A missing name is an expected outcome, not an error
+        On Error Resume Next
+            Set Shp = WS.Shapes(ControlName)
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' DISPATCH BY SHAPE TYPE
+'------------------------------------------------------------------------------
+        If Not Shp Is Nothing Then
+            Select Case Shp.Type
+                Case msoFormControl
+                    If Shp.FormControlType <> xlCheckBox Then
+                        FailMsg = "Forms control exists but is not a CheckBox"
+                        Set Shp = Nothing
+                        Exit Function
+                    End If
+                    DEMO_CB_ResolveControl = DEMO_CB_KIND_FORMS
+                    Exit Function
+
+                Case msoOLEControlObject
+                    Set Shp = Nothing
+
+                Case Else
+                    FailMsg = "shape exists but is not a Forms or ActiveX control"
+                    Set Shp = Nothing
+                    Exit Function
+            End Select
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE THE ACTIVEX CONTROL
+'------------------------------------------------------------------------------
+        On Error Resume Next
+            Set CheckBoxOle = WS.OLEObjects(ControlName)
+        On Error GoTo 0
+
+        If CheckBoxOle Is Nothing Then
+            FailMsg = "check box not found"
+            Exit Function
+        End If
+
+        If InStr(1, CheckBoxOle.progID, "CheckBox", vbTextCompare) = 0 Then
+            FailMsg = "ActiveX control exists but is not a CheckBox"
+            Set CheckBoxOle = Nothing
+            Exit Function
+        End If
+
+        DEMO_CB_ResolveControl = DEMO_CB_KIND_ACTIVEX
+
+End Function
+
+
+Private Function DEMO_CB_ErrorText( _
+    ByVal Number As Long, _
+    ByVal Source As String, _
+    ByVal Description As String) _
+    As String
+'
+'==============================================================================
+' DEMO_CB_ErrorText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Formats a runtime error for a check-box FailMsg
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+        DEMO_CB_ErrorText = CStr(Number) & ": " & Description & _
+            IIf(Len(Source) > 0, " | Source: " & Source, vbNullString)
+
+End Function

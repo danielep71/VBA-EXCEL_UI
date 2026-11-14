@@ -348,6 +348,11 @@ class DemoCleanupRegression(GateTestCase):
         self.repo.replace(BUILDER, "StateOut.Applied = StateOut.Applied Or DEMO_FM_CURSOR\r\n", "")
         self.assertFails("fast mode: Cursor must be marked owned immediately before its write")
 
+    def test_fails_when_activex_shapes_are_refused_before_their_oleobject(self) -> None:
+        activex = "                Case msoOLEControlObject\r\n                    Set Shp = Nothing\r\n"
+        self.repo.replace(BUILDER, activex, "")
+        self.assertFails("check boxes: the shape type must route Forms and ActiveX controls before refusing a shape")
+
 
 class PublicApiManifest(GateTestCase):
     check = "public API manifest"

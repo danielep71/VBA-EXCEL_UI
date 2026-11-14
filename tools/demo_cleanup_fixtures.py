@@ -1,4 +1,4 @@
-"""#70/#71 source contracts and negative fixtures, not Excel execution evidence."""
+"""#70/#71/#73 source contracts and negative fixtures, not Excel execution evidence."""
 import re
 from pathlib import Path
 
@@ -141,10 +141,28 @@ def fast_mode_findings(source: str, demo: str) -> list[str]:
     return errors
 
 
+def checkbox_findings(source: str, demo: str) -> list[str]:
+    """#73: the shape type dispatches Forms and ActiveX check boxes before any refusal."""
+    errors = []
+    resolve = _procedure(source, 'Function', 'DEMO_CB_ResolveControl')
+    if resolve is None:
+        return ['check boxes: DEMO_CB_ResolveControl missing']
+    cases = [line for line in resolve if line.startswith('case ')]
+    if cases != ['case msoformcontrol', 'case msoolecontrolobject', 'case else']:
+        errors.append('check boxes: the shape type must route Forms and ActiveX controls before refusing a shape')
+    for name in ('DEMO_CB_TryGetState', 'DEMO_CB_TrySetState'):
+        proc = _procedure(source, 'Function', name)
+        if proc is None or not any('demo_cb_resolvecontrol(' in line for line in proc):
+            errors.append(f'check boxes: {name} must resolve the control through DEMO_CB_ResolveControl')
+    if re.search(r'\bDemo_Try(?:Get|Set)CheckBoxState\b', demo):
+        errors.append('check boxes: M_EXCEL_UI_DEMO must use DEMO_CB_TryGetState and DEMO_CB_TrySetState')
+    return errors
+
+
 def selftest(root: str | Path) -> tuple[list[str], int]:
     source = (Path(root) / 'demo/M_DEMO_BUILDER.bas').read_text(encoding='ascii')
     demo = (Path(root) / 'demo/M_EXCEL_UI_DEMO.bas').read_text(encoding='ascii')
-    errors = reset_findings(source) + fast_mode_findings(source, demo)
+    errors = reset_findings(source) + fast_mode_findings(source, demo) + checkbox_findings(source, demo)
     count = 0
     for name in PROCEDURES:
         errors += propagation_findings(source, name, 'clean_exit', 'clean_fail')
@@ -202,4 +220,16 @@ End Sub'''
         count += 1
         if old not in demo or not fast_mode_findings(source, demo.replace(old, new)):
             errors.append(f'negative demo-build fixture not detected: {old.strip()}')
+    checkbox_mutations = [
+        ('                Case msoOLEControlObject\n                    Set Shp = Nothing\n', ''),
+        ('        Select Case DEMO_CB_ResolveControl(WS, ControlName, Shp, CheckBoxOle, FailMsg)\n',
+         '        Select Case DEMO_CB_KIND_FORMS\n'),
+    ]
+    for old, new in checkbox_mutations:
+        count += 1
+        if old not in source or not checkbox_findings(source.replace(old, new), demo):
+            errors.append(f'negative check-box fixture not detected: {old.strip()}')
+    count += 1
+    if not checkbox_findings(source, demo + 'Private Function Demo_TryGetCheckBoxState()\n'):
+        errors.append('negative check-box fixture not detected: a private copy in M_EXCEL_UI_DEMO')
     return errors, count

@@ -6,8 +6,9 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Bounded Excel harness for the single-pass cleanup of DEMO_Sheet_Reset and
-'   DEMO_Sheet_BuildTemplate (#71) and for the fast-mode Application-state
-'   scope of M_DEMO_BUILDER (#70).
+'   DEMO_Sheet_BuildTemplate (#71), for the fast-mode Application-state
+'   scope of M_DEMO_BUILDER (#70) and for its Forms and ActiveX check-box
+'   helpers (#73).
 '
 ' WHY THIS EXISTS
 '   The demo-cleanup source fixtures in tools/ check the shape of the cleanup
@@ -15,7 +16,8 @@ Option Explicit
 '   Excel through success, ordinary failure, unprotect failure and cleanup
 '   failure, and reads back the protection Excel actually holds afterwards.
 '   It also fails each fast-mode write in turn and reads back the
-'   Application settings Excel holds afterwards.
+'   Application settings Excel holds afterwards, and reads and writes real
+'   Forms and ActiveX controls.
 '
 ' PUBLIC SURFACE
 '   - Demo_Test_RunCleanupChecks
@@ -51,6 +53,10 @@ Option Explicit
 '   S28  Caller cleanup raises a restore failure alone; second End is inert
 '   S29  DisplayFormulaBar is not owned by fast mode
 '   S30  BuildTemplate DisplayFormulaBar write failure
+'   S31  Forms check box written and read, True and False
+'   S32  ActiveX check box with its same-name shape, written and read
+'   S33  Plain shape, Forms button, ActiveX button, missing and blank names
+'   S34  Mixed Forms and Null ActiveX check boxes refused on read
 '
 ' EVIDENCE
 '   Each scenario checks the error that reaches the caller (number, source
@@ -87,8 +93,12 @@ Option Explicit
 '     arrived without a cleanup diagnostic is checked
 '   - UserInterfaceOnly is read back in the same session only
 '   - Not a watchdog: if Excel blocks inside a call, the harness blocks too
+'   - S32-S34 create ActiveX controls in the temporary workbook. With ActiveX
+'     controls disabled in the Trust Center that creation fails, and so do
+'     those scenarios
 '
 ' UPDATED
+'   2026-11-14 - Check-box scenarios S31-S34 (#73).
 '   2026-11-14 - Fast-mode and formula-bar scenarios S15-S30 (#70).
 '   2026-11-06 - Added for #71.
 '
@@ -190,6 +200,25 @@ Option Explicit
     Private Const VALID_CONTENT         As String = "C:M"
     Private Const VALID_HIDE_ROWS       As Long = 200
 
+    'Check-box fixtures and diagnostics; the messages mirror M_DEMO_BUILDER
+    Private Const CB_TARGET                As String = "ctCheckBox"
+    Private Const CB_MISSING               As String = "ctMissing"
+    Private Const CB_FORMS_MIXED           As String = "ctFormsMixed"
+    Private Const CB_ACTIVEX_MIXED         As String = "ctActiveXMixed"
+    Private Const SHAPE_PLAIN              As String = "ctShape"
+    Private Const BUTTON_FORMS             As String = "ctFormsButton"
+    Private Const BUTTON_ACTIVEX           As String = "ctActiveXButton"
+    Private Const PROGID_CHECKBOX          As String = "Forms.CheckBox.1"
+    Private Const PROGID_BUTTON            As String = "Forms.CommandButton.1"
+    Private Const MSG_NOT_CONTROL          As String = "shape exists but is not a Forms or ActiveX control"
+    Private Const MSG_FORMS_NOT_CHECKBOX   As String = "Forms control exists but is not a CheckBox"
+    Private Const MSG_ACTIVEX_NOT_CHECKBOX As String = "ActiveX control exists but is not a CheckBox"
+    Private Const MSG_NOT_FOUND            As String = "check box not found"
+    Private Const MSG_BLANK_NAME           As String = "control name is blank"
+    Private Const MSG_MIXED                As String = "check box state is mixed: neither checked nor unchecked"
+    Private Const ERR_ACTIVEX_SETUP        As Long = vbObjectError + 2197
+    Private Const PROC_ACTIVEX_SETUP       As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_AddActiveX"
+
     'Cleanup diagnostic markers written by DEMO_Sheet_Reset
     Private Const CLEANUP_MARKER        As String = "Cleanup failure: "
     Private Const SELECTION_MARKER      As String = " | EnableSelection: "
@@ -221,9 +250,9 @@ Public Sub Demo_Test_RunCleanupChecks()
 ' Demo_Test_RunCleanupChecks
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Runs every #71 cleanup scenario and every #70 fast-mode scenario in a
-'   temporary workbook and prints one line per scenario and a PASS/FAIL
-'   summary to the Immediate window.
+'   Runs every #71 cleanup scenario, every #70 fast-mode scenario and every
+'   #73 check-box scenario in a temporary workbook and prints one line per
+'   scenario and a PASS/FAIL summary to the Immediate window.
 '
 ' RETURNS
 '   None
@@ -243,12 +272,14 @@ Public Sub Demo_Test_RunCleanupChecks()
 '
 ' DEPENDENCIES
 '   - M_DEMO_BUILDER (DEMO_Sheet_Reset, DEMO_Sheet_BuildTemplate, the
-'     DEMO_FastMode_* scope and the DEMO_InternalCleanupProbe* seams)
+'     DEMO_FastMode_* scope, DEMO_CB_TryGetState, DEMO_CB_TrySetState and
+'     the DEMO_InternalCleanupProbe* seams)
 '
 ' CALLED FROM
 '   - Invoked directly, from the Immediate window or the Macros dialog
 '
 ' UPDATED
+'   2026-11-14 - S31-S34 (#73).
 '   2026-11-14 - Session settings captured and written back; S15-S30 (#70).
 '   2026-11-06
 '==============================================================================
@@ -332,6 +363,12 @@ Public Sub Demo_Test_RunCleanupChecks()
     'Formula-bar ownership and failure (#70)
         DEMO_CT_FormulaBarPolicy "S29_FormulaBarPolicy"
         DEMO_CT_FormulaBarFault WB, "S30_FormulaBarFault"
+
+    'Forms and ActiveX check-box state (#73)
+        DEMO_CT_CheckBoxForms WB, "S31_CheckBoxForms"
+        DEMO_CT_CheckBoxActiveX WB, "S32_CheckBoxActiveX"
+        DEMO_CT_CheckBoxRefusals WB, "S33_CheckBoxRefusals"
+        DEMO_CT_CheckBoxMixed WB, "S34_CheckBoxMixed"
 
 Safe_Exit:
 '------------------------------------------------------------------------------
@@ -1729,6 +1766,262 @@ Err_Handler:
 End Sub
 
 
+Private Sub DEMO_CT_CheckBoxForms( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_CheckBoxForms
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S31: DEMO_CB_TrySetState writes True and False to a Forms check box, and
+'   DEMO_CB_TryGetState reads both states back. Each write is read back
+'   through the Forms object model and each read follows a direct write, so
+'   neither helper checks the other.
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim Shp                 As Shape           'Forms check box
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        Set Shp = DEMO_CT_AddFormsControl(WS, xlCheckBox, CB_TARGET, 10)
+        Shp.ControlFormat.Value = xlOff
+
+'------------------------------------------------------------------------------
+' ACT AND ASSERT
+'------------------------------------------------------------------------------
+    'Write through the helper; read back through the object model
+        DEMO_CT_CheckSet Scenario & ".Write.True", WS, CB_TARGET, True, True, vbNullString
+        DEMO_CT_CheckLong Scenario & ".Write.True.Readback", xlOn, Shp.ControlFormat.Value
+        DEMO_CT_CheckSet Scenario & ".Write.False", WS, CB_TARGET, False, True, vbNullString
+        DEMO_CT_CheckLong Scenario & ".Write.False.Readback", xlOff, Shp.ControlFormat.Value
+
+    'Write through the object model; read through the helper
+        Shp.ControlFormat.Value = xlOn
+        DEMO_CT_CheckGet Scenario & ".Read.True", WS, CB_TARGET, True, True, vbNullString
+        Shp.ControlFormat.Value = xlOff
+        DEMO_CT_CheckGet Scenario & ".Read.False", WS, CB_TARGET, True, False, vbNullString
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_CheckBoxActiveX( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_CheckBoxActiveX
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S32: the same reads and writes on an ActiveX check box. Its worksheet
+'   shape has the same name as its OLEObject; a lookup that refused every
+'   non-Forms shape would never reach the OLEObject.
+'
+' NOTES
+'   Creating the control needs ActiveX controls to be enabled in the Trust
+'   Center; when they are not, the scenario fails and says so.
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim CheckBoxOle         As OLEObject       'ActiveX check box
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        Set CheckBoxOle = DEMO_CT_AddActiveX(WS, PROGID_CHECKBOX, CB_TARGET, 10)
+        CheckBoxOle.Object.Value = False
+
+        DEMO_CT_CheckLong Scenario & ".Setup.SameNameShape", msoOLEControlObject, WS.Shapes(CB_TARGET).Type
+
+'------------------------------------------------------------------------------
+' ACT AND ASSERT
+'------------------------------------------------------------------------------
+    'Write through the helper; read back through the control
+        DEMO_CT_CheckSet Scenario & ".Write.True", WS, CB_TARGET, True, True, vbNullString
+        DEMO_CT_CheckText Scenario & ".Write.True.Readback", "True", DEMO_CT_ValueText(CheckBoxOle.Object.Value)
+        DEMO_CT_CheckSet Scenario & ".Write.False", WS, CB_TARGET, False, True, vbNullString
+        DEMO_CT_CheckText Scenario & ".Write.False.Readback", "False", DEMO_CT_ValueText(CheckBoxOle.Object.Value)
+
+    'Write through the control; read through the helper
+        CheckBoxOle.Object.Value = True
+        DEMO_CT_CheckGet Scenario & ".Read.True", WS, CB_TARGET, True, True, vbNullString
+        CheckBoxOle.Object.Value = False
+        DEMO_CT_CheckGet Scenario & ".Read.False", WS, CB_TARGET, True, False, vbNullString
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_CheckBoxRefusals( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_CheckBoxRefusals
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S33: both helpers refuse, with their diagnostic, a plain shape, a Forms
+'   button, an ActiveX command button, a missing name and a blank name.
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim Shp                 As Shape           'Plain shape
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        Set Shp = WS.Shapes.AddShape(msoShapeRectangle, 10, 10, 60, 18)
+        Shp.Name = SHAPE_PLAIN
+        DEMO_CT_AddFormsControl WS, xlButtonControl, BUTTON_FORMS, 40
+        DEMO_CT_AddActiveX WS, PROGID_BUTTON, BUTTON_ACTIVEX, 70
+
+'------------------------------------------------------------------------------
+' ACT AND ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckGet Scenario & ".Shape.Get", WS, SHAPE_PLAIN, False, False, MSG_NOT_CONTROL
+        DEMO_CT_CheckSet Scenario & ".Shape.Set", WS, SHAPE_PLAIN, True, False, MSG_NOT_CONTROL
+        DEMO_CT_CheckGet Scenario & ".FormsButton.Get", WS, BUTTON_FORMS, False, False, MSG_FORMS_NOT_CHECKBOX
+        DEMO_CT_CheckSet Scenario & ".FormsButton.Set", WS, BUTTON_FORMS, True, False, MSG_FORMS_NOT_CHECKBOX
+        DEMO_CT_CheckGet Scenario & ".ActiveXButton.Get", WS, BUTTON_ACTIVEX, False, False, MSG_ACTIVEX_NOT_CHECKBOX
+        DEMO_CT_CheckSet Scenario & ".ActiveXButton.Set", WS, BUTTON_ACTIVEX, True, False, MSG_ACTIVEX_NOT_CHECKBOX
+        DEMO_CT_CheckGet Scenario & ".Missing.Get", WS, CB_MISSING, False, False, MSG_NOT_FOUND
+        DEMO_CT_CheckSet Scenario & ".Missing.Set", WS, CB_MISSING, True, False, MSG_NOT_FOUND
+        DEMO_CT_CheckGet Scenario & ".Blank.Get", WS, " ", False, False, MSG_BLANK_NAME
+        DEMO_CT_CheckSet Scenario & ".Blank.Set", WS, " ", True, False, MSG_BLANK_NAME
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_CheckBoxMixed( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_CheckBoxMixed
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S34: a mixed Forms check box (xlMixed) and a mixed ActiveX check box
+'   (Value Null) are refused on read with the mixed-state diagnostic, and a
+'   write replaces the mixed state with a definite one.
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim Shp                 As Shape           'Forms check box
+    Dim CheckBoxOle         As OLEObject       'ActiveX check box
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        Set Shp = DEMO_CT_AddFormsControl(WS, xlCheckBox, CB_FORMS_MIXED, 10)
+        Shp.ControlFormat.Value = xlMixed
+        Set CheckBoxOle = DEMO_CT_AddActiveX(WS, PROGID_CHECKBOX, CB_ACTIVEX_MIXED, 40)
+        CheckBoxOle.Object.TripleState = True
+        CheckBoxOle.Object.Value = Null
+
+        DEMO_CT_CheckLong Scenario & ".Setup.FormsMixed", xlMixed, Shp.ControlFormat.Value
+        DEMO_CT_CheckText Scenario & ".Setup.ActiveXNull", "Null", DEMO_CT_ValueText(CheckBoxOle.Object.Value)
+
+'------------------------------------------------------------------------------
+' ACT AND ASSERT
+'------------------------------------------------------------------------------
+    'A mixed state is refused on read
+        DEMO_CT_CheckGet Scenario & ".Forms.Get", WS, CB_FORMS_MIXED, False, False, MSG_MIXED
+        DEMO_CT_CheckGet Scenario & ".ActiveX.Get", WS, CB_ACTIVEX_MIXED, False, False, MSG_MIXED
+
+    'A write replaces it
+        DEMO_CT_CheckSet Scenario & ".Forms.Set", WS, CB_FORMS_MIXED, False, True, vbNullString
+        DEMO_CT_CheckLong Scenario & ".Forms.Readback", xlOff, Shp.ControlFormat.Value
+        DEMO_CT_CheckSet Scenario & ".ActiveX.Set", WS, CB_ACTIVEX_MIXED, True, True, vbNullString
+        DEMO_CT_CheckText Scenario & ".ActiveX.Readback", "True", DEMO_CT_ValueText(CheckBoxOle.Object.Value)
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
 Private Sub DEMO_CT_CallReset( _
     ByVal Target As Variant, _
     ByVal FaultMask As Long, _
@@ -2254,6 +2547,195 @@ Private Sub DEMO_CT_CheckFastModeProbe( _
             " restore=" & CStr(DEMO_InternalCleanupProbeCount(PROBE_FM_RESTORE))
 
 End Sub
+
+
+Private Function DEMO_CT_AddFormsControl( _
+    ByVal WS As Worksheet, _
+    ByVal ControlType As XlFormControl, _
+    ByVal ControlName As String, _
+    ByVal TopPos As Double) _
+    As Shape
+'
+'==============================================================================
+' DEMO_CT_AddFormsControl
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Adds a named Forms control to a scenario sheet.
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Shp                 As Shape           'New control
+
+'------------------------------------------------------------------------------
+' CREATE
+'------------------------------------------------------------------------------
+        Set Shp = WS.Shapes.AddFormControl(ControlType, 200, TopPos, 80, 18)
+        Shp.Name = ControlName
+
+        Set DEMO_CT_AddFormsControl = Shp
+
+End Function
+
+
+Private Function DEMO_CT_AddActiveX( _
+    ByVal WS As Worksheet, _
+    ByVal ClassName As String, _
+    ByVal ControlName As String, _
+    ByVal TopPos As Double) _
+    As OLEObject
+'
+'==============================================================================
+' DEMO_CT_AddActiveX
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Adds a named ActiveX control to a scenario sheet of the temporary
+'   workbook. The control lives in that workbook, not in this VBA project.
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2197 with Excel's error when the control cannot be
+'   created, for example because ActiveX controls are disabled in the Trust
+'   Center
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim NewOle              As OLEObject       'New control
+    Dim AddNumber           As Long            'Error of the Add call
+    Dim AddDescription      As String          'Its description
+
+'------------------------------------------------------------------------------
+' CREATE
+'------------------------------------------------------------------------------
+        On Error Resume Next
+            Set NewOle = WS.OLEObjects.Add(ClassType:=ClassName, Left:=300, Top:=TopPos, _
+                                           Width:=80, Height:=18)
+            AddNumber = Err.Number
+            AddDescription = Err.Description
+            Err.Clear
+        On Error GoTo 0
+
+        If AddNumber <> 0 Or NewOle Is Nothing Then
+            Err.Raise ERR_ACTIVEX_SETUP, PROC_ACTIVEX_SETUP, _
+                      "Could not create the ActiveX control " & ClassName & " (" & CStr(AddNumber) & ": " & _
+                      AddDescription & "). ActiveX controls may be disabled in the Trust Center."
+        End If
+
+        NewOle.Name = ControlName
+
+        Set DEMO_CT_AddActiveX = NewOle
+
+End Function
+
+
+Private Sub DEMO_CT_CheckGet( _
+    ByVal CheckName As String, _
+    ByVal WS As Worksheet, _
+    ByVal ControlName As String, _
+    ByVal ExpectedResult As Boolean, _
+    ByVal ExpectedChecked As Boolean, _
+    ByVal ExpectedFailMsg As String)
+'
+'==============================================================================
+' DEMO_CT_CheckGet
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Calls DEMO_CB_TryGetState once and checks its result, the state it
+'   returned and its diagnostic.
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Result              As Boolean         'Return value
+    Dim IsChecked           As Boolean         'State returned
+    Dim FailMsg             As String          'Diagnostic returned
+
+'------------------------------------------------------------------------------
+' CALL AND CHECK
+'------------------------------------------------------------------------------
+        Result = DEMO_CB_TryGetState(WS, ControlName, IsChecked, FailMsg)
+
+        DEMO_CT_CheckText CheckName, _
+            "result=" & CStr(ExpectedResult) & " checked=" & CStr(ExpectedChecked) & _
+            " message=[" & ExpectedFailMsg & "]", _
+            "result=" & CStr(Result) & " checked=" & CStr(IsChecked) & " message=[" & FailMsg & "]"
+
+End Sub
+
+
+Private Sub DEMO_CT_CheckSet( _
+    ByVal CheckName As String, _
+    ByVal WS As Worksheet, _
+    ByVal ControlName As String, _
+    ByVal Value As Boolean, _
+    ByVal ExpectedResult As Boolean, _
+    ByVal ExpectedFailMsg As String)
+'
+'==============================================================================
+' DEMO_CT_CheckSet
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Calls DEMO_CB_TrySetState once and checks its result and diagnostic.
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Result              As Boolean         'Return value
+    Dim FailMsg             As String          'Diagnostic returned
+
+'------------------------------------------------------------------------------
+' CALL AND CHECK
+'------------------------------------------------------------------------------
+        Result = DEMO_CB_TrySetState(WS, ControlName, Value, FailMsg)
+
+        DEMO_CT_CheckText CheckName, _
+            "result=" & CStr(ExpectedResult) & " message=[" & ExpectedFailMsg & "]", _
+            "result=" & CStr(Result) & " message=[" & FailMsg & "]"
+
+End Sub
+
+
+Private Function DEMO_CT_ValueText( _
+    ByVal Value As Variant) _
+    As String
+'
+'==============================================================================
+' DEMO_CT_ValueText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Formats a control value for comparison: "Null" for Null, otherwise its
+'   text.
+'
+' UPDATED
+'   2026-11-14 - Added for #73.
+'==============================================================================
+
+        If IsNull(Value) Then
+            DEMO_CT_ValueText = "Null"
+        Else
+            DEMO_CT_ValueText = CStr(Value)
+        End If
+
+End Function
 
 
 Private Function DEMO_CT_NewSheet( _

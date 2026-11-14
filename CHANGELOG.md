@@ -749,6 +749,21 @@ measured against that baseline.
   `Demo_Test_RunCleanupChecks` fail each entry and restoration write in turn
   through new one-shot seams and read the settings back; the source fixtures
   of the gate check the capture, ownership and restoration order.
+- **Not yet checked on Excel.** The demo check-box helpers no longer refuse an
+  ActiveX check box before reaching it
+  ([#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73)). An ActiveX
+  control is also a worksheet shape with the same name, and the old helpers
+  refused every shape that was not a Forms control. They now dispatch on the
+  shape type: a Forms check box is read through `ControlFormat`, an ActiveX
+  check box through its `OLEObject`, and any other shape, a Forms or ActiveX
+  control that is not a check box, or a missing name is refused with a
+  diagnostic. A mixed check box (`xlMixed`, or an ActiveX `Value` of `Null`)
+  is refused on read, so the demo leaves its UI element unchanged and logs
+  why. The helpers moved from `M_EXCEL_UI_DEMO` to `M_DEMO_BUILDER` as
+  `DEMO_CB_TryGetState` and `DEMO_CB_TrySetState`, where the harness can call
+  them; scenarios S31-S34 write and read both kinds of check box, both states,
+  and every refusal. `Demo_CreateDemoSheet` still builds Forms check boxes,
+  and nothing here describes the controls of a published demo workbook.
 - Fixed the active title-bar frame being trusted without the host agreeing it
   is active. Resolving `Window.hWnd` from the `Window` that
   `Application.ActiveWindow` just returned makes the pair internally
@@ -1350,7 +1365,7 @@ practical closure status of any item that has since been reopened.
 | [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) | Bounded title-bar mutation control that fails instead of hanging | Closed |
 | [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Implemented with harness scenarios S15-S30; not yet checked on Excel |
 | [#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71) | Demo template and sheet-reset handlers do not recatch their own re-raised errors | Closed; Excel harness passed 14 scenarios and 89 checks on build 20430 x64 (2026-11-06) |
-| [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Open |
+| [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Implemented with harness scenarios S31-S34; not yet checked on Excel |
 | [#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74) | Demo template validates its layout inputs before resetting the worksheet | Open |
 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | Preserve caller-owned snapshots across all destructive-runner refusals | Closed; implementation, regression and mutation evidence verified |
 

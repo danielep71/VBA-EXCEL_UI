@@ -465,7 +465,8 @@ When you change the demo cleanup paths, use disposable worksheets and a
 bounded host harness to test ordinary failure, missing/wrong password,
 reprotection and selection failure, and read back every captured option at the
 exact tested commit. When you change fast mode, fail each entry and
-restoration write in turn and read back the Application settings.
+restoration write in turn and read back the Application settings. When you
+change the check-box helpers, read and write real Forms and ActiveX controls.
 
 `demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
 from the commit under test:
@@ -476,7 +477,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VB
 
 Open it, run **Debug → Compile VBAProject**, and run
 `Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
-creates a temporary workbook, runs thirty scenarios on sheets of its own,
+creates a temporary workbook, runs thirty-four scenarios on sheets of its own,
 closes the workbook without saving and prints one `PASS` or `FAIL` line per
 scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
 `DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
@@ -493,8 +494,10 @@ exit; a failed write-back fails the run. Each fast-mode scenario starts from
 screen updating, events and alerts on, the north-west arrow cursor and the
 session's calculation mode, or automatic calculation when the session is
 manual, which recalculates the open workbooks. Scenario S15 prints an `INFO`
-line with the entry, fast-mode and exit values. Record the commit, Excel build
-and bitness with the Immediate window output.
+line with the entry, fast-mode and exit values. Scenarios S32-S34 add ActiveX
+controls to the temporary workbook, so they fail when ActiveX controls are
+disabled in the Trust Center. Record the commit, Excel build and bitness with
+the Immediate window output.
 
 ### Evidence principles
 
