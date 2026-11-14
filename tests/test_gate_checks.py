@@ -353,6 +353,12 @@ class DemoCleanupRegression(GateTestCase):
         self.repo.replace(BUILDER, activex, "")
         self.assertFails("check boxes: the shape type must route Forms and ActiveX controls before refusing a shape")
 
+    def test_fails_when_the_template_resets_before_checking_its_layout(self) -> None:
+        limits = "        MaxCol = LimitSheet.Columns.Count\r\n"
+        self.repo.replace(BUILDER, "        DEMO_Sheet_Reset WS\r\n", "")
+        self.repo.replace(BUILDER, limits, limits + "        DEMO_Sheet_Reset WS\r\n")
+        self.assertFails("template: every layout check must raise before the worksheet is reset")
+
 
 class PublicApiManifest(GateTestCase):
     check = "public API manifest"

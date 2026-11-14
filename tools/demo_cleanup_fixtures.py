@@ -1,4 +1,4 @@
-"""#70/#71/#73 source contracts and negative fixtures, not Excel execution evidence."""
+"""#70/#71/#73/#74 source contracts and negative fixtures, not Excel execution evidence."""
 import re
 from pathlib import Path
 
@@ -18,6 +18,8 @@ ALLOW_OPTIONS = ('AllowFormattingCells', 'AllowFormattingColumns',
 FAST_MODE = (('ScreenUpdating', 'False'), ('EnableEvents', 'False'),
              ('DisplayAlerts', 'False'), ('Calculation', 'xlCalculationManual'),
              ('Cursor', 'xlWait'))
+# Layout errors of DEMO_Sheet_BuildTemplate that must be raised before its reset.
+LAYOUT_ERRORS = (2013, 2014, 2015, 2016, 2017, 2019, 2020, 2021, 2022, 2023, 2024, 2027)
 CALLER_END = ('DEMO_FastMode_EndPreservingError FastModeState, SavedErrNumber, '
               'SavedErrSource, SavedErrDescription')
 
@@ -159,10 +161,59 @@ def checkbox_findings(source: str, demo: str) -> list[str]:
     return errors
 
 
+def _raise_lines(lines: list[str], numbers: tuple[int, ...]) -> list[int]:
+    found = []
+    for index, line in enumerate(lines):
+        match = re.match(r'err\.raise vbobjecterror \+ (\d+)\b', line)
+        if match and int(match[1]) in numbers:
+            found.append(index)
+    return found
+
+
+def template_findings(source: str) -> list[str]:
+    """#74: validate before any reset or creation, and remove only an owned new sheet."""
+    errors = []
+    build = _procedure(source, 'Sub', 'DEMO_Sheet_BuildTemplate')
+    create = _procedure(source, 'Function', 'DEMO_Sheet_GetOrCreate')
+    if build is None or create is None:
+        return ['template: DEMO_Sheet_BuildTemplate or DEMO_Sheet_GetOrCreate missing']
+    reset = 'demo_sheet_reset ws'
+    if build.count(reset) != 1:
+        return ['template: expected exactly one reset of the target worksheet']
+    checks = _raise_lines(build, LAYOUT_ERRORS)
+    find = next((i for i, line in enumerate(build) if 'demo_sheet_findworksheet(wb, ws_name,' in line), None)
+    if not checks or max(checks) > build.index(reset) or find is None or find > build.index(reset):
+        errors.append('template: every layout check must raise before the worksheet is reset')
+    armed = build.index('on error goto clean_fail') if 'on error goto clean_fail' in build else -1
+    for pure in ('nameproblem = demo_sheetnameproblem(ws_name)', 'contenttext = trim$(contentcolumns)'):
+        if pure not in build or build.index(pure) > armed:
+            errors.append(f'template: {pure!r} must run before the workbook is touched')
+    owners = [i for i, line in enumerate(build) if line == 'createdsheet = true']
+    if not owners or any(build[i - 1] != 'set ws = demo_sheet_getorcreate(wb, ws_name)' for i in owners):
+        errors.append('template: only a worksheet this call created may be marked as owned')
+    cleanup = build[build.index('clean_exit:'):] if 'clean_exit:' in build else []
+    guard = 'if savederrnum <> 0 and createdsheet then'
+    if guard not in cleanup or cleanup[cleanup.index(guard) + 1] != 'cleanupfailures = demo_sheet_deleteowned(ws)':
+        errors.append('template: a failed call must remove the worksheet it created, and only that one')
+    add = next((i for i, line in enumerate(create) if line.startswith('set ws = wb.worksheets.add(')), 0)
+    if 'nameproblem = demo_sheetnameproblem(sheetname)' not in create[:add]:
+        errors.append('get-or-create: the name must be checked before a sheet is added')
+    rename = 'ws.name = demo_sheetnamevalue(sheetname)'
+    if rename not in create:
+        return errors + ['get-or-create: rename missing']
+    pos = create.index(rename)
+    captures = [f'nameerr{field} = err.{field}' for field in ('number', 'source', 'description')]
+    tail = create[pos:]
+    if create[pos + 1:pos + 4] != captures or 'cleanupfailures = demo_sheet_deleteowned(ws)' not in tail:
+        errors.append('get-or-create: a failed rename must delete the new sheet before re-raising')
+    return errors
+
+
 def selftest(root: str | Path) -> tuple[list[str], int]:
     source = (Path(root) / 'demo/M_DEMO_BUILDER.bas').read_text(encoding='ascii')
     demo = (Path(root) / 'demo/M_EXCEL_UI_DEMO.bas').read_text(encoding='ascii')
-    errors = reset_findings(source) + fast_mode_findings(source, demo) + checkbox_findings(source, demo)
+    errors = (reset_findings(source) + fast_mode_findings(source, demo)
+              + checkbox_findings(source, demo) + template_findings(source))
     count = 0
     for name in PROCEDURES:
         errors += propagation_findings(source, name, 'clean_exit', 'clean_fail')
@@ -232,4 +283,17 @@ End Sub'''
     count += 1
     if not checkbox_findings(source, demo + 'Private Function Demo_TryGetCheckBoxState()\n'):
         errors.append('negative check-box fixture not detected: a private copy in M_EXCEL_UI_DEMO')
+    template_mutations = [
+        ('        MaxCol = LimitSheet.Columns.Count\n',
+         '        MaxCol = LimitSheet.Columns.Count\n        DEMO_Sheet_Reset WS\n'),
+        ('        DEMO_Sheet_Reset WS\n', ''),
+        ('        If SavedErrNum <> 0 And CreatedSheet Then\n', '        If SavedErrNum <> 0 Then\n'),
+        ('            CleanupFailures = DEMO_Sheet_DeleteOwned(WS)\n', ''),
+        ('        NameProblem = DEMO_SheetNameProblem(SheetName)\n', ''),
+        ('            NameErrNumber = Err.Number\n', '            NameErrNumber = 0\n'),
+    ]
+    for old, new in template_mutations:
+        count += 1
+        if old not in source or not template_findings(source.replace(old, new)):
+            errors.append(f'negative template fixture not detected: {old.strip()}')
     return errors, count

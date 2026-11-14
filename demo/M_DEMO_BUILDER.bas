@@ -46,6 +46,9 @@ Option Private Module
 '     DEMO_InternalCleanupProbeBegin.
 '
 ' UPDATED
+'   2026-11-14 - DEMO_Sheet_BuildTemplate validates its layout before any
+'                reset or creation; a sheet created by a failed call is
+'                removed (#74).
 '   2026-11-14 - Check-box state helpers DEMO_CB_TryGetState and
 '                DEMO_CB_TrySetState, dispatching on the control type (#73).
 '   2026-11-14 - Fast-mode rollback, entry cursor and reported restoration
@@ -104,6 +107,7 @@ Option Private Module
     Private Const DEMO_FAULT_RESET_PROTECT   As Long = 2    'Reprotect statement fails
     Private Const DEMO_FAULT_RESET_SELECTION As Long = 4    'EnableSelection restore fails
     Private Const DEMO_FAULT_BUILD_FORMULABAR As Long = 8   'BuildTemplate DisplayFormulaBar write fails
+    Private Const DEMO_FAULT_SHEET_NAME      As Long = 16   'GetOrCreate naming of a new sheet fails
     Private Const DEMO_FAULT_FM_ENTRY_UNIT   As Long = 256  'Times a DEMO_FM_* bit: its entry write fails
     Private Const DEMO_FAULT_FM_RESTORE_UNIT As Long = 8192 'Times a DEMO_FM_* bit: its restoration fails
 
@@ -279,7 +283,13 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   None
 '
 ' BEHAVIOR
+'   - Validates every layout input first: the worksheet name, the content and
+'     left-margin columns, the body, freeze and hidden rows, widths, heights
+'     and zoom. Checks that need the worksheet grid read its limits from the
+'     target or another worksheet of the workbook. An invalid request raises
+'     before any worksheet is created or reset.
 '   - Uses the requested workbook or defaults to ThisWorkbook
+'   - Refuses a name already used by a chart or other non-worksheet sheet
 '   - Gets or creates the requested worksheet
 '   - Resets the sheet before rebuilding it
 '   - Derives the separator column from ContentColumns
@@ -288,11 +298,25 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   - Applies configurable row/column sizing and view normalization
 '
 ' ERROR POLICY
-'   Raises errors normally
+'   Raises errors normally. When the call created the worksheet and then
+'   fails, it deletes that worksheet before re-raising; a failed deletion is
+'   appended to the description as a "Cleanup failure: " line.
+'
+' DESTRUCTIVE SCOPE
+'   A rebuild of an existing worksheet is destructive by design: once the
+'   inputs are valid, DEMO_Sheet_Reset deletes its shapes and tables and
+'   clears its cells, formats, validation, comments, sizes, hidden rows and
+'   columns, tab colour and page breaks. A failure after that point is
+'   reported, but nothing is rolled back; only a worksheet this call created
+'   is removed.
 '
 ' DEPENDENCIES
+'   - DEMO_Sheet_FindWorksheet
 '   - DEMO_Sheet_GetOrCreate
 '   - DEMO_Sheet_Reset
+'   - DEMO_Sheet_DeleteOwned
+'   - DEMO_SheetNameProblem
+'   - DEMO_ParseColumnSpec
 '   - DEMO_Write_BandHeader
 '   - DEMO_ColumnLetter
 '   - DEMO_CleanupProbeHit
@@ -312,6 +336,8 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   DEMO_FastMode_Begin scope around this call does not capture or restore it.
 '
 ' UPDATED
+'   2026-11-14 - Layout validated before any reset or creation; a worksheet
+'                created by a failed call is removed (#74).
 '   2026-11-14 - Formula-bar ownership documented; fault seam (#70).
 '   2026-11-06
 '==============================================================================
@@ -321,14 +347,19 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
     Dim WB                  As Workbook        'Target workbook
     Dim WS                  As Worksheet       'Target worksheet
+    Dim LimitSheet          As Worksheet       'Worksheet the grid limits are read from
+    Dim CreatedSheet        As Boolean         'TRUE when this call created WS
+    Dim NameProblem         As String          'Why WS_Name is not a valid sheet name
+    Dim CleanupFailures     As String          'Failed removal of a created worksheet
 
     Dim MaxRow              As Long            'Last worksheet row
     Dim MaxCol              As Long            'Last worksheet column
 
-    Dim ContentParts        As Variant         'Split ContentColumns parts
     Dim ContentText         As String          'Trimmed ContentColumns text
     Dim ContentFirstColIndex As Long            'Resolved first content-column index
     Dim ContentLastColIndex As Long            'Resolved last content-column index
+    Dim LeftFirstColIndex   As Long            'Resolved first left-margin column, 0 when blank
+    Dim LeftLastColIndex    As Long            'Resolved last left-margin column, 0 when blank
 
     Dim EffectiveSeparatorColIndex As Long            'Derived separator-column index
     Dim EffectiveHideFromColIndex As Long            'Derived first hidden-column index
@@ -342,8 +373,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
     Dim TitleBandRange      As Range           'Resolved title-band range
     Dim SubTitleBandRange   As Range           'Resolved subtitle-band range
 
-    Dim TmpColIndex         As Long            'Temporary column index for normalization
-
     Dim SavedErrNum         As Long            'Captured error number
     Dim SavedErrSrc         As String          'Captured error source
     Dim SavedErrDesc        As String          'Captured error description
@@ -351,11 +380,22 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
 ' VALIDATE
 '------------------------------------------------------------------------------
+    'Every check that needs no workbook runs here, before anything is created
+    'or reset, so an invalid request leaves the workbook as it was
+
     'Reject an empty worksheet name
         If Len(Trim$(WS_Name)) = 0 Then
             Err.Raise vbObjectError + 2000, _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "Worksheet name cannot be blank."
+        End If
+
+    'Reject a name Excel would refuse for a sheet
+        NameProblem = DEMO_SheetNameProblem(WS_Name)
+        If Len(NameProblem) > 0 Then
+            Err.Raise vbObjectError + 2027, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "Worksheet name is not valid: " & NameProblem
         End If
 
     'Reject invalid freeze-row requests when pane freezing is enabled
@@ -401,6 +441,45 @@ Public Sub DEMO_Sheet_BuildTemplate( _
             End If
         End If
 
+    'Reject a blank content-column specification
+        ContentText = Trim$(ContentColumns)
+        If Len(ContentText) = 0 Then
+            Err.Raise vbObjectError + 2021, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "ContentColumns cannot be blank."
+        End If
+
+    'Reject content columns that are not one column or one column range;
+    'reversed ranges come back in ascending order
+        If Not DEMO_ParseColumnSpec(ContentText, ContentFirstColIndex, ContentLastColIndex) Then
+            Err.Raise vbObjectError + 2022, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "ContentColumns must resolve to one column or one contiguous column range."
+        End If
+
+    'Reject content-column blocks that end before column B
+        If ContentLastColIndex < 2 Then
+            Err.Raise vbObjectError + 2024, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "ContentColumns must extend at least through column B."
+        End If
+
+    'Reject left-margin columns that are neither blank nor one column range
+        If Len(Trim$(LeftMarginColumns)) > 0 Then
+            If Not DEMO_ParseColumnSpec(LeftMarginColumns, LeftFirstColIndex, LeftLastColIndex) Then
+                Err.Raise vbObjectError + 2020, _
+                          "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                          "LeftMarginColumns must be blank, one column or one contiguous column range."
+            End If
+        End If
+
+    'Reject row-hide requests before the first row
+        If HideRowsFrom < 1 Then
+            Err.Raise vbObjectError + 2019, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "HideRowsFrom must be between 1 and the worksheet last row."
+        End If
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -423,63 +502,31 @@ Public Sub DEMO_Sheet_BuildTemplate( _
         End If
 
 '------------------------------------------------------------------------------
-' RESET SHEET
+' LOCATE TARGET AND WORKSHEET LIMITS
 '------------------------------------------------------------------------------
-    'Get or create the target worksheet
-        Set WS = DEMO_Sheet_GetOrCreate(WB, WS_Name)
+    'Find an existing worksheet; a chart or other sheet with the name is refused
+        Set WS = DEMO_Sheet_FindWorksheet(WB, WS_Name, "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate")
 
-    'Reset the worksheet to a clean reusable state before rebuilding it
-        DEMO_Sheet_Reset WS
-
-'------------------------------------------------------------------------------
-' INITIALIZE WORKSHEET LIMITS
-'------------------------------------------------------------------------------
-    'Capture the last available worksheet row
-        MaxRow = WS.Rows.Count
-
-    'Capture the last available worksheet column
-        MaxCol = WS.Columns.Count
-
-'------------------------------------------------------------------------------
-' RESOLVE CONTENT COLUMN BLOCK
-'------------------------------------------------------------------------------
-    'Resolve the trimmed content-column specification
-        ContentText = Trim$(ContentColumns)
-
-    'Reject a blank content-column specification
-        If Len(ContentText) = 0 Then
-            Err.Raise vbObjectError + 2021, _
-                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
-                      "ContentColumns cannot be blank."
-        End If
-
-    'Split the content-column specification
-        ContentParts = Split(ContentText, ":")
-
-    'Resolve the content-column range when a single column was supplied
-        If UBound(ContentParts) = 0 Then
-            ContentFirstColIndex = WS.Range(Trim$(ContentParts(0)) & "1").Column
-            ContentLastColIndex = ContentFirstColIndex
-
-    'Resolve the content-column range when a standard two-part range was supplied
-        ElseIf UBound(ContentParts) = 1 Then
-            ContentFirstColIndex = WS.Range(Trim$(ContentParts(0)) & "1").Column
-            ContentLastColIndex = WS.Range(Trim$(ContentParts(1)) & "1").Column
-
-    'Reject invalid multi-part content-column specifications
+    'Every worksheet of a workbook has the same grid; read it from the target,
+    'else from another worksheet. Only a workbook without any worksheet makes
+    'this call create the target first; cleanup removes it if a check fails.
+        If Not WS Is Nothing Then
+            Set LimitSheet = WS
+        ElseIf WB.Worksheets.Count > 0 Then
+            Set LimitSheet = WB.Worksheets(1)
         Else
-            Err.Raise vbObjectError + 2022, _
-                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
-                      "ContentColumns must resolve to one column or one contiguous column range."
+            Set WS = DEMO_Sheet_GetOrCreate(WB, WS_Name)
+            CreatedSheet = True
+            Set LimitSheet = WS
         End If
 
-    'Normalize reversed content-column specifications
-        If ContentLastColIndex < ContentFirstColIndex Then
-            TmpColIndex = ContentFirstColIndex
-            ContentFirstColIndex = ContentLastColIndex
-            ContentLastColIndex = TmpColIndex
-        End If
+    'Capture the last available worksheet row and column
+        MaxRow = LimitSheet.Rows.Count
+        MaxCol = LimitSheet.Columns.Count
 
+'------------------------------------------------------------------------------
+' VALIDATE AGAINST WORKSHEET LIMITS
+'------------------------------------------------------------------------------
     'Reject content-column blocks that do not leave room for separator + hidden block
         If ContentLastColIndex > MaxCol - 2 Then
             Err.Raise vbObjectError + 2023, _
@@ -487,12 +534,48 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                       "ContentColumns must leave room for a separator column and at least one hidden trailing column."
         End If
 
-    'Reject content-column blocks that end before column B
-        If ContentLastColIndex < 2 Then
-            Err.Raise vbObjectError + 2024, _
+    'Reject left-margin columns beyond the last worksheet column
+        If LeftLastColIndex > MaxCol Then
+            Err.Raise vbObjectError + 2020, _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
-                      "ContentColumns must extend at least through column B."
+                      "LeftMarginColumns must be blank, one column or one contiguous column range."
         End If
+
+    'Reject body rows beyond the last worksheet row
+        If BodyRowTo > MaxRow Then
+            Err.Raise vbObjectError + 2014, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "Invalid body-row range."
+        End If
+
+    'Reject a freeze row beyond the last worksheet row
+        If IsFrozenPane Then
+            If FreezeAtRow > MaxRow Then
+                Err.Raise vbObjectError + 2013, _
+                          "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                          "FreezeAtRow must not exceed the worksheet last row."
+            End If
+        End If
+
+    'Reject row-hide requests beyond the last worksheet row
+        If HideRowsFrom > MaxRow Then
+            Err.Raise vbObjectError + 2019, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
+                      "HideRowsFrom must be between 1 and the worksheet last row."
+        End If
+
+'------------------------------------------------------------------------------
+' CREATE OR RESET SHEET
+'------------------------------------------------------------------------------
+    'Create the worksheet when it does not exist yet; this call then owns it
+        If WS Is Nothing Then
+            Set WS = DEMO_Sheet_GetOrCreate(WB, WS_Name)
+            CreatedSheet = True
+        End If
+
+    'Reset the worksheet to a clean reusable state before rebuilding it; from
+    'here on an existing worksheet is rebuilt destructively
+        DEMO_Sheet_Reset WS
 
 '------------------------------------------------------------------------------
 ' DERIVE SEPARATOR / HIDDEN COLUMN LOGIC
@@ -509,16 +592,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 
     'Resolve the effective first hidden-column text
         EffectiveHideColumnsFrom = DEMO_ColumnLetter(EffectiveHideFromColIndex)
-
-'------------------------------------------------------------------------------
-' VALIDATE ROW-HIDE REQUEST
-'------------------------------------------------------------------------------
-    'Reject invalid row-hide requests
-        If HideRowsFrom < 1 Or HideRowsFrom > MaxRow Then
-            Err.Raise vbObjectError + 2019, _
-                      "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
-                      "HideRowsFrom must be between 1 and the worksheet last row."
-        End If
 
 '------------------------------------------------------------------------------
 ' APPLY GLOBAL SHEET FORMATTING
@@ -540,12 +613,14 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 ' APPLY COLUMN / ROW LAYOUT
 '------------------------------------------------------------------------------
     'Apply the configured left-margin column widths
-        If Len(Trim$(LeftMarginColumns)) > 0 Then
-            WS.Columns(LeftMarginColumns).ColumnWidth = LeftMarginColumnWidth
+        If LeftFirstColIndex > 0 Then
+            WS.Range(WS.Columns(LeftFirstColIndex), WS.Columns(LeftLastColIndex)).ColumnWidth = _
+                LeftMarginColumnWidth
         End If
 
     'Apply the configured main content-block widths
-        WS.Columns(ContentColumns).ColumnWidth = ContentColumnWidth
+        WS.Range(WS.Columns(ContentFirstColIndex), WS.Columns(ContentLastColIndex)).ColumnWidth = _
+            ContentColumnWidth
 
     'Apply the derived separator-column width
         WS.Columns(EffectiveSeparatorColumns).ColumnWidth = SeparatorColumnWidth
@@ -671,6 +746,15 @@ Clean_Exit:
     'Re-raise the captured error after cleanup when needed
         On Error GoTo 0
         DEMO_CleanupProbeHit DEMO_PROBE_BUILD_CLEANUP
+
+    'Remove a worksheet this call created before it failed; keep the error
+        If SavedErrNum <> 0 And CreatedSheet Then
+            CleanupFailures = DEMO_Sheet_DeleteOwned(WS)
+            If Len(CleanupFailures) > 0 Then
+                SavedErrDesc = SavedErrDesc & vbCrLf & "Cleanup failure: " & CleanupFailures
+            End If
+        End If
+
         If SavedErrNum <> 0 Then
             Err.Raise SavedErrNum, SavedErrSrc, SavedErrDesc
         End If
@@ -1443,21 +1527,38 @@ Public Function DEMO_Sheet_GetOrCreate( _
 '     Existing or newly created worksheet.
 '
 ' BEHAVIOR
-'   - Searches the workbook for the requested sheet name
+'   - Refuses a name Excel would not accept for a sheet before creating
+'     anything
+'   - Searches the workbook for the requested worksheet name; a chart or other
+'     non-worksheet sheet with that name is refused
 '   - Creates a new worksheet if the name is not found
-'   - Renames the new sheet to the requested name
+'   - Renames the new sheet to the requested name; when the rename fails, the
+'     new sheet is deleted before the error is re-raised, so no unnamed sheet
+'     is left behind
 '
 ' ERROR POLICY
-'   Raises errors normally.
+'   Raises errors normally. A failed deletion after a failed rename is
+'   appended to the rename error's description as a "Cleanup failure: " line.
+'
+' REGRESSION SEAMS
+'   The new name passes through DEMO_SheetNameValue, which fails the rename
+'   once while M_DEMO_CLEANUP_TESTS has armed that fault.
 '
 ' UPDATED
+'   2026-11-14 - Name checked first; a sheet whose rename fails is removed
+'                (#74).
 '   2026-04-19
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Worksheet iterator / result
+    Dim WS                  As Worksheet       'Existing or new worksheet
+    Dim NameProblem         As String          'Why SheetName is not a valid sheet name
+    Dim NameErrNumber       As Long            'Rename error number
+    Dim NameErrSource       As String          'Rename error source
+    Dim NameErrDescription  As String          'Rename error description
+    Dim CleanupFailures     As String          'Failed removal of the new sheet
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -1476,31 +1577,430 @@ Public Function DEMO_Sheet_GetOrCreate( _
                       "Worksheet name cannot be blank."
         End If
 
+    'Reject a name Excel would refuse for a sheet
+        NameProblem = DEMO_SheetNameProblem(SheetName)
+        If Len(NameProblem) > 0 Then
+            Err.Raise vbObjectError + 2027, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate", _
+                      "Worksheet name is not valid: " & NameProblem
+        End If
+
 '------------------------------------------------------------------------------
 ' SEARCH EXISTING SHEETS
 '------------------------------------------------------------------------------
-    'Search for an existing worksheet with the requested name
-        For Each WS In WB.Worksheets
-            If StrComp(WS.Name, SheetName, vbTextCompare) = 0 Then
-                Set DEMO_Sheet_GetOrCreate = WS
-                Exit Function
-            End If
-        Next WS
+    'Return an existing worksheet; a non-worksheet sheet with the name raises
+        Set WS = DEMO_Sheet_FindWorksheet(WB, SheetName, "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate")
+        If Not WS Is Nothing Then
+            Set DEMO_Sheet_GetOrCreate = WS
+            Exit Function
+        End If
 
 '------------------------------------------------------------------------------
 ' CREATE SHEET
 '------------------------------------------------------------------------------
-    'Create a new worksheet because the requested one does not yet exist
-        Set WS = WB.Worksheets.Add(After:=WB.Worksheets(WB.Worksheets.Count))
+    'Create a new worksheet after the last worksheet, or after the last sheet
+    'of a workbook that has no worksheet
+        If WB.Worksheets.Count > 0 Then
+            Set WS = WB.Worksheets.Add(After:=WB.Worksheets(WB.Worksheets.Count))
+        Else
+            Set WS = WB.Worksheets.Add(After:=WB.Sheets(WB.Sheets.Count))
+        End If
 
-    'Assign the requested name to the new worksheet
-        WS.Name = SheetName
+'------------------------------------------------------------------------------
+' NAME SHEET
+'------------------------------------------------------------------------------
+    'Assign the requested name; on failure delete the new sheet, then re-raise
+        On Error Resume Next
+            WS.Name = DEMO_SheetNameValue(SheetName)
+            NameErrNumber = Err.Number
+            NameErrSource = Err.Source
+            NameErrDescription = Err.Description
+            Err.Clear
+        On Error GoTo 0
+
+        If NameErrNumber <> 0 Then
+            CleanupFailures = DEMO_Sheet_DeleteOwned(WS)
+            If Len(CleanupFailures) > 0 Then
+                NameErrDescription = NameErrDescription & vbCrLf & "Cleanup failure: " & CleanupFailures
+            End If
+            Err.Raise NameErrNumber, NameErrSource, NameErrDescription
+        End If
 
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
     'Return the existing or newly created worksheet
         Set DEMO_Sheet_GetOrCreate = WS
+End Function
+
+
+Private Function DEMO_Sheet_FindWorksheet( _
+    ByVal WB As Workbook, _
+    ByVal SheetName As String, _
+    ByVal ErrSource As String) _
+    As Worksheet
+'
+'==============================================================================
+' DEMO_Sheet_FindWorksheet
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the worksheet of WB named SheetName, or Nothing when no sheet has
+'   that name
+'
+' WHY THIS EXISTS
+'   Worksheet and chart-sheet names share one namespace. Looking only at
+'   WB.Worksheets would report a chart sheet's name as free, and creating a
+'   worksheet under it would then fail at the rename.
+'
+' INPUTS
+'   ErrSource
+'     Source of the error raised for a name held by another sheet type, so
+'     the error names the public procedure that refused the request
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2028 when a chart or other non-worksheet sheet
+'   already has the name
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Sh                  As Object          'Sheet of any type
+
+'------------------------------------------------------------------------------
+' SEARCH
+'------------------------------------------------------------------------------
+    'Compare names the way Excel does: without regard to case
+        For Each Sh In WB.Sheets
+            If StrComp(Sh.Name, SheetName, vbTextCompare) = 0 Then
+                If TypeOf Sh Is Worksheet Then
+                    Set DEMO_Sheet_FindWorksheet = Sh
+                    Exit Function
+                End If
+                Err.Raise vbObjectError + 2028, ErrSource, _
+                          "The name is already used by a sheet that is not a worksheet: " & SheetName
+            End If
+        Next Sh
+
+End Function
+
+
+Private Function DEMO_Sheet_DeleteOwned( _
+    ByVal WS As Worksheet) _
+    As String
+'
+'==============================================================================
+' DEMO_Sheet_DeleteOwned
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Deletes a worksheet that the calling invocation created, on its failure
+'   path
+'
+' BEHAVIOR
+'   - Turns DisplayAlerts off for the Delete only, so Excel does not ask for
+'     confirmation, and writes back the value it read
+'   - Attempts the Delete once; Excel refuses to delete the last visible sheet
+'
+' RETURNS
+'   String
+'     Empty on success; otherwise "<number> | <source> | <description>" of the
+'     failed Delete, and of a failed DisplayAlerts write-back after " || "
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Failures            As String          'Collected failures
+    Dim AlertsOn            As Boolean         'DisplayAlerts before the Delete
+    Dim AlertsRead          As Boolean         'TRUE when AlertsOn was read
+    Dim FailNumber          As Long            'Error number of one step
+    Dim FailSource          As String          'Error source of one step
+    Dim FailDescription     As String          'Error description of one step
+
+'------------------------------------------------------------------------------
+' DELETE
+'------------------------------------------------------------------------------
+        If WS Is Nothing Then Exit Function
+
+        On Error Resume Next
+
+    'Suppress the confirmation prompt for this Delete only
+        Err.Clear
+        AlertsOn = Application.DisplayAlerts
+        FailNumber = Err.Number
+        AlertsRead = (FailNumber = 0)
+
+        Err.Clear
+        Application.DisplayAlerts = False
+
+    'Delete the owned worksheet once
+        Err.Clear
+        WS.Delete
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        If FailNumber <> 0 Then
+            Failures = CStr(FailNumber) & " | " & FailSource & " | " & FailDescription
+        End If
+
+    'Write back the alert setting that was read
+        If AlertsRead Then
+            Err.Clear
+            Application.DisplayAlerts = AlertsOn
+            FailNumber = Err.Number
+            FailSource = Err.Source
+            FailDescription = Err.Description
+            If FailNumber <> 0 Then
+                If Len(Failures) > 0 Then
+                    Failures = Failures & " || "
+                End If
+                Failures = Failures & "DisplayAlerts: " & CStr(FailNumber) & _
+                    " | " & FailSource & " | " & FailDescription
+            End If
+        End If
+
+        Err.Clear
+        On Error GoTo 0
+
+        DEMO_Sheet_DeleteOwned = Failures
+
+End Function
+
+
+Private Function DEMO_SheetNameProblem( _
+    ByVal SheetName As String) _
+    As String
+'
+'==============================================================================
+' DEMO_SheetNameProblem
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns why Excel would refuse SheetName as a sheet name, or an empty
+'   string when the name passes these rules
+'
+' BEHAVIOR
+'   Checks the documented sheet-name rules: not blank, at most 31 characters,
+'   none of : \ / ? * [ ], no apostrophe at either end, and not History.
+'   Uniqueness is checked separately against the workbook.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Pos                 As Long            'Character position
+    Dim Ch                  As String          'Character at Pos
+
+'------------------------------------------------------------------------------
+' CHECK
+'------------------------------------------------------------------------------
+        If Len(SheetName) = 0 Then
+            DEMO_SheetNameProblem = "it is blank"
+            Exit Function
+        End If
+
+        If Len(SheetName) > 31 Then
+            DEMO_SheetNameProblem = "it is longer than 31 characters"
+            Exit Function
+        End If
+
+        If Left$(SheetName, 1) = "'" Or Right$(SheetName, 1) = "'" Then
+            DEMO_SheetNameProblem = "it begins or ends with an apostrophe"
+            Exit Function
+        End If
+
+        If StrComp(SheetName, "History", vbTextCompare) = 0 Then
+            DEMO_SheetNameProblem = "History is reserved by Excel"
+            Exit Function
+        End If
+
+        For Pos = 1 To Len(SheetName)
+            Ch = Mid$(SheetName, Pos, 1)
+            If InStr(1, ":\/?*[]", Ch, vbBinaryCompare) > 0 Then
+                DEMO_SheetNameProblem = "it contains the character " & Ch
+                Exit Function
+            End If
+        Next Pos
+
+End Function
+
+
+Private Function DEMO_ParseColumnSpec( _
+    ByVal Spec As String, _
+    ByRef FirstCol As Long, _
+    ByRef LastCol As Long) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_ParseColumnSpec
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Parses "C" or "C:M" (letters only, case-insensitive, each part optionally
+'   prefixed with $) into 1-based column indexes, without touching a worksheet
+'
+' RETURNS
+'   Boolean
+'     TRUE with FirstCol <= LastCol, a reversed range being swapped; FALSE
+'     with both set to 0 when Spec is not one column or one column range
+'
+' NOTES
+'   The indexes are not checked against the worksheet's last column here;
+'   the caller does that once it knows the grid.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Parts               As Variant         'Spec split on ":"
+    Dim Swap                As Long            'Swap buffer
+
+'------------------------------------------------------------------------------
+' PARSE
+'------------------------------------------------------------------------------
+        FirstCol = 0
+        LastCol = 0
+
+        Parts = Split(Trim$(Spec), ":")
+
+        Select Case UBound(Parts)
+            Case 0
+                FirstCol = DEMO_ColumnIndex(Parts(0))
+                LastCol = FirstCol
+            Case 1
+                FirstCol = DEMO_ColumnIndex(Parts(0))
+                LastCol = DEMO_ColumnIndex(Parts(1))
+            Case Else
+                Exit Function
+        End Select
+
+        If FirstCol = 0 Or LastCol = 0 Then
+            FirstCol = 0
+            LastCol = 0
+            Exit Function
+        End If
+
+        If LastCol < FirstCol Then
+            Swap = FirstCol
+            FirstCol = LastCol
+            LastCol = Swap
+        End If
+
+        DEMO_ParseColumnSpec = True
+
+End Function
+
+
+Private Function DEMO_ColumnIndex( _
+    ByVal Part As String) _
+    As Long
+'
+'==============================================================================
+' DEMO_ColumnIndex
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Converts one to three column letters, optionally prefixed with $, to a
+'   1-based column index; returns 0 for anything else
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Letters             As String          'Normalized letters
+    Dim Pos                 As Long            'Letter position
+    Dim Code                As Long            'Character code at Pos
+    Dim Index               As Long            'Accumulated index
+
+'------------------------------------------------------------------------------
+' CONVERT
+'------------------------------------------------------------------------------
+        Letters = UCase$(Trim$(Part))
+        If Left$(Letters, 1) = "$" Then
+            Letters = Mid$(Letters, 2)
+        End If
+
+        If Len(Letters) < 1 Or Len(Letters) > 3 Then Exit Function
+
+        For Pos = 1 To Len(Letters)
+            Code = Asc(Mid$(Letters, Pos, 1))
+            If Code < 65 Or Code > 90 Then Exit Function
+            Index = Index * 26 + (Code - 64)
+        Next Pos
+
+        DEMO_ColumnIndex = Index
+
+End Function
+
+
+Private Function DEMO_SheetNameValue( _
+    ByVal SheetName As String) _
+    As String
+'
+'==============================================================================
+' DEMO_SheetNameValue
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supplies the name DEMO_Sheet_GetOrCreate assigns to a sheet it created
+'
+' WHY THIS EXISTS
+'   Names that would fail the rename are refused before the sheet is created,
+'   so no valid request makes the rename fail on demand. Raising while the
+'   value is evaluated fails that exact statement and exercises the removal
+'   of the new sheet.
+'
+' RETURNS
+'   String
+'     SheetName, unchanged
+'
+' ERROR POLICY
+'   Raises vbObjectError + 2196 once when the naming fault is armed
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RAISE ARMED FAULT
+'------------------------------------------------------------------------------
+    'Fail the rename once when armed
+        If (mCleanupFaults And DEMO_FAULT_SHEET_NAME) <> 0 Then
+            mCleanupFaults = mCleanupFaults And Not DEMO_FAULT_SHEET_NAME
+            Err.Raise vbObjectError + 2196, _
+                      "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate.InjectedNameFault", _
+                      "Injected worksheet naming fault."
+        End If
+
+'------------------------------------------------------------------------------
+' ASSIGN RESULT
+'------------------------------------------------------------------------------
+    'Pass the name through unchanged
+        DEMO_SheetNameValue = SheetName
+
 End Function
 
 Public Sub DEMO_Sheet_Reset( _
@@ -1984,6 +2484,8 @@ Public Sub DEMO_InternalCleanupProbeBegin( _
 '       4  The cleanup EnableSelection restoration fails the same way
 '       8  The DisplayFormulaBar write of DEMO_Sheet_BuildTemplate fails while
 '          its value is evaluated
+'       16 The rename of a sheet DEMO_Sheet_GetOrCreate has just created
+'          fails the same way
 '       256 times a DEMO_FM_* setting bit (1, 2, 4, 8, 16)
 '          The fast-mode entry write of that setting fails
 '       8192 times a DEMO_FM_* setting bit

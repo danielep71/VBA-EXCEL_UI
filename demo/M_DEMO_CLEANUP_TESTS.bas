@@ -7,8 +7,9 @@ Option Explicit
 ' PURPOSE
 '   Bounded Excel harness for the single-pass cleanup of DEMO_Sheet_Reset and
 '   DEMO_Sheet_BuildTemplate (#71), for the fast-mode Application-state
-'   scope of M_DEMO_BUILDER (#70) and for its Forms and ActiveX check-box
-'   helpers (#73).
+'   scope of M_DEMO_BUILDER (#70), for its Forms and ActiveX check-box
+'   helpers (#73), and for the layout validation and owned-sheet cleanup of
+'   DEMO_Sheet_BuildTemplate (#74).
 '
 ' WHY THIS EXISTS
 '   The demo-cleanup source fixtures in tools/ check the shape of the cleanup
@@ -16,8 +17,9 @@ Option Explicit
 '   Excel through success, ordinary failure, unprotect failure and cleanup
 '   failure, and reads back the protection Excel actually holds afterwards.
 '   It also fails each fast-mode write in turn and reads back the
-'   Application settings Excel holds afterwards, and reads and writes real
-'   Forms and ActiveX controls.
+'   Application settings Excel holds afterwards, reads and writes real
+'   Forms and ActiveX controls, and checks that an invalid template request
+'   leaves an existing sheet and the sheet count as they were.
 '
 ' PUBLIC SURFACE
 '   - Demo_Test_RunCleanupChecks
@@ -35,7 +37,7 @@ Option Explicit
 '   S10  Reset reprotect failure after an operation error
 '   S11  Reset EnableSelection restoration failure
 '   S12  Reset operation, Protect and EnableSelection failures together
-'   S13  BuildTemplate ordinary error inside its guarded body
+'   S13  BuildTemplate error inside its guarded body; created sheet removed
 '   S14  BuildTemplate propagating a nested Reset failure
 '   S15  Fast mode entered and left; INFO line with entry/fast/exit values
 '   S16  Fast-mode entry fault at ScreenUpdating, rolled back
@@ -57,6 +59,16 @@ Option Explicit
 '   S32  ActiveX check box with its same-name shape, written and read
 '   S33  Plain shape, Forms button, ActiveX button, missing and blank names
 '   S34  Mixed Forms and Null ActiveX check boxes refused on read
+'   S35  BuildTemplate blank ContentColumns; existing sheet untouched
+'   S36  BuildTemplate three-part ContentColumns; existing sheet untouched
+'   S37  BuildTemplate ContentColumns that are not column letters
+'   S38  BuildTemplate ContentColumns beyond the grid; sheet untouched
+'   S39  BuildTemplate HideRowsFrom 0; existing sheet untouched
+'   S40  BuildTemplate HideRowsFrom beyond the last row; sheet untouched
+'   S41  BuildTemplate invalid sheet name; no sheet created
+'   S42  BuildTemplate rename failure of a new sheet; no stray sheet
+'   S43  BuildTemplate name held by a chart sheet; nothing created
+'   S44  BuildTemplate valid rebuild of a populated sheet
 '
 ' EVIDENCE
 '   Each scenario checks the error that reaches the caller (number, source
@@ -98,6 +110,8 @@ Option Explicit
 '     those scenarios
 '
 ' UPDATED
+'   2026-11-14 - Layout scenarios S35-S44; S13 now injects its error and
+'                checks the created sheet is removed (#74).
 '   2026-11-14 - Check-box scenarios S31-S34 (#73).
 '   2026-11-14 - Fast-mode and formula-bar scenarios S15-S30 (#70).
 '   2026-11-06 - Added for #71.
@@ -200,6 +214,24 @@ Option Explicit
     Private Const VALID_CONTENT         As String = "C:M"
     Private Const VALID_HIDE_ROWS       As Long = 200
 
+    'Layout and naming errors and seams; mirror M_DEMO_BUILDER
+    Private Const BUILD_TITLE              As String = "CT Title"
+    Private Const ERR_CONTENT_SHAPE        As Long = vbObjectError + 2022
+    Private Const DESC_CONTENT_SHAPE       As String = "ContentColumns must resolve to one column or one contiguous column range."
+    Private Const ERR_CONTENT_ROOM         As Long = vbObjectError + 2023
+    Private Const DESC_CONTENT_ROOM        As String = "ContentColumns must leave room for a separator column and at least one hidden trailing column."
+    Private Const ERR_HIDE_ROWS            As Long = vbObjectError + 2019
+    Private Const DESC_HIDE_ROWS           As String = "HideRowsFrom must be between 1 and the worksheet last row."
+    Private Const NAME_INVALID             As String = "Bad[Name"
+    Private Const ERR_NAME_INVALID         As Long = vbObjectError + 2027
+    Private Const DESC_NAME_INVALID        As String = "Worksheet name is not valid: it contains the character ["
+    Private Const ERR_NAME_TAKEN           As Long = vbObjectError + 2028
+    Private Const DESC_NAME_TAKEN          As String = "The name is already used by a sheet that is not a worksheet: "
+    Private Const FAULT_SHEET_NAME         As Long = 16
+    Private Const ERR_NAME_FAULT           As Long = vbObjectError + 2196
+    Private Const SRC_NAME_FAULT           As String = "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate.InjectedNameFault"
+    Private Const DESC_NAME_FAULT          As String = "Injected worksheet naming fault."
+
     'Check-box fixtures and diagnostics; the messages mirror M_DEMO_BUILDER
     Private Const CB_TARGET                As String = "ctCheckBox"
     Private Const CB_MISSING               As String = "ctMissing"
@@ -250,9 +282,10 @@ Public Sub Demo_Test_RunCleanupChecks()
 ' Demo_Test_RunCleanupChecks
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Runs every #71 cleanup scenario, every #70 fast-mode scenario and every
-'   #73 check-box scenario in a temporary workbook and prints one line per
-'   scenario and a PASS/FAIL summary to the Immediate window.
+'   Runs every #71 cleanup scenario, every #70 fast-mode scenario, every #73
+'   check-box scenario and every #74 layout scenario in a temporary workbook
+'   and prints one line per scenario and a PASS/FAIL summary to the
+'   Immediate window.
 '
 ' RETURNS
 '   None
@@ -279,6 +312,7 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   - Invoked directly, from the Immediate window or the Macros dialog
 '
 ' UPDATED
+'   2026-11-14 - S35-S44 (#74).
 '   2026-11-14 - S31-S34 (#73).
 '   2026-11-14 - Session settings captured and written back; S15-S30 (#70).
 '   2026-11-06
@@ -369,6 +403,24 @@ Public Sub Demo_Test_RunCleanupChecks()
         DEMO_CT_CheckBoxActiveX WB, "S32_CheckBoxActiveX"
         DEMO_CT_CheckBoxRefusals WB, "S33_CheckBoxRefusals"
         DEMO_CT_CheckBoxMixed WB, "S34_CheckBoxMixed"
+
+    'Template layout validated before any reset or creation (#74)
+        DEMO_CT_BuildInvalidLayout WB, "S35_BlankContent", vbNullString, VALID_HIDE_ROWS, _
+                                   ERR_BLANK_CONTENT, DESC_BLANK_CONTENT, False
+        DEMO_CT_BuildInvalidLayout WB, "S36_ContentParts", "C:E:G", VALID_HIDE_ROWS, _
+                                   ERR_CONTENT_SHAPE, DESC_CONTENT_SHAPE, False
+        DEMO_CT_BuildInvalidLayout WB, "S37_ContentSyntax", "C1", VALID_HIDE_ROWS, _
+                                   ERR_CONTENT_SHAPE, DESC_CONTENT_SHAPE, False
+        DEMO_CT_BuildInvalidLayout WB, "S38_ContentBounds", "XFD", VALID_HIDE_ROWS, _
+                                   ERR_CONTENT_ROOM, DESC_CONTENT_ROOM, True
+        DEMO_CT_BuildInvalidLayout WB, "S39_HideRowsZero", VALID_CONTENT, 0, _
+                                   ERR_HIDE_ROWS, DESC_HIDE_ROWS, False
+        DEMO_CT_BuildInvalidLayout WB, "S40_HideRowsBeyond", VALID_CONTENT, WB.Worksheets(1).Rows.Count + 1, _
+                                   ERR_HIDE_ROWS, DESC_HIDE_ROWS, True
+        DEMO_CT_BuildInvalidName WB, "S41_InvalidName"
+        DEMO_CT_BuildNameFault WB, "S42_NameFault"
+        DEMO_CT_BuildChartCollision WB, "S43_ChartCollision"
+        DEMO_CT_BuildValidRebuild WB, "S44_ValidRebuild"
 
 Safe_Exit:
 '------------------------------------------------------------------------------
@@ -1078,42 +1130,60 @@ Private Sub DEMO_CT_BuildOrdinaryError( _
 ' DEMO_CT_BuildOrdinaryError
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   S13: DEMO_Sheet_BuildTemplate raises a real validation error inside its
-'   guarded body, after its own reset. The error reaches the caller once and
-'   unchanged after one handler entry and one cleanup pass.
+'   S13: DEMO_Sheet_BuildTemplate creates a worksheet, resets it, and then
+'   fails inside its guarded body at the injected DisplayFormulaBar fault.
+'   The error reaches the caller once and unchanged after one handler entry
+'   and one cleanup pass, and the worksheet this call created is gone.
 '
 ' NOTES
-'   The error is raised before any window or Application setting is applied,
-'   so this scenario changes nothing outside the temporary workbook.
+'   Every deterministic layout check now runs before the reset, so an
+'   injected fault stands in for an error inside the guarded body. The
+'   template applies view settings only to the active workbook, so this
+'   scenario requires the temporary workbook to be active.
 '
 ' UPDATED
+'   2026-11-14 - Injected body fault on a created sheet; owned-sheet removal
+'                (#74).
 '   2026-11-06
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Dim SheetsBefore        As Long            'Sheet count before the call
     Dim FailuresBefore      As Long            'Failure count at scenario start
     Dim RaisedNumber        As Long            'Error reaching the caller
     Dim RaisedSource        As String          'Its source
     Dim RaisedDescription   As String          'Its description
 
 '------------------------------------------------------------------------------
-' ACT
+' ARRANGE
 '------------------------------------------------------------------------------
         On Error GoTo Err_Handler
 
         FailuresBefore = DEMO_CT_BeginScenario()
 
-        DEMO_CT_CallBuild WB, Scenario, vbNullString, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
-                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
+        SheetsBefore = WB.Sheets.Count
+        DEMO_CT_Check WB Is ActiveWorkbook, Scenario & ".Setup.Active", _
+                      "the temporary workbook is not active, so the template skips its view settings"
+        DEMO_CT_Check Not DEMO_CT_SheetExists(WB, Scenario), Scenario & ".Setup.NoSheet", _
+                      "a sheet with the scenario name already exists"
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_FORMULABAR, RaisedNumber, RaisedSource, RaisedDescription
 
 '------------------------------------------------------------------------------
 ' ASSERT
 '------------------------------------------------------------------------------
-        DEMO_CT_CheckError Scenario & ".Error", ERR_BLANK_CONTENT, SRC_BUILD, DESC_BLANK_CONTENT, _
+        DEMO_CT_CheckError Scenario & ".Error", ERR_FORMULABAR, SRC_FORMULABAR, DESC_FORMULABAR, _
                            RaisedNumber, RaisedSource, RaisedDescription
         DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 1, 1
+        DEMO_CT_Check Not DEMO_CT_SheetExists(WB, Scenario), Scenario & ".CreatedSheetRemoved", _
+                      "the worksheet this call created is still there"
+        DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
 
 Safe_Exit:
         On Error GoTo 0
@@ -1137,9 +1207,11 @@ Private Sub DEMO_CT_BuildNestedResetError( _
 ' PURPOSE
 '   S14: BuildTemplate on a password-protected sheet. Its nested reset has no
 '   password and raises; both procedures pass the error on once, unchanged,
-'   and the sheet keeps its entry protection.
+'   and the sheet keeps its entry protection. The sheet existed before the
+'   call, so the failed call does not delete it.
 '
 ' UPDATED
+'   2026-11-14 - Valid layout, so the nested reset is reached (#74).
 '   2026-11-06
 '==============================================================================
 
@@ -1168,7 +1240,7 @@ Private Sub DEMO_CT_BuildNestedResetError( _
 '------------------------------------------------------------------------------
 ' ACT
 '------------------------------------------------------------------------------
-        DEMO_CT_CallBuild WB, Scenario, vbNullString, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
                           FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
 
 '------------------------------------------------------------------------------
@@ -1180,6 +1252,8 @@ Private Sub DEMO_CT_BuildNestedResetError( _
         DEMO_CT_Check Not DEMO_CT_BodyRan(WS), Scenario & ".BodyNotRun", _
                       "the nested reset body ran although the sheet stayed protected"
         DEMO_CT_CheckOptions Scenario & ".Readback.Options", EntryOptions, DEMO_CT_ReadOptions(WS)
+        DEMO_CT_Check DEMO_CT_SheetExists(WB, Scenario), Scenario & ".SheetKept", _
+                      "the failed call deleted a sheet it did not create"
 
 Safe_Exit:
         On Error GoTo 0
@@ -1673,7 +1747,7 @@ Private Sub DEMO_CT_FormulaBarPolicy( _
 ' ASSERT
 '------------------------------------------------------------------------------
         DEMO_CT_CheckNoError Scenario & ".End.NoError", RaisedNumber, RaisedSource, RaisedDescription
-        DEMO_CT_Check Application.DisplayFormulaBar = Not EntryFormulaBar, _
+        DEMO_CT_Check Application.DisplayFormulaBar <> EntryFormulaBar, _
                       Scenario & ".FormulaBarNotOwned", "End changed DisplayFormulaBar"
         DEMO_CT_CheckText Scenario & ".State", EntryText, DEMO_CT_AppStateText()
 
@@ -1873,9 +1947,9 @@ Private Sub DEMO_CT_CheckBoxActiveX( _
 '------------------------------------------------------------------------------
     'Write through the helper; read back through the control
         DEMO_CT_CheckSet Scenario & ".Write.True", WS, CB_TARGET, True, True, vbNullString
-        DEMO_CT_CheckText Scenario & ".Write.True.Readback", "True", DEMO_CT_ValueText(CheckBoxOle.Object.Value)
+        DEMO_CT_CheckText Scenario & ".Write.True.Readback", CStr(True), DEMO_CT_ValueText(CheckBoxOle.Object.Value)
         DEMO_CT_CheckSet Scenario & ".Write.False", WS, CB_TARGET, False, True, vbNullString
-        DEMO_CT_CheckText Scenario & ".Write.False.Readback", "False", DEMO_CT_ValueText(CheckBoxOle.Object.Value)
+        DEMO_CT_CheckText Scenario & ".Write.False.Readback", CStr(False), DEMO_CT_ValueText(CheckBoxOle.Object.Value)
 
     'Write through the control; read through the helper
         CheckBoxOle.Object.Value = True
@@ -2008,7 +2082,338 @@ Private Sub DEMO_CT_CheckBoxMixed( _
         DEMO_CT_CheckSet Scenario & ".Forms.Set", WS, CB_FORMS_MIXED, False, True, vbNullString
         DEMO_CT_CheckLong Scenario & ".Forms.Readback", xlOff, Shp.ControlFormat.Value
         DEMO_CT_CheckSet Scenario & ".ActiveX.Set", WS, CB_ACTIVEX_MIXED, True, True, vbNullString
-        DEMO_CT_CheckText Scenario & ".ActiveX.Readback", "True", DEMO_CT_ValueText(CheckBoxOle.Object.Value)
+        DEMO_CT_CheckText Scenario & ".ActiveX.Readback", CStr(True), DEMO_CT_ValueText(CheckBoxOle.Object.Value)
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_BuildInvalidLayout( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String, _
+    ByVal ContentColumns As String, _
+    ByVal HideRowsFrom As Long, _
+    ByVal ExpectedNumber As Long, _
+    ByVal ExpectedDescription As String, _
+    ByVal NeedsGrid As Boolean)
+'
+'==============================================================================
+' DEMO_CT_BuildInvalidLayout
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S35-S40: an invalid ContentColumns or HideRowsFrom is refused before the
+'   template resets anything. The existing sheet keeps its cell contents,
+'   shape, table, column width and hidden row, and the workbook keeps its
+'   sheet count.
+'
+' INPUTS
+'   NeedsGrid
+'     FALSE for a check that needs no workbook: it raises before the
+'     template's handler is armed, so no probe site is reached. TRUE for a
+'     check against the worksheet's last row or column: it raises inside the
+'     guarded body, once, before the reset.
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Existing populated sheet
+    Dim EntryText           As String          'Sheet contents on entry
+    Dim SheetsBefore        As Long            'Sheet count before the call
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewPopulatedSheet(WB, Scenario)
+        EntryText = DEMO_CT_SheetText(WS)
+        SheetsBefore = WB.Sheets.Count
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBuild WB, Scenario, ContentColumns, HideRowsFrom, Application.DisplayFormulaBar, _
+                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ExpectedNumber, SRC_BUILD, ExpectedDescription, _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        If NeedsGrid Then
+            DEMO_CT_CheckProbe Scenario & ".Probe", 0, 0, 0, 0, 1, 1
+        Else
+            DEMO_CT_CheckProbe Scenario & ".Probe", 0, 0, 0, 0, 0, 0
+        End If
+        DEMO_CT_CheckText Scenario & ".SheetUntouched", EntryText, DEMO_CT_SheetText(WS)
+        DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_BuildInvalidName( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_BuildInvalidName
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S41: a sheet name Excel would refuse is rejected before any sheet is
+'   created, so the workbook keeps its sheet count.
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SheetsBefore        As Long            'Sheet count before the call
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        SheetsBefore = WB.Sheets.Count
+
+        DEMO_CT_CallBuild WB, NAME_INVALID, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ERR_NAME_INVALID, SRC_BUILD, DESC_NAME_INVALID, _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 0, 0, 0, 0, 0
+        DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_BuildNameFault( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_BuildNameFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S42: the rename of a sheet DEMO_Sheet_GetOrCreate has just created fails.
+'   The new sheet is deleted, the rename error reaches the caller unchanged,
+'   and the workbook keeps its sheet count.
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SheetsBefore        As Long            'Sheet count before the call
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        SheetsBefore = WB.Sheets.Count
+
+        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_SHEET_NAME, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ERR_NAME_FAULT, SRC_NAME_FAULT, DESC_NAME_FAULT, _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 0, 0, 0, 1, 1
+        DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
+        DEMO_CT_Check Not DEMO_CT_SheetExists(WB, Scenario), Scenario & ".NoNamedSheet", _
+                      "a sheet with the requested name exists"
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_BuildChartCollision( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_BuildChartCollision
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S43: the requested name belongs to a chart sheet. The template refuses it
+'   before creating or resetting anything; the chart sheet stays and the
+'   workbook keeps its sheet count.
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ChartSheet          As Chart           'Chart sheet holding the name
+    Dim SheetsBefore        As Long            'Sheet count before the call
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set ChartSheet = WB.Charts.Add(After:=WB.Sheets(WB.Sheets.Count))
+        ChartSheet.Name = Scenario
+        SheetsBefore = WB.Sheets.Count
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckError Scenario & ".Error", ERR_NAME_TAKEN, SRC_BUILD, DESC_NAME_TAKEN & Scenario, _
+                           RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 0, 0, 0, 1, 1
+        DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
+        DEMO_CT_Check TypeOf WB.Sheets(Scenario) Is Chart, Scenario & ".ChartKept", _
+                      "the sheet with the requested name is no longer the chart sheet"
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_BuildValidRebuild( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_BuildValidRebuild
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S44: a valid request on the same kind of populated sheet rebuilds it:
+'   the reset clears its cells, shape and table, the title band is written,
+'   no error is raised and no sheet is added.
+'
+' NOTES
+'   DisplayFormulaBar is requested at its current value, so the run leaves
+'   the formula bar as it found it.
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Existing populated sheet
+    Dim SheetsBefore        As Long            'Sheet count before the call
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewPopulatedSheet(WB, Scenario)
+        SheetsBefore = WB.Sheets.Count
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 1
+        DEMO_CT_Check DEMO_CT_BodyRan(WS), Scenario & ".ResetRan", "the reset did not clear A1"
+        DEMO_CT_CheckLong Scenario & ".Shapes", 0, WS.Shapes.Count
+        DEMO_CT_CheckLong Scenario & ".Tables", 0, WS.ListObjects.Count
+        DEMO_CT_CheckText Scenario & ".Title", BUILD_TITLE, CStr(WS.Range("B1").Value)
+        DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
 
 Safe_Exit:
         On Error GoTo 0
@@ -2089,7 +2494,7 @@ Private Sub DEMO_CT_CallBuild( _
 ' INPUTS
 '   ContentColumns / HideRowsFrom / ShowFormulaBar
 '     Passed to the template; every other argument keeps its default, and
-'     the title is "CT Title"
+'     the title is BUILD_TITLE
 '
 '   FaultMask
 '     The one-shot faults to arm for this call
@@ -2108,7 +2513,7 @@ Private Sub DEMO_CT_CallBuild( _
         DEMO_InternalCleanupProbeBegin FaultMask
 
         On Error Resume Next
-            DEMO_Sheet_BuildTemplate WS_Name:=SheetName, Title:="CT Title", TargetWorkbook:=WB, _
+            DEMO_Sheet_BuildTemplate WS_Name:=SheetName, Title:=BUILD_TITLE, TargetWorkbook:=WB, _
                 ContentColumns:=ContentColumns, HideRowsFrom:=HideRowsFrom, ShowFormulaBar:=ShowFormulaBar
             RaisedNumber = Err.Number
             RaisedSource = Err.Source
@@ -2734,6 +3139,115 @@ Private Function DEMO_CT_ValueText( _
         Else
             DEMO_CT_ValueText = CStr(Value)
         End If
+
+End Function
+
+
+Private Function DEMO_CT_NewPopulatedSheet( _
+    ByVal WB As Workbook, _
+    ByVal SheetName As String) _
+    As Worksheet
+'
+'==============================================================================
+' DEMO_CT_NewPopulatedSheet
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Adds a scenario sheet with content a reset would destroy: the A1 marker,
+'   a two-row table on D5:E7, a rectangle, a wider column C and a hidden
+'   row 10.
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'New sheet
+
+'------------------------------------------------------------------------------
+' CREATE
+'------------------------------------------------------------------------------
+        Set WS = DEMO_CT_NewSheet(WB, SheetName)
+
+        WS.Range("D5:E5").Value = Array("Key", "Value")
+        WS.Range("D6:E6").Value = Array("a", 1)
+        WS.Range("D7:E7").Value = Array("b", 2)
+        WS.ListObjects.Add SourceType:=xlSrcRange, Source:=WS.Range("D5:E7"), XlListObjectHasHeaders:=xlYes
+
+        WS.Shapes.AddShape(msoShapeRectangle, 300, 10, 60, 18).Name = SHAPE_PLAIN
+        WS.Columns(3).ColumnWidth = 13
+        WS.Rows(10).Hidden = True
+
+        Set DEMO_CT_NewPopulatedSheet = WS
+
+End Function
+
+
+Private Function DEMO_CT_SheetText( _
+    ByVal WS As Worksheet) _
+    As String
+'
+'==============================================================================
+' DEMO_CT_SheetText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Describes what DEMO_CT_NewPopulatedSheet put on a sheet, for an
+'   unchanged-sheet comparison.
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+        DEMO_CT_SheetText = "A1=" & CStr(WS.Range("A1").Value) & _
+                            " D6=" & CStr(WS.Range("D6").Value) & _
+                            " E7=" & CStr(WS.Range("E7").Value) & _
+                            " shapes=" & CStr(WS.Shapes.Count) & _
+                            " tables=" & CStr(WS.ListObjects.Count) & _
+                            " widthC=" & CStr(WS.Columns(3).ColumnWidth) & _
+                            " row10hidden=" & CStr(WS.Rows(10).Hidden)
+
+End Function
+
+
+Private Function DEMO_CT_SheetExists( _
+    ByVal WB As Workbook, _
+    ByVal SheetName As String) _
+    As Boolean
+'
+'==============================================================================
+' DEMO_CT_SheetExists
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns True when WB has a sheet of any type named SheetName.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-14 - Added for #74.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Found               As Object          'Sheet with that name, if any
+
+'------------------------------------------------------------------------------
+' LOOK UP
+'------------------------------------------------------------------------------
+        On Error Resume Next
+            Set Found = WB.Sheets(SheetName)
+            Err.Clear
+        On Error GoTo 0
+
+        DEMO_CT_SheetExists = Not Found Is Nothing
 
 End Function
 
