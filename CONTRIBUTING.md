@@ -746,7 +746,12 @@ against the review finding crosswalk in `CHANGELOG.md` (under
 `[Unreleased]`, tracked in
 [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48)). When you cite an
 identifier that is not in the table yet, add its row in the same pull request:
-`check_repo.py` fails on a cited identifier without exactly one row.
+`check_repo.py` fails on a cited identifier without exactly one row. When an
+issue in the table changes state, update its rows in the same pull request.
+Start each disposition with the issue's state (*Open*, *Reopened*, *Closed* or
+*Not planned*), and give a renumbered v1.1.1 row the same issue and state as
+the v1.1.2 row it points at; the gate checks both. It cannot read the live
+issue, so keeping the state word true is up to you.
 
 <a id="pull-requests"></a>
 
