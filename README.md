@@ -491,11 +491,15 @@ Showing the title bar merges the captured owned bits into the current style. It 
 In v1.1.2, a show falls back to the safe visible frame only when the stored
 baseline is all zero, so a non-zero baseline without a caption can still be
 re-applied ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)). On `release/v1.1.3` a stored baseline is used only
-when `HasBaseline` is true, and every show, including a no-op, reads the live
-style back before reporting success. Both checks still accept a style that
-carries only one of the two bits that make up `WS_CAPTION` (`WS_BORDER` or
-`WS_DLGFRAME`); requiring the complete `WS_CAPTION` mask is open under
-[#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6), with its bounded negative control under [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66).
+when `HasBaseline` is true and the baseline carries `WS_CAPTION`: a visible
+baseline requires `WS_CAPTION`, not merely a non-zero owned-bit value.
+Otherwise the show uses the safe visible frame. Every show, including a no-op,
+reads the live style back before reporting success. Both checks still accept a
+style that carries only one of the two bits that make up `WS_CAPTION`
+(`WS_BORDER` or `WS_DLGFRAME`); requiring the complete `WS_CAPTION` mask is
+open under [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6). Its bounded negative control passed under
+[#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66): with the v1.1.2 condition restored, the regression fails
+instead of hanging.
 
 Frame state is held per top-level window rather than once per process. On
 `release/v1.1.3`, each hWnd slot also retains its owning Excel `Window` object
@@ -822,6 +826,20 @@ it had not done:
 - a certification self-test that replaced a caller's snapshot and then
   discarded it, now refused while a snapshot exists
   ([#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43)).
+
+> [!NOTE]
+> **Erratum, 2026-11-15
+> ([#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48)).** Two of the
+> v1.1.2 corrections above were incomplete. The frame registry still lets a
+> recycled handle with the same owned bits reuse stale state; style equality
+> is a consistency check, not proof of identity, and
+> [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) is open. The
+> v1.1.2 self-test refused a caller's snapshot, but its unconditional cleanup
+> still cleared that snapshot; `release/v1.1.3` corrects this under
+> [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) at
+> `32baef384ee306082483ea5dcaf40abfe3224118`. The erratum to v1.1.2 and the
+> review finding crosswalk in [CHANGELOG.md](CHANGELOG.md) give the current
+> state of every finding.
 
 ### v1.1.1 — corrective release
 

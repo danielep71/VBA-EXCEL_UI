@@ -2696,29 +2696,25 @@ CROSSWALK_HEADING = "### 🔎 Review finding crosswalk"
 
 CROSSWALK_ROW_RE = re.compile(
     r"^\| `(?P<id>[^`]+)` \| (?P<review>v1\.1\.[0-2]) \| \[#(?P<issue>[0-9]+)\]"
-    r"\([^)]*/issues/(?P=issue)\) \| (?:`(?P<current>[^`]+)`|—) \| .+ \|$")
+    r"\([^)]*/issues/(?P=issue)\) \| (?:`(?P<current>[^`]+)`|—) \| (?P<disposition>.+) \|$")
+
+# The state each disposition starts with; the rest of the cell says what remains.
+CROSSWALK_STATE_RE = re.compile(r"^(?P<state>Open|Reopened|Closed|Not planned)\b")
 
 
-def crosswalk_findings(changelog: str, cited: dict[str, list[str]]) -> list[str]:
-    """Check the review-finding crosswalk in CHANGELOG.md against the citations.
+def crosswalk_review(ident: str) -> str:
+    """The review that assigned ``ident``: unversioned is v1.1.0, 111 and 112 name theirs."""
+    version = re.match(r"ICR-UI-(11[12])-", ident)
+    return f"v1.1.{int(version.group(1)) - 110}" if version else "v1.1.0"
 
-    ``cited`` maps each review identifier found in a tracked file to the files
-    that cite it. Every cited identifier must appear in exactly one table row,
-    each row must name an issue, and a renumbered v1.1.1 identifier must point
-    at a row of the table.
-    """
-    start = changelog.find(CROSSWALK_HEADING + "\n")
-    if start < 0:
-        return [f"CHANGELOG.md has no '{CROSSWALK_HEADING}' section"]
-    end = len(changelog)
-    for marker in ("\n### ", "\n## "):
-        at = changelog.find(marker, start + len(CROSSWALK_HEADING))
-        if 0 <= at < end:
-            end = at
-    section = changelog[start:end]
 
-    findings: list[str] = []
-    rows: dict[str, str | None] = {}
+# identifier -> (current identifier, issue, state)
+CrosswalkRows: TypeAlias = dict[str, tuple[str | None, str, str | None]]
+
+
+def crosswalk_rows(section: str, findings: list[str]) -> CrosswalkRows:
+    """Parse the crosswalk rows, appending a finding for each malformed one."""
+    rows: CrosswalkRows = {}
     for line in section.splitlines():
         if not REVIEW_ID_RE.search(line) or not line.startswith("| `"):
             continue
@@ -2729,15 +2725,67 @@ def crosswalk_findings(changelog: str, cited: dict[str, list[str]]) -> list[str]
         ident = m.group("id")
         if not REVIEW_ID_RE.fullmatch(ident):
             findings.append(f"CHANGELOG.md crosswalk: {ident!r} is not a review identifier")
-        elif ident in rows:
+            continue
+        if ident in rows:
             findings.append(f"CHANGELOG.md crosswalk: {ident} has more than one row")
-        else:
-            rows[ident] = m.group("current")
+            continue
+        if m.group("review") != crosswalk_review(ident):
+            findings.append(f"CHANGELOG.md crosswalk: {ident} names review "
+                            f"{m.group('review')}; its identifier belongs to "
+                            f"{crosswalk_review(ident)}")
+        state = CROSSWALK_STATE_RE.match(m.group("disposition"))
+        if state is None:
+            findings.append(f"CHANGELOG.md crosswalk: the disposition of {ident} does not "
+                            "start with Open, Reopened, Closed or Not planned")
+        rows[ident] = (m.group("current"), m.group("issue"),
+                       state.group("state") if state else None)
+    return rows
 
-    for ident, current in sorted(rows.items()):
-        if current is not None and current not in rows:
+
+def crosswalk_renumbering_findings(rows: CrosswalkRows) -> list[str]:
+    """A renumbered row must point at a final row with the same issue and state."""
+    findings: list[str] = []
+    for ident, (current, issue, state) in sorted(rows.items()):
+        if current is None:
+            continue
+        if current not in rows:
             findings.append(f"CHANGELOG.md crosswalk: {ident} points at {current}, "
                             "which has no row of its own")
+            continue
+        target_current, target_issue, target_state = rows[current]
+        if target_current is not None:
+            findings.append(f"CHANGELOG.md crosswalk: {ident} points at {current}, which "
+                            f"points on at {target_current}; name the final identifier")
+        if target_issue != issue:
+            findings.append(f"CHANGELOG.md crosswalk: {ident} names #{issue} but its current "
+                            f"identifier {current} names #{target_issue}")
+        if state and target_state and target_state != state:
+            findings.append(f"CHANGELOG.md crosswalk: {ident} is {state} but its current "
+                            f"identifier {current} is {target_state}")
+    return findings
+
+
+def crosswalk_findings(changelog: str, cited: dict[str, list[str]]) -> list[str]:
+    """Check the review-finding crosswalk in CHANGELOG.md against the citations.
+
+    ``cited`` maps each review identifier found in a tracked file to the files
+    that cite it. Every cited identifier must appear in exactly one table row,
+    each row must name an issue, its review and a disposition that starts with
+    the issue's state, and a renumbered v1.1.1 identifier must point at a row
+    of the table that names the same issue and state.
+    """
+    start = changelog.find(CROSSWALK_HEADING + "\n")
+    if start < 0:
+        return [f"CHANGELOG.md has no '{CROSSWALK_HEADING}' section"]
+    end = len(changelog)
+    for marker in ("\n### ", "\n## "):
+        at = changelog.find(marker, start + len(CROSSWALK_HEADING))
+        if 0 <= at < end:
+            end = at
+
+    findings: list[str] = []
+    rows = crosswalk_rows(changelog[start:end], findings)
+    findings += crosswalk_renumbering_findings(rows)
     for ident in sorted(set(cited) - set(rows)):
         where = ", ".join(sorted(set(cited[ident]))[:3])
         findings.append(f"{ident} is cited in {where} but has no row in the "

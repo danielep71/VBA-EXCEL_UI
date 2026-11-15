@@ -130,9 +130,12 @@ corrections:
 - the demo template and sheet reset no longer recatch their own re-raised
   errors (#71), and a demo button without a macro no longer names a missing
   one (#129);
-- not yet checked on Excel: demo fast mode restores every setting it changed
-  (#70), the demo check-box helpers reach ActiveX check boxes (#73), and the
-  demo template checks its layout before resetting a worksheet (#74).
+- demo fast mode restores every setting it changed (#70), the demo check-box
+  helpers reach ActiveX check boxes (#73), and the demo template checks its
+  layout before resetting a worksheet (#74); all three were checked on Excel
+  16.0 build 20430, 64-bit;
+- diagnostics degrade explicitly when the first failure-list entry cannot be
+  allocated (#38), certified on Excel 16.0 build 20430, 64-bit.
 
 Title-bar capture and persistent frame state now pair each native hWnd with the
 Excel Window that owns it. Show now uses baseline state and readback, but the
@@ -156,18 +159,18 @@ measured against that baseline.
 
 | Area | Current state |
 |---|---|
-| Production VBA | Runtime quiet-scope ownership, Ribbon fail-closed restore and title-bar WinAPI error capture implemented; title-bar Window/hWnd identity, registry generation and show verification implemented with #6/#32/#45 proof/correction gaps |
+| Production VBA | Runtime quiet-scope ownership, Ribbon fail-closed restore and title-bar WinAPI error capture implemented; title-bar Window/hWnd identity, registry generation and show verification implemented; #45 closed, #6/#32 correction and proof gaps open |
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
-| Runtime correctness fixes | #26 and #27 complete; #23 certified and open until the README and Wiki describe it; remaining title-bar defects open |
+| Runtime correctness fixes | #26, #27 and #45 complete; #23 certified and open until the README and Wiki describe it; #38 certified and open until the Wiki describes it; remaining title-bar defects open |
 | Regression and certification fixes | #43 and #135 complete; remaining certification gates open |
 | Regression VBA | Caller-owned snapshot refusal, ownership-failure, Ribbon wrong-window refusal, WinAPI error-capture and certification unit-isolation coverage added; split into a harness and four suite modules (#90), not yet certified |
-| Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); fast-mode state (#70), ActiveX check boxes (#73) and template validation (#74) implemented with harness scenarios, not yet checked on Excel |
+| Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); fast-mode state (#70), ActiveX check boxes (#73) and template validation (#74) corrected and checked on Excel with harness scenarios S15-S44 (2026-11-14) |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
 | Static validation | `python3 tools/verify.py --ci` runs every static check, including the 37 checks of `tools/check_repo.py`; the release branch passes |
 | Wiki | Last recorded track is v1.1.2; the badge workflow runs from the default branch, with final evidence still pending under #53 |
-| Excel runtime certification | Candidate heads certified on Excel 16.0 build 20430, 64-bit (2026-11-06); the final v1.1.3 head is not yet certified |
+| Excel runtime certification | Candidate heads certified on Excel 16.0 build 20430, 64-bit (2026-11-06 and 2026-11-14); the final v1.1.3 head is not yet certified |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
 ### ➕ Added
@@ -513,6 +516,12 @@ measured against that baseline.
   workbook before importing the new modules: both declare the same runners.
   In `src/`, only the `CALLED FROM` comments changed, to name these modules.
 
+- The gate's **review finding crosswalk** check now also rejects an ambiguous
+  table: a disposition that does not start with *Open*, *Reopened*, *Closed*
+  or *Not planned*, a *Review* column that disagrees with the identifier's
+  version, a renumbered v1.1.1 row whose issue or state differs from the
+  v1.1.2 row it points at, and a renumbering that points at another
+  renumbered row. Five new gate tests cover these rules (#48).
 - **Repository and module checks** now runs on a pull request to any base, so a
   pull request stacked on another task branch is checked before it is
   retargeted. Its push trigger is unchanged: `main`, `release/**` and `v*`
@@ -723,7 +732,8 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
-- **Not yet certified.** Clarified and tested how diagnostics degrade when the
+- **Certified on Excel 16.0 build 20430, 64-bit (2026-11-14).** Clarified and
+  tested how diagnostics degrade when the
   first `FailureList` entry cannot be allocated
   ([#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38),
   `ICR-UI-112-P3-04`). This is a documented degradation, not a guarantee of
@@ -788,7 +798,8 @@ measured against that baseline.
   "Cannot run the macro" error. No current demo button takes that path. The
   advisory call checker (`tools/check_vba_calls.py`) found the defect and now
   reports no defect on the repository.
-- **Not yet checked on Excel.** The demo builder's fast mode no longer leaks
+- **Checked on Excel 16.0 build 20430, 64-bit (2026-11-14).** The demo
+  builder's fast mode no longer leaks
   Application state after a partial entry or a failed restoration
   ([#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70)).
   `DEMO_FastMode_Begin` reads `ScreenUpdating`, `EnableEvents`,
@@ -804,7 +815,8 @@ measured against that baseline.
   `Demo_Test_RunCleanupChecks` fail each entry and restoration write in turn
   through new one-shot seams and read the settings back; the source fixtures
   of the gate check the capture, ownership and restoration order.
-- **Not yet checked on Excel.** The demo check-box helpers no longer refuse an
+- **Checked on Excel 16.0 build 20430, 64-bit (2026-11-14).** The demo
+  check-box helpers no longer refuse an
   ActiveX check box before reaching it
   ([#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73)). An ActiveX
   control is also a worksheet shape with the same name, and the old helpers
@@ -819,7 +831,8 @@ measured against that baseline.
   them; scenarios S31-S34 write and read both kinds of check box, both states,
   and every refusal. `Demo_CreateDemoSheet` still builds Forms check boxes,
   and nothing here describes the controls of a published demo workbook.
-- **Not yet checked on Excel.** The demo template no longer resets an existing
+- **Checked on Excel 16.0 build 20430, 64-bit (2026-11-14).** The demo
+  template no longer resets an existing
   worksheet before checking its layout inputs
   ([#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74)). An empty
   `ContentColumns`, for example, used to be refused only after the sheet's
@@ -1001,6 +1014,20 @@ measured against that baseline.
 
 ### 📖 Documentation
 
+- Brought the review finding crosswalk, the erratum to v1.1.2 and the
+  release-blocker tables up to date with the issues as of 2026-11-15 (#48).
+  Every disposition now starts with its issue's state, and the table names the
+  current issue and the current v1.1.2 identifier in explicit columns. The
+  rows record that #45 is closed, that #6's bounded negative control passed
+  under #66, that #38 is certified and open only for its Wiki criterion, and
+  that #37 and #47 are implemented and open for release-time evidence. The
+  demo corrections #70, #73 and #74 are recorded as checked on Excel, and the
+  #38 runtime correction as certified. The README carries an erratum to its
+  v1.1.2 release notes: the recycled-handle and self-test corrections were
+  incomplete, and #43 corrected the self-test at
+  `32baef384ee306082483ea5dcaf40abfe3224118`. The README and INSTALLATION
+  state that a visible title-bar baseline requires `WS_CAPTION`, not merely a
+  non-zero owned-bit value.
 - `docs/GOVERNANCE.md` states when a merge of `main` into the release branch
   needs no new automated review: only when its diff against the release branch
   is empty; the required check still runs, and any other merge-back or rebased
@@ -1371,57 +1398,69 @@ this table is the public resolution layer: every identifier cited anywhere in
 the repository maps here to exactly one issue. Identifiers without a version
 come from the v1.1.0 review, `ICR-UI-111-*` from the v1.1.1 review, and
 `ICR-UI-112-*` from the v1.1.2 review. The v1.1.2 backlog renumbered several
-v1.1.1 findings; the *Current identifier* column gives the new number. The
-v1.1.2 review never assigned P2 numbers 09 and 10, so its P2 rows run from 01
-to 08 and then 11 and 12. The static gate fails if a cited identifier is
-missing from this table or appears in it twice.
+v1.1.1 findings; the *Current v1.1.2 identifier* column gives the new number,
+and both rows name the same issue. The v1.1.2 review never assigned P2 numbers
+09 and 10, so its P2 rows run from 01 to 08 and then 11 and 12.
+
+Two identifiers look alike and are different findings. `ICR-UI-111-P3-08` is
+the CI supply-chain finding, renumbered as `ICR-UI-112-P3-07` (#37).
+`ICR-UI-112-P3-08` is the x86 and second-build certification finding (#51).
+
+Each disposition starts with the state of its issue: *Open*, *Reopened*,
+*Closed* or *Not planned*. An open issue can already be implemented or
+certified; it stays open until every acceptance criterion is met, and the rest
+of the disposition names what remains. A merged implementation is therefore not
+a closure. The static gate fails when a cited identifier has no row or more
+than one, when a disposition starts with any other word, when the *Review*
+column disagrees with the identifier, or when a renumbered row and the row it
+points at name different issues or different states.
 
 The v1.1.2 and v1.1.1 entries below still name the withdrawn review documents
 (`docs/INDEPENDENT_CODE_REVIEW_V1.1.*.md`) as published. Those paths no longer
 exist in the tree; use this table instead.
 
-Dispositions are as of 2026-11-11 and are updated with the issues.
+Dispositions are as of 2026-11-15 and are updated with the issues.
 
-| Cited identifier | Review | Issue | Current identifier | Disposition |
+| Cited identifier | Review | Current issue | Current v1.1.2 identifier | Disposition |
 |---|---|---|---|---|
-| `ICR-UI-P1-01` | v1.1.0 | [#14](https://github.com/danielep71/VBA-EXCEL_UI/issues/14) | — | Corrected in v1.1.1 |
-| `ICR-UI-P2-01` | v1.1.0 | [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21) | — | Characterized in v1.1.1 (`docs/RIBBON_SDI_BEHAVIOR.md`); fail-closed restore continues in #23 |
-| `ICR-UI-P2-02` | v1.1.0 | [#17](https://github.com/danielep71/VBA-EXCEL_UI/issues/17) | — | Corrected in v1.1.1 |
-| `ICR-UI-P2-03` | v1.1.0 | [#16](https://github.com/danielep71/VBA-EXCEL_UI/issues/16) | — | Corrected in v1.1.1 |
-| `ICR-UI-P2-04` | v1.1.0 | [#15](https://github.com/danielep71/VBA-EXCEL_UI/issues/15) | — | Corrected in v1.1.1 |
-| `ICR-UI-P2-05` | v1.1.0 | [#20](https://github.com/danielep71/VBA-EXCEL_UI/issues/20) | — | Corrected in v1.1.1 |
-| `ICR-UI-P2-06` | v1.1.0 | [#19](https://github.com/danielep71/VBA-EXCEL_UI/issues/19) | — | Corrected in v1.1.1 |
-| `ICR-UI-P2-07` | v1.1.0 | [#18](https://github.com/danielep71/VBA-EXCEL_UI/issues/18) | — | Corrected in v1.1.1 |
-| `ICR-UI-P3-03` | v1.1.0 | [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) | — | Corrected on `release/v1.1.3`; closed |
+| `ICR-UI-P1-01` | v1.1.0 | [#14](https://github.com/danielep71/VBA-EXCEL_UI/issues/14) | — | Closed; corrected in v1.1.1 |
+| `ICR-UI-P2-01` | v1.1.0 | [#21](https://github.com/danielep71/VBA-EXCEL_UI/issues/21) | — | Closed; characterized in v1.1.1 (`docs/RIBBON_SDI_BEHAVIOR.md`); fail-closed restore continues in #23 |
+| `ICR-UI-P2-02` | v1.1.0 | [#17](https://github.com/danielep71/VBA-EXCEL_UI/issues/17) | — | Closed; corrected in v1.1.1 |
+| `ICR-UI-P2-03` | v1.1.0 | [#16](https://github.com/danielep71/VBA-EXCEL_UI/issues/16) | — | Closed; corrected in v1.1.1 |
+| `ICR-UI-P2-04` | v1.1.0 | [#15](https://github.com/danielep71/VBA-EXCEL_UI/issues/15) | — | Closed; corrected in v1.1.1 |
+| `ICR-UI-P2-05` | v1.1.0 | [#20](https://github.com/danielep71/VBA-EXCEL_UI/issues/20) | — | Closed; corrected in v1.1.1 |
+| `ICR-UI-P2-06` | v1.1.0 | [#19](https://github.com/danielep71/VBA-EXCEL_UI/issues/19) | — | Closed; corrected in v1.1.1 |
+| `ICR-UI-P2-07` | v1.1.0 | [#18](https://github.com/danielep71/VBA-EXCEL_UI/issues/18) | — | Closed; corrected in v1.1.1 |
+| `ICR-UI-P3-03` | v1.1.0 | [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26) | — | Closed; corrected on `release/v1.1.3` |
 | `ICR-UI-111-P1-01` | v1.1.1 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | `ICR-UI-112-P1-01` | Open (v1.1.3); fail-closed restore certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
-| `ICR-UI-111-P2-01` | v1.1.1 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | `ICR-UI-112-P2-02` | Reopened (v1.1.3): the v1.1.2 closure was incomplete; see the erratum below |
-| `ICR-UI-111-P2-02` | v1.1.1 | [#33](https://github.com/danielep71/VBA-EXCEL_UI/issues/33) | — | Corrected in v1.1.2 |
-| `ICR-UI-111-P2-03` | v1.1.1 | [#34](https://github.com/danielep71/VBA-EXCEL_UI/issues/34) | — | Corrected in v1.1.2 |
+| `ICR-UI-111-P2-01` | v1.1.1 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | `ICR-UI-112-P2-02` | Reopened (v1.1.3); retained-Window generation identity merged (PR #63); the same-numeric-hWnd reuse proof is open; the v1.1.2 closure was incomplete, see the erratum below |
+| `ICR-UI-111-P2-02` | v1.1.1 | [#33](https://github.com/danielep71/VBA-EXCEL_UI/issues/33) | — | Closed; corrected in v1.1.2 |
+| `ICR-UI-111-P2-03` | v1.1.1 | [#34](https://github.com/danielep71/VBA-EXCEL_UI/issues/34) | — | Closed; corrected in v1.1.2 |
 | `ICR-UI-111-P2-04` | v1.1.1 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | `ICR-UI-112-P2-05` | Open (v1.1.3) |
 | `ICR-UI-111-P3-03` | v1.1.1 | [#36](https://github.com/danielep71/VBA-EXCEL_UI/issues/36) | `ICR-UI-112-P3-01` | Open (v1.1.3) |
-| `ICR-UI-111-P3-07` | v1.1.1 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | `ICR-UI-112-P3-04` | Open (v1.1.3) |
-| `ICR-UI-111-P3-08` | v1.1.1 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | `ICR-UI-112-P3-07` | Open (v1.1.3); the CI supply-chain finding, not `ICR-UI-112-P3-08` |
+| `ICR-UI-111-P3-07` | v1.1.1 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | `ICR-UI-112-P3-04` | Open (v1.1.3); corrected and certified on Excel 16.0 build 20430 x64 (2026-11-14); open until the Wiki states the degradation contract (#53) |
+| `ICR-UI-111-P3-08` | v1.1.1 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | `ICR-UI-112-P3-07` | Open (v1.1.3); implemented; open until the v1.1.3 tag run and its release-evidence link exist; the CI supply-chain finding, not `ICR-UI-112-P3-08` |
 | `ICR-UI-112-P1-01` | v1.1.2 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | — | Open (v1.1.3); fail-closed restore certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
 | `ICR-UI-112-P2-01` | v1.1.2 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | — | Closed; certified on Excel 16.0 build 20430 x64 (2026-11-14) |
-| `ICR-UI-112-P2-02` | v1.1.2 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | — | Reopened (v1.1.3) |
-| `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Reopened (v1.1.3); bounded negative control passed (#66); composite caption-mask correction open |
-| `ICR-UI-112-P2-04` | v1.1.2 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | — | Corrected on `release/v1.1.3` (`32baef384ee306082483ea5dcaf40abfe3224118`); closed |
+| `ICR-UI-112-P2-02` | v1.1.2 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | — | Reopened (v1.1.3); retained-Window generation identity merged (PR #63); the same-numeric-hWnd reuse proof is open |
+| `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Reopened (v1.1.3); bounded negative control passed (#66, 2026-11-14); the composite `WS_CAPTION` mask correction is open |
+| `ICR-UI-112-P2-04` | v1.1.2 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | — | Closed; corrected on `release/v1.1.3` at `32baef384ee306082483ea5dcaf40abfe3224118` |
 | `ICR-UI-112-P2-05` | v1.1.2 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | — | Open (v1.1.3) |
 | `ICR-UI-112-P2-06` | v1.1.2 | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | — | Reopened (v1.1.3) |
 | `ICR-UI-112-P2-07` | v1.1.2 | [#46](https://github.com/danielep71/VBA-EXCEL_UI/issues/46) | — | Open (v1.1.3) |
-| `ICR-UI-112-P2-08` | v1.1.2 | [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | — | Open (v1.1.3) |
-| `ICR-UI-112-P2-11` | v1.1.2 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | — | Open (v1.1.3); this crosswalk is part of it |
+| `ICR-UI-112-P2-08` | v1.1.2 | [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | — | Open (v1.1.3); implemented; open until the final v1.1.2-to-v1.1.3 comparison shows no supported facade change |
+| `ICR-UI-112-P2-11` | v1.1.2 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | — | Open (v1.1.3); this crosswalk and the erratum below are part of it |
 | `ICR-UI-112-P2-12` | v1.1.2 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-01` | v1.1.2 | [#36](https://github.com/danielep71/VBA-EXCEL_UI/issues/36) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-02` | v1.1.2 | [#31](https://github.com/danielep71/VBA-EXCEL_UI/issues/31) | — | Open (v1.1.3) |
 | `ICR-UI-112-P3-03` | v1.1.2 | [#50](https://github.com/danielep71/VBA-EXCEL_UI/issues/50) | — | Open (v1.1.3) |
-| `ICR-UI-112-P3-04` | v1.1.2 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | — | Open (v1.1.3) |
-| `ICR-UI-112-P3-05` | v1.1.2 | [#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27) | — | Corrected on `release/v1.1.3`; certified on Excel 16.0 build 20430 x64 (2026-11-06); closed |
+| `ICR-UI-112-P3-04` | v1.1.2 | [#38](https://github.com/danielep71/VBA-EXCEL_UI/issues/38) | — | Open (v1.1.3); corrected and certified on Excel 16.0 build 20430 x64 (2026-11-14); open until the Wiki states the degradation contract (#53) |
+| `ICR-UI-112-P3-05` | v1.1.2 | [#27](https://github.com/danielep71/VBA-EXCEL_UI/issues/27) | — | Closed; corrected on `release/v1.1.3`; certified on Excel 16.0 build 20430 x64 (2026-11-06) |
 | `ICR-UI-112-P3-06` | v1.1.2 | [#28](https://github.com/danielep71/VBA-EXCEL_UI/issues/28) | — | Open (v1.1.3) |
-| `ICR-UI-112-P3-07` | v1.1.2 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | — | Open (v1.1.3) |
+| `ICR-UI-112-P3-07` | v1.1.2 | [#37](https://github.com/danielep71/VBA-EXCEL_UI/issues/37) | — | Open (v1.1.3); implemented; open until the v1.1.3 tag run and its release-evidence link exist |
 | `ICR-UI-112-P3-08` | v1.1.2 | [#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51) | — | Not planned: support narrowed to 64-bit Office, the only certified bitness; the x86 and second-build finding, not `ICR-UI-111-P3-08` |
-| `ICR-UI-112-P3-09` | v1.1.2 | [#52](https://github.com/danielep71/VBA-EXCEL_UI/issues/52) | — | Corrected on `release/v1.1.3`; tooling only, no Excel run needed; closed |
-| `ICR-UI-112-P3-10` | v1.1.2 | [#29](https://github.com/danielep71/VBA-EXCEL_UI/issues/29) | — | Corrected on `release/v1.1.3`; tooling only, no Excel run needed; closed |
+| `ICR-UI-112-P3-09` | v1.1.2 | [#52](https://github.com/danielep71/VBA-EXCEL_UI/issues/52) | — | Closed; corrected on `release/v1.1.3`; tooling only, no Excel run needed |
+| `ICR-UI-112-P3-10` | v1.1.2 | [#29](https://github.com/danielep71/VBA-EXCEL_UI/issues/29) | — | Closed; corrected on `release/v1.1.3`; tooling only, no Excel run needed |
 | `ICR-UI-112-P3-11` | v1.1.2 | [#53](https://github.com/danielep71/VBA-EXCEL_UI/issues/53) | — | Open (v1.1.3) |
 
 ### 📝 Erratum to v1.1.2
@@ -1443,8 +1482,10 @@ The captionless baseline (`ICR-UI-112-P2-03`,
 claim: the v1.1.2 entry does not list it. It is recorded here because #6 is
 reopened for v1.1.3. The title-bar recovery fallback covers an all-zero
 baseline, not a non-zero baseline without `WS_CAPTION`, and a visible baseline
-requires `WS_CAPTION`. Its bounded negative control is tracked in
-[#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66).
+requires `WS_CAPTION`. Its bounded negative control passed on 2026-11-14
+under [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66), which is
+closed; the complete composite `WS_CAPTION` mask correction remains open
+under #6.
 
 ### ⚠️ Release-blocker status
 
@@ -1458,14 +1499,14 @@ practical closure status of any item that has since been reopened.
 | Issue | Required v1.1.3 outcome | Current status |
 |:---:|---|---|
 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | Ribbon wrong-target restoration fails closed | Certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
-| [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | Pair Excel Window and native hWnd identity defensibly | Closed |
-| [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened |
-| [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Reopened |
+| [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | Pair Excel Window and native hWnd identity defensibly | Closed; certified on Excel 16.0 build 20430 x64 (2026-11-14) |
+| [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Reopened; retained-Window generation identity merged; same-numeric-hWnd reuse proof open |
+| [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Reopened; bounded negative control passed (#66); composite caption-mask correction open |
 | [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) | Bounded title-bar mutation control that fails instead of hanging | Closed |
-| [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Implemented with harness scenarios S15-S30; not yet checked on Excel |
+| [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Closed; Excel harness passed 44 scenarios and 295 checks on build 20430 x64 (2026-11-14) |
 | [#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71) | Demo template and sheet-reset handlers do not recatch their own re-raised errors | Closed; Excel harness passed 14 scenarios and 89 checks on build 20430 x64 (2026-11-06) |
-| [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Implemented with harness scenarios S31-S34; not yet checked on Excel |
-| [#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74) | Demo template validates its layout inputs before resetting the worksheet | Implemented with harness scenarios S35-S44; not yet checked on Excel |
+| [#73](https://github.com/danielep71/VBA-EXCEL_UI/issues/73) | Demo checkbox helpers reach their OLE fallback for ActiveX controls | Closed; Excel harness passed 44 scenarios and 295 checks on build 20430 x64 (2026-11-14) |
+| [#74](https://github.com/danielep71/VBA-EXCEL_UI/issues/74) | Demo template validates its layout inputs before resetting the worksheet | Closed; Excel harness passed 44 scenarios and 295 checks on build 20430 x64 (2026-11-14) |
 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | Preserve caller-owned snapshots across all destructive-runner refusals | Closed; implementation, regression and mutation evidence verified |
 
 #### Certification and release assurance
@@ -1479,7 +1520,7 @@ practical closure status of any item that has since been reopened.
 | [#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47) | Full public API contract gate | Implemented; open until the release diff shows no supported facade change |
 | [#48](https://github.com/danielep71/VBA-EXCEL_UI/issues/48) | Accurate v1.1.2/v1.1.3 closure documentation | Open |
 | [#49](https://github.com/danielep71/VBA-EXCEL_UI/issues/49) | Exact-head review and certification gate | Open |
-| [#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150) | Markdown scanner handles fenced code inside list containers | Implemented; open until merged |
+| [#150](https://github.com/danielep71/VBA-EXCEL_UI/issues/150) | Markdown scanner handles fenced code inside list containers | Closed (#185) |
 | [#175](https://github.com/danielep71/VBA-EXCEL_UI/issues/175) | Release guides verify the tag before pushing it and name `tools/verify.py` and 64-bit-only certification | Closed (#179) |
 
 P1 and P2 items block release until implementation, regression coverage,
