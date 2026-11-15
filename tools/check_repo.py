@@ -1015,9 +1015,10 @@ def check_workflow_policy_selftest() -> None:
 
 
 # --------------------------------------------------------------------------
-# Branch coverage. Which branches Dependabot updates and CodeQL analyses is
-# configured by hand, and a branch that is renamed, added or forgotten loses
-# its updates or its analysis without anything turning red.
+# Branch coverage. Which branches Dependabot updates, CodeQL analyses and the
+# required check runs on is configured by hand, and a branch that is renamed,
+# added or forgotten loses its updates, its analysis or its evidence without
+# anything turning red.
 
 DEPENDABOT_CONFIG = ".github/dependabot.yml"
 CODEQL_WORKFLOW = ".github/workflows/codeql.yml"
@@ -1032,9 +1033,13 @@ CODEQL_BRANCHES = {
     "pull_request": ("main", "release/**"),
 }
 
-# The only filter the check reads. Another one (paths, branches-ignore, types)
-# can narrow what runs in ways the check cannot judge, so it is reported.
-CODEQL_FILTER_KEYS = ("branches",)
+# The push filters the required check must include. Release verification
+# (tools/release.py verify) reads the run on a tag's commit, which the push to
+# main and the tag push both start.
+STATIC_CHECKS_PUSH = {
+    "branches": ("main", "release/**"),
+    "tags": ("v*",),
+}
 
 # GitHub reads a branch pattern starting with this as an exclusion.
 NEGATIVE_PATTERN_PREFIX = "!"
@@ -1367,13 +1372,13 @@ def dependabot_findings(rel: str, text: str, version: str) -> list[str]:
     return findings
 
 
-def codeql_findings(rel: str, text: str) -> list[str]:
-    """Return every branch-coverage problem in the CodeQL workflow triggers."""
+def workflow_triggers(rel: str, text: str) -> tuple[dict[str, YamlValue] | None, list[str]]:
+    """Return a workflow's top-level 'on' mapping, or the findings that stop it."""
     lines = yaml_lines(text)
     on_at = next((i for i, (_, ind, content) in enumerate(lines)
                   if ind == 0 and ON_KEY_RE.match(content)), None)
     if on_at is None:
-        return [f"{rel}: no 'on:' block mapping; the triggers cannot be read"]
+        return None, [f"{rel}: no 'on:' block mapping; the triggers cannot be read"]
 
     block: list[YamlLine] = []
     for line in lines[on_at + 1:]:
@@ -1384,73 +1389,164 @@ def codeql_findings(rel: str, text: str) -> list[str]:
     try:
         triggers = YamlReader(rel, block).parse()
     except YamlShapeError as exc:
-        return [str(exc)]
+        return None, [str(exc)]
 
     if not isinstance(triggers, dict):
-        return [f"{rel}: 'on' must be a block mapping of events"]
+        return None, [f"{rel}: 'on' must be a block mapping of events"]
+    return triggers, []
 
+
+def pattern_findings(rel: str, event: str, key: str, patterns: YamlValue,
+                     required: tuple[str, ...]) -> list[str]:
+    """Return the problems with one list of branch or tag patterns.
+
+    GitHub evaluates patterns in order, and a later negative pattern ('!main')
+    excludes a ref an earlier one included. Membership alone would then report
+    coverage that does not exist, so a negative pattern is rejected rather than
+    evaluated.
+    """
+    if patterns is None:
+        patterns = []
+    if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
+        return [f"{rel}: on.{event}.{key} must be a list of patterns"]
     findings: list[str] = []
+    for pattern in patterns:
+        assert isinstance(pattern, str)
+        if pattern.startswith(NEGATIVE_PATTERN_PREFIX):
+            findings.append(
+                f"{rel}: on.{event}.{key} has the negative pattern {pattern!r}; "
+                f"it can exclude a ref listed before it, and the check does "
+                f"not evaluate pattern order")
+    for pattern in required:
+        if pattern not in patterns:
+            findings.append(f"{rel}: on.{event}.{key} does not include {pattern!r}")
+    return findings
+
+
+def filter_findings(rel: str, event: str, trigger: YamlValue,
+                    required: dict[str, tuple[str, ...]],
+                    unfiltered: str | None = None) -> list[str]:
+    """Return the problems with one event's filters.
+
+    Only the filters named in required are read. Another one (paths,
+    branches-ignore, types) can narrow what runs in ways the check cannot
+    judge, so it is reported. An event without filters runs on every ref:
+    that passes unless unfiltered says why it must not.
+    """
+    if trigger is None:
+        return [] if unfiltered is None else [f"{rel}: on.{event} has no filter; {unfiltered}"]
+    if not isinstance(trigger, dict):
+        return [f"{rel}: on.{event} must be a mapping of filters"]
+
+    findings = [
+        f"{rel}: on.{event}.{key} is a filter this check does not read; teach "
+        f"tools/check_repo.py about it before relying on it"
+        for key in trigger if key not in required
+    ]
+    for key, patterns in required.items():
+        findings += pattern_findings(rel, event, key, trigger.get(key), patterns)
+    return findings
+
+
+def codeql_findings(rel: str, text: str) -> list[str]:
+    """Return every branch-coverage problem in the CodeQL workflow triggers."""
+    triggers, findings = workflow_triggers(rel, text)
+    if triggers is None:
+        return findings
+
     for event, required in CODEQL_BRANCHES.items():
         if event not in triggers:
             findings.append(f"{rel}: on.{event} is missing; CodeQL must analyse "
                             f"{event} events for {', '.join(required)}")
         else:
-            findings += codeql_trigger_findings(rel, event, triggers[event], required)
+            findings += filter_findings(rel, event, triggers[event], {"branches": required})
     return findings
 
 
-def codeql_trigger_findings(rel: str, event: str, trigger: YamlValue,
-                            required: tuple[str, ...]) -> list[str]:
-    """Return the problems with one CodeQL event's branch filter.
+def static_checks_findings(rel: str, text: str) -> list[str]:
+    """Return every trigger problem in the workflow of the required check.
 
-    GitHub evaluates branch patterns in order, and a later negative pattern
-    ('!main') excludes a branch an earlier one included. Membership alone
-    would then report coverage that does not exist, so a negative pattern is
-    rejected rather than evaluated.
+    A pull request must get the required check whatever its base, so that a
+    pull request stacked on a task branch is checked before it is retargeted:
+    on.pull_request takes no filter. Pushes run only on main, release/** and
+    v* tags, so a push to a task branch does not repeat its pull-request run,
+    and the push run on main is the one release verification reads.
     """
-    if trigger is None:
-        return []                    # no filter: every branch is analysed
-    if not isinstance(trigger, dict):
-        return [f"{rel}: on.{event} must be a mapping with a branches list"]
-
-    findings = [
-        f"{rel}: on.{event}.{key} is a filter this check does not read; teach "
-        f"tools/check_repo.py about it before relying on it"
-        for key in trigger if key not in CODEQL_FILTER_KEYS
-    ]
-    branches = trigger.get("branches")
-    if not isinstance(branches, list) or not all(isinstance(b, str) for b in branches):
-        findings.append(f"{rel}: on.{event}.branches must be a list of branch names")
+    triggers, findings = workflow_triggers(rel, text)
+    if triggers is None:
         return findings
-    for branch in branches:
-        assert isinstance(branch, str)
-        if branch.startswith(NEGATIVE_PATTERN_PREFIX):
-            findings.append(
-                f"{rel}: on.{event}.branches has the negative pattern {branch!r}; "
-                f"it can exclude a branch listed before it, and the check does "
-                f"not evaluate pattern order")
-    for branch in required:
-        if branch not in branches:
-            findings.append(f"{rel}: on.{event}.branches does not include {branch!r}")
+
+    if "pull_request" not in triggers:
+        findings.append(f"{rel}: on.pull_request is missing; every pull request "
+                        f"needs the required check")
+    elif isinstance(triggers["pull_request"], dict):
+        keys = ", ".join(triggers["pull_request"])
+        findings.append(
+            f"{rel}: on.pull_request filters {keys}; the required check must run "
+            f"on a pull request to any base, so the trigger takes no filter")
+    elif triggers["pull_request"] is not None:
+        findings.append(f"{rel}: on.pull_request must be an empty mapping")
+
+    if "push" not in triggers:
+        findings.append(f"{rel}: on.push is missing; release verification reads "
+                        f"the required check from the push run on main")
+    else:
+        findings += filter_findings(
+            rel, "push", triggers["push"], STATIC_CHECKS_PUSH,
+            unfiltered="a push to a task branch would repeat its pull-request run")
+    return findings
+
+
+def push_branch_findings(rel: str, text: str) -> list[str]:
+    """Return the problems with a workflow's push branch filter.
+
+    A workflow that limits its push trigger to some branches must keep main
+    among them, or its runs on the default branch silently stop. A workflow
+    without a push trigger, or whose push trigger has no branch filter, is
+    not affected.
+    """
+    triggers, findings = workflow_triggers(rel, text)
+    if triggers is None:
+        return findings
+    push = triggers.get("push")
+    if not isinstance(push, dict):
+        return []
+    if "branches-ignore" in push:
+        findings.append(f"{rel}: on.push.branches-ignore is a filter this check "
+                        f"does not read; list the branches with on.push.branches")
+    if "branches" in push:
+        findings += pattern_findings(rel, "push", "branches", push["branches"], ("main",))
     return findings
 
 
 def check_branch_coverage() -> None:
-    """Hold Dependabot and CodeQL to the default and the open release branch."""
+    """Hold Dependabot and the workflows to the default and the release branches."""
     if not os.path.isfile(os.path.join(REPO, "VERSION")):
         return                       # already reported by required files
 
     version = read("VERSION").decode("utf-8").strip()
 
-    for rel in (DEPENDABOT_CONFIG, CODEQL_WORKFLOW):
+    # Each of these has rules of its own, which include main where it matters.
+    dedicated: dict[str, Callable[[str, str], list[str]]] = {
+        DEPENDABOT_CONFIG: lambda rel, text: dependabot_findings(rel, text, version),
+        CODEQL_WORKFLOW: codeql_findings,
+        GATE_WORKFLOW: static_checks_findings,
+    }
+    for rel, rule in dedicated.items():
         if not os.path.isfile(os.path.join(REPO, rel)):
             fail("branch-coverage", f"{rel} is missing")
             continue
-        text = read(rel).decode("utf-8")
-        found = (dependabot_findings(rel, text, version) if rel == DEPENDABOT_CONFIG
-                 else codeql_findings(rel, text))
-        for finding in found:
+        for finding in rule(rel, read(rel).decode("utf-8")):
             fail("branch-coverage", finding)
+
+    tracked = git_tracked_files()
+    if tracked is None:
+        return
+    for rel in tracked:
+        if (rel.startswith(".github/workflows/") and rel.endswith((".yml", ".yaml"))
+                and rel not in dedicated):
+            for finding in push_branch_findings(rel, read(rel).decode("utf-8")):
+                fail("branch-coverage", finding)
 
 
 def dependabot_entry(template: str, target: str | None = None) -> str:
@@ -1642,6 +1738,122 @@ CODEQL_SELFTEST_CASES = [
 ]
 
 
+STATIC_CHECKS_TRIGGERS = """\
+name: Static checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  static:
+    name: Repository and module checks
+    runs-on: ubuntu-24.04
+"""
+
+STATIC_CHECKS_PUSH_BLOCK = """\
+  push:
+    branches:
+      - main
+      - 'release/**'
+    tags:
+      - 'v*'
+"""
+
+STATIC_CHECKS_SELFTEST_CASES = [
+    ("the tracked triggers pass", STATIC_CHECKS_TRIGGERS, 0),
+    ("a pull-request branch filter is rejected",
+     STATIC_CHECKS_TRIGGERS.replace("  pull_request:\n",
+                                    "  pull_request:\n    branches:\n      - main\n"),
+     1),
+    ("a pull-request path filter is rejected",
+     STATIC_CHECKS_TRIGGERS.replace("  pull_request:\n",
+                                    "  pull_request:\n    paths:\n      - src/**\n"),
+     1),
+    ("a missing pull-request trigger is rejected",
+     STATIC_CHECKS_TRIGGERS.replace("  pull_request:\n", ""),
+     1),
+    ("a push filter without main is rejected",
+     STATIC_CHECKS_TRIGGERS.replace("      - main\n      - 'release/**'\n",
+                                    "      - 'release/**'\n"),
+     1),
+    ("a push filter without release/** is rejected",
+     STATIC_CHECKS_TRIGGERS.replace("      - main\n      - 'release/**'\n",
+                                    "      - main\n"),
+     1),
+    ("a push filter without v* tags is rejected",
+     STATIC_CHECKS_TRIGGERS.replace("    tags:\n      - 'v*'\n", ""),
+     1),
+    ("a push filter that excludes main again is rejected",
+     STATIC_CHECKS_TRIGGERS.replace("      - 'release/**'\n",
+                                    "      - 'release/**'\n      - '!main'\n"),
+     1),
+    ("an unfiltered push trigger is rejected",
+     STATIC_CHECKS_TRIGGERS.replace(STATIC_CHECKS_PUSH_BLOCK, "  push:\n"),
+     1),
+    ("a missing push trigger is rejected",
+     STATIC_CHECKS_TRIGGERS.replace(STATIC_CHECKS_PUSH_BLOCK, ""),
+     1),
+    ("a push path filter is reported",
+     STATIC_CHECKS_TRIGGERS.replace("  push:\n", "  push:\n    paths:\n      - src/**\n"),
+     1),
+]
+
+PUSH_WORKFLOW = """\
+name: Example
+
+on:
+  pull_request:
+    paths:
+      - .github/labels.json
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - .github/labels.json
+  workflow_dispatch:
+"""
+
+PUSH_BRANCH_SELFTEST_CASES = [
+    ("a push filter with main passes", PUSH_WORKFLOW, 0),
+    ("a push trigger without a branch filter passes",
+     PUSH_WORKFLOW.replace("    branches:\n      - main\n      - 'release/**'\n", ""),
+     0),
+    ("a tag-only push trigger passes",
+     PUSH_WORKFLOW.replace("    branches:\n      - main\n      - 'release/**'\n",
+                           "    tags:\n      - 'v*'\n"),
+     0),
+    ("a workflow without a push trigger passes",
+     PUSH_WORKFLOW.replace("  push:\n    branches:\n      - main\n      - 'release/**'\n"
+                           "    paths:\n      - .github/labels.json\n", ""),
+     0),
+    ("a push filter without main is rejected",
+     PUSH_WORKFLOW.replace("      - main\n      - 'release/**'\n", "      - 'release/**'\n"),
+     1),
+    ("a push filter that excludes main again is rejected",
+     PUSH_WORKFLOW.replace("      - 'release/**'\n", "      - 'release/**'\n      - '!main'\n"),
+     1),
+    ("a push branches-ignore filter is reported",
+     PUSH_WORKFLOW.replace("    branches:\n      - main\n      - 'release/**'\n",
+                           "    branches-ignore:\n      - 'feature/**'\n"),
+     1),
+    ("a flow sequence is reported, not guessed at",
+     PUSH_WORKFLOW.replace("    branches:\n      - main\n      - 'release/**'\n",
+                           "    branches: [main]\n"),
+     1),
+    ("a missing on block is reported",
+     PUSH_WORKFLOW.replace("on:\n", "triggers:\n"),
+     1),
+]
+
+
 def check_branch_coverage_selftest() -> None:
     """Run the branch-coverage rules against their own fixtures.
 
@@ -1655,12 +1867,20 @@ def check_branch_coverage_selftest() -> None:
                  f"{label}: expected {expected} finding(s), got {len(found)}"
                  + (f" | {found}" if found else ""))
 
-    for label, text, expected in CODEQL_SELFTEST_CASES:
-        found = codeql_findings("fixture.yml", text)
-        if len(found) != expected:
-            fail("branch-coverage-selftest",
-                 f"{label}: expected {expected} finding(s), got {len(found)}"
-                 + (f" | {found}" if found else ""))
+    workflow_cases: list[tuple[Callable[[str, str], list[str]],
+                               list[tuple[str, str, int]]]] = [
+        (codeql_findings, CODEQL_SELFTEST_CASES),
+        (static_checks_findings, STATIC_CHECKS_SELFTEST_CASES),
+        (push_branch_findings, PUSH_BRANCH_SELFTEST_CASES),
+    ]
+    for rule, cases in workflow_cases:
+        for label, text, expected in cases:
+            found = rule("fixture.yml", text)
+            if len(found) != expected:
+                fail("branch-coverage-selftest",
+                     f"{rule.__name__}: {label}: expected {expected} finding(s), "
+                     f"got {len(found)}" + (f" | {found}" if found else ""))
+
 
 # --------------------------------------------------------------------------
 # Characters a Markdown renderer treats as escapable. A backslash before any of

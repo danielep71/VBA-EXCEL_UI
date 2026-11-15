@@ -441,7 +441,8 @@ class BranchCoverage(GateTestCase):
     check = "branch coverage"
     DEPENDABOT = ".github/dependabot.yml"
     CODEQL = ".github/workflows/codeql.yml"
-    ENTRY = re.compile(r"^  - package-ecosystem:", re.M)
+    LABELS_SYNC = ".github/workflows/labels-sync.yml"
+    ENTRY =re.compile(r"^  - package-ecosystem:", re.M)
 
     def version(self) -> str:
         return self.repo.read_text("VERSION").strip()
@@ -526,12 +527,40 @@ class BranchCoverage(GateTestCase):
         self.repo.remove(self.CODEQL)
         self.assertFails(f"{self.CODEQL} is missing")
 
+    def test_fails_when_the_required_check_filters_pull_requests(self) -> None:
+        self.repo.replace(WORKFLOW, "  pull_request:\n  push:",
+                          "  pull_request:\n    branches:\n      - main\n  push:")
+        self.assertFails(f"{WORKFLOW}: on.pull_request filters branches")
+
+    def test_fails_when_a_push_filter_omits_main(self) -> None:
+        self.repo.replace(self.LABELS_SYNC, "  push:\n    branches:\n      - main\n",
+                          "  push:\n    branches:\n")
+        self.assertFails(f"{self.LABELS_SYNC}: on.push.branches does not include 'main'")
+
+    def test_fails_when_the_required_check_push_omits_release_branches(self) -> None:
+        self.repo.replace(WORKFLOW, "      - main\n      - 'release/**'\n    tags:",
+                          "      - main\n    tags:")
+        self.assertFails(f"{WORKFLOW}: on.push.branches does not include 'release/**'")
+
+    def test_fails_when_the_required_check_push_omits_tags(self) -> None:
+        self.repo.replace(WORKFLOW, "    tags:\n      - 'v*'\n", "")
+        self.assertFails(f"{WORKFLOW}: on.push.tags does not include 'v*'")
+
 
 class BranchCoverageSelfTest(GateTestCase):
     check = "branch coverage self-test"
 
     def test_passes_on_the_current_tree(self) -> None:
         self.assertPasses()
+
+    def test_fails_when_the_required_check_push_is_not_read(self) -> None:
+        with patch.object(check_repo, "STATIC_CHECKS_PUSH",
+                          {"branches": ("main",), "tags": ("v*",)}):
+            self.assertFails("a push filter without release/** is rejected")
+
+    def test_fails_when_any_push_filter_is_accepted(self) -> None:
+        with patch.object(check_repo, "push_branch_findings", lambda rel, text: []):
+            self.assertFails("a push filter without main is rejected")
 
     def test_fails_when_no_setting_is_compared(self) -> None:
         with patch.object(check_repo, "MIRRORED_KEYS", ()):
