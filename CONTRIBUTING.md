@@ -360,8 +360,11 @@ Two checks hold the documentation to the repository:
   as `<sha>` are not checked. When you rename a tool, an option or a
   parameter, update the documentation in the same change.
 
-CI runs the same command on every pull request and writes its table of results
-to the job summary. It cannot execute VBA — a hosted runner has no Excel — so
+CI runs the same command on every pull request, whatever its base, and writes
+its table of results to the job summary. A pull request stacked on another
+task branch is therefore checked before it is retargeted. Pushes run it only on
+`main`, `release/**` and `v*` tags: a push to a task branch starts no run,
+because its pull request already runs the check. It cannot execute VBA — a hosted runner has no Excel — so
 certification remains a manual step on a real host, and the two are
 complementary rather than alternatives.
 

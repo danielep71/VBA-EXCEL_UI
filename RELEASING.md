@@ -313,7 +313,8 @@ checks that the tag is annotated and equals `VERSION` at the tagged commit, that
 reachable from `origin/main`, which is why `git fetch origin main` comes first.
 It then asks GitHub for the **Repository and module checks** run on the tagged
 commit's SHA. That commit is already on `main`, and every push to `main` runs
-the check, so wait until that run has concluded.
+the check, so wait until that run has concluded. The gate's **branch
+coverage** check keeps `main` in that push trigger.
 
 Push the tag only when `verify` ends with `RESULT: PASS`:
 

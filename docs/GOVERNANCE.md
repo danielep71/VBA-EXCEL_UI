@@ -42,6 +42,16 @@ its copy. To change a ruleset, change it in the repository settings, run
 `python3 tools/check_rulesets.py --repository danielep71/VBA-EXCEL_UI --export`,
 and commit the result in a pull request that explains why.
 
+**Repository and module checks** runs on every pull request, whatever its
+base, so you can stack a pull request on another task branch and get the
+check before it is retargeted. Its push trigger runs only on `main`,
+`release/**` and `v*` tags, and the push run on `main` is the one
+`tools/release.py verify` finds on a tag's commit. The workflow has no
+job-level `if`: a skipped run of a required check would count as passing. The
+gate's **branch coverage** check fails when the workflow filters pull
+requests, when its push trigger omits `main`, `release/**` or `v*` tags, and
+when any workflow's push branch filter omits `main`.
+
 A pull request that merges `main` into the release branch needs no new
 automated review when its diff against the release branch is empty: the merge
 then only joins the histories, and the changes it carries were reviewed in the

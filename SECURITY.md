@@ -330,6 +330,8 @@ The repository currently contains these workflows:
 The static workflow:
 
 - runs on a GitHub-hosted Ubuntu runner;
+- runs on every pull request, whatever its base, and on pushes to `main`,
+  `release/**` and `v*` tags only;
 - checks exported source as text;
 - uses the repository’s Python tooling;
 - sets up a pinned Node.js release and installs only Ruff, mypy and their
@@ -351,7 +353,8 @@ hand.
 
 The issue workflows are documented in
 [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md). Only **Sync issue labels** has
-`issues: write`, and it reconciles labels only from the default branch; only
+`issues: write`, and it reconciles labels only from the default branch; its
+push trigger runs only on `main` and `release/**`. Only
 **Keep milestones issue-only** has `pull-requests: write`, runs from the base
 branch through `pull_request_target`, and never checks out or runs
 pull-request code. **Detect issue-label drift** and **Issue triage** are

@@ -8,9 +8,14 @@ name: Keep milestones issue-only
 
 on:
   push:
-    paths: [.github/workflows/pr-milestones.yml]
+    paths:
+      - .github/workflows/pr-milestones.yml
   pull_request_target:
-    types: [opened, reopened, edited, milestoned]
+    types:
+      - opened
+      - reopened
+      - edited
+      - milestoned
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
