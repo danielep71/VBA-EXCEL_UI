@@ -132,8 +132,9 @@ corrections:
   one (#129);
 - not yet checked on Excel: demo fast mode restores every setting it changed
   (#70), the demo check-box helpers reach ActiveX check boxes (#73), the
-  demo template checks its layout before resetting a worksheet (#74), and the
-  demo's title-bar read captures `Err.LastDllError` immediately (#144).
+  demo template checks its layout before resetting a worksheet (#74), the
+  demo's title-bar read captures `Err.LastDllError` immediately (#144), and a
+  demo build no longer queries the printer driver for page breaks (#187).
 
 Title-bar capture and persistent frame state now pair each native hWnd with the
 Excel Window that owns it. Show now uses baseline state and readback, but the
@@ -829,6 +830,22 @@ measured against that baseline.
   Err.LastDllError=<n>; hWnd=<h>`. The gate's `WinAPI error capture` check
   now covers `demo/` as well as `src/` and `test/`, and its fixtures prove
   that a capture defect in a module of each folder is reported.
+- **Not yet checked on Excel.** Building the demo sheet no longer makes Excel
+  query the printer driver for page breaks the template never adds
+  ([#187](https://github.com/danielep71/VBA-EXCEL_UI/issues/187)).
+  `DEMO_Sheet_BuildTemplate` now resets the sheet with
+  `RemovePageBreaks:=False`, so a rebuild keeps manual page breaks that were
+  already on the sheet. `DEMO_Sheet_Reset` with the default
+  `RemovePageBreaks:=True` still removes them through `ResetAllPageBreaks`.
+  Both write `DisplayPageBreaks` only when it reads `True`, through the new
+  `DEMO_Sheet_HidePageBreaks`. Scenarios S45-S48 of
+  `Demo_Test_RunCleanupChecks` check that a reset removes a manual row and
+  column break, leaves hidden indicators unwritten and hides shown ones with
+  one write, and that a rebuild neither calls `ResetAllPageBreaks` nor writes
+  `DisplayPageBreaks` and keeps the break; the source fixtures of the gate
+  check the same contract. Whether reading `DisplayPageBreaks` avoids the
+  printer query still needs an Excel host with a slow or offline default
+  printer.
 - Fixed the active title-bar frame being trusted without the host agreeing it
   is active. Resolving `Window.hWnd` from the `Window` that
   `Application.ActiveWindow` just returned makes the pair internally

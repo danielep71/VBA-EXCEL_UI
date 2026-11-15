@@ -372,9 +372,19 @@ class DemoCleanupRegression(GateTestCase):
 
     def test_fails_when_the_template_resets_before_checking_its_layout(self) -> None:
         limits = "        MaxCol = LimitSheet.Columns.Count\r\n"
-        self.repo.replace(BUILDER, "        DEMO_Sheet_Reset WS\r\n", "")
-        self.repo.replace(BUILDER, limits, limits + "        DEMO_Sheet_Reset WS\r\n")
+        reset = "        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\r\n"
+        self.repo.replace(BUILDER, reset, "")
+        self.repo.replace(BUILDER, limits, limits + reset)
         self.assertFails("template: every layout check must raise before the worksheet is reset")
+
+    def test_fails_when_the_template_removes_page_breaks_again(self) -> None:
+        self.repo.replace(BUILDER, "        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\r\n",
+                          "        DEMO_Sheet_Reset WS\r\n")
+        self.assertFails("page breaks: the template must keep manual breaks and hide shown indicators after its reset")
+
+    def test_fails_when_display_page_breaks_is_written_unconditionally(self) -> None:
+        self.repo.replace(BUILDER, "            If Shown Then\r\n", "            If True Then\r\n")
+        self.assertFails("page breaks: DisplayPageBreaks must be read first and written, counted, only when True")
 
 
 class PublicApiManifest(GateTestCase):

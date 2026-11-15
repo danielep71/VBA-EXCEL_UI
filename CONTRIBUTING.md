@@ -471,7 +471,10 @@ exact tested commit. When you change fast mode, fail each entry and
 restoration write in turn and read back the Application settings. When you
 change the check-box helpers, read and write real Forms and ActiveX controls.
 When you change the template's validation, check that an invalid request
-leaves an existing sheet and the sheet count unchanged.
+leaves an existing sheet and the sheet count unchanged. When you change how
+the reset or the template handles page breaks, check that a reset removes
+manual breaks and that the template neither removes them nor writes
+`DisplayPageBreaks` when the indicators are hidden.
 
 `demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
 from the commit under test:
@@ -482,7 +485,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VB
 
 Open it, run **Debug → Compile VBAProject**, and run
 `Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
-creates a temporary workbook, runs forty-four scenarios on sheets of its own,
+creates a temporary workbook, runs forty-eight scenarios on sheets of its own,
 closes the workbook without saving and prints one `PASS` or `FAIL` line per
 scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
 `DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
@@ -501,8 +504,10 @@ session's calculation mode, or automatic calculation when the session is
 manual, which recalculates the open workbooks. Scenario S15 prints an `INFO`
 line with the entry, fast-mode and exit values. Scenarios S32-S34 add ActiveX
 controls to the temporary workbook, so they fail when ActiveX controls are
-disabled in the Trust Center. Record the commit, Excel build and bitness with
-the Immediate window output.
+disabled in the Trust Center. Scenarios S45-S48 set manual page breaks or show
+the page-break indicators on their own sheets, so Excel consults the default
+printer driver for those sheets. Record the commit, Excel build and bitness
+with the Immediate window output.
 
 ### Evidence principles
 

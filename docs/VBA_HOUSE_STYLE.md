@@ -235,6 +235,14 @@ Rebuilding an existing worksheet stays destructive: once the inputs are valid,
 `DEMO_Sheet_Reset` clears it, and a later failure is reported without undoing
 that reset.
 
+Removing manual page breaks (`ResetAllPageBreaks`) and writing
+`DisplayPageBreaks` make Excel lay the sheet out through the default printer
+driver, which waits on a slow, offline or network printer. The template adds no
+manual page breaks, so it resets with `RemovePageBreaks:=False` and keeps any
+that exist. `DEMO_Sheet_HidePageBreaks` reads `DisplayPageBreaks` and writes it
+only when it is `True`. An explicit `DEMO_Sheet_Reset` with the default
+`RemovePageBreaks:=True` still removes manual breaks.
+
 ## Excel state ownership
 
 Assume these surfaces belong to the caller or host unless the project explicitly

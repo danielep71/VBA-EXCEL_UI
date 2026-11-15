@@ -8,8 +8,9 @@ Option Explicit
 '   Bounded Excel harness for the single-pass cleanup of DEMO_Sheet_Reset and
 '   DEMO_Sheet_BuildTemplate (#71), for the fast-mode Application-state
 '   scope of M_DEMO_BUILDER (#70), for its Forms and ActiveX check-box
-'   helpers (#73), and for the layout validation and owned-sheet cleanup of
-'   DEMO_Sheet_BuildTemplate (#74).
+'   helpers (#73), for the layout validation and owned-sheet cleanup of
+'   DEMO_Sheet_BuildTemplate (#74), and for the page-break handling of both
+'   procedures (#187).
 '
 ' WHY THIS EXISTS
 '   The demo-cleanup source fixtures in tools/ check the shape of the cleanup
@@ -69,6 +70,10 @@ Option Explicit
 '   S42  BuildTemplate rename failure of a new sheet; no stray sheet
 '   S43  BuildTemplate name held by a chart sheet; nothing created
 '   S44  BuildTemplate valid rebuild of a populated sheet
+'   S45  Reset removes a manual row break and a manual column break
+'   S46  Reset leaves hidden page-break indicators unwritten
+'   S47  Reset hides shown page-break indicators with one write
+'   S48  BuildTemplate keeps a manual break and writes no page-break setting
 '
 ' EVIDENCE
 '   Each scenario checks the error that reaches the caller (number, source
@@ -108,8 +113,14 @@ Option Explicit
 '   - S32-S34 create ActiveX controls in the temporary workbook. With ActiveX
 '     controls disabled in the Trust Center that creation fails, and so do
 '     those scenarios
+'   - S45 and S48 set and read manual page breaks and S47 shows the
+'     page-break indicators, which makes Excel lay those sheets out through
+'     the default printer driver; on a slow or offline printer they wait for
+'     it. The probe counts the page-break calls the demo code reaches; it
+'     cannot see whether Excel queried the printer
 '
 ' UPDATED
+'   2026-11-15 - Page-break scenarios S45-S48 (#187).
 '   2026-11-14 - Layout scenarios S35-S44; S13 now injects its error and
 '                checks the created sheet is removed (#74).
 '   2026-11-14 - Check-box scenarios S31-S34 (#73).
@@ -146,6 +157,8 @@ Option Explicit
     Private Const PROBE_RESET_SELECTION As Long = 4
     Private Const PROBE_BUILD_HANDLER   As Long = 5
     Private Const PROBE_BUILD_CLEANUP   As Long = 6
+    Private Const PROBE_PAGE_BREAKS     As Long = 9
+    Private Const PROBE_DISPLAY_BREAKS  As Long = 10
 
     'One-shot cleanup fault bits; mirror M_DEMO_BUILDER
     Private Const FAULT_NONE            As Long = 0
@@ -213,6 +226,10 @@ Option Explicit
     'A layout every template call accepts
     Private Const VALID_CONTENT         As String = "C:M"
     Private Const VALID_HIDE_ROWS       As Long = 200
+
+    'Manual page-break positions inside the template's visible area
+    Private Const BREAK_ROW             As Long = 20
+    Private Const BREAK_COLUMN          As Long = 6
 
     'Layout and naming errors and seams; mirror M_DEMO_BUILDER
     Private Const BUILD_TITLE              As String = "CT Title"
@@ -283,9 +300,9 @@ Public Sub Demo_Test_RunCleanupChecks()
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Runs every #71 cleanup scenario, every #70 fast-mode scenario, every #73
-'   check-box scenario and every #74 layout scenario in a temporary workbook
-'   and prints one line per scenario and a PASS/FAIL summary to the
-'   Immediate window.
+'   check-box scenario, every #74 layout scenario and every #187 page-break
+'   scenario in a temporary workbook and prints one line per scenario and a
+'   PASS/FAIL summary to the Immediate window.
 '
 ' RETURNS
 '   None
@@ -312,6 +329,7 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   - Invoked directly, from the Immediate window or the Macros dialog
 '
 ' UPDATED
+'   2026-11-15 - S45-S48 (#187).
 '   2026-11-14 - S35-S44 (#74).
 '   2026-11-14 - S31-S34 (#73).
 '   2026-11-14 - Session settings captured and written back; S15-S30 (#70).
@@ -421,6 +439,12 @@ Public Sub Demo_Test_RunCleanupChecks()
         DEMO_CT_BuildNameFault WB, "S42_NameFault"
         DEMO_CT_BuildChartCollision WB, "S43_ChartCollision"
         DEMO_CT_BuildValidRebuild WB, "S44_ValidRebuild"
+
+    'Page breaks and their indicators without a needless printer query (#187)
+        DEMO_CT_ResetManualBreaks WB, "S45_ResetManualBreaks"
+        DEMO_CT_ResetBreakIndicators WB, "S46_BreaksHidden", False
+        DEMO_CT_ResetBreakIndicators WB, "S47_BreaksShown", True
+        DEMO_CT_BuildKeepsPageBreaks WB, "S48_BuildKeepsBreaks"
 
 Safe_Exit:
 '------------------------------------------------------------------------------
@@ -2414,6 +2438,235 @@ Private Sub DEMO_CT_BuildValidRebuild( _
         DEMO_CT_CheckLong Scenario & ".Tables", 0, WS.ListObjects.Count
         DEMO_CT_CheckText Scenario & ".Title", BUILD_TITLE, CStr(WS.Range("B1").Value)
         DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_ResetManualBreaks( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_ResetManualBreaks
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S45: a default reset of a sheet with a manual row break and a manual
+'   column break leaves neither, through one ResetAllPageBreaks call, and
+'   leaves the page-break indicators hidden.
+'
+' NOTES
+'   Setting and reading the breaks makes Excel lay this sheet out through the
+'   default printer driver.
+'
+' UPDATED
+'   2026-11-15 - Added for #187.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual
+        WS.Columns(BREAK_COLUMN).PageBreak = xlPageBreakManual
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".ArrangeRow", _
+                      "the host did not keep the manual row break"
+        DEMO_CT_Check WS.Columns(BREAK_COLUMN).PageBreak = xlPageBreakManual, Scenario & ".ArrangeColumn", _
+                      "the host did not keep the manual column break"
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallReset WS, FAULT_NONE, vbNullString, False, _
+                          RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 0
+        DEMO_CT_CheckLong Scenario & ".ResetAllPageBreaks", 1, _
+                          DEMO_InternalCleanupProbeCount(PROBE_PAGE_BREAKS)
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak <> xlPageBreakManual, Scenario & ".RowBreak", _
+                      "the manual row break survived the reset"
+        DEMO_CT_Check WS.Columns(BREAK_COLUMN).PageBreak <> xlPageBreakManual, Scenario & ".ColumnBreak", _
+                      "the manual column break survived the reset"
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
+                      "the page-break indicators are shown after the reset"
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_ResetBreakIndicators( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String, _
+    ByVal Shown As Boolean)
+'
+'==============================================================================
+' DEMO_CT_ResetBreakIndicators
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S46: a default reset of a sheet whose page-break indicators are hidden
+'   does not write DisplayPageBreaks, and they stay hidden.
+'   S47: when they are shown, the reset writes DisplayPageBreaks once and
+'   hides them.
+'
+' INPUTS
+'   Shown
+'     Whether the indicators are shown before the reset
+'
+' UPDATED
+'   2026-11-15 - Added for #187.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim Writes              As Long            'DisplayPageBreaks writes expected
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        If Shown Then
+            WS.DisplayPageBreaks = True
+            Writes = 1
+        End If
+        DEMO_CT_Check WS.DisplayPageBreaks = Shown, Scenario & ".Arrange", _
+                      "the host did not keep DisplayPageBreaks=" & CStr(Shown)
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallReset WS, FAULT_NONE, vbNullString, False, _
+                          RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 0
+        DEMO_CT_CheckLong Scenario & ".DisplayWrites", Writes, _
+                          DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS)
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
+                      "the page-break indicators are shown after the reset"
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_BuildKeepsPageBreaks( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_BuildKeepsPageBreaks
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S48: a valid rebuild of a sheet with a manual row break and hidden
+'   indicators neither calls ResetAllPageBreaks nor writes
+'   DisplayPageBreaks, keeps the break and leaves the indicators hidden.
+'
+' NOTES
+'   Setting and reading the break makes Excel lay this sheet out through the
+'   default printer driver; the template itself must not. DisplayFormulaBar
+'   is requested at its current value, as in S44.
+'
+' UPDATED
+'   2026-11-15 - Added for #187.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Existing sheet
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual
+        WS.DisplayPageBreaks = False
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".ArrangeRow", _
+                      "the host did not keep the manual row break"
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".ArrangeHidden", _
+                      "the host did not keep DisplayPageBreaks=False"
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 1
+        DEMO_CT_CheckLong Scenario & ".ResetAllPageBreaks", 0, _
+                          DEMO_InternalCleanupProbeCount(PROBE_PAGE_BREAKS)
+        DEMO_CT_CheckLong Scenario & ".DisplayWrites", 0, _
+                          DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS)
+        DEMO_CT_Check DEMO_CT_BodyRan(WS), Scenario & ".ResetRan", "the reset did not clear A1"
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".RowBreak", _
+                      "the template removed a manual page break"
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
+                      "the page-break indicators are shown after the rebuild"
 
 Safe_Exit:
         On Error GoTo 0
