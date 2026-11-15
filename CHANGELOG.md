@@ -494,6 +494,15 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- **Repository and module checks** now runs on a pull request to any base, so a
+  pull request stacked on another task branch is checked before it is
+  retargeted. Its push trigger is unchanged: `main`, `release/**` and `v*`
+  tags. **Sync issue labels** now starts a push run only on `main` and
+  `release/**`, so a push to a task branch no longer repeats its pull-request
+  run. The gate's **branch coverage** check now fails when the required
+  check's workflow filters pull requests, when its push trigger omits `main`,
+  `release/**` or `v*` tags, or when any workflow's push branch filter omits
+  `main`, the branch whose push run `tools/release.py verify` reads (#188).
 - Narrowed the supported Office bitness to 64-bit. I certify releases only on
   64-bit Office and have no 32-bit host, so 32-bit Office is not certified. The
   32-bit WinAPI declarations stay in the source and the static gate still checks
