@@ -141,8 +141,9 @@ complete caption-mask correction remains open under #6. The bounded control
 equal-handle proof gap.
 
 `M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`, `M_EXCEL_UI_TITLEBAR`, the
-regression module and the demo modules have therefore changed; `M_EXCEL_UI`
-changed in its comments only, and `M_DEMO_CLEANUP_TESTS` is new. The supported
+regression tests and the demo modules have therefore changed; `M_EXCEL_UI`
+changed in its comments only, `M_DEMO_CLEANUP_TESTS` is new, and the
+regression module is split into a harness and four suite modules (#90). The supported
 public facade remains unchanged.
 
 The API contract gate was implemented first and deliberately. It records the
@@ -160,7 +161,7 @@ measured against that baseline.
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
 | Runtime correctness fixes | #26 and #27 complete; #23 certified and open until the README and Wiki describe it; remaining title-bar defects open |
 | Regression and certification fixes | #43 and #135 complete; remaining certification gates open |
-| Regression VBA | Caller-owned snapshot refusal, ownership-failure, Ribbon wrong-window refusal, WinAPI error-capture and certification unit-isolation coverage added |
+| Regression VBA | Caller-owned snapshot refusal, ownership-failure, Ribbon wrong-window refusal, WinAPI error-capture and certification unit-isolation coverage added; split into a harness and four suite modules (#90), not yet certified |
 | Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); fast-mode state (#70), ActiveX check boxes (#73) and template validation (#74) implemented with harness scenarios, not yet checked on Excel |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
@@ -493,6 +494,24 @@ measured against that baseline.
   export path.
 
 ### 🔧 Changed
+
+- **Not yet certified.** Split the regression module
+  `test/M_EXCEL_UI_REGRESSION_TESTS.bas` into a harness and one module per
+  suite ([#90](https://github.com/danielep71/VBA-EXCEL_UI/issues/90)):
+  `M_EXCEL_UI_TEST_HARNESS` (configuration, assertions, state capture and
+  cleanup, certification records and evidence files),
+  `M_EXCEL_UI_TEST_RUNTIME`, `M_EXCEL_UI_TEST_SNAPSHOT`,
+  `M_EXCEL_UI_TEST_TITLEBAR` and `M_EXCEL_UI_TEST_CERTIFICATION`, which holds
+  the release certification and the combined pack. Every procedure moved
+  byte for byte; the only edit is `Private` to `Public` where another module
+  now calls it, inside `Option Private Module`. Every `Test_EXCEL_UI_Run*`
+  runner keeps its name and runs the same cases in the same order, and
+  certification keeps its three units. The development configuration lists
+  the five modules in import order, the evidence policy names the
+  certification module, and the title-bar control regression now checks every
+  test module. Remove `M_EXCEL_UI_REGRESSION_TESTS` from a development
+  workbook before importing the new modules: both declare the same runners.
+  In `src/`, only the `CALLED FROM` comments changed, to name these modules.
 
 - **Repository and module checks** now runs on a pull request to any base, so a
   pull request stacked on another task branch is checked before it is

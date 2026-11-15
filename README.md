@@ -580,10 +580,14 @@ than no diagnostic at all.
 
 ## ✅ Regression testing
 
-Optional test module:
+Optional test modules, imported together after the production modules:
 
 ```text
-test/M_EXCEL_UI_REGRESSION_TESTS.bas
+test/M_EXCEL_UI_TEST_HARNESS.bas         shared assertions, cleanup and evidence
+test/M_EXCEL_UI_TEST_RUNTIME.bas         runtime cases
+test/M_EXCEL_UI_TEST_SNAPSHOT.bas        snapshot cases and the Ribbon probe
+test/M_EXCEL_UI_TEST_TITLEBAR.bas        title-bar cases
+test/M_EXCEL_UI_TEST_CERTIFICATION.bas   release certification and the full pack
 ```
 
 Public runners:
@@ -739,7 +743,7 @@ to tagged GitHub Releases.
 | [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) | One-command release certification in Excel and its evidence folder |
 | [docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md) | The advisory check of calls across modules |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
-| [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |
+| [Regression tests](test/) | Behavioral verification: the harness and one module per suite |
 | [GitHub Releases](https://github.com/danielep71/VBA-EXCEL_UI/releases) | Release notes and tested demo workbooks; [RELEASING.md](RELEASING.md) lists the assets a release carries |
 
 ---

@@ -92,7 +92,7 @@ or copied workbooks.
 <!-- /generated:modules:production -->
 
 Optional material is not part of the normal runtime unless stated otherwise.
-The development configuration adds the regression module to the production
+The development configuration adds the test modules to the production
 package, and the demo configuration adds the demo modules; their Order
 continues the production import order:
 
@@ -100,7 +100,11 @@ continues the production import order:
 
 | Order | Repository source | VBE component | Responsibility |
 |---:|---|---|---|
-| 5 | `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | `M_EXCEL_UI_REGRESSION_TESTS` | Regression and release certification |
+| 5 | `test/M_EXCEL_UI_TEST_HARNESS.bas` | `M_EXCEL_UI_TEST_HARNESS` | Shared test harness: assertions, state capture and cleanup, certification records, and evidence files |
+| 6 | `test/M_EXCEL_UI_TEST_RUNTIME.bas` | `M_EXCEL_UI_TEST_RUNTIME` | Runtime cases: visibility, structured results, target scope, failure list, and quiet-update scope |
+| 7 | `test/M_EXCEL_UI_TEST_SNAPSHOT.bas` | `M_EXCEL_UI_TEST_SNAPSHOT` | Snapshot cases, the snapshot-identity runner, and the Ribbon SDI probe |
+| 8 | `test/M_EXCEL_UI_TEST_TITLEBAR.bas` | `M_EXCEL_UI_TEST_TITLEBAR` | Title-bar cases, the title-bar pack, and the SDI title-bar identity runner |
+| 9 | `test/M_EXCEL_UI_TEST_CERTIFICATION.bas` | `M_EXCEL_UI_TEST_CERTIFICATION` | Release certification, the combined regression pack, and the certification cases |
 
 <!-- /generated:modules:development -->
 
@@ -155,13 +159,14 @@ saved. Compile afterwards as in step 5. See
 A successful import is not sufficient evidence that the installation is correct.
 
 `Test_EXCEL_UI_RunReleaseCertification` is defined in
-`test/M_EXCEL_UI_REGRESSION_TESTS.bas`; it is not part of the four-module
-production package. Before release or production certification, import that
-regression module from the **same tag or commit** as the production modules,
-compile the complete VBA project, and then run the certification procedure. If
-the destination workbook is not intended to retain test code, capture the
-result, remove the regression module afterward, recompile, and repeat the
-public-API smoke test.
+`test/M_EXCEL_UI_TEST_CERTIFICATION.bas`, one of the five test modules of the
+development configuration above; none of them is part of the four-module
+production package. Before release or production certification, import all five
+test modules from the **same tag or commit** as the production modules, in the
+order above, compile the complete VBA project, and then run the certification
+procedure. If the destination workbook is not intended to retain test code,
+capture the result, remove the test modules afterward, recompile, and repeat
+the public-API smoke test.
 
 - Run `Test_EXCEL_UI_RunReleaseCertification` for production/release validation.
 - Treat any incomplete, skipped, failed, or cleanup-failed unit as not passing.
@@ -200,7 +205,10 @@ Before upgrading:
 4. identify every required production component.
 
 - Replace all four production modules together from the same tag.
-- Re-import the matching optional regression module when validating an upgrade.
+- Re-import the matching optional test modules when validating an upgrade.
+  Remove `M_EXCEL_UI_REGRESSION_TESTS` first if the project still holds it:
+  the five test modules replace it and declare the same runners, so the
+  project does not compile while both are present.
 - Review newly observable diagnostics and recovery behavior even when public signatures are unchanged.
 - Never restore per-window state by collection index or reuse a stale snapshot as current authority.
 
@@ -215,9 +223,9 @@ while leaving old code active.
 2. Return the Excel UI to a recoverable visible state and clear any snapshot.
 3. Remove the legacy `M_EXCEL_UI` module completely.
 4. Import all four current production modules from one tag or commit.
-5. Compile, import the matching regression module for validation, and run the
+5. Compile, import the matching test modules for validation, and run the
    complete certification sequence.
-6. Remove the regression module afterward when the production workbook should
+6. Remove the test modules afterward when the production workbook should
    contain only the four supported runtime modules, then compile once more.
 
 After replacement, compile and repeat the full installation validation. Do not
@@ -281,7 +289,7 @@ Report suspected vulnerabilities privately under [SECURITY.md](SECURITY.md).
 
 The production modules write no files, registry settings or workbook content.
 Their only state is the in-memory snapshot and the UI state of the running Excel
-instance, which steps 1 and 3 return to normal. The regression module writes
+instance, which steps 1 and 3 return to normal. The certification module writes
 its evidence to `%TEMP%\EXCEL_UI_certification_*`; delete those files if you
 do not keep them. Removing the modules does not undo trusted-location, add-in
 or macro-security settings you changed to install them; revert those separately

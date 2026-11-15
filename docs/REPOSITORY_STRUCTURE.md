@@ -29,7 +29,11 @@ VBA-EXCEL_UI/
 │  ├─ M_EXCEL_UI_SNAPSHOT.bas
 │  └─ M_EXCEL_UI_TITLEBAR.bas
 ├─ test/
-│  └─ M_EXCEL_UI_REGRESSION_TESTS.bas
+│  ├─ M_EXCEL_UI_TEST_CERTIFICATION.bas
+│  ├─ M_EXCEL_UI_TEST_HARNESS.bas
+│  ├─ M_EXCEL_UI_TEST_RUNTIME.bas
+│  ├─ M_EXCEL_UI_TEST_SNAPSHOT.bas
+│  └─ M_EXCEL_UI_TEST_TITLEBAR.bas
 ├─ tests/
 ├─ tools/
 ├─ .editorconfig
