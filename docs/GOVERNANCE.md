@@ -52,6 +52,16 @@ gate's **branch coverage** check fails when the workflow filters pull
 requests, when its push trigger omits `main`, `release/**` or `v*` tags, and
 when any workflow's push branch filter omits `main`.
 
+A pull request that merges `main` into the release branch needs no new
+automated review when its diff against the release branch is empty: the merge
+then only joins the histories, and the changes it carries were reviewed in the
+pull requests that brought them to each branch. Its description shows the
+empty `git diff --stat release/vX.Y.Z <head>` and names those pull requests.
+The required **Repository and module checks** still run and must pass. A
+merge-back that changes any file is reviewed as usual, and so is every pull
+request after a rebase or branch update, because newly merged code can still
+conflict with it in meaning.
+
 <a id="repository-settings"></a>
 
 ## Repository settings
