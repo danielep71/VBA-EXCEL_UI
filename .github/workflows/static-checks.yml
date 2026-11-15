@@ -14,7 +14,17 @@ name: Static checks
 # the behavioural gate and which I run on a real host.
 #
 # The division is the point: this catches the mechanical mistakes cheaply and
-# on every push, so that manual certification time is spent on behaviour.
+# on every pull request, so that manual certification time is spent on
+# behaviour.
+#
+# A pull request runs the checks whatever its base, so a pull request stacked
+# on another task branch is checked before it is retargeted. The trigger
+# carries no branch filter, and the job no `if`: a skipped run of a required
+# check counts as passing. Pushes run only on main, release/** and v* tags, so
+# a push to a task branch does not repeat its pull-request run. The push run
+# on main is the one tools/release.py verify finds on a tag's commit. The
+# gate's "branch coverage" check in tools/check_repo.py enforces these
+# triggers.
 #
 # The tag trigger exists because a tag is the artefact people install from.
 # Before that trigger was added, nothing ran against a tag and a release could
@@ -38,9 +48,6 @@ name: Static checks
 
 on:
   pull_request:
-    branches:
-      - main
-      - 'release/**'
   push:
     branches:
       - main
