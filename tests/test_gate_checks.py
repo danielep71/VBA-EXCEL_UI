@@ -22,6 +22,7 @@ TESTS = "test/M_EXCEL_UI_TEST_HARNESS.bas"
 TITLEBAR_TESTS = "test/M_EXCEL_UI_TEST_TITLEBAR.bas"
 CERTIFICATION_TESTS = "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"
 BUILDER = "demo/M_DEMO_BUILDER.bas"
+DEMO = "demo/M_EXCEL_UI_DEMO.bas"
 WORKFLOW = ".github/workflows/static-checks.yml"
 RULE = "'" + "=" * 78 + "\r\n"
 NEVER = re.compile(r"(?!)")
@@ -347,6 +348,22 @@ class WinApiErrorCapture(GateTestCase):
         with patch("winapi_capture_fixtures.procedure_findings", return_value=iter(())):
             self.assertFails("#27 fixture a helper call between the call and the capture is rejected")
 
+    def test_fails_when_the_demo_declares_get_last_error_again(self) -> None:
+        clear = '        Private Declare Sub Demo_SetLastError Lib "kernel32" Alias _'
+        declare = '        Private Declare Function Demo_GetLastError Lib "kernel32" Alias "GetLastError" () As Long'
+        self.repo.replace(DEMO, clear, declare + "\r\n" + clear)
+        self.assertFails("legacy-x86: declares Demo_GetLastError; capture Err.LastDllError instead")
+
+    def test_fails_when_the_demo_reads_its_error_after_another_statement(self) -> None:
+        capture = "        LastErr = Err.LastDllError\r\n"
+        self.repo.replace(DEMO, capture, "        FailMsg = vbNullString\r\n" + capture)
+        self.assertFails("Demo_TryGetTitleBarVisibility: Err.LastDllError read after an intervening statement",
+                         "Demo_GetWindowLongPtr is not immediately followed by its Err.LastDllError capture")
+
+    def test_fails_when_the_demo_drops_out_of_scope(self) -> None:
+        with patch("winapi_capture_fixtures.SCOPE", ("src/", "test/")):
+            self.assertFails("#27 scope fixture demo/: a capture defect there is not checked")
+
 
 class DemoCleanupRegression(GateTestCase):
     check = "demo cleanup regression"
@@ -374,9 +391,19 @@ class DemoCleanupRegression(GateTestCase):
 
     def test_fails_when_the_template_resets_before_checking_its_layout(self) -> None:
         limits = "        MaxCol = LimitSheet.Columns.Count\r\n"
-        self.repo.replace(BUILDER, "        DEMO_Sheet_Reset WS\r\n", "")
-        self.repo.replace(BUILDER, limits, limits + "        DEMO_Sheet_Reset WS\r\n")
+        reset = "        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\r\n"
+        self.repo.replace(BUILDER, reset, "")
+        self.repo.replace(BUILDER, limits, limits + reset)
         self.assertFails("template: every layout check must raise before the worksheet is reset")
+
+    def test_fails_when_the_template_removes_page_breaks_again(self) -> None:
+        self.repo.replace(BUILDER, "        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\r\n",
+                          "        DEMO_Sheet_Reset WS\r\n")
+        self.assertFails("page breaks: the template must keep manual breaks and hide shown indicators after its reset")
+
+    def test_fails_when_display_page_breaks_is_written_unconditionally(self) -> None:
+        self.repo.replace(BUILDER, "            If Shown Then\r\n", "            If True Then\r\n")
+        self.assertFails("page breaks: DisplayPageBreaks must be read first and written, counted, only when True")
 
 
 class PublicApiManifest(GateTestCase):
