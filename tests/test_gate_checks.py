@@ -649,6 +649,40 @@ class ReviewFindingCrosswalk(GateTestCase):
         self.repo.replace("CHANGELOG.md", "| `ICR-UI-112-P3-04` | v1.1.2", "| `ICR-UI-112-P3-44` | v1.1.2")
         self.assertFails("ICR-UI-111-P3-07 points at ICR-UI-112-P3-04, which has no row")
 
+    def row(self, ident: str) -> str:
+        return next(line for line in self.repo.read_text("CHANGELOG.md").splitlines()
+                    if line.startswith(f"| `{ident}` |"))
+
+    def test_fails_when_a_renumbered_row_names_another_issue(self) -> None:
+        row = self.row("ICR-UI-111-P3-07")
+        self.repo.replace("CHANGELOG.md", row, row.replace("/issues/38) |", "/issues/37) |")
+                          .replace("[#38]", "[#37]"))
+        self.assertFails("ICR-UI-111-P3-07 names #37 but its current identifier "
+                         "ICR-UI-112-P3-04 names #38")
+
+    def test_fails_when_a_renumbered_row_disagrees_on_the_state(self) -> None:
+        row = self.row("ICR-UI-111-P2-04")
+        self.repo.replace("CHANGELOG.md", row, row.replace("| Open (v1.1.3) |", "| Closed |"))
+        self.assertFails("ICR-UI-111-P2-04 is Closed but its current identifier "
+                         "ICR-UI-112-P2-05 is Open")
+
+    def test_fails_on_a_chained_renumbering(self) -> None:
+        row = self.row("ICR-UI-112-P2-05")
+        self.repo.replace("CHANGELOG.md", row, row.replace("| — |", "| `ICR-UI-112-P3-01` |"))
+        self.assertFails("ICR-UI-111-P2-04 points at ICR-UI-112-P2-05, which points on at "
+                         "ICR-UI-112-P3-01")
+
+    def test_fails_on_a_disposition_without_a_state(self) -> None:
+        row = self.row("ICR-UI-112-P3-11")
+        self.repo.replace("CHANGELOG.md", row, row.replace("| Open (v1.1.3) |", "| Fixed |"))
+        self.assertFails("the disposition of ICR-UI-112-P3-11 does not start with Open, "
+                         "Reopened, Closed or Not planned")
+
+    def test_fails_when_the_review_disagrees_with_the_identifier(self) -> None:
+        row = self.row("ICR-UI-112-P3-11")
+        self.repo.replace("CHANGELOG.md", row, row.replace("| v1.1.2 |", "| v1.1.1 |"))
+        self.assertFails("ICR-UI-112-P3-11 names review v1.1.1; its identifier belongs to v1.1.2")
+
     def test_fails_without_the_crosswalk_section(self) -> None:
         self.repo.replace("CHANGELOG.md", "### 🔎 Review finding crosswalk", "### Review findings")
         self.assertFails("CHANGELOG.md has no '### 🔎 Review finding crosswalk' section")
