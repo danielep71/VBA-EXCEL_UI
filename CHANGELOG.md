@@ -497,6 +497,12 @@ measured against that baseline.
 
 ### 🔧 Changed
 
+- The gate's **review finding crosswalk** check now also rejects an ambiguous
+  table: a disposition that does not start with *Open*, *Reopened*, *Closed*
+  or *Not planned*, a *Review* column that disagrees with the identifier's
+  version, a renumbered v1.1.1 row whose issue or state differs from the
+  v1.1.2 row it points at, and a renumbering that points at another
+  renumbered row. Five new gate tests cover these rules (#48).
 - **Repository and module checks** now runs on a pull request to any base, so a
   pull request stacked on another task branch is checked before it is
   retargeted. Its push trigger is unchanged: `main`, `release/**` and `v*`
