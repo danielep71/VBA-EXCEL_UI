@@ -973,6 +973,10 @@ measured against that baseline.
 
 ### 📖 Documentation
 
+- `docs/GOVERNANCE.md` states when a merge of `main` into the release branch
+  needs no new automated review: only when its diff against the release branch
+  is empty; the required check still runs, and any other merge-back or rebased
+  pull request is reviewed as usual (#189).
 - Corrected the Markdown documents for accuracy against the repository, its
   tooling and the issue states: the release guides (#175), this changelog's
   Unreleased section (#176), the README, INSTALLATION, the repository
