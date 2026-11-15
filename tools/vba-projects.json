@@ -15,7 +15,11 @@
     "src/M_EXCEL_UI_TITLEBAR.bas": "WinAPI declarations, owned title-bar bits, and frame refresh",
     "src/M_EXCEL_UI_SNAPSHOT.bas": "Snapshot state, capture/restore, and window identity",
     "src/M_EXCEL_UI.bas": "Public `UI_*` facade and targeting orchestration",
-    "test/M_EXCEL_UI_REGRESSION_TESTS.bas": "Regression and release certification",
+    "test/M_EXCEL_UI_TEST_HARNESS.bas": "Shared test harness: assertions, state capture and cleanup, certification records, and evidence files",
+    "test/M_EXCEL_UI_TEST_RUNTIME.bas": "Runtime cases: visibility, structured results, target scope, failure list, and quiet-update scope",
+    "test/M_EXCEL_UI_TEST_SNAPSHOT.bas": "Snapshot cases, the snapshot-identity runner, and the Ribbon SDI probe",
+    "test/M_EXCEL_UI_TEST_TITLEBAR.bas": "Title-bar cases, the title-bar pack, and the SDI title-bar identity runner",
+    "test/M_EXCEL_UI_TEST_CERTIFICATION.bas": "Release certification, the combined regression pack, and the certification cases",
     "demo/M_EXCEL_UI_DEMO.bas": "Demonstration actions",
     "demo/M_DEMO_BUILDER.bas": "Demo worksheet construction",
     "demo/M_DEMO_CLEANUP_TESTS.bas": "Excel harness for demo sheet reset and template cleanup"
@@ -32,14 +36,18 @@
       ]
     },
     "development": {
-      "description": "A workbook that runs the regression suite and release certification: the production modules and the regression module.",
+      "description": "A workbook that runs the regression suite and release certification: the production modules, the test harness and the four suite modules.",
       "gating": true,
       "modules": [
         "src/M_EXCEL_UI_RUNTIME.bas",
         "src/M_EXCEL_UI_TITLEBAR.bas",
         "src/M_EXCEL_UI_SNAPSHOT.bas",
         "src/M_EXCEL_UI.bas",
-        "test/M_EXCEL_UI_REGRESSION_TESTS.bas"
+        "test/M_EXCEL_UI_TEST_HARNESS.bas",
+        "test/M_EXCEL_UI_TEST_RUNTIME.bas",
+        "test/M_EXCEL_UI_TEST_SNAPSHOT.bas",
+        "test/M_EXCEL_UI_TEST_TITLEBAR.bas",
+        "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"
       ]
     },
     "demo": {

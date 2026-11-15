@@ -187,10 +187,10 @@ class SyncScriptTests(unittest.TestCase):
         result = self.pwsh(
             f"$r = Get-RepositoryNames -SourceFiles @(Get-RepositorySources -RepoPath '{ROOT}')\n"
             "$l = Get-LeftInPlaceModules -WorkbookModules @('Module1', 'M_EXCEL_UI', "
-            "'M_EXCEL_UI_REGRESSION_TESTS', 'm_demo_builder') -RepositoryNames $r "
+            "'M_EXCEL_UI_TEST_HARNESS', 'm_demo_builder') -RepositoryNames $r "
             "-ModeNames @('M_EXCEL_UI', 'M_EXCEL_UI_RUNTIME', 'M_EXCEL_UI_SNAPSHOT', 'M_EXCEL_UI_TITLEBAR')\n"
             "ConvertTo-Json -InputObject @($l) | Set-Content -LiteralPath $env:RESULT -Encoding utf8")
-        self.assertEqual(result, ["M_EXCEL_UI_REGRESSION_TESTS", "m_demo_builder"])
+        self.assertEqual(result, ["M_EXCEL_UI_TEST_HARNESS", "m_demo_builder"])
 
     # Folder selection ---------------------------------------------------------
 

@@ -79,7 +79,13 @@ class DiscoverModules(unittest.TestCase):
             manifest = json.loads(repo.read_text("tools/vba-projects.json"))
             self.assertEqual(sorted(check_repo.PRODUCTION_MODULES),
                              sorted(manifest["configurations"]["production"]["modules"]))
-            self.assertEqual(check_repo.TEST_MODULES, ["test/M_EXCEL_UI_REGRESSION_TESTS.bas"])
+            self.assertEqual(sorted(check_repo.TEST_MODULES),
+                             sorted(rel for rel in manifest["configurations"]["development"]["modules"]
+                                    if rel.startswith("test/")))
+            self.assertEqual(check_repo.TEST_MODULES,
+                             ["test/M_EXCEL_UI_TEST_CERTIFICATION.bas", "test/M_EXCEL_UI_TEST_HARNESS.bas",
+                              "test/M_EXCEL_UI_TEST_RUNTIME.bas", "test/M_EXCEL_UI_TEST_SNAPSHOT.bas",
+                              "test/M_EXCEL_UI_TEST_TITLEBAR.bas"])
             self.assertEqual(check_repo.DEMO_MODULES,
                              ["demo/M_DEMO_BUILDER.bas", "demo/M_DEMO_CLEANUP_TESTS.bas",
                               "demo/M_EXCEL_UI_DEMO.bas"])

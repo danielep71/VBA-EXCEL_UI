@@ -6,6 +6,7 @@ entry-style restoration helper to use the result it returns, so a failed
 restoration cannot be dropped on a cleanup path.
 """
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 from vba_analyze import CONFIGS, active_lines, statements
@@ -68,7 +69,7 @@ def discarded_restores(source: str, helper: str = RESTORE) -> list[str]:
     return errors
 
 
-def selftest(root: str | Path) -> list[str]:
+def selftest(root: str | Path, modules: Iterable[str] | None = None) -> list[str]:
     source = f'''Private Sub {CASE}()
 On Error GoTo Err_Handler
 Safe_Exit:
@@ -104,8 +105,30 @@ End Sub
     for name, text, expected_failure in restore_cases:
         if bool(discarded_restores(text)) != expected_failure:
             errors.append(f'#66 restore fixture {name}: unexpected result')
-    path = Path(root) / 'test/M_EXCEL_UI_REGRESSION_TESTS.bas'
-    source = path.read_text(encoding='ascii')
-    errors.extend(findings(source))
-    errors.extend(discarded_restores(source))
+    errors.extend(module_findings(root, modules))
+    return errors
+
+
+def module_findings(root: str | Path, modules: Iterable[str] | None = None) -> list[str]:
+    """Hold the test modules to both rules.
+
+    The case must be defined in exactly one module, which findings() then
+    checks; every module is checked for a discarded restoration result, since
+    the helper is called from more than one suite. ``modules`` defaults to
+    every .bas file in test/.
+    """
+    if modules is None:
+        modules = sorted(p.relative_to(root).as_posix() for p in (Path(root) / 'test').glob('*.bas'))
+    defining = re.compile(r'^(?:Private|Public)\s+Sub\s+' + re.escape(CASE) + r'\b', re.I | re.M)
+    errors: list[str] = []
+    holders: list[str] = []
+    for rel in modules:
+        source = (Path(root) / rel).read_text(encoding='ascii')
+        if defining.search(source):
+            holders.append(rel)
+            errors.extend(f'{rel}: {finding}' for finding in findings(source))
+        errors.extend(f'{rel}: {finding}' for finding in discarded_restores(source))
+    if len(holders) != 1:
+        errors.append(f'expected {CASE} in exactly one test module, found {len(holders)}: '
+                      f'{", ".join(holders) or "none"}')
     return errors

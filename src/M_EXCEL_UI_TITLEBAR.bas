@@ -388,7 +388,7 @@ Private m_InjectFramePairFault          As Long
 'return a valid zero, fail with a chosen error or leave a stale last-error on
 'demand, so each of those branches is reached by replacing what the capture
 'took, after it took it. Operations and kinds are private Longs, mirrored in
-'the regression module.
+'M_EXCEL_UI_TEST_TITLEBAR.
 '
 '   Operation   0  none   1  GWL_STYLE read   2  GWL_STYLE write
 '   Kind        0  no fault
@@ -631,7 +631,8 @@ Public Sub UI_InternalInjectFramePairFault( _
 '   None.
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'   - M_EXCEL_UI_TEST_CERTIFICATION
 '
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
@@ -712,7 +713,7 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 ' CALLED FROM
 '   - UI_TryGetTitleBarVisible
 '   - UI_TrySetTitleBarVisibleIfNeeded
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' NOTES
 '   The handle is valid only for as long as that window is open. Callers that
@@ -1300,7 +1301,7 @@ Public Sub UI_InternalResetTitleBarBaseline()
 '   None.
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
@@ -1370,7 +1371,7 @@ Public Function UI_InternalIsFrameRefreshPending( _
 '   - UI_FrameStateIndexForHwnd
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' NOTES
 '   Public only for same-project regression access. Not part of the supported
@@ -1461,7 +1462,7 @@ Public Sub UI_InternalInjectFrameRefreshFailure( _
 '   None.
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
@@ -1542,7 +1543,7 @@ Public Sub UI_InternalInjectWindowStyleFault( _
 '   None.
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
@@ -1593,7 +1594,7 @@ Public Function UI_InternalSimulateFrameHandleReuse( _
 '   - UI_FrameStateSlotForHwnd
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' UPDATED
 '   2026-09-03
@@ -1671,7 +1672,7 @@ Public Function UI_InternalMergeTitleBarStyleBits( _
 '
 ' CALLED FROM
 '   - UI_TrySetTitleBarVisibleForHwndWorker
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module

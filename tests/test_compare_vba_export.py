@@ -199,13 +199,13 @@ class CompareExportTests(unittest.TestCase):
         code, out = self.run_tool("production")
         self.assertEqual(code, 1)
         self.assertIn("missing from the export: M_EXCEL_UI_TITLEBAR (src/M_EXCEL_UI_TITLEBAR.bas)", out)
-        self.assertIn("not in the source for this mode: M_EXCEL_UI_REGRESSION_TESTS", out)
+        self.assertIn("not in the source for this mode: M_EXCEL_UI_TEST_HARNESS", out)
 
     def test_demo_modules_are_not_development_modules(self) -> None:
         self.export("demo")
         code, out = self.run_tool("development")
         self.assertEqual(code, 1)
-        self.assertIn("missing from the export: M_EXCEL_UI_REGRESSION_TESTS", out)
+        self.assertIn("missing from the export: M_EXCEL_UI_TEST_HARNESS", out)
         self.assertIn("not in the source for this mode: M_DEMO_BUILDER", out)
         self.assertIn("not in the source for this mode: M_EXCEL_UI_DEMO", out)
 
@@ -329,9 +329,9 @@ class CompareExportTests(unittest.TestCase):
         cases: dict[str, tuple[Callable[[dict[str, Any]], object], str]] = {
             "dropped entry": (lambda r: r["components"].pop(0), "is in the export but not in export-manifest.json"),
             "extra entry": (lambda r: r["components"].append(
-                {"name": "M_EXCEL_UI_REGRESSION_TESTS", "type": "standard",
-                 "file": "M_EXCEL_UI_REGRESSION_TESTS.bas", "sha256": "0" * 64}),
-                "lists M_EXCEL_UI_REGRESSION_TESTS.bas, which is not in the export"),
+                {"name": "M_EXCEL_UI_TEST_HARNESS", "type": "standard",
+                 "file": "M_EXCEL_UI_TEST_HARNESS.bas", "sha256": "0" * 64}),
+                "lists M_EXCEL_UI_TEST_HARNESS.bas, which is not in the export"),
             "renamed component": (lambda r: r["components"][0].update(name="Other"), "names Other"),
             "workbook digest": (lambda r: r["workbook"].update(sha256="0" * 64),
                                 "is not the workbook the export was made from"),

@@ -8,7 +8,7 @@ that tools\vba-projects.json lists for one configuration, and asks which one
 unless -Mode gives the answer:
 
 - Production: the four modules of src\.
-- Development: the production modules and the regression module of test\,
+- Development: the production modules and the modules of test\,
   for a workbook that runs the regression suite and release certification.
 - Demo: the production modules and the modules of demo\.
 
@@ -606,7 +606,7 @@ try {
         if ([string]::IsNullOrWhiteSpace($syncMode)) {
             Write-Host "Which configuration should the workbook hold?"
             Write-Host "  1 = Production:  the modules of src"
-            Write-Host "  2 = Development: src and the regression module of test"
+            Write-Host "  2 = Development: src and the modules of test"
             Write-Host "  3 = Demo:        src and the modules of demo"
             $syncMode = ConvertTo-SyncMode -Answer (Read-Host "Production, development or demo? [1/2/3]")
             if ($null -eq $syncMode) {

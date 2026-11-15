@@ -35,14 +35,14 @@ for _name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
 
 UNITS = ["RegressionPack", "SnapshotIdentity", "TitleBarSdiIdentity"]
 RUNNER = (
-    "Attribute VB_Name = \"M_EXCEL_UI_REGRESSION_TESTS\"\n"
+    "Attribute VB_Name = \"M_EXCEL_UI_TEST_CERTIFICATION\"\n"
     "Option Explicit\n\n"
     "Public Sub Test_EXCEL_UI_RunReleaseCertification()\n"
     + "".join(f"        TST_CertRunUnit \"{unit}\"\n" for unit in UNITS)
     + "End Sub\n\n"
     "Private Sub TST_CertRunUnit( _\n    ByVal UnitName As String)\nEnd Sub\n"
 )
-DEVELOPMENT = ["src/M_EXCEL_UI.bas", "test/M_EXCEL_UI_REGRESSION_TESTS.bas"]
+DEVELOPMENT = ["src/M_EXCEL_UI.bas", "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"]
 MANIFEST = {
     "schema_version": 1,
     "configurations": {
@@ -54,7 +54,7 @@ FILES = {
     ".gitattributes": "*.bas text eol=crlf\n",
     "tools/vba-projects.json": json.dumps(MANIFEST, indent=2) + "\n",
     "src/M_EXCEL_UI.bas": "Attribute VB_Name = \"M_EXCEL_UI\"\nOption Explicit\n\n'café is spelled in cp1252\n",
-    "test/M_EXCEL_UI_REGRESSION_TESTS.bas": RUNNER,
+    "test/M_EXCEL_UI_TEST_CERTIFICATION.bas": RUNNER,
 }
 
 
@@ -197,7 +197,7 @@ class SourceTests(Fixture):
         inventory = evidence.source_inventory(self.root, self.sha)
         self.assertEqual([module["path"] for module in inventory["modules"]], DEVELOPMENT)
         self.assertEqual([module["name"] for module in inventory["modules"]],
-                         ["M_EXCEL_UI", "M_EXCEL_UI_REGRESSION_TESTS"])
+                         ["M_EXCEL_UI", "M_EXCEL_UI_TEST_CERTIFICATION"])
         for module in inventory["modules"]:
             on_disk = (self.root / module["path"]).read_bytes()
             self.assertIn(b"\r\n", on_disk)
@@ -367,7 +367,7 @@ class NegativeTests(Fixture):
         def wrong(docs: dict[str, Any]) -> None:
             docs["source-digests.json"]["modules"][1]["checked_out_sha256"] = "1" * 64
         self.bundle_with(wrong)
-        self.assert_fails("source digests", "checked-out test/M_EXCEL_UI_REGRESSION_TESTS.bas differs")
+        self.assert_fails("source digests", "checked-out test/M_EXCEL_UI_TEST_CERTIFICATION.bas differs")
 
     def test_a_missing_module_digest_fails(self) -> None:
         self.bundle_with(lambda docs: docs["source-digests.json"]["modules"].pop())
@@ -505,7 +505,7 @@ class RepositoryTests(unittest.TestCase):
     def test_this_repository_inventory_and_units_are_readable(self) -> None:
         sha = evidence.resolve_commit(ROOT, "HEAD")
         inventory = evidence.source_inventory(ROOT, sha)
-        self.assertIn("test/M_EXCEL_UI_REGRESSION_TESTS.bas", [module["path"] for module in inventory["modules"]])
+        self.assertIn("test/M_EXCEL_UI_TEST_CERTIFICATION.bas", [module["path"] for module in inventory["modules"]])
         for module in inventory["modules"]:
             self.assertEqual(module["name"], Path(module["path"]).stem)
         units = evidence.certification_units(ROOT, sha)

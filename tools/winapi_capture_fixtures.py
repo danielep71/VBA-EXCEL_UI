@@ -158,7 +158,7 @@ def findings(sources: dict[str, str]) -> tuple[list[str], dict[str, int]]:
 
 
 def run(root: str | Path, modules: Iterable[str]) -> list[str]:
-    """Check the tracked component and regression modules, and refuse a tree with nothing to check."""
+    """Check the tracked component and test modules, and refuse a tree with nothing to check."""
     sources = {rel: (Path(root) / rel).read_text(encoding='ascii')
                for rel in modules if rel.startswith(SCOPE)}
     errors, checked = findings(sources)

@@ -18,7 +18,9 @@ from unittest.mock import patch
 from gate_fixture import GateTestCase, check_repo, reformat, vba_api, wiki_badges
 
 RUNTIME = "src/M_EXCEL_UI_RUNTIME.bas"
-TESTS = "test/M_EXCEL_UI_REGRESSION_TESTS.bas"
+TESTS = "test/M_EXCEL_UI_TEST_HARNESS.bas"
+TITLEBAR_TESTS = "test/M_EXCEL_UI_TEST_TITLEBAR.bas"
+CERTIFICATION_TESTS = "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"
 BUILDER = "demo/M_DEMO_BUILDER.bas"
 WORKFLOW = ".github/workflows/static-checks.yml"
 RULE = "'" + "=" * 78 + "\r\n"
@@ -266,22 +268,39 @@ class TitleBarControlRegression(GateTestCase):
         self.assertPasses()
 
     def test_fails_when_cleanup_leaves_its_handler_armed(self) -> None:
-        text = self.repo.read_bytes(TESTS).decode("ascii")
+        text = self.repo.read_bytes(TITLEBAR_TESTS).decode("ascii")
         start = text.index("Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline")
         cleanup = text.index("Safe_Exit:", start)
         disarm = text.index("On Error GoTo 0", cleanup)
         text = text[:disarm] + "On Error Resume Next" + text[disarm + len("On Error GoTo 0"):]
-        self.repo.write(TESTS, text.encode("ascii"))
-        self.assertFails("cleanup re-raise must disable its handler")
+        self.repo.write(TITLEBAR_TESTS, text.encode("ascii"))
+        self.assertFails(f"{TITLEBAR_TESTS}: ", "cleanup re-raise must disable its handler")
 
     def test_fails_when_a_restore_result_is_discarded(self) -> None:
-        text = self.repo.read_bytes(TESTS).decode("ascii")
+        text = self.repo.read_bytes(TITLEBAR_TESTS).decode("ascii")
         start = text.index("Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline")
         checked = "        RestoreOK = TST_RestoreTitleBarStyle( _\r\n"
         call = text.index(checked, start)
         text = text[:call] + "        TST_RestoreTitleBarStyle _\r\n" + text[call + len(checked):]
-        self.repo.write(TESTS, text.encode("ascii"))
+        self.repo.write(TITLEBAR_TESTS, text.encode("ascii"))
         self.assertFails("TST_RestoreTitleBarStyle result discarded; check it and report a failed restoration")
+
+    def test_fails_when_another_suite_discards_a_restore_result(self) -> None:
+        # The pack in the certification module calls the helper too, so every
+        # test module is checked, not only the one that holds the case.
+        text = self.repo.read_bytes(CERTIFICATION_TESTS).decode("ascii")
+        start = text.index("Sub TST_RunRegressionPack")
+        call = text.index("TST_RestoreTitleBarStyle(", start)
+        line = text.rindex("\r\n", 0, call) + 2
+        text = text[:line] + "        TST_RestoreTitleBarStyle hWnd, 0, False, Msg\r\n" + text[line:]
+        self.repo.write(CERTIFICATION_TESTS, text.encode("ascii"))
+        self.assertFails(f"{CERTIFICATION_TESTS}: ", "TST_RestoreTitleBarStyle result discarded")
+
+    def test_fails_when_no_test_module_holds_the_case(self) -> None:
+        self.repo.replace(TITLEBAR_TESTS, "Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline(",
+                          "Sub TST_Case_TitleBarShowRejectsCaptionlessBaselineRenamed(")
+        self.assertFails("expected TST_Case_TitleBarShowRejectsCaptionlessBaseline in exactly one test module, "
+                         "found 0: none")
 
 
 class WinApiErrorCapture(GateTestCase):
@@ -304,7 +323,7 @@ class WinApiErrorCapture(GateTestCase):
 
     def test_fails_when_on_error_runs_between_the_api_and_the_capture(self) -> None:
         text = self.repo.read_bytes(TESTS).decode("ascii")
-        start = text.index("Private Function TST_TryRefreshWindowFrame(")
+        start = text.index("Public Function TST_TryRefreshWindowFrame(")
         capture = text.index(self.CAPTURE, start)
         text = text[:capture] + "        On Error Resume Next\r\n" + text[capture:]
         self.repo.write(TESTS, text.encode("ascii"))
