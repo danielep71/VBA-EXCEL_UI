@@ -740,7 +740,7 @@ Private Sub TST_CertExecuteUnit( _
 '
 ' NOTES
 '   Dispatch is an explicit Select Case rather than Application.Run because the
-'   units are private to this module and a name-based call would fail silently
+'   units include Private procedures and a name-based call would fail silently
 '   or bind to the wrong project. A compile-time reference cannot rot.
 '
 '   The SelfTest units are dispatched only by
