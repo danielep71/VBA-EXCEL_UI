@@ -82,6 +82,8 @@ Option Explicit
 '   - Demo_CreateDemoSheet is the canonical builder
 '
 ' UPDATED
+'   2026-11-15 - The title-bar read captures Err.LastDllError right after
+'                the WinAPI call; GetLastError is no longer declared (#144).
 '   2026-11-14 - Check-box reads and writes moved to M_DEMO_BUILDER, which
 '                reaches ActiveX check boxes (#73).
 '   2026-11-14 - Demo_CreateDemoSheet keeps fast-mode restoration failures and
@@ -142,15 +144,11 @@ Option Explicit
                 Alias "GetWindowLongA" (ByVal hWnd As LongPtr, ByVal nIndex As Long) _
                 As Long
         #End If
-        Private Declare PtrSafe Function Demo_GetLastError Lib "kernel32" Alias _
-            "GetLastError" () As Long
         Private Declare PtrSafe Sub Demo_SetLastError Lib "kernel32" Alias _
             "SetLastError" (ByVal dwErrCode As Long)
     #Else
         Private Declare Function Demo_GetWindowLong Lib "user32" Alias _
             "GetWindowLongA" ( ByVal hWnd As Long, ByVal nIndex As Long) As Long
-        Private Declare Function Demo_GetLastError Lib "kernel32" Alias _
-            "GetLastError" () As Long
         Private Declare Sub Demo_SetLastError Lib "kernel32" Alias _
             "SetLastError" ( ByVal dwErrCode As Long)
     #End If
@@ -1544,7 +1542,14 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
 '
+' WINAPI ERROR CAPTURE
+'   SetLastError 0, the style read into a local and the Err.LastDllError
+'   capture are three adjacent statements in every compilation branch, as in
+'   src/. GetWindowLong[Ptr] can return zero legitimately, so only a zero
+'   style with a non-zero captured error is a failure.
+'
 ' UPDATED
+'   2026-11-15 - Err.LastDllError captured right after the call (#144).
 '   2026-07-25
 '==============================================================================
 '
@@ -1595,12 +1600,15 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
                 StyleValue = Demo_GetWindowLong(xlHnd, DEMO_GWL_STYLE)
     #End If
 
-    'Read the Win32 last-error value immediately after the API call
-        LastErr = Demo_GetLastError
-    'Treat zero plus nonzero last error as failure
+    'Capture the native error in the very next statement, before any other
+    'call or On Error statement can replace it
+        LastErr = Err.LastDllError
+
+    'A zero style with a captured error of zero is a valid zero; a zero style
+    'with a non-zero captured error is a failure
         If StyleValue = 0 And LastErr <> 0 Then
-            FailMsg = "GetWindowLong/GetWindowLongPtr failed; GetLastError=" & _
-                CStr(LastErr)
+            FailMsg = "GetWindowLong/GetWindowLongPtr failed reading the window style; " & _
+                "Err.LastDllError=" & CStr(LastErr) & "; hWnd=" & CStr(xlHnd)
             GoTo Safe_Exit
         End If
 

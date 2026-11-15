@@ -20,6 +20,7 @@ from gate_fixture import GateTestCase, check_repo, reformat, vba_api, wiki_badge
 RUNTIME = "src/M_EXCEL_UI_RUNTIME.bas"
 TESTS = "test/M_EXCEL_UI_REGRESSION_TESTS.bas"
 BUILDER = "demo/M_DEMO_BUILDER.bas"
+DEMO = "demo/M_EXCEL_UI_DEMO.bas"
 WORKFLOW = ".github/workflows/static-checks.yml"
 RULE = "'" + "=" * 78 + "\r\n"
 NEVER = re.compile(r"(?!)")
@@ -327,6 +328,22 @@ class WinApiErrorCapture(GateTestCase):
     def test_fails_when_the_fixtures_stop_detecting_a_late_capture(self) -> None:
         with patch("winapi_capture_fixtures.procedure_findings", return_value=iter(())):
             self.assertFails("#27 fixture a helper call between the call and the capture is rejected")
+
+    def test_fails_when_the_demo_declares_get_last_error_again(self) -> None:
+        clear = '        Private Declare Sub Demo_SetLastError Lib "kernel32" Alias _'
+        declare = '        Private Declare Function Demo_GetLastError Lib "kernel32" Alias "GetLastError" () As Long'
+        self.repo.replace(DEMO, clear, declare + "\r\n" + clear)
+        self.assertFails("legacy-x86: declares Demo_GetLastError; capture Err.LastDllError instead")
+
+    def test_fails_when_the_demo_reads_its_error_after_another_statement(self) -> None:
+        capture = "        LastErr = Err.LastDllError\r\n"
+        self.repo.replace(DEMO, capture, "        FailMsg = vbNullString\r\n" + capture)
+        self.assertFails("Demo_TryGetTitleBarVisibility: Err.LastDllError read after an intervening statement",
+                         "Demo_GetWindowLongPtr is not immediately followed by its Err.LastDllError capture")
+
+    def test_fails_when_the_demo_drops_out_of_scope(self) -> None:
+        with patch("winapi_capture_fixtures.SCOPE", ("src/", "test/")):
+            self.assertFails("#27 scope fixture demo/: a capture defect there is not checked")
 
 
 class DemoCleanupRegression(GateTestCase):

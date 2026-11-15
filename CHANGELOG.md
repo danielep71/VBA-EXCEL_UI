@@ -131,8 +131,9 @@ corrections:
   errors (#71), and a demo button without a macro no longer names a missing
   one (#129);
 - not yet checked on Excel: demo fast mode restores every setting it changed
-  (#70), the demo check-box helpers reach ActiveX check boxes (#73), and the
-  demo template checks its layout before resetting a worksheet (#74).
+  (#70), the demo check-box helpers reach ActiveX check boxes (#73), the
+  demo template checks its layout before resetting a worksheet (#74), and the
+  demo's title-bar read captures `Err.LastDllError` immediately (#144).
 
 Title-bar capture and persistent frame state now pair each native hWnd with the
 Excel Window that owns it. Show now uses baseline state and readback, but the
@@ -818,6 +819,16 @@ measured against that baseline.
   hidden rows on a populated sheet, an invalid name, a failed rename, a chart
   sheet holding the name and a valid rebuild; S13 now injects its template
   error and checks that the created sheet is removed.
+- **Not yet checked on Excel.** The demo's title-bar read now captures
+  `Err.LastDllError` in the statement right after its `GetWindowLong[Ptr]`
+  call, in every compilation branch, instead of calling `GetLastError` after
+  the conditional block
+  ([#144](https://github.com/danielep71/VBA-EXCEL_UI/issues/144)). The
+  `GetLastError` declarations are removed from `demo/`, and a failure now
+  reads `GetWindowLong/GetWindowLongPtr failed reading the window style;
+  Err.LastDllError=<n>; hWnd=<h>`. The gate's `WinAPI error capture` check
+  now covers `demo/` as well as `src/` and `test/`, and its fixtures prove
+  that a capture defect in a module of each folder is reported.
 - Fixed the active title-bar frame being trusted without the host agreeing it
   is active. Resolving `Window.hWnd` from the `Window` that
   `Application.ActiveWindow` just returned makes the pair internally

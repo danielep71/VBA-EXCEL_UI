@@ -13,8 +13,8 @@ one arm can drift while the others stay correct:
     ``SetLastError 0`` and directly followed by that capture;
   * GetLastError is not declared, so there is one route to the error.
 
-The contract covers the component in src/ and the regression helpers in test/.
-The demo modules in demo/ are not yet held to it.
+The contract covers the component in src/, the regression helpers in test/
+and the demo modules in demo/.
 
 This is bounded source evidence, not proof of runtime behaviour: it does not
 follow GoTo, and it cannot see an error replaced inside the call itself.
@@ -27,7 +27,7 @@ from pathlib import Path
 from vba_analyze import CONFIGS, DECLARE, PROC, VAR, active_lines, names, statements
 from vba_lex import LexicalError, code_only
 
-SCOPE = ('src/', 'test/')
+SCOPE = ('src/', 'test/', 'demo/')
 AMBIGUOUS_ZERO = frozenset({
     'getwindowlonga', 'getwindowlongw', 'getwindowlongptra', 'getwindowlongptrw',
     'setwindowlonga', 'setwindowlongw', 'setwindowlongptra', 'setwindowlongptrw',
@@ -157,11 +157,15 @@ def findings(sources: dict[str, str]) -> tuple[list[str], dict[str, int]]:
     return sorted(errors), checked
 
 
+def scoped(sources: dict[str, str]) -> dict[str, str]:
+    """The modules the contract covers: those in src/, test/ and demo/."""
+    return {rel: text for rel, text in sources.items() if rel.startswith(SCOPE)}
+
+
 def run(root: str | Path, modules: Iterable[str]) -> list[str]:
-    """Check the tracked component and regression modules, and refuse a tree with nothing to check."""
-    sources = {rel: (Path(root) / rel).read_text(encoding='ascii')
-               for rel in modules if rel.startswith(SCOPE)}
-    errors, checked = findings(sources)
+    """Check the tracked component, regression and demo modules, and refuse a tree with nothing to check."""
+    errors, checked = findings(scoped({rel: (Path(root) / rel).read_text(encoding='ascii')
+                                       for rel in modules}))
     for config_name, count in checked.items():
         if count == 0:
             errors.append(f'{config_name}: no GetWindowLong/SetWindowLong call found; '
@@ -285,6 +289,17 @@ CASES: list[tuple[str, str, str, tuple[str, ...]]] = [
      BASE.replace('#Else\nPrivate Declare Function GetWindowLong',
                   GET_LAST_ERROR + '#Else\nPrivate Declare Function GetWindowLong'),
      'declares GetLastError', ('vba7-x64', 'vba7-x86')),
+    ('a GetLastError read after the conditional block is rejected',
+     BASE.replace('#Else\nPrivate Declare Function GetWindowLong',
+                  GET_LAST_ERROR + '#Else\nPrivate Declare Function GetWindowLong')
+         .replace(CAPTURE_LINE, '    DllError = GetLastError()\n    If ApiResult'),
+     'not immediately followed by its Err.LastDllError capture', tuple(CONFIGS)),
+]
+
+# (folder, whether a defect in a module there must be reported). A module
+# outside the covered folders is never checked, so each folder is proved here.
+SCOPE_CASES: list[tuple[str, bool]] = [
+    ('src/', True), ('test/', True), ('demo/', True), ('docs/', False),
 ]
 
 
@@ -301,4 +316,10 @@ def selftest() -> tuple[list[str], int]:
         anywhere = {config for config in CONFIGS if any(f': {config}: ' in f for f in found)}
         if named != set(configs) or anywhere != set(configs):
             errors.append(f'#27 fixture {name}: expected {expected!r} in {configs}, got {found}')
-    return errors, len(CASES)
+    defect = BASE.replace(CAPTURE_LINE, '    FailMsg = Describe("read", 0)\n' + CAPTURE_LINE)
+    for folder, reported in SCOPE_CASES:
+        found, _ = findings(scoped({folder + 'M_FIXTURE.bas': defect}))
+        if bool(found) != reported:
+            state = 'checked' if found else 'not checked'
+            errors.append(f'#27 scope fixture {folder}: a capture defect there is {state}')
+    return errors, len(CASES) + len(SCOPE_CASES)

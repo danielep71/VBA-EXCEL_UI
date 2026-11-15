@@ -116,7 +116,7 @@ the current analyzer does not certify case completeness or execution.
 
 ## WinAPI error capture (#27)
 
-In `src/` and `test/`, read a native error code only through
+In `src/`, `test/` and `demo/`, read a native error code only through
 `Err.LastDllError`, and do not declare `GetLastError`. VBA sets
 `Err.LastDllError` after every `Declare` call, the next `Declare` call replaces
 it, and `Err.Clear` or any `On Error` statement resets it. Write every native
@@ -142,7 +142,8 @@ x64, VBA7 x86 and legacy x86, and proves itself against passing and failing
 fixtures first. It reads statement order only: it does not follow `GoTo` and
 cannot observe the error a call leaves, so
 `TST_Case_TitleBarApiErrorCapture` must still pass on a real Excel host. The
-demo modules in `demo/` are not yet held to this rule (#144).
+demo's title-bar read follows the same sequence (#144); its gate fixtures also
+prove that a defect in a `src/`, `test/` or `demo/` module is reported.
 
 ## Public contracts and compatibility
 
