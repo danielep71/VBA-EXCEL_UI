@@ -180,14 +180,16 @@ attempt and the insufficiently isolated generation control):
 | #43 | Four one-runner-at-a-time refusal mutants | Prove caller-owned snapshots survive each refusal |
 | #43 | Cleanup-skipping mutant | Prove the success-path snapshot-release assertion detects leakage |
 | #26 | Two quiet-scope variants | Detect the old entry-read behavior and missing ownership readback; no dedicated End-side mutation |
-| #32 | Retained-Window generation-proof variant | Fails with the current distinct-handle seam; same-numeric-hWnd generation proof is still missing |
+| #32 | Retained-Window generation-proof variant | Failed with the earlier distinct-handle seam, which is not a same-numeric-hWnd generation proof |
 | #6 / #66 | Title-bar module with the v1.1.2 fallback condition restored | Negative control for captionless recovery; the first attempt hung. The bounded rerun below failed as intended on 2026-11-14, with Excel usable |
 | #45 | Active-frame-pair comparison control | Prove disagreement fails at `.Disagreed.Refused` |
 
 This inventories recorded types and purposes, not recoverable local filenames:
-the historical throwaway files were not committed. For #32, a true unchanged-
-hWnd generation control remains outstanding; do not count the distinct-handle
-seam as that evidence. Preserve reviewed results separately from disposable code.
+the historical throwaway files were not committed. For #32, the unchanged-hWnd
+generation control has not been run on Excel: with the retained-Window check
+removed, `TST_Case_TitleBarSameHwndGenerationReuse` must fail at `.Crossed`. Do
+not count the distinct-handle result as that evidence. Preserve reviewed results
+separately from disposable code.
 
 #### Title-bar negative control (#6, #66)
 

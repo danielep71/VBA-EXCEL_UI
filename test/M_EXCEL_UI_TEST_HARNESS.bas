@@ -1060,7 +1060,7 @@ Public Function TST_RestoreTitleBarStyle( _
 '   - TST_Case_TitleBarRoundTrip
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
 '   - TST_Case_TitleBarShowRejectsCaptionlessBaseline
-'   - TST_Case_TitleBarSameStyleHandleReuse
+'   - TST_Case_TitleBarSameHwndGenerationReuse
 '   - TST_Case_TitleBarFrameRefreshDebtRetried
 '   - TST_Case_TitleBarStaleFrameEntryNotReused
 '   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame

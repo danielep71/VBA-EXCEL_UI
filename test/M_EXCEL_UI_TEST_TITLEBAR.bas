@@ -25,7 +25,8 @@ Option Private Module
 '   - hide / show round-trip
 '   - preservation of unrelated GWL_STYLE bits across hide / show
 '   - show recovers without a baseline and rejects a captionless baseline
-'   - equal style bits cannot authenticate a recycled handle
+'   - frame state never crosses to a new window generation that holds the
+'     same numeric hWnd with equal-zero or equal-nonzero owned bits
 '   - a failed frame refresh is owed and retried
 '   - the frame-state registry refuses an entry it cannot prove
 '   - WinAPI error capture: a valid zero, an injected DLL error and an
@@ -52,6 +53,9 @@ Option Private Module
 '     runner
 '
 ' UPDATED
+'   2026-11-16 - Replaced the same-style handle-reuse case with
+'                TST_Case_TitleBarSameHwndGenerationReuse, which keeps the
+'                stored hWnd and changes only the window generation (#32).
 '   2026-11-15 - Split out of the single regression module; the runners and
 '                cases moved here unchanged apart from visibility (#90).
 '   2026-11-06 - Every title-bar case that hides a frame restores the entry
@@ -400,11 +404,14 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
 '   - TST_Case_TitleBarFrameRefreshDebtRetried
 '   - TST_Case_TitleBarStaleFrameEntryNotReused
+'   - TST_Case_TitleBarSameHwndGenerationReuse
 '   - TST_Case_TitleBarApiErrorCapture
 '   - TST_RestoreTitleBarStyle
 '   - TST_RecordCleanupFailure
 '
 ' UPDATED
+'   2026-11-16 - Registered the same-hWnd generation case in place of the
+'                same-style handle-reuse case (#32).
 '   2026-11-06 - Put the entry frame's style back through the harness and
 '                failed the pack when it could not (#66).
 '   2026-11-06 - Registered the WinAPI error-capture case (#27).
@@ -507,8 +514,9 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify that frame state which cannot be proved is discarded, not applied
         TST_Case_TitleBarStaleFrameEntryNotReused
 
-    'Verify equal-zero and equal-nonzero handle reuse with object identity
-        TST_Case_TitleBarSameStyleHandleReuse
+    'Verify that equal-zero and equal-nonzero state under an unchanged hWnd
+    'never crosses to another window generation
+        TST_Case_TitleBarSameHwndGenerationReuse
 
     'Verify that a disagreed active-frame pair is refused by both callers
         TST_Case_ActiveFramePairRefusesMismatch
@@ -774,216 +782,606 @@ Err_Handler:
 End Sub
 
 
-Public Sub TST_Case_TitleBarSameStyleHandleReuse()
+Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
+
 '
 '==============================================================================
-' TST_Case_TitleBarSameStyleHandleReuse
+' TST_Case_TitleBarSameHwndGenerationReuse
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Prove that equal style bits cannot authenticate a recycled numeric hWnd.
+'   Verify that frame state recorded for one window generation never crosses
+'   to another generation that holds the same numeric hWnd and the same owned
+'   style bits.
+'
+' WHY THIS EXISTS
+'   This is the regression for ICR-UI-112-P2-02 (#32). Windows reissues a
+'   closed window's handle, so a registry slot can name, by its numeric hWnd,
+'   a window it was never written for. When that window carries the owned
+'   bits the slot last wrote, the v1.1.2 owned-bit proof accepts the slot,
+'   and the new window takes over the closed window's baseline, ownership
+'   flag and refresh debt. Only the retained Window can tell the two
+'   generations apart.
+'
+'   A reissued handle cannot be forced on demand, so the case builds the slot
+'   the registry would then hold. UI_InternalSimulateFrameGenerationReuse
+'   keeps the stored hWnd, which is the target's own handle, and every state
+'   field the component recorded, and replaces only the retained Window with
+'   one of another generation. Neither the numeric scan nor the owned bits
+'   can then reject the slot; only the generation check can.
+'
+' RETURNS
+'   None.
 '
 ' BEHAVIOR
-'   Exercises both equal-zero and equal-nonzero owned-bit collisions. The seam
-'   changes only the slot's numeric name and claimed last-written bits; its
-'   retained Window object remains the original generation token.
+'   - Opens a target workbook whose frame is under test, and a second
+'     workbook that it closes at once, keeping its Window wrapper as a closed
+'     generation.
+'   - Runs four passes: equal-zero and equal-nonzero owned bits, each with
+'     the slot attributed to the closed generation and to the anchor window.
+'   - Equal-zero: a hide whose repaint is refused leaves a slot that claims
+'     the hidden frame, holds the visible baseline and owes a repaint.
+'   - Equal-nonzero: a show whose repaint is refused leaves a slot that owes
+'     a repaint for the non-zero owned bits it wrote.
+'   - Repaints the frame through the harness, so the window is consistent and
+'     carries exactly the owned bits the slot last wrote.
+'   - After the rebinding, asserts that the slot kept the target hWnd and the
+'     recorded state, makes one production lookup, and asserts that it
+'     reported no debt and left no slot for the hWnd.
+'   - Requests a show and asserts that it treats the window as new: no
+'     baseline it did not record, no ownership and no debt.
 '
 ' ERROR POLICY
-'   - Restores both entry styles through the harness on every exit, with the
-'     handler disabled, and raises the saved failure once.
-'   - Fails, with the restoration diagnostic, when either entry style cannot
-'     be written, refreshed and read back.
+'   - Restores the target's entry style through the harness on every exit,
+'     with the handler disabled, and raises the saved failure once.
+'   - Fails, with the restoration diagnostic, when the entry style cannot be
+'     written, refreshed and read back.
+'   - Fails at .Precondition when the host does not provide the state the
+'     case depends on, because it could not then detect the defect.
+'
+' DEPENDENCIES
+'   - UI_InternalSimulateFrameGenerationReuse
+'   - UI_InternalTryReadFrameState
+'   - UI_InternalIsFrameRefreshPending
+'   - UI_InternalInjectFrameRefreshFailure
+'   - UI_TrySetTitleBarVisibleForHwndIfNeeded
+'   - TST_DescribeFrameSlot
+'   - TST_RestoreTitleBarStyle
+'
+' NOTES
+'   A build without the retained-Window generation check accepts the slot in
+'   the first pass, EqualZero.ClosedGeneration, and fails at .Crossed with
+'   "stale frame state crossed to the replacement generation", listing the
+'   fields that survived.
+'
+'   The anchor window only stands in for another live owner. The case never
+'   writes its frame.
 '
 ' UPDATED
-'   2026-11-06 - Verified and reported both entry-style restorations (#66).
-'   2026-09-03
+'   2026-11-16 - Replaced TST_Case_TitleBarSameStyleHandleReuse, whose seam
+'                also changed the stored hWnd (#32).
 '==============================================================================
+'
 
-    Dim AnchorWindow        As Window
-    Dim ReplacementBook     As Workbook
-    Dim ReplacementWindow   As Window
-    Dim CaseIndex           As Long
-    Dim OK                  As Boolean
-    Dim Msg                 As String
-    Dim FailNumber          As Long
-    Dim FailSource          As String
-    Dim FailDescription     As String
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorWindow        As Window          'Window active on entry
+    Dim TargetBook          As Workbook        'Workbook whose frame is tested
+    Dim ClosedBook          As Workbook        'Workbook closed at once
+    Dim ClosedWindow        As Object          'Wrapper of the closed generation
+    Dim PriorOwner          As Object          'Generation the slot is given
 
 #If VBA7 Then
-    Dim AnchorHwnd          As LongPtr
-    Dim ReplacementHwnd     As LongPtr
-    Dim AnchorEntryStyle    As LongPtr
-    Dim ReplacementEntryStyle As LongPtr
-    Dim AnchorVisibleStyle  As LongPtr
-    Dim ReplacementStyle    As LongPtr
-    Dim ResultStyle         As LongPtr
-    Dim CollisionBits       As LongPtr
+    Dim TargetHwnd          As LongPtr         'Frame under test
+    Dim AnchorHwnd          As LongPtr         'Frame of the anchor window
+    Dim ClosedProbeHwnd     As LongPtr         'hWnd the closed wrapper reports
+    Dim EntryStyle          As LongPtr         'Target style on entry
+    Dim ArrangeStyle        As LongPtr         'Distinctive visible style
+    Dim ResultStyle         As LongPtr         'Style read back
+    Dim VisibleOwned        As LongPtr         'Owned bits of that visible style
+    Dim LiveOwned           As LongPtr         'Owned bits at the collision
+    Dim ExpectedOwned       As LongPtr         'Owned bits a correct show leaves
+    Dim SlotOwned           As LongPtr         'Slot OwnedStyleBits
+    Dim SlotLastWritten     As LongPtr         'Slot LastWrittenBits
 #Else
-    Dim AnchorHwnd          As Long
-    Dim ReplacementHwnd     As Long
-    Dim AnchorEntryStyle    As Long
-    Dim ReplacementEntryStyle As Long
-    Dim AnchorVisibleStyle  As Long
-    Dim ReplacementStyle    As Long
-    Dim ResultStyle         As Long
-    Dim CollisionBits       As Long
+    Dim TargetHwnd          As Long            'Frame under test
+    Dim AnchorHwnd          As Long            'Frame of the anchor window
+    Dim ClosedProbeHwnd     As Long            'hWnd the closed wrapper reports
+    Dim EntryStyle          As Long            'Target style on entry
+    Dim ArrangeStyle        As Long            'Distinctive visible style
+    Dim ResultStyle         As Long            'Style read back
+    Dim VisibleOwned        As Long            'Owned bits of that visible style
+    Dim LiveOwned           As Long            'Owned bits at the collision
+    Dim ExpectedOwned       As Long            'Owned bits a correct show leaves
+    Dim SlotOwned           As Long            'Slot OwnedStyleBits
+    Dim SlotLastWritten     As Long            'Slot LastWrittenBits
 #End If
 
-    Dim AnchorCaptured      As Boolean
-    Dim ReplacementCaptured As Boolean
-    Dim AnchorRestored      As Boolean
-    Dim ReplacementRestored As Boolean
-    Dim AnchorRestoreMsg    As String
-    Dim ReplacementRestoreMsg As String
+    Dim CollisionIndex      As Long            '0 equal-zero, 1 equal-nonzero
+    Dim OwnerIndex          As Long            '0 closed generation, 1 live window
+    Dim PassLabel           As String          'Pass name for diagnostics
+    Dim ExpectHidden        As Boolean         'ComponentHidden the pass records
+    Dim ClosedProbeError    As Long            'Error the closed wrapper raised
+    Dim SlotFound           As Boolean         'TRUE when a slot holds TargetHwnd
+    Dim SlotHasBaseline     As Boolean         'Slot HasBaseline
+    Dim SlotHidden          As Boolean         'Slot ComponentHidden
+    Dim SlotPending         As Boolean         'Slot RefreshPending
+    Dim PendingReported     As Boolean         'Debt the production lookup saw
+    Dim OK                  As Boolean         'Result of a call under test
+    Dim Msg                 As String          'Diagnostic buffer
 
-    Const PROC As String = "TST_Case_TitleBarSameStyleHandleReuse"
+    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle was read
+    Dim RestoreOK           As Boolean         'TRUE once the style is back
+    Dim RestoreMsg          As String          'Diagnostic from the restoration
 
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_TitleBarSameHwndGenerationReuse"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
         On Error GoTo Err_Handler
-        TST_Log PROC, "START", _
-            "Validating same-style recycled-hWnd rejection"
 
+        TST_Log PROC, "START", _
+            "Validating that frame state never crosses to a new generation " & _
+            "of the same hWnd"
+
+'------------------------------------------------------------------------------
+' OPEN THE WINDOWS
+'------------------------------------------------------------------------------
+    'The anchor stands in for another live owner; its frame is never written
         Set AnchorWindow = ActiveWindow
+
         If AnchorWindow Is Nothing Then
-            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 90, PROC, _
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 90, _
+                PROC, _
                 "no anchor Excel Window is available"
         End If
+
         AnchorHwnd = AnchorWindow.hWnd
 
-        Set ReplacementBook = Workbooks.Add
-        Set ReplacementWindow = ReplacementBook.Windows(1)
-        ReplacementHwnd = ReplacementWindow.hWnd
+    'Open the window whose frame is under test
+        Set TargetBook = Workbooks.Add
+        TargetHwnd = TargetBook.Windows(1).hWnd
 
-        If AnchorHwnd = ReplacementHwnd Then
-            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 91, PROC, _
+        If TargetHwnd = 0 Or TargetHwnd = AnchorHwnd Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 91, _
+                PROC & ".Precondition", _
                 "the host did not provide distinct SDI window handles"
         End If
 
-        If Not TST_TryGetWindowStyle( _
-            AnchorHwnd, AnchorEntryStyle, Msg) Then
-
-            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 92, PROC, Msg
+    'Keep the entry style, so the frame can be put back on every exit
+        If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 92, _
+                PROC, _
+                "unable to read the target entry style | " & Msg
         End If
-        AnchorCaptured = True
 
-        If Not TST_TryGetWindowStyle( _
-            ReplacementHwnd, ReplacementEntryStyle, Msg) Then
+        StyleCaptured = True
 
-            Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 93, PROC, Msg
-        End If
-        ReplacementCaptured = True
+    'Open and close a second workbook. Its Window wrapper is what a slot still
+    'retains once its window has closed and Windows has reissued the handle.
+    'It is taken as an Object while the window is open.
+        Set ClosedBook = Workbooks.Add
+        Set ClosedWindow = ClosedBook.Windows(1)
+        TST_SafeCloseWorkbook ClosedBook
 
-        For CaseIndex = 0 To 1
-            UI_InternalResetTitleBarBaseline
-
-        'Give the original generation a distinctive visible baseline before the
-        'component hides it and records ownership.
-            AnchorVisibleStyle = _
-                (AnchorEntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
-                TST_TITLEBAR_FOREIGN_FRAME
-
-            If Not TST_TrySetWindowStyle( _
-                AnchorHwnd, AnchorVisibleStyle, Msg) Then
-
-                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 94, PROC, Msg
-            End If
-            If Not TST_TryRefreshWindowFrame(AnchorHwnd, Msg) Then
-                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 95, PROC, Msg
-            End If
-
-            OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
-                TargetHwnd:=AnchorHwnd, _
-                IsVisible:=False, _
-                FailMsg:=Msg)
-            TST_AssertBooleanEquals True, OK, _
-                "SameStyleReuse.AnchorHidden"
-
-        'Model a replacement generation whose live style coincides with the
-        'stale slot: zero in the first pass, non-zero captionless in the second.
-            If CaseIndex = 0 Then
-                CollisionBits = 0
-            Else
-                CollisionBits = TST_TITLEBAR_CAPTIONLESS_FRAME
-            End If
-
-            ReplacementStyle = _
-                (ReplacementEntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
-                CollisionBits
-
-            If Not TST_TrySetWindowStyle( _
-                ReplacementHwnd, ReplacementStyle, Msg) Then
-
-                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 96, PROC, Msg
-            End If
-            If Not TST_TryRefreshWindowFrame(ReplacementHwnd, Msg) Then
-                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 97, PROC, Msg
-            End If
-
-            If Not UI_InternalSimulateFrameHandleReuse( _
-                OriginalHwnd:=AnchorHwnd, _
-                ReplacementHwnd:=ReplacementHwnd, _
-                ReplacementOwnedBits:=CollisionBits) Then
-
-                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 98, PROC, _
-                    "unable to arm the recycled-hWnd seam"
-            End If
-
-            OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
-                TargetHwnd:=ReplacementHwnd, _
-                IsVisible:=True, _
-                FailMsg:=Msg)
-            TST_AssertBooleanEquals True, OK, _
-                "SameStyleReuse.ReplacementShown"
-
-            If Not TST_TryGetWindowStyle( _
-                ReplacementHwnd, ResultStyle, Msg) Then
-
-                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 99, PROC, Msg
-            End If
-
-        'A discarded slot uses the safe visible fallback. The original
-        'generation's distinctive baseline must never cross to the replacement.
-            If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> _
-                TST_TITLEBAR_OWNED_MASK Then
-
-                Err.Raise TEST_TITLEBAR_SDI_ERR_BASE + 100, PROC, _
-                    "stale frame state crossed to the replacement generation"
-            End If
-        Next CaseIndex
-
-Safe_Exit:
+    'Record how the closed wrapper answers. It must not report the target
+    'handle, or it would not be another generation.
         On Error Resume Next
-        UI_InternalResetTitleBarBaseline
-        AnchorRestored = TST_RestoreTitleBarStyle( _
-            AnchorHwnd, AnchorEntryStyle, AnchorCaptured, AnchorRestoreMsg)
-        ReplacementRestored = TST_RestoreTitleBarStyle( _
-            ReplacementHwnd, ReplacementEntryStyle, ReplacementCaptured, _
-            ReplacementRestoreMsg)
-        TST_SafeCloseWorkbook ReplacementBook
-        If Not AnchorWindow Is Nothing Then AnchorWindow.Activate
+
+            ClosedProbeHwnd = ClosedWindow.hWnd
+            ClosedProbeError = Err.Number
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "OBSERVED", _
+            "closed generation | hWnd read raised=" & _
+            CStr(ClosedProbeError <> 0) & _
+            " | error=" & CStr(ClosedProbeError) & _
+            " | hWnd=" & CStr(ClosedProbeHwnd)
+
+        If ClosedProbeError = 0 And ClosedProbeHwnd = TargetHwnd Then
+            Err.Raise _
+                TEST_TITLEBAR_SDI_ERR_BASE + 93, _
+                PROC & ".Precondition", _
+                "the closed generation's Window reports the target hWnd; " & _
+                "the case cannot attribute the slot to another generation"
+        End If
+
+'------------------------------------------------------------------------------
+' RUN THE PASSES
+'------------------------------------------------------------------------------
+        For CollisionIndex = 0 To 1
+
+            For OwnerIndex = 0 To 1
+
+            'Name the pass and pick the generation the slot is given
+                If CollisionIndex = 0 Then
+                    PassLabel = "EqualZero"
+                Else
+                    PassLabel = "EqualNonzero"
+                End If
+
+                If OwnerIndex = 0 Then
+                    PassLabel = PassLabel & ".ClosedGeneration"
+                    Set PriorOwner = ClosedWindow
+                Else
+                    PassLabel = PassLabel & ".OtherLiveWindow"
+                    Set PriorOwner = AnchorWindow
+                End If
+
+            'Start from an empty registry and a distinctive visible frame, so
+            'a baseline that crossed can be told from the safe visible fallback
+                UI_InternalResetTitleBarBaseline
+
+                ArrangeStyle = _
+                    (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
+                    TST_TITLEBAR_FOREIGN_FRAME
+
+                If Not TST_TrySetWindowStyle( _
+                    TargetHwnd, ArrangeStyle, Msg) Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 94, _
+                        PROC, _
+                        PassLabel & " | unable to write the visible style | " & Msg
+                End If
+
+                If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 95, _
+                        PROC, _
+                        PassLabel & " | unable to refresh the visible frame | " & Msg
+                End If
+
+                If Not TST_TryGetWindowStyle( _
+                    TargetHwnd, ResultStyle, Msg) Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 96, _
+                        PROC, _
+                        PassLabel & " | unable to read the visible style | " & Msg
+                End If
+
+                VisibleOwned = ResultStyle And TST_TITLEBAR_OWNED_MASK
+
+                If (VisibleOwned And TST_WS_CAPTION) <> TST_WS_CAPTION Or _
+                    VisibleOwned = TST_TITLEBAR_OWNED_MASK Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 97, _
+                        PROC & ".Precondition", _
+                        PassLabel & " | Windows did not keep a distinctive " & _
+                        "visible frame; owned=" & CStr(VisibleOwned) & _
+                        "; a crossed baseline could not be told from the " & _
+                        "safe visible fallback"
+                End If
+
+            'Let the component record state for this generation. A refused
+            'repaint leaves a debt in the slot.
+                If CollisionIndex = 0 Then
+
+                    ExpectHidden = True
+
+                    UI_InternalInjectFrameRefreshFailure True
+
+                    OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                        TargetHwnd:=TargetHwnd, _
+                        IsVisible:=False, _
+                        FailMsg:=Msg)
+
+                    TST_AssertBooleanEquals False, OK, _
+                        "SameHwndGeneration." & PassLabel & ".HideOwesRepaint"
+
+                Else
+
+                    ExpectHidden = False
+
+                    OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                        TargetHwnd:=TargetHwnd, _
+                        IsVisible:=False, _
+                        FailMsg:=Msg)
+
+                    TST_AssertBooleanEquals True, OK, _
+                        "SameHwndGeneration." & PassLabel & ".Hidden"
+
+                    UI_InternalInjectFrameRefreshFailure True
+
+                    OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                        TargetHwnd:=TargetHwnd, _
+                        IsVisible:=True, _
+                        FailMsg:=Msg)
+
+                    TST_AssertBooleanEquals False, OK, _
+                        "SameHwndGeneration." & PassLabel & ".ShowOwesRepaint"
+
+                End If
+
+            'Disarm the seam in case the refused repaint did not consume it,
+            'then repaint through the harness. The debt stays in the slot.
+                UI_InternalInjectFrameRefreshFailure False
+
+                If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 98, _
+                        PROC, _
+                        PassLabel & " | unable to repaint the frame | " & Msg
+                End If
+
+            'Give the slot to the other generation. The stored hWnd stays the
+            'target's own handle.
+                If Not UI_InternalSimulateFrameGenerationReuse( _
+                    TargetHwnd:=TargetHwnd, _
+                    PriorOwner:=PriorOwner) Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 99, _
+                        PROC, _
+                        PassLabel & " | unable to give the slot to another " & _
+                        "generation"
+                End If
+
+            'The slot must still hold the target hWnd and the recorded state,
+            'or the pass proves nothing about that state
+                SlotFound = UI_InternalTryReadFrameState( _
+                    TargetHwnd, SlotOwned, SlotHasBaseline, SlotHidden, _
+                    SlotPending, SlotLastWritten)
+
+                If Not SlotFound Or Not SlotHasBaseline Or _
+                    SlotOwned <> VisibleOwned Or _
+                    SlotHidden <> ExpectHidden Or Not SlotPending Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 101, _
+                        PROC & ".Precondition", _
+                        PassLabel & " | the rebound slot does not hold the " & _
+                        "recorded state | " & _
+                        TST_DescribeFrameSlot(SlotFound, SlotOwned, _
+                            SlotHasBaseline, SlotHidden, SlotPending, _
+                            SlotLastWritten)
+                End If
+
+            'The window must carry exactly the owned bits the slot last wrote:
+            'that equality is the collision under test
+                If Not TST_TryGetWindowStyle( _
+                    TargetHwnd, ResultStyle, Msg) Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 102, _
+                        PROC, _
+                        PassLabel & " | unable to read the collision style | " & Msg
+                End If
+
+                LiveOwned = ResultStyle And TST_TITLEBAR_OWNED_MASK
+
+                If LiveOwned <> SlotLastWritten Or _
+                    (LiveOwned = 0) <> (CollisionIndex = 0) Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 103, _
+                        PROC & ".Precondition", _
+                        PassLabel & " | the live owned bits " & _
+                        CStr(LiveOwned) & " do not form this pass's " & _
+                        "collision with LastWrittenBits " & _
+                        CStr(SlotLastWritten)
+                End If
+
+                TST_Log PROC, "TRACE", _
+                    PassLabel & " | slot given to another generation | hWnd=" & _
+                    CStr(TargetHwnd) & " | live owned=" & CStr(LiveOwned) & _
+                    " | " & _
+                    TST_DescribeFrameSlot(SlotFound, SlotOwned, _
+                        SlotHasBaseline, SlotHidden, SlotPending, _
+                        SlotLastWritten)
+
+            'One production lookup by the replacement generation. It must
+            'discard the slot: report no debt and leave nothing behind.
+                PendingReported = UI_InternalIsFrameRefreshPending(TargetHwnd)
+
+                SlotFound = UI_InternalTryReadFrameState( _
+                    TargetHwnd, SlotOwned, SlotHasBaseline, SlotHidden, _
+                    SlotPending, SlotLastWritten)
+
+                If PendingReported Or SlotFound Then
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 100, _
+                        PROC & ".Crossed", _
+                        "stale frame state crossed to the replacement " & _
+                        "generation | pass=" & PassLabel & _
+                        " | debt reported=" & CStr(PendingReported) & _
+                        " | " & _
+                        TST_DescribeFrameSlot(SlotFound, SlotOwned, _
+                            SlotHasBaseline, SlotHidden, SlotPending, _
+                            SlotLastWritten)
+                End If
+
+            'A show must treat the window as new. Equal-zero has no caption of
+            'its own, so it takes the safe visible fallback; equal-nonzero
+            'already carries its caption and keeps it.
+                OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                    TargetHwnd:=TargetHwnd, _
+                    IsVisible:=True, _
+                    FailMsg:=Msg)
+
+                If Not OK Then
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 104, _
+                        PROC & ".Show", _
+                        PassLabel & " | show on the replacement generation " & _
+                        "reported failure | " & Msg
+                End If
+
+                If Not TST_TryGetWindowStyle( _
+                    TargetHwnd, ResultStyle, Msg) Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 105, _
+                        PROC, _
+                        PassLabel & " | unable to read the shown style | " & Msg
+                End If
+
+                If CollisionIndex = 0 Then
+                    ExpectedOwned = TST_TITLEBAR_OWNED_MASK
+                Else
+                    ExpectedOwned = LiveOwned
+                End If
+
+                If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> _
+                    ExpectedOwned Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 106, _
+                        PROC & ".Show", _
+                        PassLabel & " | the show applied state the " & _
+                        "replacement generation never had | expected owned=" & _
+                        CStr(ExpectedOwned) & " | actual owned=" & _
+                        CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK) & _
+                        " | prior baseline=" & CStr(VisibleOwned)
+                End If
+
+            'The slot the show created must describe this generation alone
+                SlotFound = UI_InternalTryReadFrameState( _
+                    TargetHwnd, SlotOwned, SlotHasBaseline, SlotHidden, _
+                    SlotPending, SlotLastWritten)
+
+                If Not SlotFound Or Not SlotHasBaseline Or _
+                    SlotOwned <> LiveOwned Or SlotHidden Or SlotPending Then
+
+                    Err.Raise _
+                        TEST_TITLEBAR_SDI_ERR_BASE + 107, _
+                        PROC & ".Show", _
+                        PassLabel & " | the replacement generation's slot " & _
+                        "is not new | " & _
+                        TST_DescribeFrameSlot(SlotFound, SlotOwned, _
+                            SlotHasBaseline, SlotHidden, SlotPending, _
+                            SlotLastWritten)
+                End If
+
+                TST_Log PROC, "TRACE", _
+                    PassLabel & " | slot discarded; show left owned=" & _
+                    CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK)
+
+            Next OwnerIndex
+
+        Next CollisionIndex
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Discard the registry, put the target frame back through the harness and
+    'close the temporary workbooks, whatever happened above. The API under
+    'test takes no part.
+        On Error Resume Next
+            UI_InternalResetTitleBarBaseline
+            RestoreOK = TST_RestoreTitleBarStyle( _
+                TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
+            Set PriorOwner = Nothing
+            Set ClosedWindow = Nothing
+            TST_SafeCloseWorkbook ClosedBook
+            TST_SafeCloseWorkbook TargetBook
+
+            If Not AnchorWindow Is Nothing Then
+                AnchorWindow.Activate
+            End If
         On Error GoTo 0
 
     'A frame that cannot be put back fails the case, after any earlier failure
         TST_RecordCleanupFailure _
-            AnchorRestored, AnchorRestoreMsg, PROC, _
-            FailNumber, FailSource, FailDescription
-        TST_RecordCleanupFailure _
-            ReplacementRestored, ReplacementRestoreMsg, PROC & ".Replacement", _
-            FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
+            TST_Log PROC, "FAIL", FailSource & " | " & FailDescription
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
         TST_Log PROC, "PASS", _
-            "Equal-zero and equal-nonzero recycled handles were rejected"
+            "Equal-zero and equal-nonzero state under an unchanged hWnd " & _
+            "stayed with its own generation"
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 Err_Handler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
+
         Resume Safe_Exit
 
 End Sub
+
+
+#If VBA7 Then
+Private Function TST_DescribeFrameSlot( _
+    ByVal SlotFound As Boolean, _
+    ByVal OwnedStyleBits As LongPtr, _
+    ByVal HasBaseline As Boolean, _
+    ByVal ComponentHidden As Boolean, _
+    ByVal RefreshPending As Boolean, _
+    ByVal LastWrittenBits As LongPtr) _
+    As String
+#Else
+Private Function TST_DescribeFrameSlot( _
+    ByVal SlotFound As Boolean, _
+    ByVal OwnedStyleBits As Long, _
+    ByVal HasBaseline As Boolean, _
+    ByVal ComponentHidden As Boolean, _
+    ByVal RefreshPending As Boolean, _
+    ByVal LastWrittenBits As Long) _
+    As String
+#End If
+
+'
+'==============================================================================
+' TST_DescribeFrameSlot
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Format the fields UI_InternalTryReadFrameState returned, for a failure
+'   message or a trace line.
+'
+' RETURNS
+'   "slot kept=False" when no slot was found; otherwise every field.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_Case_TitleBarSameHwndGenerationReuse
+'
+' UPDATED
+'   2026-11-16 (#32)
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' FORMAT FIELDS
+'------------------------------------------------------------------------------
+        On Error Resume Next
+
+        If Not SlotFound Then
+            TST_DescribeFrameSlot = "slot kept=False"
+            Exit Function
+        End If
+
+        TST_DescribeFrameSlot = _
+            "slot kept=True | OwnedStyleBits=" & CStr(OwnedStyleBits) & _
+            " | HasBaseline=" & CStr(HasBaseline) & _
+            " | ComponentHidden=" & CStr(ComponentHidden) & _
+            " | RefreshPending=" & CStr(RefreshPending) & _
+            " | LastWrittenBits=" & CStr(LastWrittenBits)
+
+End Function
 
 
 Public Sub TST_Case_TitleBarRoundTrip()
@@ -3016,8 +3414,8 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 '
 ' WHY THIS EXISTS
 '   This guards the different-owned-bits form of ICR-UI-111-P2-01. The
-'   equal-bits form, ICR-UI-112-P2-02 (#32), remains open and is exercised by
-'   TST_Case_TitleBarSameStyleHandleReuse. Windows reissues a window
+'   equal-bits form, ICR-UI-112-P2-02 (#32), is exercised by
+'   TST_Case_TitleBarSameHwndGenerationReuse. Windows reissues a window
 '   handle once the window holding it has closed, and IsWindow answers for
 '   whichever window holds the handle now, so a handle match was accepted as
 '   proof of identity. A show could then restore a closed window's captured
