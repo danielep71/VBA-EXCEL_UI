@@ -25,9 +25,10 @@ Option Private Module
 ' CONTENTS
 '   - Fault injection: the one-shot post-capture fault that
 '     Test_EXCEL_UI_RunOwnershipCleanupChecks arms and the runner it checks
-'     takes
-'   - Certification records and evidence: unit outcomes, skips, snapshots a
-'     unit left behind, and the JSON and text evidence files
+'     takes, and the one-shot certification record fault
+'   - Certification records and evidence: one record of unit outcomes and
+'     skips that publishes an entry only once it is complete, snapshots a
+'     unit left behind, the verdict, and the JSON and text evidence files
 '   - Cleanup helpers: entry title-bar style restoration, cleanup-failure
 '     reporting, and best-effort window and workbook closing
 '   - Snapshot / restore helpers: the harness's own capture and restore of the
@@ -40,6 +41,11 @@ Option Private Module
 '
 ' STATE MANAGEMENT
 '   - Certification records accrue only while a certification run is active
+'   - A certification entry is counted only after every buffer holds it. An
+'     entry that cannot be stored sets the record's scalar RecordFailed
+'     flag, which forces FAIL | INCOMPLETE and is named in both evidence
+'     documents; TST_CertResetCounters clears it before the next run
+'   - The record fault is one-shot, and certification disarms it on start
 '   - The post-capture fault is one-shot: taking it disarms it
 '   - Per-window test state is captured and restored by Application.Windows
 '     index
@@ -57,6 +63,9 @@ Option Private Module
 '   - Assumes the EXCEL_UI modules are present in the same VBA project
 '
 ' UPDATED
+'   2026-11-16 - Certification records units and skips through one
+'                commit-after-allocation path, checks the record before
+'                reading it, and fails closed when it cannot be stored (#50).
 '   2026-11-15 - Split out of the single regression module: the shared
 '                configuration, helpers and certification records moved here
 '                unchanged apart from visibility (#90).
@@ -96,6 +105,32 @@ Option Private Module
     Public Const TEST_FAULT_NONE As Long = 0  'No post-capture fault armed
     Public Const TEST_FAULT_ASSERTION As Long = 1  'Fail an assertion after capture
     Public Const TEST_FAULT_UNEXPECTED As Long = 2  'Raise an unexpected error after capture
+
+    'Kinds of certification record entry. A case kind is added here when
+    'certification records cases (#42); TST_CertTryAppendEntry stores every kind.
+    Public Const TEST_CERT_ENTRY_UNIT As Long = 1  'Entry: one unit outcome
+    Public Const TEST_CERT_ENTRY_SKIP As Long = 2  'Entry: one skipped case
+
+    'The parallel buffers of a certification record, in the order they grow.
+    'TST_CertRecordIsConsistent walks them from the first to the last.
+    Public Const TEST_CERT_BUFFER_ANY As Long = 0  'Record fault: the first buffer reached
+    Public Const TEST_CERT_BUFFER_KIND As Long = 1  'Buffer: entry kinds
+    Public Const TEST_CERT_BUFFER_NAME As Long = 2  'Buffer: entry names
+    Public Const TEST_CERT_BUFFER_PASSED As Long = 3  'Buffer: unit outcomes
+    Public Const TEST_CERT_BUFFER_DETAIL As Long = 4  'Buffer: entry detail
+
+    'Where recording first failed. Stages 1 to 4 are the TEST_CERT_BUFFER_*
+    'value of the buffer that could not grow.
+    Public Const TEST_CERT_RECFAIL_NONE As Long = 0  'Recording has not failed
+    Public Const TEST_CERT_RECFAIL_WRITE As Long = 5  'Writing a reserved entry failed
+    Public Const TEST_CERT_RECFAIL_INVARIANT As Long = 6  'Buffers disagree with the counts
+    Public Const TEST_CERT_RECFAIL_EVIDENCE As Long = 7  'Reading entries for evidence failed
+    Public Const TEST_CERT_RECFAIL_KIND As Long = 8  'An entry of no known kind was offered
+    Public Const TEST_CERT_RECFAIL_RESET As Long = 9  'The record could not be cleared
+
+    Public Const TEST_CERT_RECORD_FAULT_NONE As Long = 0  'No record fault armed
+    Public Const TEST_CERT_RECORD_FAULT_FIRST As Long = 1  'Fail a buffer's first allocation
+    Public Const TEST_CERT_RECORD_FAULT_GROWTH As Long = 2  'Fail an allocated buffer's growth
     Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
@@ -200,24 +235,59 @@ Option Private Module
 ' RELEASE-CERTIFICATION STATE
 '==============================================================================
 
+'One certification record: every stored entry and the counts that publish
+'them. Units and skips share the same parallel buffers and the same append
+'path, TST_CertTryAppendEntry, so the rule below is enforced in one place.
+'
+'EntryCount is the logical length of every buffer. A buffer may be larger,
+'because an append that grew some buffers and then failed leaves them grown,
+'but an entry exists only once EntryCount includes it, and EntryCount grows
+'only after every buffer holds the complete entry. The invariants are
+'
+'    UnitCount + SkipCount = EntryCount >= 0
+'    every buffer is unallocated or 1-based, with UBound >= EntryCount
+'
+'RecordFailed is the authoritative result when an entry cannot be stored. It
+'is a scalar, set before anything else is allocated, and it forces the
+'verdict to FAIL | INCOMPLETE whatever the buffers hold. RecordFailCount,
+'RecordFailStage and RecordFailError are the diagnostic that survives when
+'no text can be composed.
+Public Type tCertRecord
+    EntryCount          As Long                'Published entries
+    UnitCount           As Long                'Published unit entries
+    SkipCount           As Long                'Published skip entries
+    EntryKind()         As Long                'TEST_CERT_ENTRY_* per entry
+    EntryName()         As String              'Unit name, or the skipping procedure
+    EntryPassed()       As Boolean             'Unit outcome; FALSE for a skip
+    EntryDetail()       As String              'Unit failure text, or the skip reason
+    RecordFailed        As Boolean             'TRUE once an entry was not stored
+    RecordFailCount     As Long                'Recording failures since the reset
+    RecordFailStage     As Long                'TEST_CERT_RECFAIL_* of the first one
+    RecordFailError     As Long                'Runtime error number of the first one
+End Type
+
 'Accrued only while a certification run is active. The regression packs are
 'shared with the legacy runners, so recording must be inert outside a run rather
 'than leaking counts from one invocation into the next.
 Public m_CertActive                    As Boolean
 
-Public m_CertUnitCount                 As Long
-Private m_CertUnitNames()               As String
-Public m_CertUnitPassed()              As Boolean
-Private m_CertUnitDetail()              As String
-
-Public m_CertSkipCount                 As Long
-Private m_CertSkipDetail()              As String
+'The record of the certification run in progress. Only the TST_Cert* record
+'helpers write it; a regression case drives the same helpers on a record of
+'its own, so that its injected failures never reach this one.
+Public m_CertRecord                    As tCertRecord
 
 'Snapshots that units left behind, named by unit. Each one is released before
 'the next unit runs, so that one failure cannot fail every unit after it. The
 'exit state therefore no longer shows the leak, and the cleanup verdict reads
 'it from here instead.
 Public m_CertLeakDetail                As String
+
+'One-shot record fault, consumed by the next buffer allocation it matches.
+'Only TST_CertInjectRecordFault arms it, and only the record regression case
+'calls that. TST_CertResetCounters disarms it, so a fault left armed cannot
+'reach the next certification run.
+Private m_CertRecordFault               As Long
+Private m_CertRecordFaultBuffer         As Long
 
 'Post-capture fault injection, consumed by the first runner that reaches its
 'injection point. One-shot on purpose: a flag that stayed set would fault every
@@ -314,6 +384,145 @@ Public Function TST_TakePostCaptureFault() As Long
 End Function
 
 
+Public Sub TST_CertInjectRecordFault( _
+    ByVal FaultKind As Long, _
+    ByVal BufferId As Long)
+
+'
+'==============================================================================
+' TST_CertInjectRecordFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arm a one-shot allocation failure for the next certification record
+'   buffer allocation that the fault matches.
+'
+' WHY THIS EXISTS
+'   A certification record must fail closed when a buffer cannot be allocated
+'   (#50). Excel cannot be made to run out of memory on demand, so the path is
+'   unreachable without injecting the failure, and the three shapes it must
+'   survive differ: no buffer allocated yet, every buffer already allocated,
+'   and some parallel buffers grown while another was not.
+'
+' INPUTS
+'   FaultKind
+'     TEST_CERT_RECORD_FAULT_NONE disarms.
+'     TEST_CERT_RECORD_FAULT_FIRST fails the next first allocation of a
+'     buffer that holds nothing yet.
+'     TEST_CERT_RECORD_FAULT_GROWTH fails the next growth of a buffer that is
+'     already allocated.
+'
+'   BufferId
+'     TEST_CERT_BUFFER_ANY fails the first matching allocation of any buffer.
+'     A TEST_CERT_BUFFER_* value fails only that buffer, after the buffers
+'     before it have grown.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Cannot raise.
+'
+' CALLED FROM
+'   - TST_CertCheckRecordFault
+'   - TST_Case_CertRecordFailsClosed
+'
+' NOTES
+'   The fault is consumed only by an allocation it matches: a FIRST fault is
+'   not consumed by a growth, and a GROWTH fault is not consumed by a first
+'   allocation. TST_CertResetCounters disarms it.
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+        m_CertRecordFault = FaultKind
+        m_CertRecordFaultBuffer = BufferId
+
+End Sub
+
+
+Private Function TST_CertTakeRecordFault( _
+    ByVal BufferId As Long, _
+    ByVal Allocated As Boolean) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertTakeRecordFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Report whether the armed record fault matches this allocation, and disarm
+'   it in the same step when it does.
+'
+' WHY THIS EXISTS
+'   Reading and clearing separately would leave the fault armed on a path
+'   that read it and then failed, and the only reader fails on purpose
+'   immediately after reading it.
+'
+' INPUTS
+'   BufferId
+'     TEST_CERT_BUFFER_* value of the buffer about to be allocated.
+'
+'   Allocated
+'     TRUE when the buffer already holds entries and is about to grow.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the allocation must fail; the fault is then disarmed.
+'
+' ERROR POLICY
+'   - Cannot raise.
+'
+' CALLED FROM
+'   - TST_CertReserveBuffer
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Fire                As Boolean         'TRUE when the fault matches
+
+'------------------------------------------------------------------------------
+' MATCH FAULT
+'------------------------------------------------------------------------------
+    'A fault matches by allocation shape first, then by buffer
+        Fire = False
+
+        Select Case m_CertRecordFault
+
+            Case TEST_CERT_RECORD_FAULT_FIRST
+                Fire = Not Allocated
+
+            Case TEST_CERT_RECORD_FAULT_GROWTH
+                Fire = Allocated
+
+        End Select
+
+        If Fire Then
+            If m_CertRecordFaultBuffer <> TEST_CERT_BUFFER_ANY Then
+                Fire = (m_CertRecordFaultBuffer = BufferId)
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' DISARM AND RETURN
+'------------------------------------------------------------------------------
+    'One-shot: a fault that fired cannot fire again
+        If Fire Then
+            m_CertRecordFault = TEST_CERT_RECORD_FAULT_NONE
+            m_CertRecordFaultBuffer = TEST_CERT_BUFFER_ANY
+        End If
+
+        TST_CertTakeRecordFault = Fire
+
+End Function
+
+
 '
 '------------------------------------------------------------------------------
 '
@@ -330,7 +539,8 @@ Public Sub TST_CertResetCounters()
 ' TST_CertResetCounters
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Clear every certification counter and buffer before a run.
+'   Clear the certification record, the leak record and the record fault
+'   before a run.
 '
 ' WHY THIS EXISTS
 '   The regression packs are shared with the legacy runners, so skip recording
@@ -338,16 +548,32 @@ Public Sub TST_CertResetCounters()
 '   certification run in the same session would inherit the first run's counts
 '   and report a verdict about work it did not do.
 '
+'   A run that follows a recording failure must also start clean: the fatal
+'   flag of the earlier run is cleared, and a record fault left armed is
+'   disarmed, so neither can decide the next verdict (#50).
+'
 ' RETURNS
 '   None.
 '
+' BEHAVIOR
+'   - Disarms the record fault.
+'   - Clears the leak record.
+'   - Clears m_CertRecord through TST_CertResetRecord, which verifies that
+'     every buffer is released and flags the record when one is not.
+'
 ' ERROR POLICY
-'   - Does not raise.
+'   - Does not raise. A record that cannot be cleared is flagged as a
+'     recording failure, which forces FAIL | INCOMPLETE.
+'
+' DEPENDENCIES
+'   - TST_CertResetRecord
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
 ' UPDATED
+'   2026-11-16 - Clears the record through TST_CertResetRecord and disarms
+'                the record fault (#50).
 '   2026-11-06 - Clears the record of snapshots units left behind (#135).
 '   2026-08-19
 '==============================================================================
@@ -359,16 +585,120 @@ Public Sub TST_CertResetCounters()
     'Suppress any error; a reset that cannot complete must not abort the run
         On Error Resume Next
 
-        m_CertUnitCount = 0
-        m_CertSkipCount = 0
+        m_CertRecordFault = TEST_CERT_RECORD_FAULT_NONE
+        m_CertRecordFaultBuffer = TEST_CERT_BUFFER_ANY
+
         m_CertLeakDetail = vbNullString
 
-        Erase m_CertUnitNames
-        Erase m_CertUnitPassed
-        Erase m_CertUnitDetail
-        Erase m_CertSkipDetail
+        If Not TST_CertResetRecord(m_CertRecord) Then
+            TST_Log "TST_CertResetCounters", "RECORD FAIL", _
+                "the certification record could not be cleared; the verdict " & _
+                "will be FAIL | INCOMPLETE"
+        End If
 
 End Sub
+
+
+Public Function TST_CertResetRecord( _
+    ByRef Rec As tCertRecord) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertResetRecord
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Empty one certification record and verify that every buffer is released.
+'
+' WHY THIS EXISTS
+'   A record is reused from one certification run to the next. Clearing it
+'   with nothing checked would let a buffer that survived the reset, or a
+'   fatal flag from the earlier run, decide the next verdict (#50).
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to empty.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => every count and failure field is zero and every buffer is
+'              unallocated.
+'     FALSE => a buffer survived; the record is flagged with
+'              TEST_CERT_RECFAIL_RESET.
+'
+' BEHAVIOR
+'   - Unpublishes every entry first, by zeroing the counts.
+'   - Releases every buffer.
+'   - Clears the failure fields, including a fatal flag left by an earlier
+'     run.
+'   - Reads every buffer back, and flags the record when one still holds
+'     storage.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertBufferCapacity
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - TST_CertResetCounters
+'   - TST_CertCheckRecordFault
+'   - TST_Case_CertRecordFailsClosed
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim BufferId            As Long            'Cursor over the buffers
+    Dim Cleared             As Boolean         'TRUE while every buffer reads empty
+
+'------------------------------------------------------------------------------
+' CLEAR RECORD
+'------------------------------------------------------------------------------
+    'Unpublish before releasing, so no count ever describes a released buffer.
+    'Every step is attempted; the readback below is what decides the result.
+        On Error Resume Next
+
+        Rec.EntryCount = 0
+        Rec.UnitCount = 0
+        Rec.SkipCount = 0
+
+        Erase Rec.EntryKind
+        Erase Rec.EntryName
+        Erase Rec.EntryPassed
+        Erase Rec.EntryDetail
+
+        Rec.RecordFailed = False
+        Rec.RecordFailCount = 0
+        Rec.RecordFailStage = TEST_CERT_RECFAIL_NONE
+        Rec.RecordFailError = 0
+
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' VERIFY RECORD
+'------------------------------------------------------------------------------
+    'A buffer that still holds storage is a failed reset, not a clean one
+        Cleared = True
+
+        For BufferId = TEST_CERT_BUFFER_KIND To TEST_CERT_BUFFER_DETAIL
+            If TST_CertBufferCapacity(Rec, BufferId) <> 0 Then
+                Cleared = False
+            End If
+        Next BufferId
+
+        If Not Cleared Then
+            TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_RESET, 0
+        End If
+
+        TST_CertResetRecord = Cleared
+
+End Function
 
 
 Public Sub TST_CertRecordSkip( _
@@ -402,12 +732,19 @@ Public Sub TST_CertRecordSkip( _
 '   None.
 '
 ' ERROR POLICY
-'   - Does not raise.
+'   - Does not raise. A skip that cannot be stored sets
+'     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE; that flag,
+'     not the skip list, is authoritative when the list is short.
+'
+' DEPENDENCIES
+'   - TST_CertRecordEntry
 '
 ' CALLED FROM
 '   - TST_RunRegressionPack
 '
 ' UPDATED
+'   2026-11-16 - Stores the skip through the shared record path, which
+'                publishes it only once it is complete (#50).
 '   2026-08-19
 '==============================================================================
 '
@@ -426,10 +763,11 @@ Public Sub TST_CertRecordSkip( _
 
         If m_CertActive Then
 
-            m_CertSkipCount = m_CertSkipCount + 1
-
-            ReDim Preserve m_CertSkipDetail(1 To m_CertSkipCount)
-            m_CertSkipDetail(m_CertSkipCount) = CallerProc & ": " & Reason
+            If Not TST_CertRecordEntry(TEST_CERT_ENTRY_SKIP, CallerProc, False, Reason) Then
+                TST_Log "TST_CertRecordSkip", "RECORD FAIL", _
+                    "a skip by " & CallerProc & " could not be stored; the " & _
+                    "verdict will be FAIL | INCOMPLETE"
+            End If
 
         End If
 
@@ -450,7 +788,7 @@ Public Sub TST_CertRecordUnit( _
 '
 ' WHY THIS EXISTS
 '   The verdict, the JSON evidence and the text report are all derived from the
-'   same arrays, so there is exactly one place where an outcome enters the run
+'   same record, so there is exactly one place where an outcome enters the run
 '   and no opportunity for the three to disagree.
 '
 ' INPUTS
@@ -467,12 +805,19 @@ Public Sub TST_CertRecordUnit( _
 '   None.
 '
 ' ERROR POLICY
-'   - Does not raise.
+'   - Does not raise. An outcome that cannot be stored sets
+'     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE; that flag,
+'     not the unit list, is authoritative when the list is short.
+'
+' DEPENDENCIES
+'   - TST_CertRecordEntry
 '
 ' CALLED FROM
 '   - TST_CertRunUnit
 '
 ' UPDATED
+'   2026-11-16 - Stores the outcome through the shared record path, which
+'                publishes it only once it is complete (#50).
 '   2026-08-19
 '==============================================================================
 '
@@ -483,20 +828,1199 @@ Public Sub TST_CertRecordUnit( _
     'Recording must never be the thing that breaks a run
         On Error Resume Next
 
-        m_CertUnitCount = m_CertUnitCount + 1
-
-        ReDim Preserve m_CertUnitNames(1 To m_CertUnitCount)
-        ReDim Preserve m_CertUnitPassed(1 To m_CertUnitCount)
-        ReDim Preserve m_CertUnitDetail(1 To m_CertUnitCount)
-
-        m_CertUnitNames(m_CertUnitCount) = UnitName
-        m_CertUnitPassed(m_CertUnitCount) = Passed
-        m_CertUnitDetail(m_CertUnitCount) = Detail
+        If Not TST_CertRecordEntry(TEST_CERT_ENTRY_UNIT, UnitName, Passed, Detail) Then
+            TST_Log "TST_CertRecordUnit", "RECORD FAIL", _
+                "the outcome of " & UnitName & " could not be stored; the " & _
+                "verdict will be FAIL | INCOMPLETE"
+        End If
 
         TST_Log "TST_CertRecordUnit", IIf(Passed, "UNIT PASS", "UNIT FAIL"), _
             UnitName & IIf(Len(Detail) > 0, " | " & Detail, vbNullString)
 
 End Sub
+
+
+Private Function TST_CertRecordEntry( _
+    ByVal Kind As Long, _
+    ByVal EntryName As String, _
+    ByVal Passed As Boolean, _
+    ByVal Detail As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertRecordEntry
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store one entry in the record of the certification run in progress, and
+'   make sure that an entry that was not stored is counted as a recording
+'   failure.
+'
+' WHY THIS EXISTS
+'   TST_CertTryAppendEntry flags the record from its own handler. A failure
+'   before that handler is armed, such as copying an argument, would return
+'   FALSE with nothing flagged. Comparing the failure count before and after
+'   closes that gap, so no missing entry can go unflagged.
+'
+'   Unit and skip recording use this one path; case recording joins it when
+'   certification records cases (#42).
+'
+' INPUTS
+'   Kind / EntryName / Passed / Detail
+'     As TST_CertTryAppendEntry.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the entry was stored and published.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertTryAppendEntry
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - TST_CertRecordUnit
+'   - TST_CertRecordSkip
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FailuresBefore      As Long            'Failure count before the append
+    Dim Stored              As Boolean         'TRUE once the entry is published
+
+'------------------------------------------------------------------------------
+' APPEND ENTRY
+'------------------------------------------------------------------------------
+    'An append that raised leaves Stored FALSE
+        On Error Resume Next
+
+        FailuresBefore = m_CertRecord.RecordFailCount
+        Stored = False
+
+        Stored = TST_CertTryAppendEntry(m_CertRecord, Kind, EntryName, Passed, Detail)
+
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' FLAG AN UNCOUNTED MISS
+'------------------------------------------------------------------------------
+    'A miss the append could not flag itself is still a recording failure
+        If Not Stored Then
+            If m_CertRecord.RecordFailCount = FailuresBefore Then
+                TST_CertMarkRecordFailure m_CertRecord, TEST_CERT_RECFAIL_WRITE, 0
+            End If
+        End If
+
+        TST_CertRecordEntry = Stored
+
+End Function
+
+
+Public Function TST_CertTryAppendEntry( _
+    ByRef Rec As tCertRecord, _
+    ByVal Kind As Long, _
+    ByVal EntryName As String, _
+    ByVal Passed As Boolean, _
+    ByVal Detail As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertTryAppendEntry
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store one entry in a certification record and publish it only once it is
+'   complete.
+'
+' WHY THIS EXISTS
+'   Recording used to raise the count first and then grow each parallel array
+'   under On Error Resume Next. A growth that failed left a count describing
+'   an entry that one array did not hold, and the verdict and evidence loops
+'   then read past the end of that array with every error suppressed (#50).
+'
+'   This is the one append path for every kind of entry: units and skips
+'   today, and cases when certification records them (#42). A new kind adds
+'   a TEST_CERT_ENTRY_* value and its count, not a new set of arrays.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to append to.
+'
+'   Kind
+'     TEST_CERT_ENTRY_UNIT or TEST_CERT_ENTRY_SKIP.
+'
+'   EntryName
+'     Unit name, or the procedure that skipped.
+'
+'   Passed
+'     Unit outcome. FALSE for a skip.
+'
+'   Detail
+'     Unit failure text, or the skip reason.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => the entry is stored and the counts include it.
+'     FALSE => nothing was published; Rec.RecordFailed is TRUE.
+'
+' BEHAVIOR
+'   1  validate      reject an unknown kind, and a record whose buffers
+'                    already disagree with its counts
+'   2  reserve       grow every buffer to the next index, in buffer order; a
+'                    buffer already large enough is left alone
+'   3  write         write every field of the entry
+'   4  publish       raise the kind count, then EntryCount, last
+'
+'   A failure at any step leaves the counts as they were. Buffers grown before
+'   the failure stay grown; they are capacity, not entries, and the next
+'   append reuses them.
+'
+' ERROR POLICY
+'   - Does not raise.
+'   - On failure the handler copies Err.Number and then sets the scalar
+'     failure fields of Rec before anything else is allocated.
+'   - Rec.RecordFailed is authoritative when the entry cannot be stored: it
+'     forces FAIL | INCOMPLETE through TST_CertComposeEvidence, and
+'     RecordFailCount, RecordFailStage and RecordFailError name the failure
+'     without needing any text.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'   - TST_CertReserveBuffer
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - TST_CertRecordEntry
+'   - TST_CertCheckRecordFault
+'   - TST_Case_CertRecordFailsClosed
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim NewIndex            As Long            'Index the entry is written to
+    Dim Stage               As Long            'Step a failure is charged to
+    Dim FailNumber          As Long            'Error number of a failure
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertTryAppendEntry = False
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'An entry no evidence section reads would be stored and never reported
+        Stage = TEST_CERT_RECFAIL_KIND
+
+        If Kind <> TEST_CERT_ENTRY_UNIT And Kind <> TEST_CERT_ENTRY_SKIP Then
+            TST_CertMarkRecordFailure Rec, Stage, 0
+            GoTo Safe_Exit
+        End If
+
+    'Growing a record whose buffers already disagree with its counts would
+    'publish an entry next to one that is missing
+        Stage = TEST_CERT_RECFAIL_INVARIANT
+
+        If Not TST_CertRecordIsConsistent(Rec) Then
+            TST_CertMarkRecordFailure Rec, Stage, 0
+            GoTo Safe_Exit
+        End If
+
+        NewIndex = Rec.EntryCount + 1
+
+'------------------------------------------------------------------------------
+' RESERVE EVERY BUFFER
+'------------------------------------------------------------------------------
+    'Stage names the buffer being grown, so a failure is charged to it
+        For Stage = TEST_CERT_BUFFER_KIND To TEST_CERT_BUFFER_DETAIL
+            TST_CertReserveBuffer Rec, Stage, NewIndex
+        Next Stage
+
+'------------------------------------------------------------------------------
+' WRITE EVERY FIELD
+'------------------------------------------------------------------------------
+    'The slot is beyond EntryCount, so a partial write is never read
+        Stage = TEST_CERT_RECFAIL_WRITE
+
+        Rec.EntryKind(NewIndex) = Kind
+        Rec.EntryName(NewIndex) = EntryName
+        Rec.EntryPassed(NewIndex) = Passed
+        Rec.EntryDetail(NewIndex) = Detail
+
+'------------------------------------------------------------------------------
+' PUBLISH
+'------------------------------------------------------------------------------
+    'Scalar assignments only; EntryCount last, once the entry is complete
+        If Kind = TEST_CERT_ENTRY_UNIT Then
+            Rec.UnitCount = Rec.UnitCount + 1
+        Else
+            Rec.SkipCount = Rec.SkipCount + 1
+        End If
+
+        Rec.EntryCount = NewIndex
+
+        TST_CertTryAppendEntry = True
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Flag the record before anything else can allocate
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Rec, Stage, FailNumber
+
+        TST_CertTryAppendEntry = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Private Sub TST_CertReserveBuffer( _
+    ByRef Rec As tCertRecord, _
+    ByVal BufferId As Long, _
+    ByVal Needed As Long)
+
+'
+'==============================================================================
+' TST_CertReserveBuffer
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Make one record buffer hold at least Needed 1-based elements.
+'
+' WHY THIS EXISTS
+'   Each buffer is grown on its own, so that the caller can charge a failure
+'   to the buffer that caused it, and so that the record fault can fail one
+'   chosen buffer while the others grow.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record that owns the buffer.
+'
+'   BufferId
+'     TEST_CERT_BUFFER_* value of the buffer.
+'
+'   Needed
+'     Upper bound the buffer must reach.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Leaves a buffer that is already large enough alone.
+'   - Otherwise consumes a matching record fault, and grows the buffer with
+'     ReDim Preserve.
+'
+' ERROR POLICY
+'   - Raises error 7 when the record fault fires, error 9 when the buffer is
+'     not 1-based, and whatever ReDim Preserve raises. The caller's handler
+'     flags the record.
+'
+' DEPENDENCIES
+'   - TST_CertBufferCapacity
+'   - TST_CertTakeRecordFault
+'
+' CALLED FROM
+'   - TST_CertTryAppendEntry
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Capacity            As Long            'Elements the buffer holds now
+
+    Const PROC As String = "TST_CertReserveBuffer"
+
+'------------------------------------------------------------------------------
+' READ CAPACITY
+'------------------------------------------------------------------------------
+    'A buffer that is not 1-based cannot be indexed by entry number
+        Capacity = TST_CertBufferCapacity(Rec, BufferId)
+
+        If Capacity < 0 Then
+            Err.Raise 9, PROC, _
+                "certification record buffer " & CStr(BufferId) & " is not 1-based"
+        End If
+
+'------------------------------------------------------------------------------
+' GROW BUFFER
+'------------------------------------------------------------------------------
+    'Only an allocation that is really needed can consume the fault
+        If Capacity < Needed Then
+
+            If TST_CertTakeRecordFault(BufferId, (Capacity > 0)) Then
+                Err.Raise 7, PROC, _
+                    "injected certification record allocation failure"
+            End If
+
+            Select Case BufferId
+
+                Case TEST_CERT_BUFFER_KIND
+                    ReDim Preserve Rec.EntryKind(1 To Needed)
+
+                Case TEST_CERT_BUFFER_NAME
+                    ReDim Preserve Rec.EntryName(1 To Needed)
+
+                Case TEST_CERT_BUFFER_PASSED
+                    ReDim Preserve Rec.EntryPassed(1 To Needed)
+
+                Case TEST_CERT_BUFFER_DETAIL
+                    ReDim Preserve Rec.EntryDetail(1 To Needed)
+
+                Case Else
+                    Err.Raise 5, PROC, _
+                        "unknown certification record buffer " & CStr(BufferId)
+
+            End Select
+
+        End If
+
+End Sub
+
+
+Private Function TST_CertBufferCapacity( _
+    ByRef Rec As tCertRecord, _
+    ByVal BufferId As Long) _
+    As Long
+
+'
+'==============================================================================
+' TST_CertBufferCapacity
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Report how many 1-based elements one record buffer holds.
+'
+' WHY THIS EXISTS
+'   An unallocated dynamic array raises on LBound and UBound. Reading the
+'   bounds in one place, under its own handler, lets every caller compare a
+'   capacity with a count instead of indexing and hoping.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record that owns the buffer.
+'
+'   BufferId
+'     TEST_CERT_BUFFER_* value of the buffer.
+'
+' RETURNS
+'   Long
+'     The upper bound of a 1-based buffer; 0 for an unallocated buffer; -1
+'     for a buffer that is not 1-based, an unknown buffer, or a read that
+'     failed for any other reason.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertReserveBuffer
+'   - TST_CertRecordIsConsistent
+'   - TST_CertResetRecord
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LowBound            As Long            'LBound of the buffer
+    Dim HighBound           As Long            'UBound of the buffer
+    Dim FailNumber          As Long            'Error number of a failed read
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertBufferCapacity = -1
+
+'------------------------------------------------------------------------------
+' READ BOUNDS
+'------------------------------------------------------------------------------
+    'An unallocated buffer raises error 9 here
+        Select Case BufferId
+
+            Case TEST_CERT_BUFFER_KIND
+                LowBound = LBound(Rec.EntryKind)
+                HighBound = UBound(Rec.EntryKind)
+
+            Case TEST_CERT_BUFFER_NAME
+                LowBound = LBound(Rec.EntryName)
+                HighBound = UBound(Rec.EntryName)
+
+            Case TEST_CERT_BUFFER_PASSED
+                LowBound = LBound(Rec.EntryPassed)
+                HighBound = UBound(Rec.EntryPassed)
+
+            Case TEST_CERT_BUFFER_DETAIL
+                LowBound = LBound(Rec.EntryDetail)
+                HighBound = UBound(Rec.EntryDetail)
+
+            Case Else
+                GoTo Safe_Exit
+
+        End Select
+
+'------------------------------------------------------------------------------
+' RETURN CAPACITY
+'------------------------------------------------------------------------------
+    'Only a 1-based buffer can be indexed by entry number
+        If LowBound = 1 Then
+            TST_CertBufferCapacity = HighBound
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Subscript out of range is an unallocated buffer; anything else is unknown
+        FailNumber = Err.Number
+
+        If FailNumber = 9 Then
+            TST_CertBufferCapacity = 0
+        Else
+            TST_CertBufferCapacity = -1
+        End If
+
+        Resume Safe_Exit
+
+End Function
+
+
+Private Sub TST_CertMarkRecordFailure( _
+    ByRef Rec As tCertRecord, _
+    ByVal Stage As Long, _
+    ByVal ErrorNumber As Long)
+
+'
+'==============================================================================
+' TST_CertMarkRecordFailure
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Flag a certification record as incomplete.
+'
+' WHY THIS EXISTS
+'   The flag is what forces FAIL | INCOMPLETE when an entry cannot be stored,
+'   so setting it must not depend on the allocation that just failed. This
+'   writes scalar fields only: no string, array or object is created.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to flag.
+'
+'   Stage
+'     TEST_CERT_RECFAIL_* value, or the TEST_CERT_BUFFER_* value of the
+'     buffer that could not grow.
+'
+'   ErrorNumber
+'     Runtime error number, or 0 when the failure raised none.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Sets RecordFailed and counts the failure.
+'   - Keeps the stage and error number of the first failure, which caused
+'     any that follow.
+'
+' ERROR POLICY
+'   - Cannot raise. It runs inside error handlers.
+'
+' CALLED FROM
+'   - TST_CertTryAppendEntry
+'   - TST_CertRecordEntry
+'   - TST_CertResetRecord
+'   - TST_CertBuildEntryLists
+'   - TST_CertComposeEvidence
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' FLAG RECORD
+'------------------------------------------------------------------------------
+    'The flag first: it is the part the verdict depends on
+        Rec.RecordFailed = True
+
+        If Rec.RecordFailCount < 2147483647 Then
+            Rec.RecordFailCount = Rec.RecordFailCount + 1
+        End If
+
+        If Rec.RecordFailStage = TEST_CERT_RECFAIL_NONE Then
+            Rec.RecordFailStage = Stage
+            Rec.RecordFailError = ErrorNumber
+        End If
+
+End Sub
+
+
+Public Function TST_CertRecordIsConsistent( _
+    ByRef Rec As tCertRecord) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertRecordIsConsistent
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Check the invariants of a certification record before anything indexes
+'   its buffers.
+'
+' WHY THIS EXISTS
+'   The evidence loops index every buffer up to EntryCount. A count beyond a
+'   buffer's bound raised out of range, and the On Error Resume Next around
+'   those loops turned that into missing or wrong evidence (#50). Checking
+'   first makes a mismatch a recording failure instead.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to check. It is not changed.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the counts are non-negative, UnitCount + SkipCount equals
+'     EntryCount, and every buffer is either unallocated with EntryCount = 0
+'     or 1-based with an upper bound of at least EntryCount.
+'
+' ERROR POLICY
+'   - Does not raise. A check that cannot complete returns FALSE.
+'
+' DEPENDENCIES
+'   - TST_CertBufferCapacity
+'
+' CALLED FROM
+'   - TST_CertTryAppendEntry
+'   - TST_CertBuildEntryLists
+'   - TST_CertCheckRecordFault
+'   - TST_Case_CertRecordFailsClosed
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim BufferId            As Long            'Cursor over the buffers
+    Dim Consistent          As Boolean         'TRUE while every check passes
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertRecordIsConsistent = False
+
+'------------------------------------------------------------------------------
+' CHECK COUNTS
+'------------------------------------------------------------------------------
+    'The kind counts partition the published entries
+        Consistent = (Rec.EntryCount >= 0) And _
+            (Rec.UnitCount >= 0) And _
+            (Rec.SkipCount >= 0)
+
+        If Consistent Then
+            Consistent = (Rec.UnitCount + Rec.SkipCount = Rec.EntryCount)
+        End If
+
+'------------------------------------------------------------------------------
+' CHECK BUFFERS
+'------------------------------------------------------------------------------
+    'Every published entry must exist in every buffer
+        If Consistent Then
+
+            For BufferId = TEST_CERT_BUFFER_KIND To TEST_CERT_BUFFER_DETAIL
+
+                If TST_CertBufferCapacity(Rec, BufferId) < Rec.EntryCount Then
+                    Consistent = False
+                End If
+
+            Next BufferId
+
+        End If
+
+        TST_CertRecordIsConsistent = Consistent
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'A check that cannot complete is a failed check
+        TST_CertRecordIsConsistent = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Public Sub TST_CertComposeEvidence( _
+    ByRef Rec As tCertRecord, _
+    ByVal CleanupOK As Boolean, _
+    ByVal CleanupDetail As String, _
+    ByRef UnitsFailed As Long, _
+    ByRef Complete As Boolean, _
+    ByRef Passed As Boolean, _
+    ByRef Verdict As String, _
+    ByRef RecordingDetail As String, _
+    ByRef JsonText As String, _
+    ByRef ReportText As String)
+
+'
+'==============================================================================
+' TST_CertComposeEvidence
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Derive the verdict of a certification record and compose its JSON and
+'   text evidence.
+'
+' WHY THIS EXISTS
+'   The verdict used to be counted by the runner and the evidence built by
+'   two loops that each trusted the counts. One composer, which checks the
+'   record before reading it and decides the verdict after, is what keeps a
+'   record that could not be stored from producing a passing document (#50).
+'
+'   The runner and the record regression case both call it, so the case
+'   asserts exactly what certification emits.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to report. A failure found while reading it flags it.
+'
+'   CleanupOK / CleanupDetail
+'     Cleanup verdict computed by the caller.
+'
+'   UnitsFailed / Complete / Passed / Verdict / RecordingDetail /
+'   JsonText / ReportText
+'     ByRef outputs. Set to a failing verdict and empty documents first, so
+'     that any early exit leaves FAIL | INCOMPLETE.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   1  read entries  check the invariants, then list units and skips; a
+'                    mismatch or a failed read flags the record and lists
+'                    nothing
+'   2  verdict       Complete requires no skip and no recording failure;
+'                    Passed requires Complete, no failed unit and cleanup OK
+'   3  documents     JSON with "recording" and "recordingDetail", and a text
+'                    report with a RECORDING line when recording failed
+'
+' ERROR POLICY
+'   - Does not raise. An error flags the record with
+'     TEST_CERT_RECFAIL_EVIDENCE and leaves the failing verdict.
+'   - Passed and Complete are authoritative. When a document cannot be
+'     composed in full, they and Rec.RecordFailed still describe the run, and
+'     neither document can say passed while Rec.RecordFailed is TRUE.
+'
+' DEPENDENCIES
+'   - TST_CertBuildEntryLists
+'   - TST_CertVerdictLine
+'   - TST_CertRecordingDetail
+'   - TST_CertBuildJsonEvidence
+'   - TST_CertBuildTextReport
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_CertCheckRecordFault
+'   - TST_Case_CertRecordFailsClosed
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim UnitJson            As String          'unitResults members
+    Dim SkipJson            As String          'skipDetail members
+    Dim UnitLines           As String          'Unit lines of the report
+    Dim SkipLines           As String          'Skip lines of the report
+    Dim FailNumber          As Long            'Error number of a failure
+
+'------------------------------------------------------------------------------
+' FAIL CLOSED
+'------------------------------------------------------------------------------
+    'Every output starts as a failure; only a complete pass below changes it
+        UnitsFailed = 0
+        Complete = False
+        Passed = False
+        Verdict = "RESULT: FAIL | INCOMPLETE"
+        RecordingDetail = vbNullString
+        JsonText = vbNullString
+        ReportText = vbNullString
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' READ ENTRIES
+'------------------------------------------------------------------------------
+    'Checks the invariants before indexing; a failure flags the record
+        TST_CertBuildEntryLists _
+            Rec:=Rec, _
+            UnitsFailed:=UnitsFailed, _
+            UnitJson:=UnitJson, _
+            SkipJson:=SkipJson, _
+            UnitLines:=UnitLines, _
+            SkipLines:=SkipLines
+
+'------------------------------------------------------------------------------
+' DETERMINE VERDICT
+'------------------------------------------------------------------------------
+    'Decided after the entries were read, so a failure found there counts.
+    'Completeness and correctness are separate questions: a run that skipped
+    'a mandatory unit, or could not record one, is not complete.
+        Complete = (Rec.SkipCount = 0) And Not Rec.RecordFailed
+        Passed = (UnitsFailed = 0) And CleanupOK And Complete
+
+        Verdict = TST_CertVerdictLine( _
+            Passed:=Passed, _
+            Complete:=Complete, _
+            Units:=Rec.UnitCount, _
+            UnitsFailed:=UnitsFailed, _
+            Skipped:=Rec.SkipCount, _
+            CleanupOK:=CleanupOK)
+
+        If Rec.RecordFailed Then
+            RecordingDetail = TST_CertRecordingDetail(Rec)
+        End If
+
+'------------------------------------------------------------------------------
+' BUILD DOCUMENTS
+'------------------------------------------------------------------------------
+    'Both documents carry the same verdict and the same entries
+        JsonText = TST_CertBuildJsonEvidence( _
+            Rec:=Rec, _
+            UnitsFailed:=UnitsFailed, _
+            CleanupOK:=CleanupOK, _
+            CleanupDetail:=CleanupDetail, _
+            Complete:=Complete, _
+            Passed:=Passed, _
+            RecordingDetail:=RecordingDetail, _
+            UnitJson:=UnitJson, _
+            SkipJson:=SkipJson)
+
+        ReportText = TST_CertBuildTextReport( _
+            Rec:=Rec, _
+            Verdict:=Verdict, _
+            CleanupDetail:=CleanupDetail, _
+            RecordingDetail:=RecordingDetail, _
+            UnitLines:=UnitLines, _
+            SkipLines:=SkipLines)
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Flag the record first, then put the failing verdict back
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_EVIDENCE, FailNumber
+
+        Complete = False
+        Passed = False
+        Verdict = "RESULT: FAIL | INCOMPLETE"
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Function TST_CertBuildEntryLists( _
+    ByRef Rec As tCertRecord, _
+    ByRef UnitsFailed As Long, _
+    ByRef UnitJson As String, _
+    ByRef SkipJson As String, _
+    ByRef UnitLines As String, _
+    ByRef SkipLines As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertBuildEntryLists
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Read every published entry once and compose the unit and skip sections
+'   of both evidence documents.
+'
+' WHY THIS EXISTS
+'   Reading the record in one pass, after its invariants are checked, means
+'   the JSON and the text report list the same entries, and no index beyond a
+'   buffer's bound is ever read.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to read. A mismatch or a failed read flags it.
+'
+'   UnitsFailed / UnitJson / SkipJson / UnitLines / SkipLines
+'     ByRef outputs: the failed-unit count, the members of the unitResults
+'     and skipDetail arrays, and the unit and skip lines of the report.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => every entry was read, and the kinds read match the counts.
+'     FALSE => the record is flagged, every output is empty and
+'              UnitsFailed is 0.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'   - TST_CertJsonEscape
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - TST_CertComposeEvidence
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the entries
+    Dim UnitsSeen           As Long            'Unit entries read
+    Dim SkipsSeen           As Long            'Skip entries read
+    Dim FailedSeen          As Long            'Failed units read
+    Dim SkipText            As String          'One skip, as it is reported
+    Dim Matched             As Boolean         'TRUE while kinds match counts
+    Dim FailNumber          As Long            'Error number of a failed read
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        UnitsFailed = 0
+        UnitJson = vbNullString
+        SkipJson = vbNullString
+        UnitLines = vbNullString
+        SkipLines = vbNullString
+
+        TST_CertBuildEntryLists = False
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' CHECK INVARIANTS
+'------------------------------------------------------------------------------
+    'Nothing is indexed until every buffer is known to hold every entry
+        Matched = TST_CertRecordIsConsistent(Rec)
+
+'------------------------------------------------------------------------------
+' READ ENTRIES
+'------------------------------------------------------------------------------
+    'One pass, in recording order
+        If Matched Then
+
+            For ScanIdx = 1 To Rec.EntryCount
+
+                Select Case Rec.EntryKind(ScanIdx)
+
+                    Case TEST_CERT_ENTRY_UNIT
+                        UnitsSeen = UnitsSeen + 1
+
+                        If Not Rec.EntryPassed(ScanIdx) Then
+                            FailedSeen = FailedSeen + 1
+                        End If
+
+                        If UnitsSeen > 1 Then
+                            UnitJson = UnitJson & ","
+                        End If
+
+                        UnitJson = UnitJson & "{""name"":""" & _
+                            TST_CertJsonEscape(Rec.EntryName(ScanIdx)) & """" & _
+                            ",""passed"":" & _
+                            IIf(Rec.EntryPassed(ScanIdx), "true", "false") & _
+                            ",""detail"":""" & _
+                            TST_CertJsonEscape(Rec.EntryDetail(ScanIdx)) & """}"
+
+                        UnitLines = UnitLines & _
+                            IIf(Rec.EntryPassed(ScanIdx), "  PASS  ", "  FAIL  ") & _
+                            Rec.EntryName(ScanIdx) & _
+                            IIf(Len(Rec.EntryDetail(ScanIdx)) > 0, _
+                                " | " & Rec.EntryDetail(ScanIdx), vbNullString) & _
+                            vbNewLine
+
+                    Case TEST_CERT_ENTRY_SKIP
+                        SkipsSeen = SkipsSeen + 1
+
+                        SkipText = Rec.EntryName(ScanIdx) & ": " & _
+                            Rec.EntryDetail(ScanIdx)
+
+                        If SkipsSeen > 1 Then
+                            SkipJson = SkipJson & ","
+                        End If
+
+                        SkipJson = SkipJson & """" & TST_CertJsonEscape(SkipText) & """"
+                        SkipLines = SkipLines & "  SKIP  " & SkipText & vbNewLine
+
+                    Case Else
+                        Matched = False
+
+                End Select
+
+                If Not Matched Then
+                    Exit For
+                End If
+
+            Next ScanIdx
+
+        End If
+
+    'Every published entry must have been read as the kind it was counted as
+        If Matched Then
+            Matched = (UnitsSeen = Rec.UnitCount) And (SkipsSeen = Rec.SkipCount)
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN LISTS
+'------------------------------------------------------------------------------
+    'A record that does not match its counts lists nothing
+        If Matched Then
+            UnitsFailed = FailedSeen
+            TST_CertBuildEntryLists = True
+        Else
+            TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_INVARIANT, 0
+
+            UnitJson = vbNullString
+            SkipJson = vbNullString
+            UnitLines = vbNullString
+            SkipLines = vbNullString
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Flag the record first, then drop whatever was half read
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_EVIDENCE, FailNumber
+
+        UnitsFailed = 0
+        UnitJson = vbNullString
+        SkipJson = vbNullString
+        UnitLines = vbNullString
+        SkipLines = vbNullString
+
+        TST_CertBuildEntryLists = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Private Function TST_CertVerdictLine( _
+    ByVal Passed As Boolean, _
+    ByVal Complete As Boolean, _
+    ByVal Units As Long, _
+    ByVal UnitsFailed As Long, _
+    ByVal Skipped As Long, _
+    ByVal CleanupOK As Boolean) _
+    As String
+
+'
+'==============================================================================
+' TST_CertVerdictLine
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Compose the RESULT line of a certification run.
+'
+' WHY THIS EXISTS
+'   The line is quoted in pull requests and checked against the JSON by
+'   tools/check_excel_evidence.py, so its format is composed in one place.
+'
+' INPUTS
+'   Passed / Complete / Units / UnitsFailed / Skipped / CleanupOK
+'     The verdict components.
+'
+' RETURNS
+'   String
+'     RESULT: <PASS|FAIL> | <COMPLETE|INCOMPLETE> | units=<n> failed=<n>
+'     skipped=<n> cleanup=<OK|FAILED>
+'
+' ERROR POLICY
+'   - Raises only if the text cannot be allocated; the caller's handler then
+'     keeps its failing verdict.
+'
+' CALLED FROM
+'   - TST_CertComposeEvidence
+'
+' UPDATED
+'   2026-11-16 - Moved out of Test_EXCEL_UI_RunReleaseCertification (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' COMPOSE LINE
+'------------------------------------------------------------------------------
+        TST_CertVerdictLine = "RESULT: " & IIf(Passed, "PASS", "FAIL") & _
+            " | " & IIf(Complete, "COMPLETE", "INCOMPLETE") & _
+            " | units=" & CStr(Units) & _
+            " failed=" & CStr(UnitsFailed) & _
+            " skipped=" & CStr(Skipped) & _
+            " cleanup=" & IIf(CleanupOK, "OK", "FAILED")
+
+End Function
+
+
+Private Function TST_CertRecordingDetail( _
+    ByRef Rec As tCertRecord) _
+    As String
+
+'
+'==============================================================================
+' TST_CertRecordingDetail
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Name a certification-recording failure from the scalar fields of the
+'   record.
+'
+' WHY THIS EXISTS
+'   The entry that could not be stored is, by definition, not in the record,
+'   so the evidence names the failure from what survived it: the count, the
+'   stage and the error number of the first failure.
+'
+' INPUTS
+'   Rec
+'     ByRef. The flagged record. It is not changed.
+'
+' RETURNS
+'   String
+'     "certification recording FAILED | failures=<n> | first: <stage>",
+'     followed by " | error <n>" when the failure raised one. When the full
+'     text cannot be composed, the first three words alone.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertComposeEvidence
+'
+' UPDATED
+'   2026-11-16 - Added (#50).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Detail              As String          'Text under construction
+    Dim StageText           As String          'What the first failure was doing
+
+'------------------------------------------------------------------------------
+' NAME FAILURE
+'------------------------------------------------------------------------------
+    'The prefix first, so that a later failure still leaves a named failure
+        On Error Resume Next
+
+        Detail = "certification recording FAILED"
+
+        Select Case Rec.RecordFailStage
+
+            Case TEST_CERT_BUFFER_KIND
+                StageText = "growing the entry-kind buffer"
+
+            Case TEST_CERT_BUFFER_NAME
+                StageText = "growing the entry-name buffer"
+
+            Case TEST_CERT_BUFFER_PASSED
+                StageText = "growing the unit-outcome buffer"
+
+            Case TEST_CERT_BUFFER_DETAIL
+                StageText = "growing the entry-detail buffer"
+
+            Case TEST_CERT_RECFAIL_WRITE
+                StageText = "writing the entry"
+
+            Case TEST_CERT_RECFAIL_INVARIANT
+                StageText = "the record buffers disagree with its counts"
+
+            Case TEST_CERT_RECFAIL_EVIDENCE
+                StageText = "reading the entries for the evidence"
+
+            Case TEST_CERT_RECFAIL_KIND
+                StageText = "an entry of unknown kind"
+
+            Case TEST_CERT_RECFAIL_RESET
+                StageText = "clearing the record"
+
+            Case Else
+                StageText = "stage " & CStr(Rec.RecordFailStage)
+
+        End Select
+
+        Detail = Detail & _
+            " | failures=" & CStr(Rec.RecordFailCount) & _
+            " | first: " & StageText & _
+            IIf(Rec.RecordFailError <> 0, _
+                " | error " & CStr(Rec.RecordFailError), vbNullString)
+
+        TST_CertRecordingDetail = Detail
+
+End Function
 
 
 Public Function TST_CertAppendDetail( _
@@ -556,11 +2080,15 @@ End Function
 
 
 Public Function TST_CertBuildJsonEvidence( _
+    ByRef Rec As tCertRecord, _
     ByVal UnitsFailed As Long, _
     ByVal CleanupOK As Boolean, _
     ByVal CleanupDetail As String, _
     ByVal Complete As Boolean, _
-    ByVal Passed As Boolean) _
+    ByVal Passed As Boolean, _
+    ByVal RecordingDetail As String, _
+    ByVal UnitJson As String, _
+    ByVal SkipJson As String) _
     As String
 
 '
@@ -580,8 +2108,19 @@ Public Function TST_CertBuildJsonEvidence( _
 '   module carries no dependency, and the field set is small and fixed.
 '
 ' INPUTS
+'   Rec
+'     ByRef. The record reported; its counts and RecordFailed are read, never
+'     its buffers.
+'
 '   UnitsFailed / CleanupOK / CleanupDetail / Complete / Passed
-'     Verdict components computed by the caller.
+'     Verdict components computed by TST_CertComposeEvidence.
+'
+'   RecordingDetail
+'     Text naming a recording failure; empty when recording succeeded.
+'
+'   UnitJson / SkipJson
+'     Members of the unitResults and skipDetail arrays, composed by
+'     TST_CertBuildEntryLists after the record's invariants were checked.
 '
 ' RETURNS
 '   String
@@ -589,18 +2128,23 @@ Public Function TST_CertBuildJsonEvidence( _
 '
 ' ERROR POLICY
 '   - Does not raise. A field that cannot be read is reported as unknown.
+'   - "recording" is derived from Rec.RecordFailed alone, and "complete" and
+'     "passed" are false whenever it is set, so no document can claim a pass
+'     over a record that could not be stored.
 '
 ' DEPENDENCIES
 '   - TST_CertJsonEscape
 '
 ' CALLED FROM
-'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_CertComposeEvidence
 '
 ' NOTES
 '   Bitness and VBA generation come from conditional compilation, so they
 '   describe the build that is executing rather than what the host reports.
 '
 ' UPDATED
+'   2026-11-16 - Reads the record it is given, and reports "recording" and
+'                "recordingDetail" (#50).
 '   2026-08-19
 '==============================================================================
 '
@@ -609,15 +2153,17 @@ Public Function TST_CertBuildJsonEvidence( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim Json                As String          'Document under construction
-    Dim ScanIdx             As Long            'Cursor over recorded units
     Dim Bitness             As String          'Office bitness of this build
     Dim VbaGeneration       As String          'VBA generation of this build
+    Dim Recorded            As Boolean         'TRUE when every entry was stored
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Evidence must be produced even when a field cannot be read
         On Error Resume Next
+
+        Recorded = Not Rec.RecordFailed
 
 #If VBA7 Then
         VbaGeneration = "VBA7"
@@ -649,54 +2195,23 @@ Public Function TST_CertBuildJsonEvidence( _
 '------------------------------------------------------------------------------
     'Counts first, so a reader sees the shape of the run before its detail
         Json = Json & _
-            ",""units"":" & CStr(m_CertUnitCount) & _
+            ",""units"":" & CStr(Rec.UnitCount) & _
             ",""unitsFailed"":" & CStr(UnitsFailed) & _
-            ",""skipped"":" & CStr(m_CertSkipCount) & _
+            ",""skipped"":" & CStr(Rec.SkipCount) & _
             ",""cleanup"":""" & IIf(CleanupOK, "OK", "FAILED") & """" & _
             ",""cleanupDetail"":""" & TST_CertJsonEscape(CleanupDetail) & """" & _
-            ",""complete"":" & IIf(Complete, "true", "false") & _
-            ",""passed"":" & IIf(Passed, "true", "false")
+            ",""recording"":""" & IIf(Recorded, "OK", "FAILED") & """" & _
+            ",""recordingDetail"":""" & TST_CertJsonEscape(RecordingDetail) & """" & _
+            ",""complete"":" & IIf(Complete And Recorded, "true", "false") & _
+            ",""passed"":" & IIf(Passed And Complete And Recorded, "true", "false")
 
 '------------------------------------------------------------------------------
-' BUILD UNIT DETAIL
+' BUILD UNIT AND SKIP DETAIL
 '------------------------------------------------------------------------------
-    'One object per unit, in execution order
-        Json = Json & ",""unitResults"":["
-
-        For ScanIdx = 1 To m_CertUnitCount
-
-            If ScanIdx > 1 Then
-                Json = Json & ","
-            End If
-
-            Json = Json & "{""name"":""" & _
-                TST_CertJsonEscape(m_CertUnitNames(ScanIdx)) & """" & _
-                ",""passed"":" & IIf(m_CertUnitPassed(ScanIdx), "true", "false") & _
-                ",""detail"":""" & _
-                TST_CertJsonEscape(m_CertUnitDetail(ScanIdx)) & """}"
-
-        Next ScanIdx
-
-        Json = Json & "]"
-
-'------------------------------------------------------------------------------
-' BUILD SKIP DETAIL
-'------------------------------------------------------------------------------
-    'Skips are listed explicitly; an empty array is a meaningful result
-        Json = Json & ",""skipDetail"":["
-
-        For ScanIdx = 1 To m_CertSkipCount
-
-            If ScanIdx > 1 Then
-                Json = Json & ","
-            End If
-
-            Json = Json & """" & _
-                TST_CertJsonEscape(m_CertSkipDetail(ScanIdx)) & """"
-
-        Next ScanIdx
-
-        Json = Json & "]}"
+    'One object per unit, in execution order. Skips are listed explicitly; an
+    'empty array is a meaningful result.
+        Json = Json & ",""unitResults"":[" & UnitJson & "]"
+        Json = Json & ",""skipDetail"":[" & SkipJson & "]}"
 
 '------------------------------------------------------------------------------
 ' RETURN DOCUMENT
@@ -738,6 +2253,7 @@ Public Function TST_CertJsonEscape( _
 '
 ' CALLED FROM
 '   - TST_CertBuildJsonEvidence
+'   - TST_CertBuildEntryLists
 '
 ' UPDATED
 '   2026-08-19
@@ -769,8 +2285,12 @@ End Function
 
 
 Public Function TST_CertBuildTextReport( _
+    ByRef Rec As tCertRecord, _
     ByVal Verdict As String, _
-    ByVal CleanupDetail As String) _
+    ByVal CleanupDetail As String, _
+    ByVal RecordingDetail As String, _
+    ByVal UnitLines As String, _
+    ByVal SkipLines As String) _
     As String
 
 '
@@ -786,23 +2306,35 @@ Public Function TST_CertBuildTextReport( _
 '   changelog validation block.
 '
 ' INPUTS
+'   Rec
+'     ByRef. The record reported; only RecordFailed is read.
+'
 '   Verdict
 '     Pre-composed verdict line.
 '
 '   CleanupDetail
 '     Cleanup findings; empty when cleanup passed.
 '
+'   RecordingDetail
+'     Text naming a recording failure; empty when recording succeeded.
+'
+'   UnitLines / SkipLines
+'     Unit and skip lines composed by TST_CertBuildEntryLists.
+'
 ' RETURNS
 '   String
-'     A multi-line report.
+'     A multi-line report. A recording failure adds a RECORDING line directly
+'     under the RESULT line, named even when RecordingDetail is empty.
 '
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' CALLED FROM
-'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_CertComposeEvidence
 '
 ' UPDATED
+'   2026-11-16 - Takes the composed lines and reports a recording failure
+'                (#50).
 '   2026-08-19
 '==============================================================================
 '
@@ -811,7 +2343,6 @@ Public Function TST_CertBuildTextReport( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim Report              As String          'Report under construction
-    Dim ScanIdx             As Long            'Cursor over recorded entries
 
 '------------------------------------------------------------------------------
 ' BUILD REPORT
@@ -827,28 +2358,25 @@ Public Function TST_CertBuildTextReport( _
             String$(60, "-") & vbNewLine & Verdict & vbNewLine
 
 '------------------------------------------------------------------------------
-' APPEND UNIT RESULTS
+' APPEND RECORDING FAILURE
 '------------------------------------------------------------------------------
-    'One line per unit, in execution order
-        For ScanIdx = 1 To m_CertUnitCount
+    'Directly under the verdict, because it says the lists below are short
+        If Rec.RecordFailed Then
 
-            Report = Report & _
-                IIf(m_CertUnitPassed(ScanIdx), "  PASS  ", "  FAIL  ") & _
-                m_CertUnitNames(ScanIdx) & _
-                IIf(Len(m_CertUnitDetail(ScanIdx)) > 0, _
-                    " | " & m_CertUnitDetail(ScanIdx), vbNullString) & _
-                vbNewLine
+            If Len(RecordingDetail) > 0 Then
+                Report = Report & "  RECORDING  " & RecordingDetail & vbNewLine
+            Else
+                Report = Report & "  RECORDING  certification recording FAILED" & vbNewLine
+            End If
 
-        Next ScanIdx
+        End If
 
 '------------------------------------------------------------------------------
-' APPEND SKIPS AND CLEANUP
+' APPEND UNITS, SKIPS AND CLEANUP
 '------------------------------------------------------------------------------
-    'Skips are named, because an unnamed skip is what this runner exists to
-    'stop happening
-        For ScanIdx = 1 To m_CertSkipCount
-            Report = Report & "  SKIP  " & m_CertSkipDetail(ScanIdx) & vbNewLine
-        Next ScanIdx
+    'One line per unit, in execution order. Skips are named, because an
+    'unnamed skip is what this runner exists to stop happening.
+        Report = Report & UnitLines & SkipLines
 
         If Len(CleanupDetail) > 0 Then
             Report = Report & "  CLEANUP  " & CleanupDetail & vbNewLine
