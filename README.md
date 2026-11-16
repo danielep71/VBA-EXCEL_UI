@@ -631,7 +631,8 @@ RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
 
 Completeness and correctness are reported separately on purpose. A run that
 skipped a mandatory unit is not a pass, whatever the assertions that did execute
-reported.
+reported. Neither is a run that could not record a unit or a skip: it reports
+`FAIL | INCOMPLETE`, and both documents name the recording failure.
 
 `Test_EXCEL_UI_RunAll` remains the interactive runner and is **not** the release
 gate. It opens and closes temporary windows and workbooks for its targeting and

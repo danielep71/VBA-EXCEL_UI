@@ -790,6 +790,29 @@ measured against that baseline.
   regression case forces a capture failure through the active-frame pair seam
   and checks both the failure list in the unit detail and that the next unit
   runs.
+- **Not yet certified.** Release certification no longer reports a verdict
+  from a record it could not complete
+  ([#50](https://github.com/danielep71/VBA-EXCEL_UI/issues/50),
+  `ICR-UI-112-P3-03`). Recording a unit or a skip raised the count before
+  growing the parallel arrays, with every error suppressed, so a failed
+  growth could leave a count that described an entry the arrays did not hold,
+  and the evidence loops then read past their end. Units and skips now share
+  one recording path in `M_EXCEL_UI_TEST_HARNESS`: it grows every buffer,
+  writes every field and only then publishes the count. An entry that cannot
+  be stored sets a fatal flag, without allocating, that makes the run
+  `FAIL | INCOMPLETE`. The verdict and both documents are composed after the
+  record's buffers are checked against its counts, and a mismatch fails
+  closed the same way. `certification.json` gains `recording` (`OK` or
+  `FAILED`) and `recordingDetail`, and `certification.txt` a `RECORDING`
+  line; `tools/check_excel_evidence.py` rejects a bundle whose recording
+  failed or whose report disagrees, and reads a document without the field
+  as recording `OK`. Resetting the record before a run clears the flag and
+  verifies that every buffer is released. A new regression case in the
+  RegressionPack unit injects one-shot allocation failures into a local
+  record (the first allocation, a later growth and the growth of one chosen
+  buffer, for a unit and for a skip) and corrupted counts, and asserts
+  `FAIL | INCOMPLETE`, no out-of-range read, no `"passed":true` document and
+  a clean pass after a reset. The `[supported]` facade is unchanged.
 - **Checked on Excel 16.0 build 20430, 64-bit (2026-11-06).** A demo button
   created without a macro no longer
   points `OnAction` at `DEMO_DEMOButton_NotAssigned`, which no module declares
