@@ -24,6 +24,8 @@ Option Explicit
 '
 ' PUBLIC SURFACE
 '   - Demo_Test_RunCleanupChecks
+'   - Demo_Test_RunLogged and Demo_Test_TitleBarState, which
+'     tools\Check-EXCEL_UI.ps1 calls through Application.Run
 '
 ' SCENARIOS
 '   S01  Reset success, protection options set A, reprotected
@@ -85,6 +87,13 @@ Option Explicit
 '   Calculation and Cursor; a failed check prints the expected and actual
 '   values.
 '
+' LOG SINK
+'   Every line this module prints goes through DEMO_CT_Print. While
+'   Demo_Test_RunLogged runs a macro, the line is also appended to its log
+'   file as UTF-8. With no sink set, the Immediate window shows exactly
+'   what it showed before the sink existed. A failed write never raises: it
+'   ends writing and is reported in the verdict Demo_Test_RunLogged returns.
+'
 ' SAFETY
 '   - Works only in a temporary workbook it creates and closes without saving;
 '     no existing workbook or sheet is touched
@@ -120,6 +129,8 @@ Option Explicit
 '     cannot see whether Excel queried the printer
 '
 ' UPDATED
+'   2026-11-16 - Log sink, Demo_Test_RunLogged and Demo_Test_TitleBarState
+'                for the scripted Excel checks (#197).
 '   2026-11-15 - Page-break scenarios S45-S48 (#187).
 '   2026-11-14 - Layout scenarios S35-S44; S13 now injects its error and
 '                checks the created sheet is removed (#74).
@@ -275,6 +286,9 @@ Option Explicit
     'Raised by the runner when any check failed
     Private Const ERR_RUN_FAILED        As Long = vbObjectError + 2199
 
+    'Raised inside Demo_Test_RunLogged for a macro it does not run
+    Private Const ERR_UNKNOWN_MACRO     As Long = vbObjectError + 2200
+
 '------------------------------------------------------------------------------
 ' PRIVATE MODULE STATE
 '------------------------------------------------------------------------------
@@ -291,6 +305,9 @@ Option Explicit
     Private mSessionCursor         As Long       'Session Application.Cursor
     Private mSessionFormulaBar     As Boolean    'Session Application.DisplayFormulaBar
     Private mBaselineCalculation   As Long       'Calculation of the fast-mode baseline
+
+    Private mLogSinkPath           As String     'Log file of Demo_Test_RunLogged; empty = no sink
+    Private mLogSinkFailure        As String     'First failed write to it; empty = none
 
 
 Public Sub Demo_Test_RunCleanupChecks()
@@ -361,7 +378,7 @@ Public Sub Demo_Test_RunCleanupChecks()
 
         DEMO_InternalCleanupProbeEnd
 
-        Debug.Print PROC & ": START " & Format$(Now, "yyyy-mm-dd hh:nn:ss")
+        DEMO_CT_Print PROC & ": START " & Format$(Now, "yyyy-mm-dd hh:nn:ss")
 
     'Record the Application settings the scenarios change
         DEMO_CT_CaptureSession
@@ -479,7 +496,7 @@ Safe_Exit:
             Summary = Summary & " | run stopped: " & CStr(RaisedNumber) & _
                       " | " & RaisedSource & " | " & RaisedDescription
         End If
-        Debug.Print Summary
+        DEMO_CT_Print Summary
 
     'Report a failed run to the caller; the handler is already disabled
         If RaisedNumber <> 0 Then
@@ -503,6 +520,220 @@ Err_Handler:
         Resume Safe_Exit
 
 End Sub
+
+
+Public Function Demo_Test_RunLogged( _
+    ByVal MacroName As String, _
+    ByVal LogPath As String) _
+    As String
+'
+'==============================================================================
+' Demo_Test_RunLogged
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Runs one demo macro with the log sink set and returns its verdict as one
+'   line instead of raising.
+'
+' WHY THIS EXISTS
+'   tools\Check-EXCEL_UI.ps1 drives the demo through Application.Run. A
+'   script cannot read the Immediate window, and a macro that raises into
+'   Application.Run stops Excel on a run-time error message that someone must
+'   dismiss. Through this function every line this module prints also
+'   reaches LogPath, and the outcome comes back as a value.
+'
+' INPUTS
+'   MacroName
+'     Demo_Test_RunCleanupChecks, or one of the demo actions the script
+'     drives: Demo_CreateDemoSheet, Demo_ClearAllUI, Demo_HideSelectedUI and
+'     Demo_ShowSelectedUI
+'
+'   LogPath
+'     The log file to append to. Empty runs the macro with no sink
+'
+' RETURNS
+'   One line: "RESULT: PASS" when the macro returned, or
+'   "RESULT: FAIL | Error <n> | Source: <source> | <description>" when it
+'   raised. When a line could not be written to LogPath,
+'   " | LOG WRITE FAILED: <reason>" follows
+'
+' BEHAVIOR
+'   - Prints a START line, runs the macro, then prints the verdict line, which
+'     is also the last line of the log, and stops the sink
+'   - What the macro itself prints is unchanged; only its error is caught
+'
+' ERROR POLICY
+'   Does not raise; an unknown macro name gives a FAIL verdict. A log write
+'   failure never changes the macro's PASS or FAIL
+'
+' NOTES
+'   Only this module prints through the sink. The demo actions report a
+'   failure with Debug.Print in M_EXCEL_UI_DEMO, which stays in the
+'   Immediate window
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Verdict             As String          'The verdict line
+    Dim SinkFailure         As String          'First log write failure, if any
+    Dim RaisedNumber        As Long            'Error the macro raised
+    Dim RaisedSource        As String          'Source of that error
+    Dim RaisedDescription   As String          'Text of that error
+
+    Const PROC As String = "Demo_Test_RunLogged"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the sink; an earlier failure belongs to an earlier run
+        mLogSinkPath = LogPath
+        mLogSinkFailure = vbNullString
+
+        DEMO_CT_Print PROC & ": START " & MacroName & " " & _
+                      Format$(Now, "yyyy-mm-dd hh:nn:ss")
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' RUN
+'------------------------------------------------------------------------------
+        Select Case MacroName
+
+            Case "Demo_Test_RunCleanupChecks"
+                Demo_Test_RunCleanupChecks
+
+            Case "Demo_CreateDemoSheet"
+                Demo_CreateDemoSheet
+
+            Case "Demo_ClearAllUI"
+                Demo_ClearAllUI
+
+            Case "Demo_HideSelectedUI"
+                Demo_HideSelectedUI
+
+            Case "Demo_ShowSelectedUI"
+                Demo_ShowSelectedUI
+
+            Case Else
+                Err.Raise ERR_UNKNOWN_MACRO, PROC, "unknown macro: " & MacroName
+
+        End Select
+
+        Verdict = "RESULT: PASS"
+
+'------------------------------------------------------------------------------
+' REPORT VERDICT
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Every path arrives here with the handler disabled or released
+        On Error GoTo 0
+
+    'One line, whatever line breaks the error text held
+        Verdict = Replace(Replace(Replace(Verdict, vbCrLf, " / "), vbCr, " / "), _
+                          vbLf, " / ")
+
+        DEMO_CT_Print Verdict
+
+    'Stop the sink; a failed write is reported, never raised
+        SinkFailure = mLogSinkFailure
+        mLogSinkPath = vbNullString
+        mLogSinkFailure = vbNullString
+
+        If Len(SinkFailure) > 0 Then
+            Verdict = Verdict & " | LOG WRITE FAILED: " & _
+                      Replace(Replace(SinkFailure, vbCr, " "), vbLf, " ")
+        End If
+
+        Demo_Test_RunLogged = Verdict
+
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Capture before anything else touches Err
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+
+        Verdict = "RESULT: FAIL | Error " & CStr(RaisedNumber) & _
+                  " | Source: " & RaisedSource & _
+                  " | " & RaisedDescription
+
+        Resume Safe_Exit
+
+End Function
+
+
+Public Function Demo_Test_TitleBarState() As String
+'
+'==============================================================================
+' Demo_Test_TitleBarState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the title-bar state of the frame Excel reports as active:
+'   VISIBLE or HIDDEN, read through UI_TryGetTitleBarVisible, or
+'   "UNKNOWN | <reason>" when it cannot be read.
+'
+' WHY THIS EXISTS
+'   tools\Check-EXCEL_UI.ps1 hides and shows the title bar through the
+'   chkTitleBar selection and the HIDE and SHOW actions of the demo sheet,
+'   then reads the state back. Application.Run returns a function's value but
+'   not its ByRef arguments, so the read is wrapped here.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim IsVisible           As Boolean         'Title-bar visibility read
+    Dim FailMsg             As String          'Reason the read failed
+    Dim RaisedNumber        As Long            'Unexpected error number
+    Dim RaisedDescription   As String          'Unexpected error text
+
+'------------------------------------------------------------------------------
+' READ STATE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        If UI_TryGetTitleBarVisible(IsVisible, FailMsg) Then
+            If IsVisible Then
+                Demo_Test_TitleBarState = "VISIBLE"
+            Else
+                Demo_Test_TitleBarState = "HIDDEN"
+            End If
+        Else
+            Demo_Test_TitleBarState = "UNKNOWN | " & FailMsg
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        RaisedNumber = Err.Number
+        RaisedDescription = Err.Description
+
+        Demo_Test_TitleBarState = "UNKNOWN | error " & CStr(RaisedNumber) & _
+                                  ": " & RaisedDescription
+
+        Resume Safe_Exit
+
+End Function
 
 
 Private Sub DEMO_CT_ResetSuccess( _
@@ -1354,8 +1585,8 @@ Private Sub DEMO_CT_FastModeSuccess( _
         DEMO_CT_CheckLong Scenario & ".End.Applied", 0, State.Applied
         DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
 
-        Debug.Print "    INFO " & Scenario & ": entry [" & EntryText & "] fast [" & FastText & _
-                    "] exit [" & ExitText & "]"
+        DEMO_CT_Print "    INFO " & Scenario & ": entry [" & EntryText & "] fast [" & FastText & _
+                      "] exit [" & ExitText & "]"
 
 Safe_Exit:
         On Error GoTo 0
@@ -3796,10 +4027,10 @@ Private Sub DEMO_CT_EndScenario( _
         On Error GoTo 0
 
         If mFailures = FailuresBefore Then
-            Debug.Print "  PASS " & Scenario
+            DEMO_CT_Print "  PASS " & Scenario
         Else
             mScenarioFailures = mScenarioFailures + 1
-            Debug.Print "  FAIL " & Scenario & " (" & CStr(mFailures - FailuresBefore) & " check(s) failed)"
+            DEMO_CT_Print "  FAIL " & Scenario & " (" & CStr(mFailures - FailuresBefore) & " check(s) failed)"
         End If
 
 End Sub
@@ -3844,9 +4075,224 @@ Private Sub DEMO_CT_Fail( _
 '==============================================================================
 
         mFailures = mFailures + 1
-        Debug.Print "    FAIL " & CheckName & ": " & Detail
+        DEMO_CT_Print "    FAIL " & CheckName & ": " & Detail
 
 End Sub
+
+
+Private Sub DEMO_CT_Print(ByVal LineText As String)
+'
+'==============================================================================
+' DEMO_CT_Print
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prints one line to the Immediate window and appends it to the log sink
+'   when Demo_Test_RunLogged has set one.
+'
+' NOTES
+'   With no sink set, the Immediate window shows exactly what the
+'   Debug.Print this replaces showed.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+        Debug.Print LineText
+        DEMO_CT_LogSinkWrite LineText
+
+End Sub
+
+
+Private Sub DEMO_CT_LogSinkWrite(ByVal LineText As String)
+'
+'==============================================================================
+' DEMO_CT_LogSinkWrite
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Appends one line to the log sink as UTF-8, when a sink is set.
+'
+' BEHAVIOR
+'   - Does nothing when no sink is set, or after a write to it failed
+'   - Opens, appends to and closes the file for every line, so that nothing
+'     stays open when a macro stops part-way
+'
+' ERROR POLICY
+'   Does not raise. The first failure is kept for Demo_Test_RunLogged and
+'   ends writing until its next run
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LineBytes()         As Byte            'UTF-8 bytes of the line and CR LF
+    Dim FileNumber          As Integer         'Free file handle
+    Dim FileOpen            As Boolean         'TRUE while the file is open
+    Dim FailNumber          As Long            'Captured write error number
+    Dim FailDescription     As String          'Captured write error text
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'With no sink, or after a failed write, there is nothing to do
+        If Len(mLogSinkPath) = 0 Or Len(mLogSinkFailure) > 0 Then
+            Exit Sub
+        End If
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' APPEND LINE
+'------------------------------------------------------------------------------
+        LineBytes = DEMO_CT_LogSinkEncode(LineText)
+
+        FileNumber = FreeFile
+        Open mLogSinkPath For Binary Access Write As #FileNumber
+        FileOpen = True
+
+        Put #FileNumber, LOF(FileNumber) + 1, LineBytes
+
+        Close #FileNumber
+        FileOpen = False
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Close a file that a failed write left open
+        If FileOpen Then
+            On Error Resume Next
+                Close #FileNumber
+            On Error GoTo 0
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Capture before anything else touches Err, and keep the failure
+        FailNumber = Err.Number
+        FailDescription = Err.Description
+
+        mLogSinkFailure = "error " & CStr(FailNumber) & " writing " & _
+                          mLogSinkPath & ": " & FailDescription
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Function DEMO_CT_LogSinkEncode(ByVal LineText As String) As Byte()
+'
+'==============================================================================
+' DEMO_CT_LogSinkEncode
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns one log line as UTF-8 bytes followed by CR LF.
+'
+' WHY THIS EXISTS
+'   VBA file statements write text in the system code page, which cannot
+'   carry every character that a localized Excel error text may hold. The
+'   demo workbook does not hold the test harness, so this module has its own
+'   copy of the encoder in M_EXCEL_UI_TEST_HARNESS.
+'
+' RETURNS
+'   The UTF-8 bytes of LineText, then CR LF. A UTF-16 surrogate that is not
+'   part of a pair is written as U+FFFD
+'
+' ERROR POLICY
+'   Raises only when memory runs out; DEMO_CT_LogSinkWrite keeps that as a
+'   write failure
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Bytes()             As Byte            'Encoded line
+    Dim TextLength          As Long            'UTF-16 code units in LineText
+    Dim CharIdx             As Long            'Current code unit, 1-based
+    Dim ByteIdx             As Long            'Next byte to write, 0-based
+    Dim CodeUnit            As Long            'Current UTF-16 code unit
+    Dim NextUnit            As Long            'Following UTF-16 code unit
+    Dim CodePoint           As Long            'Scalar value being encoded
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Three bytes per code unit is the most UTF-8 needs; two more hold CR LF
+        TextLength = Len(LineText)
+        ReDim Bytes(0 To 3 * TextLength + 1)
+
+        CharIdx = 1
+        ByteIdx = 0
+
+'------------------------------------------------------------------------------
+' ENCODE
+'------------------------------------------------------------------------------
+        Do While CharIdx <= TextLength
+
+            CodeUnit = AscW(Mid$(LineText, CharIdx, 1)) And &HFFFF&
+            CodePoint = CodeUnit
+
+        'Join a surrogate pair into one scalar; replace a lone surrogate
+            If CodeUnit >= &HD800& And CodeUnit <= &HDFFF& Then
+                CodePoint = &HFFFD&
+                If CodeUnit <= &HDBFF& And CharIdx < TextLength Then
+                    NextUnit = AscW(Mid$(LineText, CharIdx + 1, 1)) And &HFFFF&
+                    If NextUnit >= &HDC00& And NextUnit <= &HDFFF& Then
+                        CodePoint = &H10000 + (CodeUnit - &HD800&) * &H400& + _
+                                    (NextUnit - &HDC00&)
+                        CharIdx = CharIdx + 1
+                    End If
+                End If
+            End If
+
+        'Write one to four bytes
+            If CodePoint < &H80& Then
+                Bytes(ByteIdx) = CodePoint
+                ByteIdx = ByteIdx + 1
+            ElseIf CodePoint < &H800& Then
+                Bytes(ByteIdx) = &HC0& Or (CodePoint \ &H40&)
+                Bytes(ByteIdx + 1) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 2
+            ElseIf CodePoint < &H10000 Then
+                Bytes(ByteIdx) = &HE0& Or (CodePoint \ &H1000&)
+                Bytes(ByteIdx + 1) = &H80& Or ((CodePoint \ &H40&) And &H3F&)
+                Bytes(ByteIdx + 2) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 3
+            Else
+                Bytes(ByteIdx) = &HF0& Or (CodePoint \ &H40000)
+                Bytes(ByteIdx + 1) = &H80& Or ((CodePoint \ &H1000&) And &H3F&)
+                Bytes(ByteIdx + 2) = &H80& Or ((CodePoint \ &H40&) And &H3F&)
+                Bytes(ByteIdx + 3) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 4
+            End If
+
+            CharIdx = CharIdx + 1
+
+        Loop
+
+'------------------------------------------------------------------------------
+' RETURN LINE
+'------------------------------------------------------------------------------
+        Bytes(ByteIdx) = 13
+        Bytes(ByteIdx + 1) = 10
+
+        ReDim Preserve Bytes(0 To ByteIdx + 1)
+
+        DEMO_CT_LogSinkEncode = Bytes
+
+End Function
 
 
 Private Sub DEMO_CT_CheckLong( _
