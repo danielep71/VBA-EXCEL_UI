@@ -206,6 +206,10 @@ Capture commands, tool versions, timestamps, and complete results. Rerun affecte
   of the candidate, and validate the evidence folder it writes with
   `python3 tools/check_excel_evidence.py <folder> --commit <sha>`
   ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
+- `tools\Check-EXCEL_UI.cmd` runs the same certification, then the regression
+  runners and the demo checks, and writes a `summary.txt` to quote in the
+  evidence record ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)). It does not
+  replace the checks below.
 - Exercise hide/show, snapshot/restore, multi-window identity, and title-bar behavior.
 - Confirm cleanup restores host UI state after success and error paths.
 

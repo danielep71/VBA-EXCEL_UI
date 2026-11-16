@@ -15,6 +15,9 @@ cleanup on error paths), and it runs nothing but certification:
 `Test_EXCEL_UI_RunRibbonSdiProbe` is a characterization that asserts nothing
 (see [RIBBON_SDI_BEHAVIOR.md](RIBBON_SDI_BEHAVIOR.md)) and is not part of the
 release gate, so its output is not part of a bundle.
+`tools/Check-EXCEL_UI.ps1` runs this script unchanged and then the other
+runners and the demo checks, with a log for each
+([EXCEL_CHECKS.md](EXCEL_CHECKS.md)).
 
 ## ✅ Requirements
 
@@ -254,7 +257,9 @@ its first failed assertion and the unit stops there. A validated bundle whose
 for every row that names that unit, for that commit and that host only. The
 Immediate window holds each case's `PASS` or `FAIL` line and the `OBSERVED`
 line of the close-and-reopen case. The bundle does not collect them, so record
-them with the bundle when you need them. The Excel builds and bitnesses that a
+them with the bundle when you need them; `tools/Check-EXCEL_UI.ps1` writes the
+lines of each runner it runs, such as `Test_EXCEL_UI_RunTitleBarSdiIdentity`,
+to that runner's log ([EXCEL_CHECKS.md](EXCEL_CHECKS.md)). The Excel builds and bitnesses that a
 release must certify are governed by
 [#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51).
 

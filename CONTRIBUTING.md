@@ -379,7 +379,12 @@ On Windows, the workbook tools shorten that step:
 - `tools\Certify-EXCEL_UI.cmd` builds, compiles and certifies a development
   workbook from the checked-out commit and writes an evidence folder that
   `tools/check_excel_evidence.py` validates
-  ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
+  ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md));
+- `tools\Check-EXCEL_UI.cmd` runs that certification, then the
+  `Test_EXCEL_UI_Run*` runners, the demo cleanup harness and the demo build
+  and title-bar checks, and writes one bundle with a log per runner and check
+  and a `summary.txt` to quote in the pull request
+  ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)).
 
 The required job also runs `tools/check_vba_calls.py`, which resolves calls
 across the modules of each configuration
@@ -439,8 +444,8 @@ current tree) and at least one failing fixture (a named defect).
 a new check needs a `GateTestCase` subclass in `tests/test_gate_checks.py`
 before it can merge. Like the gate, the tests use only the standard library,
 except that `tests/test_check_issues.py` also needs Node.js, and
-`tests/test_certify_script.py` and most of `tests/test_sync_script.py` need
-PowerShell 7 (`pwsh`); those tests are skipped where `pwsh` is not installed.
+`tests/test_certify_script.py`, most of `tests/test_check_script.py` and most
+of `tests/test_sync_script.py` need PowerShell 7 (`pwsh`); those tests are skipped where `pwsh` is not installed.
 `tools/check_repo.py`, `tools/reformat.py`, `tools/vba_api.py` and
 `tools/wiki_badges.py` run their self-tests with `--selftest`; the Node.js
 label scripts under `.github/scripts/` use `--self-test`. `test/` is a
@@ -486,7 +491,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VB
 ```
 
 Open it, run **Debug → Compile VBAProject**, and run
-`Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
+`Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog, or
+let `tools\Check-EXCEL_UI.cmd` build the workbook and run it for you
+([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)). It
 creates a temporary workbook, runs forty-eight scenarios on sheets of its own,
 closes the workbook without saving and prints one `PASS` or `FAIL` line per
 scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or

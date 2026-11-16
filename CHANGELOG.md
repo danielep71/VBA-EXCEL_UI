@@ -179,6 +179,26 @@ measured against that baseline.
 
 ### ➕ Added
 
+- **Not yet checked on Excel.** Added **tools/Check-EXCEL_UI.ps1** and its
+  launcher **tools/Check-EXCEL_UI.cmd**
+  ([#197](https://github.com/danielep71/VBA-EXCEL_UI/issues/197)). One command
+  runs certification through `tools/Certify-EXCEL_UI.ps1`, unchanged, then
+  each default `Test_EXCEL_UI_Run*` runner, `Demo_Test_RunCleanupChecks`, two
+  timed `Demo_CreateDemoSheet` runs, a record of the Windows default printer,
+  and the demo's title-bar check box hiding and showing the title bar. It
+  writes one bundle with a log per runner and check, a `summary.txt` with one
+  line per step and a final `RESULT: PASS` or `RESULT: FAIL` line, and a
+  `session.json`, and exits non-zero when a step fails. It opens and closes
+  Excel with the certification script's own functions, never lowers macro
+  security and closes only the Excel instances it started; it needs one
+  **Enable Content** click per workbook, and **docs/EXCEL_CHECKS.md**
+  describes the trusted-location alternative. To feed it, `TST_Log` and the
+  demo cleanup harness mirror each printed line to an opt-in UTF-8 log sink,
+  and the new `TST_RunRunnerWithLog` and `Demo_Test_RunLogged` run a runner
+  or demo macro and return its `RESULT:` verdict instead of raising. A failed
+  log write is reported in that verdict and never fails the runner. With no
+  sink set, the Immediate window shows what it showed before. The supported
+  API is unchanged.
 - Added **tools/release.py** and the **Release** workflow
   (`.github/workflows/release.yml`). On a pushed `v*` tag, the workflow checks
   that the tag is annotated and equals `VERSION`, that `CHANGELOG.md` has a

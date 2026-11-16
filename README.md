@@ -624,6 +624,9 @@ On Windows, `tools\Certify-EXCEL_UI.cmd` does the same from a clean checkout:
 it builds a development workbook from the commit, compiles it, runs the
 certification and collects the evidence in a folder bound to the commit
 ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
+`tools\Check-EXCEL_UI.cmd` runs that certification, then the runners above and
+the demo checks, and writes one bundle with a log per runner and a
+`summary.txt` ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)).
 
 It executes every mandatory unit, counts units, failures, skips and cleanup
 separately, verifies afterwards that no snapshot, stray workbook or suppressed
@@ -751,6 +754,7 @@ to tagged GitHub Releases.
 | [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md) | Issue labels, priorities, milestones, target dates and the issue workflows |
 | [docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md) | Importing the modules into a workbook from the command line, and checking a workbook's VBA against a commit |
 | [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) | One-command release certification in Excel and its evidence folder |
+| [docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md) | Certification, the regression runners and the demo checks in one command, with a log per runner and a summary |
 | [docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md) | The advisory check of calls across modules |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
 | [Regression tests](test/) | Behavioral verification: the harness and one module per suite |

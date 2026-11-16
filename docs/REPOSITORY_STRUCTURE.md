@@ -15,6 +15,7 @@ VBA-EXCEL_UI/
 │  └─ M_EXCEL_UI_DEMO.bas
 ├─ docs/
 │  ├─ EXCEL_CERTIFICATION.md
+│  ├─ EXCEL_CHECKS.md
 │  ├─ GOVERNANCE.md
 │  ├─ ISSUE_LABELS.md
 │  ├─ REPOSITORY_STRUCTURE.md
@@ -53,7 +54,8 @@ VBA-EXCEL_UI/
 ```
 
 `tools/` holds the Python static gate and its helpers, the release tool, and
-the Windows workbook tools (synchronization, export and certification), `tests/` the unit tests for
+the Windows workbook tools (synchronization, export, certification and the
+scripted Excel checks), `tests/` the unit tests for
 those tools, and `images/` the documentation images.
 
 The source repository intentionally contains no versioned demo `.xlsm`. Release
@@ -66,9 +68,9 @@ binaries are attached to tagged GitHub Releases.
 | `src/` | Authoritative production modules for UI, runtime, snapshots, and title-bar control |
 | `test/` | Regression and release-certification source |
 | `demo/` | Demo and reproducible host setup |
-| `tools/` | Static validation, documentation rendering, the release tool (`release.py`), and the Windows workbook scripts for synchronization, export and certification |
+| `tools/` | Static validation, documentation rendering, the release tool (`release.py`), and the Windows workbook scripts for synchronization, export, certification and the scripted Excel checks |
 | `tests/` | Unit tests for the tools in `tools/` |
-| `docs/` | VBA house style, governance, this page, issue and label rules, workbook synchronization, Excel certification, the VBA call checker, and measured Ribbon SDI behaviour |
+| `docs/` | VBA house style, governance, this page, issue and label rules, workbook synchronization, Excel certification, the scripted Excel checks, the VBA call checker, and measured Ribbon SDI behaviour |
 | `images/` | Documentation images, the only approved home for binary files |
 | `.github/` | Workflows, rulesets, repository settings, issue and pull-request templates, the label catalogue and its scripts, the Excel evidence policy (`excel-evidence-policy.json`), the Dependabot configuration (`dependabot.yml`), and the negative probe that tests the actionlint job (`actionlint/`) |
 
