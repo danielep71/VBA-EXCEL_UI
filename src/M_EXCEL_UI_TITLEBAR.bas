@@ -39,7 +39,8 @@ Option Private Module
 '   - UI_InternalInjectFrameRefreshFailure
 '   - UI_InternalInjectFramePairFault
 '   - UI_InternalInjectWindowStyleFault
-'   - UI_InternalSimulateFrameHandleReuse
+'   - UI_InternalSimulateFrameGenerationReuse
+'   - UI_InternalTryReadFrameState
 '
 ' OWNERSHIP MODEL
 '   This module claims exactly five GWL_STYLE bits and nothing else:
@@ -94,6 +95,13 @@ Option Private Module
 '   must still equal the stored native handle before any slot is reused.
 '   LastWrittenBits remains a state-consistency check, never identity proof:
 '   equal zero or equal non-zero style bits can occur on unrelated windows.
+'
+'   v1.1.2 proved an entry by owned-bit equality alone. That proof was
+'   partial: a window that inherited a closed window's handle and carried the
+'   same owned bits passed it, and took over the closed window's baseline,
+'   ownership flag and refresh debt. v1.1.3 adds the retained Window as the
+'   generation identity, so such an entry is discarded before any of that
+'   state is used.
 '
 ' DESIGN PRINCIPLES
 '   - The merge policy is a pure function, deliberately separated from the
@@ -166,8 +174,9 @@ Option Private Module
 '     another add-in while this component holds the frame hidden also discards
 '     the entry. The baseline is then recaptured from the live bits, which is
 '     the same self-healing rule that already applies while the component
-'     owns nothing. No regression yet reuses an unchanged handle value for a
-'     new window generation, and ICR-UI-112-P2-02 (#32) remains open.
+'     owns nothing. The regression for ICR-UI-112-P2-02 (#32) keeps the
+'     stored handle value unchanged and attributes the entry to another
+'     window generation, with equal-zero and equal-nonzero owned bits.
 '   - The frame-state registry is bounded by compaction, not by growth alone.
 '     Before the registry is extended, every entry that fails the ownership
 '     test in UI_FrameStateEntryHolds is reclaimed, which includes every entry
@@ -179,6 +188,11 @@ Option Private Module
 '     drift apart.
 '
 ' UPDATED
+'   2026-11-16 - Replaced the UI_InternalSimulateFrameHandleReuse seam, which
+'                also changed the stored hWnd, with
+'                UI_InternalSimulateFrameGenerationReuse, which keeps the hWnd
+'                and changes only the retained Window, and added the
+'                read-only UI_InternalTryReadFrameState seam (#32).
 '   2026-11-06 - Captured the native error through Err.LastDllError straight
 '                after each WinAPI call and removed the GetLastError
 '                declarations. A failure now names the API, operation, error
@@ -1567,28 +1581,59 @@ End Sub
 
 
 #If VBA7 Then
-Public Function UI_InternalSimulateFrameHandleReuse( _
-    ByVal OriginalHwnd As LongPtr, _
-    ByVal ReplacementHwnd As LongPtr, _
-    ByVal ReplacementOwnedBits As LongPtr) _
+Public Function UI_InternalSimulateFrameGenerationReuse( _
+    ByVal TargetHwnd As LongPtr, _
+    ByVal PriorOwner As Object) _
     As Boolean
 #Else
-Public Function UI_InternalSimulateFrameHandleReuse( _
-    ByVal OriginalHwnd As Long, _
-    ByVal ReplacementHwnd As Long, _
-    ByVal ReplacementOwnedBits As Long) _
+Public Function UI_InternalSimulateFrameGenerationReuse( _
+    ByVal TargetHwnd As Long, _
+    ByVal PriorOwner As Object) _
     As Boolean
 #End If
 '
 '==============================================================================
-' UI_InternalSimulateFrameHandleReuse
+' UI_InternalSimulateFrameGenerationReuse
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Rebinds one registry slot's numeric handle while retaining its original
-'   Window object, reproducing the evidence presented by recycled hWnd values.
+'   Attributes the registry slot that holds TargetHwnd to another window
+'   generation, leaving its numeric hWnd and every state field unchanged.
 '
-' CONTRACT
-'   Same-project regression seam only. Production code must never call it.
+' WHY THIS EXISTS
+'   Windows reissues a closed window's handle to a later window, but not on
+'   demand. Once it has, the registry holds a slot whose numeric hWnd equals
+'   the live window's handle, whose baseline, ownership flag and refresh debt
+'   were recorded for the closed window, and whose retained Window object is
+'   the closed window's. This seam produces exactly that slot: the numeric
+'   scan still matches, the recorded owned bits are untouched, and only the
+'   retained generation token differs. A seam that also
+'   changes the stored handle cannot show that generation identity, rather
+'   than a plain numeric mismatch, is what rejects the slot.
+'
+' INPUTS
+'   TargetHwnd
+'     The numeric handle whose slot is rebound. The slot keeps it.
+'
+'   PriorOwner
+'     The Excel Window object the slot retains from now on: the wrapper of a
+'     window that has closed, or the Window of another live window. It is
+'     retained as given and never read here, because a closed window's
+'     wrapper raises when it is read.
+'
+' RETURNS
+'   Boolean
+'     True  => the slot now retains PriorOwner.
+'     False => PriorOwner is Nothing, no slot holds TargetHwnd, or the
+'              rebinding failed.
+'
+' BEHAVIOR
+'   - Finds the slot by numeric handle, as the production scan does, without
+'     proving or discarding it.
+'   - Replaces only the retained Window. hWnd, OwnedStyleBits, HasBaseline,
+'     ComponentHidden, RefreshPending and LastWrittenBits stay as they are.
+'
+' ERROR POLICY
+'   - Does not raise.
 '
 ' DEPENDENCIES
 '   - UI_FrameStateSlotForHwnd
@@ -1596,27 +1641,197 @@ Public Function UI_InternalSimulateFrameHandleReuse( _
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_TITLEBAR
 '
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     keeps it off the external facade, so this is project-public surface.
+'   - Production code must never call it.
+'
 ' UPDATED
-'   2026-09-03
+'   2026-11-16 - Replaced UI_InternalSimulateFrameHandleReuse, which also
+'                rewrote the stored hWnd and the last-written bits (#32).
 '==============================================================================
+'
 
-    Dim Slot                As Long
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Slot                As Long            'Registry index for TargetHwnd
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
         On Error GoTo Err_Handler
-        UI_InternalSimulateFrameHandleReuse = False
 
-        Slot = UI_FrameStateSlotForHwnd(OriginalHwnd)
-        If Slot < 1 Then Exit Function
+    'Assume nothing was rebound until the slot has changed
+        UI_InternalSimulateFrameGenerationReuse = False
 
-        m_FrameStates(Slot).hWnd = ReplacementHwnd
-        m_FrameStates(Slot).LastWrittenBits = _
-            ReplacementOwnedBits And TITLEBAR_OWNED_STYLE_MASK
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'A slot always retains an object, so an absent one is not a generation
+        If PriorOwner Is Nothing Then
+            GoTo Safe_Exit
+        End If
 
-        UI_InternalSimulateFrameHandleReuse = True
+    'Find the slot by numeric handle alone, as the production scan does
+        Slot = UI_FrameStateSlotForHwnd(TargetHwnd)
+
+        If Slot < 1 Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' REBIND GENERATION
+'------------------------------------------------------------------------------
+    'Change the generation the slot is attributed to, and nothing else
+        Set m_FrameStateWindows(Slot) = PriorOwner
+
+        UI_InternalSimulateFrameGenerationReuse = True
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
         Exit Function
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 Err_Handler:
-        UI_InternalSimulateFrameHandleReuse = False
+    'A seam must never raise into the harness that called it
+        UI_InternalSimulateFrameGenerationReuse = False
+
+End Function
+
+
+#If VBA7 Then
+Public Function UI_InternalTryReadFrameState( _
+    ByVal TargetHwnd As LongPtr, _
+    ByRef OwnedStyleBits As LongPtr, _
+    ByRef HasBaseline As Boolean, _
+    ByRef ComponentHidden As Boolean, _
+    ByRef RefreshPending As Boolean, _
+    ByRef LastWrittenBits As LongPtr) _
+    As Boolean
+#Else
+Public Function UI_InternalTryReadFrameState( _
+    ByVal TargetHwnd As Long, _
+    ByRef OwnedStyleBits As Long, _
+    ByRef HasBaseline As Boolean, _
+    ByRef ComponentHidden As Boolean, _
+    ByRef RefreshPending As Boolean, _
+    ByRef LastWrittenBits As Long) _
+    As Boolean
+#End If
+'
+'==============================================================================
+' UI_InternalTryReadFrameState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the fields of the registry slot that holds a numeric handle,
+'   without proving the slot, discarding it or creating one.
+'
+' WHY THIS EXISTS
+'   A window generation that inherits a handle must not inherit the slot's
+'   baseline, ownership flag or refresh debt. The production lookup proves a
+'   slot before it returns one, so it can only answer for a slot that passed.
+'   A regression has to ask the opposite question, whether a slot that should
+'   have failed is still there, and this read answers it field by field so a
+'   failure names each piece of state that crossed.
+'
+' INPUTS
+'   TargetHwnd
+'     The numeric handle to look up.
+'
+'   OwnedStyleBits, HasBaseline, ComponentHidden, RefreshPending,
+'   LastWrittenBits
+'     ByRef. Receive the slot's fields; zero and False when no slot holds
+'     TargetHwnd.
+'
+' RETURNS
+'   Boolean
+'     True  => a slot holds TargetHwnd and its fields were copied.
+'     False => no slot holds TargetHwnd, or the read failed.
+'
+' BEHAVIOR
+'   - Scans by numeric handle alone and never reads the retained Window.
+'   - Never mutates the registry.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - UI_FrameStateSlotForHwnd
+'
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'
+' NOTES
+'   - Public only for same-project regression access. Option Private Module
+'     keeps it off the external facade, so this is project-public surface.
+'   - Production code must never call it.
+'
+' UPDATED
+'   2026-11-16 (#32)
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Slot                As Long            'Registry index for TargetHwnd
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
+        On Error GoTo Err_Handler
+
+    'Report an empty slot until one is found
+        UI_InternalTryReadFrameState = False
+        OwnedStyleBits = 0
+        HasBaseline = False
+        ComponentHidden = False
+        RefreshPending = False
+        LastWrittenBits = 0
+
+'------------------------------------------------------------------------------
+' FIND SLOT
+'------------------------------------------------------------------------------
+    'Find the slot by numeric handle alone, as the production scan does
+        Slot = UI_FrameStateSlotForHwnd(TargetHwnd)
+
+        If Slot < 1 Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' COPY FIELDS
+'------------------------------------------------------------------------------
+    'Copy every field a later generation must not inherit
+        OwnedStyleBits = m_FrameStates(Slot).OwnedStyleBits
+        HasBaseline = m_FrameStates(Slot).HasBaseline
+        ComponentHidden = m_FrameStates(Slot).ComponentHidden
+        RefreshPending = m_FrameStates(Slot).RefreshPending
+        LastWrittenBits = m_FrameStates(Slot).LastWrittenBits
+
+        UI_InternalTryReadFrameState = True
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'A seam must never raise into the harness that called it
+        UI_InternalTryReadFrameState = False
 
 End Function
 
@@ -2299,9 +2514,11 @@ Private Function UI_FrameStateSlotForHwnd( _
 '
 ' CALLED FROM
 '   - UI_FrameStateIndexForHwnd
-'   - UI_InternalSimulateFrameHandleReuse
+'   - UI_InternalSimulateFrameGenerationReuse
+'   - UI_InternalTryReadFrameState
 '
 ' UPDATED
+'   2026-11-16 - Called by the two registry seams (#32).
 '   2026-09-03
 '   2026-08-21
 '==============================================================================
