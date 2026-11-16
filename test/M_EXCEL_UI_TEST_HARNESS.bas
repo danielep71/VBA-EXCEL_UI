@@ -37,7 +37,8 @@ Option Private Module
 '     report the failure count and list they rejected
 '   - State read/write helpers, including the GWL_STYLE read and write and the
 '     frame refresh, which capture Err.LastDllError immediately after each call
-'   - Diagnostics and timing: logging, frame-style probes and error text
+'   - Diagnostics and timing: logging, the opt-in log sink that mirrors
+'     every logged line to a UTF-8 file, frame-style probes and error text
 '
 ' STATE MANAGEMENT
 '   - Certification records accrue only while a certification run is active
@@ -49,6 +50,8 @@ Option Private Module
 '   - The post-capture fault is one-shot: taking it disarms it
 '   - Per-window test state is captured and restored by Application.Windows
 '     index
+'   - The log sink is off unless TST_LogSinkStart names a file; with no
+'     sink TST_Log prints exactly what it printed before the sink existed
 '   - Entry frame styles are put back through the harness WinAPI helpers,
 '     never through the API under test, and a failed restoration is reported
 '
@@ -63,6 +66,9 @@ Option Private Module
 '   - Assumes the EXCEL_UI modules are present in the same VBA project
 '
 ' UPDATED
+'   2026-11-16 - TST_Log mirrors each line to an opt-in UTF-8 log sink,
+'                and a failed write is kept for the caller's verdict
+'                instead of being raised (#197).
 '   2026-11-16 - Certification records units and skips through one
 '                commit-after-allocation path, checks the record before
 '                reading it, and fails closed when it cannot be stored (#50).
@@ -299,6 +305,15 @@ Private m_CertRecordFaultBuffer         As Long
 'be reached any other way: the failures it must survive are ones the runners
 'are built not to have.
 Private m_InjectFault                   As Long
+
+'Opt-in log sink. While a path is set, TST_Log appends every line it prints
+'to that file as UTF-8, so that a script, which cannot read the Immediate
+'window, can read the run. Only TST_LogSinkStart sets it. Empty means no
+'sink, and TST_Log then prints exactly what it printed before. The first
+'write failure is kept and ends writing until the next start; TST_LogSinkStop
+'returns it for the caller's verdict, and nothing is raised.
+Private m_LogSinkPath                   As String
+Private m_LogSinkFailure                As String
 
 
 '
@@ -5331,10 +5346,12 @@ Public Sub TST_Log( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write a consistent diagnostic line to the Immediate Window for the
-'   regression harness
+'   regression harness, and to the log sink when one is set
 '
 ' WHY THIS EXISTS
-'   The harness needs readable progress and failure logging
+'   The harness needs readable progress and failure logging. A script that
+'   runs the suites cannot read the Immediate Window, so the same line also
+'   goes to the opt-in log sink
 '
 ' INPUTS
 '   ProcName
@@ -5351,11 +5368,19 @@ Public Sub TST_Log( _
 '
 ' ERROR POLICY
 '   - Suppresses any unexpected logging failure locally
+'   - A failed sink write is kept by TST_LogSinkWriteLine for the caller's
+'     verdict; it never reaches the caller of TST_Log
 '
 ' UPDATED
+'   2026-11-16 - Mirrors the line to the opt-in log sink (#197).
 '   2026-07-25
 '==============================================================================
 '
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LineText            As String          'The diagnostic line
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -5365,9 +5390,315 @@ Public Sub TST_Log( _
 '------------------------------------------------------------------------------
 ' WRITE DIAGNOSTIC LINE
 '------------------------------------------------------------------------------
-        Debug.Print ProcName & " @ " & Stage & " | " & Detail
+        LineText = ProcName & " @ " & Stage & " | " & Detail
+        Debug.Print LineText
+
+    'Mirror the line to the opt-in log sink; with no sink this writes nothing
+        TST_LogSinkWriteLine LineText
 
 End Sub
+
+
+Public Sub TST_LogSinkStart(ByVal LogPath As String)
+
+'
+'==============================================================================
+' TST_LogSinkStart
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Name the file that TST_Log mirrors its lines to from now on
+'
+' WHY THIS EXISTS
+'   A script that runs a runner through Application.Run cannot read the
+'   Immediate Window. With a sink set, every line the runner logs is also
+'   appended to a file the script reads afterwards
+'
+' INPUTS
+'   LogPath
+'     Full path of the log file. Lines are appended; the file is created by
+'     the first write. An empty path sets no sink
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Clears any write failure kept from an earlier sink
+'   - Writes nothing itself
+'
+' ERROR POLICY
+'   - Does not raise
+'
+' CALLED FROM
+'   - TST_RunRunnerWithLog
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' SET SINK
+'------------------------------------------------------------------------------
+        m_LogSinkPath = LogPath
+        m_LogSinkFailure = vbNullString
+
+End Sub
+
+
+Public Function TST_LogSinkStop() As String
+
+'
+'==============================================================================
+' TST_LogSinkStop
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stop mirroring TST_Log lines and report whether every write succeeded
+'
+' WHY THIS EXISTS
+'   A failed write must not fail or interrupt the runner being logged, but it
+'   must not be lost either: the caller puts it in its verdict
+'
+' RETURNS
+'   String
+'     Empty when every line reached the file; otherwise the first write
+'     failure, with the error number, the path and the error text
+'
+' BEHAVIOR
+'   - After this call TST_Log prints only to the Immediate Window again
+'
+' ERROR POLICY
+'   - Does not raise
+'
+' CALLED FROM
+'   - TST_RunRunnerWithLog
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' RETURN FAILURE AND CLEAR SINK
+'------------------------------------------------------------------------------
+        TST_LogSinkStop = m_LogSinkFailure
+
+        m_LogSinkPath = vbNullString
+        m_LogSinkFailure = vbNullString
+
+End Function
+
+
+Public Sub TST_LogSinkWriteLine(ByVal LineText As String)
+
+'
+'==============================================================================
+' TST_LogSinkWriteLine
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Append one line to the log sink as UTF-8, when a sink is set
+'
+' WHY THIS EXISTS
+'   TST_Log and the logged-runner verdict write through one path, so that a
+'   failure is kept in one place
+'
+' INPUTS
+'   LineText
+'     The line, without a line break; CR LF is appended
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Does nothing when no sink is set, or after a write to it failed
+'   - Opens, appends to and closes the file for every line, so that nothing
+'     stays open when a runner stops part-way
+'
+' ERROR POLICY
+'   - Does not raise. The first failure is kept for TST_LogSinkStop and ends
+'     writing until the next TST_LogSinkStart, so an unwritable file costs
+'     one failed attempt, not one per line
+'
+' CALLED FROM
+'   - TST_Log
+'   - TST_RunRunnerWithLog
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LineBytes()         As Byte            'UTF-8 bytes of the line and CR LF
+    Dim FileNumber          As Integer         'Free file handle
+    Dim FileOpen            As Boolean         'TRUE while the file is open
+    Dim FailNumber          As Long            'Captured write error number
+    Dim FailDescription     As String          'Captured write error text
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'With no sink, or after a failed write, there is nothing to do
+        If Len(m_LogSinkPath) = 0 Or Len(m_LogSinkFailure) > 0 Then
+            Exit Sub
+        End If
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' APPEND LINE
+'------------------------------------------------------------------------------
+        LineBytes = TST_LogSinkEncode(LineText)
+
+        FileNumber = FreeFile
+        Open m_LogSinkPath For Binary Access Write As #FileNumber
+        FileOpen = True
+
+        Put #FileNumber, LOF(FileNumber) + 1, LineBytes
+
+        Close #FileNumber
+        FileOpen = False
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Close a file that a failed write left open
+        If FileOpen Then
+            On Error Resume Next
+                Close #FileNumber
+            On Error GoTo 0
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Capture before anything else touches Err, and keep the failure
+        FailNumber = Err.Number
+        FailDescription = Err.Description
+
+        m_LogSinkFailure = "error " & CStr(FailNumber) & " writing " & _
+            m_LogSinkPath & ": " & FailDescription
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Function TST_LogSinkEncode(ByVal LineText As String) As Byte()
+
+'
+'==============================================================================
+' TST_LogSinkEncode
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Return one log line as UTF-8 bytes followed by CR LF
+'
+' WHY THIS EXISTS
+'   VBA file statements write text in the system code page, which cannot
+'   carry every character that a workbook name or a localized Excel error
+'   text may hold. The log is UTF-8 so that a script reads it the same way
+'   on every host
+'
+' INPUTS
+'   LineText
+'     The line to encode, without a line break
+'
+' RETURNS
+'   The UTF-8 bytes of LineText, then CR LF. A UTF-16 surrogate that is not
+'   part of a pair is written as U+FFFD
+'
+' ERROR POLICY
+'   - Raises only when memory runs out; TST_LogSinkWriteLine keeps that as a
+'     write failure
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Bytes()             As Byte            'Encoded line
+    Dim TextLength          As Long            'UTF-16 code units in LineText
+    Dim CharIdx             As Long            'Current code unit, 1-based
+    Dim ByteIdx             As Long            'Next byte to write, 0-based
+    Dim CodeUnit            As Long            'Current UTF-16 code unit
+    Dim NextUnit            As Long            'Following UTF-16 code unit
+    Dim CodePoint           As Long            'Scalar value being encoded
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Three bytes per code unit is the most UTF-8 needs; two more hold CR LF
+        TextLength = Len(LineText)
+        ReDim Bytes(0 To 3 * TextLength + 1)
+
+        CharIdx = 1
+        ByteIdx = 0
+
+'------------------------------------------------------------------------------
+' ENCODE
+'------------------------------------------------------------------------------
+        Do While CharIdx <= TextLength
+
+            CodeUnit = AscW(Mid$(LineText, CharIdx, 1)) And &HFFFF&
+            CodePoint = CodeUnit
+
+        'Join a surrogate pair into one scalar; replace a lone surrogate
+            If CodeUnit >= &HD800& And CodeUnit <= &HDFFF& Then
+                CodePoint = &HFFFD&
+                If CodeUnit <= &HDBFF& And CharIdx < TextLength Then
+                    NextUnit = AscW(Mid$(LineText, CharIdx + 1, 1)) And &HFFFF&
+                    If NextUnit >= &HDC00& And NextUnit <= &HDFFF& Then
+                        CodePoint = &H10000 + (CodeUnit - &HD800&) * &H400& + _
+                            (NextUnit - &HDC00&)
+                        CharIdx = CharIdx + 1
+                    End If
+                End If
+            End If
+
+        'Write one to four bytes
+            If CodePoint < &H80& Then
+                Bytes(ByteIdx) = CodePoint
+                ByteIdx = ByteIdx + 1
+            ElseIf CodePoint < &H800& Then
+                Bytes(ByteIdx) = &HC0& Or (CodePoint \ &H40&)
+                Bytes(ByteIdx + 1) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 2
+            ElseIf CodePoint < &H10000 Then
+                Bytes(ByteIdx) = &HE0& Or (CodePoint \ &H1000&)
+                Bytes(ByteIdx + 1) = &H80& Or ((CodePoint \ &H40&) And &H3F&)
+                Bytes(ByteIdx + 2) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 3
+            Else
+                Bytes(ByteIdx) = &HF0& Or (CodePoint \ &H40000)
+                Bytes(ByteIdx + 1) = &H80& Or ((CodePoint \ &H1000&) And &H3F&)
+                Bytes(ByteIdx + 2) = &H80& Or ((CodePoint \ &H40&) And &H3F&)
+                Bytes(ByteIdx + 3) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 4
+            End If
+
+            CharIdx = CharIdx + 1
+
+        Loop
+
+'------------------------------------------------------------------------------
+' RETURN LINE
+'------------------------------------------------------------------------------
+        Bytes(ByteIdx) = 13
+        Bytes(ByteIdx + 1) = 10
+
+        ReDim Preserve Bytes(0 To ByteIdx + 1)
+
+        TST_LogSinkEncode = Bytes
+
+End Function
 
 
 Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double

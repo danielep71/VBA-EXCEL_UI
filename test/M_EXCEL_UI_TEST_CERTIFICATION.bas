@@ -21,6 +21,9 @@ Option Private Module
 '   - Test_EXCEL_UI_RunReleaseCertification
 '   - Test_EXCEL_UI_RunCertificationSelfTest
 '   - Test_EXCEL_UI_RunOwnershipCleanupChecks
+'   - TST_RunRunnerWithLog, which runs one public runner of the suites
+'     with the log sink set and returns its verdict instead of raising;
+'     tools\Check-EXCEL_UI.ps1 calls it
 '
 ' TEST SCOPE
 '   Release certification units
@@ -54,6 +57,8 @@ Option Private Module
 '   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' UPDATED
+'   2026-11-16 - Added TST_RunRunnerWithLog for the scripted Excel checks
+'                (#197).
 '   2026-11-16 - Certification composes its verdict and evidence through
 '                the harness, failing closed when a unit or skip could not
 '                be recorded; added the certification-record case (#50).
@@ -1479,6 +1484,163 @@ Public Sub Test_EXCEL_UI_RunCore()
         TST_RunRegressionPack IncludeTitleBarTests:=False, CallerProc:="Test_EXCEL_UI_RunCore"
 
 End Sub
+
+
+Public Function TST_RunRunnerWithLog( _
+    ByVal RunnerName As String, _
+    ByVal LogPath As String) _
+    As String
+
+'
+'==============================================================================
+' TST_RunRunnerWithLog
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Run one public runner with the log sink set, and return its verdict as
+'   one line instead of raising
+'
+' WHY THIS EXISTS
+'   tools\Check-EXCEL_UI.ps1 runs the runners through Application.Run. A
+'   script cannot read the Immediate Window, and a runner that raises into
+'   Application.Run stops Excel on a run-time error message that someone must
+'   dismiss. Through this function every line the runner logs also reaches
+'   LogPath, and its outcome comes back as a value
+'
+' INPUTS
+'   RunnerName
+'     The public runner to run. Only the runners listed under RUN are
+'     accepted
+'
+'   LogPath
+'     The log file to append to. Empty runs the runner with no sink
+'
+' RETURNS
+'   String
+'     One line: "RESULT: PASS" when the runner returned, or
+'     "RESULT: FAIL | Error <n> | Source: <source> | <description>" when it
+'     raised. When a line could not be written to LogPath,
+'     " | LOG WRITE FAILED: <reason>" follows
+'
+' BEHAVIOR
+'   - Logs a START line, runs the runner, then prints the verdict line and
+'     writes it to the log as its last line, and stops the sink
+'   - What the runner itself prints is unchanged; only its error is caught
+'
+' ERROR POLICY
+'   - Does not raise; an unknown runner name gives a FAIL verdict
+'   - A log write failure never changes the runner's PASS or FAIL
+'
+' NOTES
+'   - Test_EXCEL_UI_RunReleaseCertification is not accepted:
+'     tools\Certify-EXCEL_UI.ps1 runs it and collects its evidence
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Verdict             As String          'The verdict line
+    Dim SinkFailure         As String          'First log write failure, if any
+    Dim RaisedNumber        As Long            'Error the runner raised
+    Dim RaisedSource        As String          'Source of that error
+    Dim RaisedDescription   As String          'Text of that error
+
+    Const PROC As String = "TST_RunRunnerWithLog"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        TST_LogSinkStart LogPath
+
+        TST_Log PROC, "START", RunnerName & " | " & _
+            Format$(Now, "yyyy-mm-dd hh:nn:ss")
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' RUN
+'------------------------------------------------------------------------------
+        Select Case RunnerName
+
+            Case "Test_EXCEL_UI_RunAll"
+                Test_EXCEL_UI_RunAll
+
+            Case "Test_EXCEL_UI_RunCore"
+                Test_EXCEL_UI_RunCore
+
+            Case "Test_EXCEL_UI_RunTitleBarOnly"
+                Test_EXCEL_UI_RunTitleBarOnly
+
+            Case "Test_EXCEL_UI_RunSnapshotIdentity"
+                Test_EXCEL_UI_RunSnapshotIdentity
+
+            Case "Test_EXCEL_UI_RunTitleBarSdiIdentity"
+                Test_EXCEL_UI_RunTitleBarSdiIdentity
+
+            Case "Test_EXCEL_UI_RunCertificationSelfTest"
+                Test_EXCEL_UI_RunCertificationSelfTest
+
+            Case "Test_EXCEL_UI_RunOwnershipCleanupChecks"
+                Test_EXCEL_UI_RunOwnershipCleanupChecks
+
+            Case "Test_EXCEL_UI_RunRibbonSdiProbe"
+                Test_EXCEL_UI_RunRibbonSdiProbe
+
+            Case Else
+                Err.Raise _
+                    TEST_CERT_ERR_BASE + 40, _
+                    PROC, _
+                    "unknown runner: " & RunnerName
+
+        End Select
+
+        Verdict = "RESULT: PASS"
+
+'------------------------------------------------------------------------------
+' REPORT VERDICT
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Every path arrives here with the handler disabled or released
+        On Error GoTo 0
+
+    'One line, whatever line breaks the error text held
+        Verdict = Replace(Replace(Replace(Verdict, vbCrLf, " / "), vbCr, " / "), _
+            vbLf, " / ")
+
+        Debug.Print Verdict
+        TST_LogSinkWriteLine Verdict
+
+    'A failed write is reported, never raised
+        SinkFailure = TST_LogSinkStop()
+
+        If Len(SinkFailure) > 0 Then
+            Verdict = Verdict & " | LOG WRITE FAILED: " & _
+                Replace(Replace(SinkFailure, vbCr, " "), vbLf, " ")
+        End If
+
+        TST_RunRunnerWithLog = Verdict
+
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Capture before anything else touches Err
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+
+        Verdict = "RESULT: FAIL | Error " & CStr(RaisedNumber) & _
+            " | Source: " & RaisedSource & _
+            " | " & RaisedDescription
+
+        Resume Safe_Exit
+
+End Function
 
 
 '
