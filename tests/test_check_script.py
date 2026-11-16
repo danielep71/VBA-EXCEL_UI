@@ -1,0 +1,415 @@
+"""Offline tests for tools/Check-EXCEL_UI.ps1 and the VBA entry points it calls.
+
+The contract tests read the script and the VBA modules as text. The helper
+tests load the script's functions from its syntax tree and run them in
+PowerShell 7 (pwsh), and the run tests start the whole script where its
+preflight fails before anything starts Excel. Nothing here starts Excel; the
+pwsh tests are skipped where pwsh is not installed.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "tools" / "Check-EXCEL_UI.ps1"
+LAUNCHER = ROOT / "tools" / "Check-EXCEL_UI.cmd"
+CERTIFY = ROOT / "tools" / "Certify-EXCEL_UI.ps1"
+POLICY = ROOT / ".github" / "excel-evidence-policy.json"
+TEST_CERTIFICATION = ROOT / "test" / "M_EXCEL_UI_TEST_CERTIFICATION.bas"
+TEST_HARNESS = ROOT / "test" / "M_EXCEL_UI_TEST_HARNESS.bas"
+DEMO_TESTS = ROOT / "demo" / "M_DEMO_CLEANUP_TESTS.bas"
+DEMO = ROOT / "demo" / "M_EXCEL_UI_DEMO.bas"
+PWSH = shutil.which("pwsh")
+
+# Defines the script's functions, and the ones it takes from the
+# certification script, without running either body.
+LOADER = r"""
+$ErrorActionPreference = 'Stop'
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:CHECK_SCRIPT, [ref]$null, [ref]$null)
+foreach ($s in $ast.EndBlock.Statements) {
+    if ($s -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
+        . ([scriptblock]::Create($s.Extent.Text))
+    }
+}
+$Invariant = [System.Globalization.CultureInfo]::InvariantCulture
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$shared = Import-CertifyDefinitions -Path $env:CERTIFY_SCRIPT `
+    -Functions @('Get-UtcStamp', 'Write-Log', 'Get-InnerMessage')
+. $shared.Definitions
+$script:SessionLog = $null
+"""
+WRITE = " | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $env:RESULT -Encoding utf8"
+
+
+def read(path: Path) -> str:
+    return path.read_text(encoding="ascii").replace("\r\n", "\n")
+
+
+def script_value(name: str) -> str:
+    """The single-quoted text a script variable is set to."""
+    match = re.search(rf"^\${name} = '([^']*)'$", read(SCRIPT), re.M)
+    assert match is not None, name
+    return match.group(1)
+
+
+def script_list(name: str) -> list[str]:
+    """The single-quoted texts of a script variable set to @(...)."""
+    match = re.search(rf"^\${name} = @\((.*?)\)$", read(SCRIPT), re.M | re.S)
+    assert match is not None, name
+    return re.findall(r"'([^']*)'", match.group(1))
+
+
+def vba_procedure(path: Path, name: str) -> str:
+    match = re.search(rf"^Public (?:Sub|Function) {name}\b.*?^End (?:Sub|Function)$", read(path), re.M | re.S)
+    assert match is not None, name
+    return match.group(0)
+
+
+def case_labels(body: str) -> list[str]:
+    return re.findall(r'^\s*Case "([^"]+)"$', body, re.M)
+
+
+def vba_publics(*paths: Path) -> set[str]:
+    names: set[str] = set()
+    for path in paths:
+        names.update(re.findall(r"^Public (?:Sub|Function) (\w+)", read(path), re.M))
+    return names
+
+
+def git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+class ContractTests(unittest.TestCase):
+    """The script, the VBA entry points and the certification script agree."""
+
+    def test_the_runner_list_is_what_the_vba_entry_point_runs(self) -> None:
+        default = script_list("DefaultRunners")
+        probe = script_value("ProbeRunner")
+        body = vba_procedure(TEST_CERTIFICATION, script_value("RunnerMacro"))
+        self.assertEqual(case_labels(body), [*default, probe])
+        self.assertEqual(default, [
+            "Test_EXCEL_UI_RunAll", "Test_EXCEL_UI_RunCore", "Test_EXCEL_UI_RunTitleBarOnly",
+            "Test_EXCEL_UI_RunSnapshotIdentity", "Test_EXCEL_UI_RunTitleBarSdiIdentity",
+            "Test_EXCEL_UI_RunCertificationSelfTest", "Test_EXCEL_UI_RunOwnershipCleanupChecks"])
+        publics = vba_publics(*sorted((ROOT / "test").glob("*.bas")))
+        for name in [*default, probe]:
+            with self.subTest(name):
+                self.assertIn(name, publics)
+                self.assertRegex(body, rf"(?m)^\s+{name}$")
+        policy = json.loads(POLICY.read_text(encoding="utf-8"))
+        self.assertNotIn(policy["certification_runner"], case_labels(body))
+
+    def test_the_demo_macros_are_what_the_demo_entry_point_runs(self) -> None:
+        body = vba_procedure(DEMO_TESTS, script_value("DemoLoggedMacro"))
+        macros = [script_value(name) for name in
+                  ("DemoCleanupMacro", "DemoBuildMacro", "DemoClearMacro", "DemoHideMacro", "DemoShowMacro")]
+        self.assertEqual(case_labels(body), macros)
+        publics = vba_publics(*sorted((ROOT / "demo").glob("*.bas")))
+        for name in [*macros, script_value("DemoLoggedMacro"), script_value("DemoTitleBarStateMacro")]:
+            with self.subTest(name):
+                self.assertIn(name, publics)
+        self.assertIn("UI_TryGetTitleBarVisible(IsVisible, FailMsg)",
+                      vba_procedure(DEMO_TESTS, script_value("DemoTitleBarStateMacro")))
+
+    def test_the_demo_sheet_and_check_box_names_are_the_demo_constants(self) -> None:
+        demo = read(DEMO)
+        for constant, variable in (("DEMO_SHEET_NAME", "DemoSheetName"), ("CB_TITLEBAR", "TitleBarCheckBox")):
+            with self.subTest(constant):
+                self.assertRegex(demo, rf'Private Const {constant} +As String = "{script_value(variable)}"')
+        # The CLEAR ALL, HIDE SELECTED UI and SHOW SELECTED UI buttons run the
+        # macros the script runs, and the HIDE and SHOW actions read chkTitleBar.
+        flat = re.sub(r" _\n\s*", " ", demo)
+        for caption, variable in (("CLEAR ALL", "DemoClearMacro"), ("HIDE SELECTED UI", "DemoHideMacro"),
+                                  ("SHOW SELECTED UI", "DemoShowMacro")):
+            with self.subTest(caption):
+                self.assertIn(f'"{caption}", "{script_value(variable)}")', flat)
+        self.assertIn("TitleBarVis = Demo_CheckBoxToUIVisibility(WS, CB_TITLEBAR,", demo)
+
+    def test_every_shared_name_is_defined_by_the_certification_script(self) -> None:
+        certify = read(CERTIFY)
+        for name in script_list("SharedFunctions"):
+            with self.subTest(name):
+                self.assertRegex(certify, rf"(?m)^function {re.escape(name)}\b")
+        for name in script_list("SharedValues"):
+            with self.subTest(name):
+                self.assertRegex(certify, rf"(?m)^\${name} = ")
+        self.assertEqual(script_value("CertifyScriptName"), CERTIFY.name)
+
+    def test_macro_security_is_never_lowered_or_written(self) -> None:
+        text = read(SCRIPT)
+        self.assertEqual(re.findall(r"AutomationSecurity = (\S+)", text), ["$MsoAutomationSecurityByUI"])
+        for pattern in (r"Set-ItemProperty", r"New-ItemProperty", r"\breg(?:\.exe)? add", r"VBAWarnings\s*=",
+                        r"AccessVBOM\s*=", r"Trusted Locations"):
+            with self.subTest(pattern):
+                self.assertIsNone(re.search(pattern, text, re.I))
+
+    def test_no_two_script_variables_differ_only_in_case(self) -> None:
+        text = re.sub(r"^function [^\n]*\{.*?^\}[ \t]*$", "", read(SCRIPT), flags=re.MULTILINE | re.DOTALL)
+        spellings: dict[str, set[str]] = {}
+        for name in re.findall(r"\$(?:script:)?([A-Za-z_][A-Za-z0-9_]*)", text):
+            spellings.setdefault(name.lower(), set()).add(name)
+        clashes = {key: sorted(names) for key, names in spellings.items() if len(names) > 1}
+        self.assertEqual(clashes, {})
+
+    def test_the_launcher_passes_its_arguments_to_the_script(self) -> None:
+        self.assertIn('set "SCRIPT=%~dp0Check-EXCEL_UI.ps1"', read(LAUNCHER))
+        self.assertIn('-File "%SCRIPT%" %*', read(LAUNCHER))
+        self.assertEqual(SCRIPT.read_bytes().count(b"\r\n"), SCRIPT.read_bytes().count(b"\n"))
+        self.assertEqual(LAUNCHER.read_bytes().count(b"\r\n"), LAUNCHER.read_bytes().count(b"\n"))
+
+
+class LogSinkSourceTests(unittest.TestCase):
+    """With no sink set, the harnesses print what they printed before."""
+
+    def test_tst_log_prints_the_line_it_mirrors(self) -> None:
+        body = vba_procedure(TEST_HARNESS, "TST_Log")
+        self.assertIn('LineText = ProcName & " @ " & Stage & " | " & Detail\n'
+                      "        Debug.Print LineText\n", body)
+        self.assertIn("        TST_LogSinkWriteLine LineText\n", body)
+        self.assertEqual(len(re.findall(r"(?m)^\s*Debug\.Print ", body)), 1)
+
+    def test_the_sink_writes_nothing_without_a_path_and_never_raises(self) -> None:
+        for path, name, state in ((TEST_HARNESS, "TST_LogSinkWriteLine", "m_LogSinkPath"),
+                                  (DEMO_TESTS, "DEMO_CT_LogSinkWrite", "mLogSinkPath")):
+            with self.subTest(name):
+                text = read(path)
+                match = re.search(rf"^(?:Public|Private) Sub {name}\b.*?^End Sub$", text, re.M | re.S)
+                assert match is not None
+                body = match.group(0)
+                self.assertRegex(body, rf"If Len\({state}\) = 0 Or Len\({state[:-4]}Failure\) > 0 Then\n"
+                                       r"\s+Exit Sub")
+                self.assertNotIn("Err.Raise", body)
+                self.assertIn("Resume Safe_Exit", body)
+
+    def test_every_demo_harness_line_goes_through_the_sink(self) -> None:
+        text = read(DEMO_TESTS)
+        self.assertEqual(re.findall(r"(?m)^[ \t]*Debug\.Print (.*)$", text), ["LineText"])
+        self.assertEqual(len(re.findall(r"(?m)^[ \t]*DEMO_CT_Print ", text)), 8)
+
+    def test_the_entry_points_report_instead_of_raising(self) -> None:
+        for path, name in ((TEST_CERTIFICATION, "TST_RunRunnerWithLog"), (DEMO_TESTS, "Demo_Test_RunLogged")):
+            with self.subTest(name):
+                body = vba_procedure(path, name)
+                handler = body.split("Err_Handler:", 1)[1]
+                self.assertNotIn("Err.Raise", handler)
+                self.assertIn("Resume Safe_Exit", handler)
+                self.assertIn('Verdict = "RESULT: PASS"', body)
+                self.assertIn('Verdict = "RESULT: FAIL | Error " & CStr(RaisedNumber)', body)
+                self.assertIn('" | LOG WRITE FAILED: "', body)
+
+
+@unittest.skipUnless(PWSH, "PowerShell 7 (pwsh) is not installed")
+class HelperTests(unittest.TestCase):
+    """The script's helpers, run in pwsh."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.temp = Path(temp.name)
+        self.result = self.temp / "result.json"
+
+    def run_body(self, body: str) -> Any:
+        completed = subprocess.run(
+            [str(PWSH), "-NoProfile", "-NonInteractive", "-Command", LOADER + body],
+            env={**os.environ, "CHECK_SCRIPT": str(SCRIPT), "CERTIFY_SCRIPT": str(CERTIFY),
+                 "RESULT": str(self.result), "TEMPDIR": str(self.temp)},
+            capture_output=True, text=True, timeout=120, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
+        return json.loads(self.result.read_text(encoding="utf-8-sig"))
+
+    def test_shared_definitions_come_from_the_certification_script(self) -> None:
+        result = self.run_body(
+            "$d = Import-CertifyDefinitions -Path $env:CERTIFY_SCRIPT -Functions @('Stop-QuitProcess') "
+            "-Variables @('MsoAutomationSecurityByUI', 'CompileControlId', 'ReadinessMacro')\n"
+            "$m = ''\ntry { $null = Import-CertifyDefinitions -Path $env:CERTIFY_SCRIPT "
+            "-Functions @('Get-UtcStamp', 'No-SuchFunction') -Variables @('NoSuchValue') } "
+            "catch { $m = $_.Exception.Message }\n"
+            "$gone = ''\ntry { $null = Import-CertifyDefinitions -Path (Join-Path $env:TEMPDIR 'none.ps1') "
+            "-Functions @('Get-UtcStamp') } catch { $gone = $_.Exception.Message }\n"
+            "@{ values = $d.Values; text = $d.Definitions.ToString().StartsWith('function Stop-QuitProcess'); "
+            "error = $m; gone = $gone }" + WRITE)
+        self.assertEqual(result["values"], {"MsoAutomationSecurityByUI": 2, "CompileControlId": 578,
+                                            "ReadinessMacro": "M_EXCEL_UI.UI_HasExcelUIStateSnapshot"})
+        self.assertTrue(result["text"])
+        self.assertIn("no longer defines No-SuchFunction, NoSuchValue.", result["error"])
+        self.assertIn("The certification script is missing", result["gone"])
+
+    def test_the_runner_list_is_resolved_and_checked(self) -> None:
+        default = script_list("DefaultRunners")
+        probe = script_value("ProbeRunner")
+        args = (f"-Default @({', '.join(repr(name) for name in default)}) -Probe '{probe}'").replace('"', "'")
+        result = self.run_body(
+            f"$a = Resolve-RunnerList {args}\n"
+            f"$b = Resolve-RunnerList -Requested @('test_excel_ui_runcore, Test_EXCEL_UI_RunAll', "
+            f"'Test_EXCEL_UI_RunCore') -IncludeProbe {args}\n"
+            f"$c = Resolve-RunnerList -Requested @('Test_EXCEL_UI_RunRibbonSdiProbe') -IncludeProbe {args}\n"
+            f"$m = ''\ntry {{ $null = Resolve-RunnerList -Requested @('Test_EXCEL_UI_RunReleaseCertification') "
+            f"{args} }} catch {{ $m = $_.Exception.Message }}\n"
+            "@{ a = @($a); b = @($b); c = @($c); error = $m }" + WRITE)
+        self.assertEqual(result["a"], default)
+        self.assertEqual(result["b"], ["Test_EXCEL_UI_RunCore", "Test_EXCEL_UI_RunAll", probe])
+        self.assertEqual(result["c"], [probe])
+        self.assertIn("Unknown runner Test_EXCEL_UI_RunReleaseCertification.", result["error"])
+
+    def test_a_macro_outcome_needs_a_verdict_and_a_log_that_ends_with_it(self) -> None:
+        log = self.temp / "runner.log"
+        result = self.run_body(
+            "$log = Join-Path $env:TEMPDIR 'runner.log'\n"
+            "function Outcome([string]$r, [string]$e = '') { $o = Get-MacroOutcome -Returned $r -Raised $e "
+            "-LogPath $log; return @{ passed = $o.Passed; detail = $o.Detail } }\n"
+            "$missing = Outcome 'RESULT: PASS'\n"
+            "[IO.File]::WriteAllText($log, \"START`r`nline`r`nRESULT: PASS`r`n\", $Utf8NoBom)\n"
+            "$pass = Outcome 'RESULT: PASS'\n"
+            "$mismatch = Outcome 'RESULT: FAIL | Error 5 | Source: S | text'\n"
+            "$logFailed = Outcome 'RESULT: PASS | LOG WRITE FAILED: error 75 writing x: Path/File access error'\n"
+            "$none = Outcome ''\n$raised = Outcome '' 'Cannot run the macro'\n"
+            "[IO.File]::AppendAllText($log, \"RESULT: FAIL | Error 5 | Source: S | text`r`n\", $Utf8NoBom)\n"
+            "$fail = Outcome 'RESULT: FAIL | Error 5 | Source: S | text'\n"
+            "@{ missing = $missing; pass = $pass; mismatch = $mismatch; logFailed = $logFailed; none = $none; "
+            "raised = $raised; fail = $fail }" + WRITE)
+        self.assertTrue(log.exists())
+        self.assertEqual(result["pass"], {"passed": True, "detail": "RESULT: PASS"})
+        self.assertEqual(result["fail"], {"passed": False, "detail": "RESULT: FAIL | Error 5 | Source: S | text"})
+        self.assertFalse(result["missing"]["passed"])
+        self.assertIn("the log does not end with that verdict", result["missing"]["detail"])
+        self.assertIn("the log does not end with that verdict", result["mismatch"]["detail"])
+        self.assertEqual(result["logFailed"], {
+            "passed": False,
+            "detail": "RESULT: PASS; the log could not be written: error 75 writing x: Path/File access error"})
+        self.assertEqual(result["none"], {"passed": False, "detail": "no verdict was returned: ''"})
+        self.assertEqual(result["raised"], {"passed": False, "detail": "Application.Run raised: Cannot run the macro"})
+
+    def test_results_timings_and_the_summary(self) -> None:
+        result = self.run_body(
+            "function S([string]$n, [string]$s, [string]$d = '', [string]$l = '') { "
+            "[ordered]@{ name = $n; status = $s; detail = $d; log = $l } }\n"
+            "$ok = @((S 'a' 'PASS'), (S 'b' 'WARN'), (S 'c' 'INFO'))\n"
+            "$bad = $ok + @(S 'd' 'FAIL')\n$notRun = $ok + @(S 'e' 'NOT_RUN')\n"
+            "$summary = Format-Summary -Commit ('0' * 40) -HostLine 'Excel 16.0 build 20430, x64' "
+            "-Steps @((S 'preflight' 'PASS' 'ok'), (S 'Test_EXCEL_UI_RunAll' 'FAIL' 'RESULT: FAIL | x' "
+            "'runner-Test_EXCEL_UI_RunAll.log')) -Result 'FAIL'\n"
+            "@{ ok = (Get-RunResult -Steps $ok -Cancelled $false); "
+            "bad = (Get-RunResult -Steps $bad -Cancelled $false); "
+            "notRun = (Get-RunResult -Steps $notRun -Cancelled $false); "
+            "cancelled = (Get-RunResult -Steps $ok -Cancelled $true); "
+            "timing = @((Get-TimingStatus 9.9 10), (Get-TimingStatus 10 10), (Get-TimingStatus 10.1 10)); "
+            "seconds = (Format-Seconds 12.345); summary = @($summary); "
+            "args = (ConvertTo-ArgumentLine @('-File', 'C:\\a b\\x.ps1', '', 'say \"hi\"')) }" + WRITE)
+        self.assertEqual(result["ok"], {"Result": "PASS", "ExitCode": 0})
+        self.assertEqual(result["bad"], {"Result": "FAIL", "ExitCode": 1})
+        self.assertEqual(result["notRun"], {"Result": "FAIL", "ExitCode": 1})
+        self.assertEqual(result["cancelled"], {"Result": "FAIL", "ExitCode": 2})
+        self.assertEqual(result["timing"], ["PASS", "PASS", "WARN"])
+        self.assertEqual(result["seconds"], "12.3")
+        self.assertEqual(result["summary"], [
+            "Commit: " + "0" * 40,
+            "Host: Excel 16.0 build 20430, x64",
+            "PASS preflight: ok",
+            "FAIL Test_EXCEL_UI_RunAll: RESULT: FAIL | x [runner-Test_EXCEL_UI_RunAll.log]",
+            "RESULT: FAIL"])
+        self.assertEqual(result["args"], '-File "C:\\a b\\x.ps1" "" "say \\"hi\\""')
+
+    def test_a_step_that_cannot_run_is_a_failure_that_says_why(self) -> None:
+        result = self.run_body(
+            "$script:Steps = @((New-CheckStep 'a' 'a.log'), (New-CheckStep 'b' ''), (New-CheckStep 'c' ''))\n"
+            "Set-CheckStep 'a' 'PASS' 'done' -Seconds 1.234 | Out-Null\n"
+            "Skip-CheckStep @('a', 'b') 'a step failed' | Out-Null\n"
+            "$m = ''\ntry { Set-CheckStep 'z' 'PASS' } catch { $m = $_.Exception.Message }\n"
+            "@{ steps = $script:Steps; error = $m }" + WRITE)
+        steps = {step["name"]: step for step in result["steps"]}
+        self.assertEqual((steps["a"]["status"], steps["a"]["detail"], steps["a"]["seconds"]), ("PASS", "done", 1.23))
+        self.assertEqual((steps["b"]["status"], steps["b"]["detail"]), ("FAIL", "not run: a step failed"))
+        self.assertEqual(steps["c"]["status"], "NOT_RUN")
+        self.assertEqual(result["error"], "The step 'z' is not in this run.")
+
+
+@unittest.skipUnless(PWSH, "PowerShell 7 (pwsh) is not installed")
+@unittest.skipIf(os.name == "nt", "on Windows the preflight could reach a real Excel installation")
+class ScriptRunTests(unittest.TestCase):
+    """The whole script, run where its preflight fails before anything starts Excel."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.repo = Path(temp.name) / "repo"
+        self.bundle = Path(temp.name) / "bundle"
+        (self.repo / ".github").mkdir(parents=True)
+        shutil.copyfile(POLICY, self.repo / ".github" / "excel-evidence-policy.json")
+        (self.repo / "a.txt").write_text("a\n", encoding="utf-8")
+        git(self.repo, "init", "-q")
+        git(self.repo, "config", "user.name", "Test")
+        git(self.repo, "config", "user.email", "test@example.invalid")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "fixture")
+
+    def run_script(self, *extra: str, bundle: Path | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(PWSH), "-NoProfile", "-NonInteractive", "-File", str(SCRIPT), "-RepoRoot", str(self.repo),
+             "-BundleDir", str(bundle or self.bundle), *extra],
+            capture_output=True, text=True, timeout=120, check=False)
+
+    def test_a_failed_preflight_still_writes_the_summary_and_the_session(self) -> None:
+        completed = self.run_script("-Runners", "Test_EXCEL_UI_RunCore,Test_EXCEL_UI_RunAll", "-IncludeRibbonProbe")
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        summary = (self.bundle / "summary.txt").read_text(encoding="utf-8").splitlines()
+        self.assertTrue(summary[0].startswith("Commit: "))
+        self.assertEqual(summary[-1], "RESULT: FAIL")
+        steps = [line.split(":", 1)[0] for line in summary[1:-1]]
+        self.assertEqual(steps, [
+            "FAIL preflight", "FAIL certification", "FAIL open-development", "FAIL Test_EXCEL_UI_RunCore",
+            "FAIL Test_EXCEL_UI_RunAll", "FAIL Test_EXCEL_UI_RunRibbonSdiProbe", "FAIL close-development",
+            "FAIL demo-build", "FAIL demo-open", "FAIL demo-compile", "FAIL demo-cleanup-checks",
+            "FAIL demo-create-sheet-1", "FAIL demo-create-sheet-2", "FAIL default-printer", "FAIL demo-titlebar",
+            "FAIL close-demo"])
+        self.assertTrue(all(line.endswith("not run: the preflight failed") for line in summary[2:-1]))
+        self.assertNotIn("[", "".join(summary[1:-1]))
+        self.assertIn("RESULT: FAIL", completed.stdout)
+        session = json.loads((self.bundle / "session.json").read_text(encoding="utf-8-sig"))
+        self.assertRegex(session["commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(session["tool"], "tools/Check-EXCEL_UI.ps1")
+        self.assertEqual((session["result"], session["exit_code"]), ("FAIL", 1))
+        self.assertEqual(session["runners"],
+                         ["Test_EXCEL_UI_RunCore", "Test_EXCEL_UI_RunAll", "Test_EXCEL_UI_RunRibbonSdiProbe"])
+        self.assertEqual(session["slow_build_seconds"], 10)
+        self.assertIsNotNone(session["finished_utc"])
+        self.assertEqual(len(session["steps"]), len(steps))
+        self.assertTrue((self.bundle / "session.log").exists())
+        self.assertFalse((self.bundle / "certification").exists())
+
+    def test_the_script_stops_before_the_bundle_on_a_bad_start(self) -> None:
+        with self.subTest("unknown runner"):
+            completed = self.run_script("-Runners", "Test_EXCEL_UI_RunNothing")
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("ERROR: Unknown runner Test_EXCEL_UI_RunNothing.", completed.stdout)
+        with self.subTest("bundle inside the checkout"):
+            completed = self.run_script(bundle=self.repo / "bundle")
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("ERROR: the bundle folder must be outside the checkout", completed.stdout)
+        with self.subTest("bundle not empty"):
+            self.bundle.mkdir()
+            (self.bundle / "x.txt").write_text("x", encoding="utf-8")
+            completed = self.run_script()
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("ERROR: the bundle folder is not empty", completed.stdout)
+            shutil.rmtree(self.bundle)
+        with self.subTest("changed working tree"):
+            (self.repo / "a.txt").write_text("b\n", encoding="utf-8")
+            completed = self.run_script()
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("ERROR: the working tree has changes.", completed.stdout)
+        self.assertFalse(self.bundle.exists())
+        self.assertFalse((self.repo / "bundle").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
