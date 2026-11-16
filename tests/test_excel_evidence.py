@@ -42,6 +42,8 @@ RUNNER = (
     + "End Sub\n\n"
     "Private Sub TST_CertRunUnit( _\n    ByVal UnitName As String)\nEnd Sub\n"
 )
+RECORDING_DETAIL = ("certification recording FAILED | failures=1"
+                    " | first: growing the unit-outcome buffer | error 7")
 DEVELOPMENT = ["src/M_EXCEL_UI.bas", "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"]
 MANIFEST = {
     "schema_version": 1,
@@ -90,6 +92,8 @@ def report_text(result: dict[str, Any]) -> str:
     lines = ["VBA Excel UI - release certification",
              f"Excel {result['excelVersion']} build {result['excelBuild']}",
              result["operatingSystem"], result["timestampLocal"], "-" * 60, result_line(result)]
+    if result.get("recording") == "FAILED":
+        lines.append(f"  RECORDING  {result['recordingDetail']}")
     lines += [f"  {'PASS' if unit['passed'] else 'FAIL'}  {unit['name']}"
               + (f" | {unit['detail']}" if unit["detail"] else "") for unit in result["unitResults"]]
     lines += [f"  SKIP  {item}" for item in result["skipDetail"]]
@@ -107,7 +111,8 @@ def documents(root: Path, sha: str) -> dict[str, Any]:
         "component": "VBA Excel UI", "schema": 1, "timestampLocal": "2026-11-06 10:03:00",
         "excelVersion": "16.0", "excelBuild": "17928", "operatingSystem": "Windows (64-bit) NT 10.00",
         "bitness": "x64", "vbaGeneration": "VBA7", "units": len(UNITS), "unitsFailed": 0, "skipped": 0,
-        "cleanup": "OK", "cleanupDetail": "", "complete": True, "passed": True,
+        "cleanup": "OK", "cleanupDetail": "", "recording": "OK", "recordingDetail": "",
+        "complete": True, "passed": True,
         "unitResults": [{"name": unit, "passed": True, "detail": ""} for unit in UNITS],
         "skipDetail": [],
     }
@@ -231,6 +236,13 @@ class PassingBundleTests(Fixture):
         self.bundle_with()
         code, _, _ = self.run_main(str(self.bundle))
         self.assertEqual(code, 0)
+
+    def test_a_document_without_a_recording_field_passes(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            del docs["certification.json"]["recording"]
+            del docs["certification.json"]["recordingDetail"]
+        self.bundle_with(earlier_runner)
+        self.assertEqual(self.failed(), {})
 
     def test_an_ansi_report_with_a_non_ascii_detail_is_read(self) -> None:
         def detail(docs: dict[str, Any]) -> None:
@@ -395,6 +407,42 @@ class NegativeTests(Fixture):
             docs["certification.json"].update(cleanup="FAILED", cleanupDetail="workbook count 2, expected 1")
         self.bundle_with(leaked)
         self.assert_fails("verdict", "cleanup FAILED: workbook count 2")
+
+    @staticmethod
+    def recording_failed(docs: dict[str, Any]) -> None:
+        docs["certification.json"].update(complete=False, passed=False, recording="FAILED",
+                                           recordingDetail=RECORDING_DETAIL)
+
+    def test_a_recording_failure_fails_and_is_named(self) -> None:
+        self.bundle_with(self.recording_failed)
+        failures = self.failed()
+        self.assertIn(RECORDING_DETAIL, failures["verdict"])
+        self.assertNotIn("report", failures)
+
+    def test_a_report_that_omits_the_recording_failure_fails(self) -> None:
+        result = copy.deepcopy(self.base)
+        self.recording_failed(result)
+        report = report_text(result["certification.json"]).replace(f"  RECORDING  {RECORDING_DETAIL}\r\n", "")
+        self.bundle_with(self.recording_failed, report=report)
+        self.assert_fails("report", "RECORDING lines [] differ")
+
+    def test_a_recording_line_in_a_clean_report_fails(self) -> None:
+        lines = report_text(self.base["certification.json"]).split("\r\n")
+        lines.insert(6, f"  RECORDING  {RECORDING_DETAIL}")
+        self.bundle_with(report="\r\n".join(lines))
+        self.assert_fails("report", "RECORDING lines")
+
+    def test_a_recording_value_other_than_ok_or_failed_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(recording="PARTIAL"))
+        self.assert_fails("verdict", "recording must be OK or FAILED")
+
+    def test_a_failed_recording_without_a_detail_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(recording="FAILED"))
+        self.assert_fails("verdict", "recording FAILED without a recordingDetail")
+
+    def test_a_recording_detail_on_a_clean_recording_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(recordingDetail=RECORDING_DETAIL))
+        self.assert_fails("verdict", "recording is OK but recordingDetail is not empty")
 
     def test_units_other_than_the_runners_fail(self) -> None:
         def renamed(docs: dict[str, Any]) -> None:
