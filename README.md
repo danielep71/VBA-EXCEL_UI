@@ -501,10 +501,15 @@ open under [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6). Its bounde
 [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66): with the v1.1.2 condition restored, the regression fails
 instead of hanging.
 
-Frame state is held per top-level window rather than once per process. On
-`release/v1.1.3`, each hWnd slot also retains its owning Excel `Window` object
-as a generation token; equal style bits are only a consistency check and cannot
-authenticate a recycled handle ([#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) remains open).
+Frame state is held per top-level window rather than once per process. In
+v1.1.2 a slot was proved by its owned style bits alone, which was a partial
+proof: a window that inherits a closed window's handle and carries the same
+owned bits passes it. On `release/v1.1.3`, each hWnd slot also retains its
+owning Excel `Window` object as a generation identity; equal style bits are
+only a consistency check and cannot authenticate a recycled handle. The
+regression keeps the numeric hWnd and changes only the window generation, with
+equal-zero and equal-nonzero owned bits; [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) remains open until it passes on
+Excel.
 While the component does not own a hidden
 state for a window, the live owned bits are re-read on every call, so a
 legitimate frame change made by Excel or another add-in is adopted rather than
