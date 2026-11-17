@@ -193,8 +193,8 @@ PASS demo-build: EXCEL_UI-demo.xlsm built from the checkout [demo-build.log]
 PASS demo-open: Excel 16.0 build 20430, x64; process 23456
 PASS demo-compile: Debug > Compile VBAProject completed and is greyed out
 PASS demo-cleanup-checks: RESULT: PASS [demo-cleanup-checks.log]
-PASS demo-create-sheet-1: Demo_CreateDemoSheet took 2.4 s (WARN above 10.0 s) [demo-create-sheet-1.log]
-PASS demo-create-sheet-2: Demo_CreateDemoSheet took 2.1 s (WARN above 10.0 s) [demo-create-sheet-2.log]
+PASS demo-create-sheet-1: Demo_CreateDemoSheet took 2.4 s (threshold 10.0 s) [demo-create-sheet-1.log]
+PASS demo-create-sheet-2: Demo_CreateDemoSheet took 2.1 s (threshold 10.0 s) [demo-create-sheet-2.log]
 INFO default-printer: Microsoft Print to PDF; work offline False; status Idle; network False
 PASS demo-titlebar: before VISIBLE; after HIDE HIDDEN; after SHOW VISIBLE [demo-titlebar.log]
 PASS close-demo: Workbook closed without saving; Excel quit

@@ -951,7 +951,7 @@ try {
                 Set-CheckStep $name 'RUNNING' $DemoBuildMacro
                 $outcome = Invoke-LoggedMacro -State $demoState -EntryPoint $DemoLoggedMacro -Macro $DemoBuildMacro `
                     -LogPath (Join-Path $script:BundleDir $step.log)
-                $timing = '{0} took {1} s (WARN above {2} s)' -f $DemoBuildMacro, (Format-Seconds $outcome.Seconds),
+                $timing = '{0} took {1} s (threshold {2} s)' -f $DemoBuildMacro, (Format-Seconds $outcome.Seconds),
                     (Format-Seconds $SlowBuildSeconds)
                 if ($outcome.Passed) {
                     Set-CheckStep $name (Get-TimingStatus $outcome.Seconds $SlowBuildSeconds) $timing -Seconds $outcome.Seconds
