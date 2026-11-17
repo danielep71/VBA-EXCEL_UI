@@ -501,10 +501,15 @@ open under [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6). Its bounde
 [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66): with the v1.1.2 condition restored, the regression fails
 instead of hanging.
 
-Frame state is held per top-level window rather than once per process. On
-`release/v1.1.3`, each hWnd slot also retains its owning Excel `Window` object
-as a generation token; equal style bits are only a consistency check and cannot
-authenticate a recycled handle ([#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) remains open).
+Frame state is held per top-level window rather than once per process. In
+v1.1.2 a slot was proved by its owned style bits alone, which was a partial
+proof: a window that inherits a closed window's handle and carries the same
+owned bits passes it. On `release/v1.1.3`, each hWnd slot also retains its
+owning Excel `Window` object as a generation identity; equal style bits are
+only a consistency check and cannot authenticate a recycled handle. The
+regression keeps the numeric hWnd and changes only the window generation, with
+equal-zero and equal-nonzero owned bits; [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) remains open until it passes on
+Excel.
 While the component does not own a hidden
 state for a window, the live owned bits are re-read on every call, so a
 legitimate frame change made by Excel or another add-in is adopted rather than
@@ -584,10 +589,14 @@ than no diagnostic at all.
 
 ## ✅ Regression testing
 
-Optional test module:
+Optional test modules, imported together after the production modules:
 
 ```text
-test/M_EXCEL_UI_REGRESSION_TESTS.bas
+test/M_EXCEL_UI_TEST_HARNESS.bas         shared assertions, cleanup and evidence
+test/M_EXCEL_UI_TEST_RUNTIME.bas         runtime cases
+test/M_EXCEL_UI_TEST_SNAPSHOT.bas        snapshot cases and the Ribbon probe
+test/M_EXCEL_UI_TEST_TITLEBAR.bas        title-bar cases
+test/M_EXCEL_UI_TEST_CERTIFICATION.bas   release certification and the full pack
 ```
 
 Public runners:
@@ -615,6 +624,9 @@ On Windows, `tools\Certify-EXCEL_UI.cmd` does the same from a clean checkout:
 it builds a development workbook from the commit, compiles it, runs the
 certification and collects the evidence in a folder bound to the commit
 ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
+`tools\Check-EXCEL_UI.cmd` runs that certification, then the runners above and
+the demo checks, and writes one bundle with a log per runner and a
+`summary.txt` ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)).
 
 It executes every mandatory unit, counts units, failures, skips and cleanup
 separately, verifies afterwards that no snapshot, stray workbook or suppressed
@@ -627,7 +639,8 @@ RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
 
 Completeness and correctness are reported separately on purpose. A run that
 skipped a mandatory unit is not a pass, whatever the assertions that did execute
-reported.
+reported. Neither is a run that could not record a unit or a skip: it reports
+`FAIL | INCOMPLETE`, and both documents name the recording failure.
 
 `Test_EXCEL_UI_RunAll` remains the interactive runner and is **not** the release
 gate. It opens and closes temporary windows and workbooks for its targeting and
@@ -741,9 +754,10 @@ to tagged GitHub Releases.
 | [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md) | Issue labels, priorities, milestones, target dates and the issue workflows |
 | [docs/WORKBOOK_SYNC.md](docs/WORKBOOK_SYNC.md) | Importing the modules into a workbook from the command line, and checking a workbook's VBA against a commit |
 | [docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md) | One-command release certification in Excel and its evidence folder |
+| [docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md) | Certification, the regression runners and the demo checks in one command, with a log per runner and a summary |
 | [docs/VBA_CALL_CHECKER.md](docs/VBA_CALL_CHECKER.md) | The advisory check of calls across modules |
 | [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md) | Measured Ribbon behaviour across workbook windows, and the model it commits the component to |
-| [Regression tests](test/M_EXCEL_UI_REGRESSION_TESTS.bas) | Behavioral verification |
+| [Regression tests](test/) | Behavioral verification: the harness and one module per suite |
 | [GitHub Releases](https://github.com/danielep71/VBA-EXCEL_UI/releases) | Release notes and tested demo workbooks; [RELEASING.md](RELEASING.md) lists the assets a release carries |
 
 ---

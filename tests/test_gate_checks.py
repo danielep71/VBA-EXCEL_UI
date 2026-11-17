@@ -18,8 +18,11 @@ from unittest.mock import patch
 from gate_fixture import GateTestCase, check_repo, reformat, vba_api, wiki_badges
 
 RUNTIME = "src/M_EXCEL_UI_RUNTIME.bas"
-TESTS = "test/M_EXCEL_UI_REGRESSION_TESTS.bas"
+TESTS = "test/M_EXCEL_UI_TEST_HARNESS.bas"
+TITLEBAR_TESTS = "test/M_EXCEL_UI_TEST_TITLEBAR.bas"
+CERTIFICATION_TESTS = "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"
 BUILDER = "demo/M_DEMO_BUILDER.bas"
+DEMO = "demo/M_EXCEL_UI_DEMO.bas"
 WORKFLOW = ".github/workflows/static-checks.yml"
 RULE = "'" + "=" * 78 + "\r\n"
 NEVER = re.compile(r"(?!)")
@@ -266,22 +269,39 @@ class TitleBarControlRegression(GateTestCase):
         self.assertPasses()
 
     def test_fails_when_cleanup_leaves_its_handler_armed(self) -> None:
-        text = self.repo.read_bytes(TESTS).decode("ascii")
+        text = self.repo.read_bytes(TITLEBAR_TESTS).decode("ascii")
         start = text.index("Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline")
         cleanup = text.index("Safe_Exit:", start)
         disarm = text.index("On Error GoTo 0", cleanup)
         text = text[:disarm] + "On Error Resume Next" + text[disarm + len("On Error GoTo 0"):]
-        self.repo.write(TESTS, text.encode("ascii"))
-        self.assertFails("cleanup re-raise must disable its handler")
+        self.repo.write(TITLEBAR_TESTS, text.encode("ascii"))
+        self.assertFails(f"{TITLEBAR_TESTS}: ", "cleanup re-raise must disable its handler")
 
     def test_fails_when_a_restore_result_is_discarded(self) -> None:
-        text = self.repo.read_bytes(TESTS).decode("ascii")
+        text = self.repo.read_bytes(TITLEBAR_TESTS).decode("ascii")
         start = text.index("Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline")
         checked = "        RestoreOK = TST_RestoreTitleBarStyle( _\r\n"
         call = text.index(checked, start)
         text = text[:call] + "        TST_RestoreTitleBarStyle _\r\n" + text[call + len(checked):]
-        self.repo.write(TESTS, text.encode("ascii"))
+        self.repo.write(TITLEBAR_TESTS, text.encode("ascii"))
         self.assertFails("TST_RestoreTitleBarStyle result discarded; check it and report a failed restoration")
+
+    def test_fails_when_another_suite_discards_a_restore_result(self) -> None:
+        # The pack in the certification module calls the helper too, so every
+        # test module is checked, not only the one that holds the case.
+        text = self.repo.read_bytes(CERTIFICATION_TESTS).decode("ascii")
+        start = text.index("Sub TST_RunRegressionPack")
+        call = text.index("TST_RestoreTitleBarStyle(", start)
+        line = text.rindex("\r\n", 0, call) + 2
+        text = text[:line] + "        TST_RestoreTitleBarStyle hWnd, 0, False, Msg\r\n" + text[line:]
+        self.repo.write(CERTIFICATION_TESTS, text.encode("ascii"))
+        self.assertFails(f"{CERTIFICATION_TESTS}: ", "TST_RestoreTitleBarStyle result discarded")
+
+    def test_fails_when_no_test_module_holds_the_case(self) -> None:
+        self.repo.replace(TITLEBAR_TESTS, "Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline(",
+                          "Sub TST_Case_TitleBarShowRejectsCaptionlessBaselineRenamed(")
+        self.assertFails("expected TST_Case_TitleBarShowRejectsCaptionlessBaseline in exactly one test module, "
+                         "found 0: none")
 
 
 class WinApiErrorCapture(GateTestCase):
@@ -304,7 +324,7 @@ class WinApiErrorCapture(GateTestCase):
 
     def test_fails_when_on_error_runs_between_the_api_and_the_capture(self) -> None:
         text = self.repo.read_bytes(TESTS).decode("ascii")
-        start = text.index("Private Function TST_TryRefreshWindowFrame(")
+        start = text.index("Public Function TST_TryRefreshWindowFrame(")
         capture = text.index(self.CAPTURE, start)
         text = text[:capture] + "        On Error Resume Next\r\n" + text[capture:]
         self.repo.write(TESTS, text.encode("ascii"))
@@ -327,6 +347,22 @@ class WinApiErrorCapture(GateTestCase):
     def test_fails_when_the_fixtures_stop_detecting_a_late_capture(self) -> None:
         with patch("winapi_capture_fixtures.procedure_findings", return_value=iter(())):
             self.assertFails("#27 fixture a helper call between the call and the capture is rejected")
+
+    def test_fails_when_the_demo_declares_get_last_error_again(self) -> None:
+        clear = '        Private Declare Sub Demo_SetLastError Lib "kernel32" Alias _'
+        declare = '        Private Declare Function Demo_GetLastError Lib "kernel32" Alias "GetLastError" () As Long'
+        self.repo.replace(DEMO, clear, declare + "\r\n" + clear)
+        self.assertFails("legacy-x86: declares Demo_GetLastError; capture Err.LastDllError instead")
+
+    def test_fails_when_the_demo_reads_its_error_after_another_statement(self) -> None:
+        capture = "        LastErr = Err.LastDllError\r\n"
+        self.repo.replace(DEMO, capture, "        FailMsg = vbNullString\r\n" + capture)
+        self.assertFails("Demo_TryGetTitleBarVisibility: Err.LastDllError read after an intervening statement",
+                         "Demo_GetWindowLongPtr is not immediately followed by its Err.LastDllError capture")
+
+    def test_fails_when_the_demo_drops_out_of_scope(self) -> None:
+        with patch("winapi_capture_fixtures.SCOPE", ("src/", "test/")):
+            self.assertFails("#27 scope fixture demo/: a capture defect there is not checked")
 
 
 class DemoCleanupRegression(GateTestCase):
@@ -355,9 +391,19 @@ class DemoCleanupRegression(GateTestCase):
 
     def test_fails_when_the_template_resets_before_checking_its_layout(self) -> None:
         limits = "        MaxCol = LimitSheet.Columns.Count\r\n"
-        self.repo.replace(BUILDER, "        DEMO_Sheet_Reset WS\r\n", "")
-        self.repo.replace(BUILDER, limits, limits + "        DEMO_Sheet_Reset WS\r\n")
+        reset = "        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\r\n"
+        self.repo.replace(BUILDER, reset, "")
+        self.repo.replace(BUILDER, limits, limits + reset)
         self.assertFails("template: every layout check must raise before the worksheet is reset")
+
+    def test_fails_when_the_template_removes_page_breaks_again(self) -> None:
+        self.repo.replace(BUILDER, "        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\r\n",
+                          "        DEMO_Sheet_Reset WS\r\n")
+        self.assertFails("page breaks: the template must keep manual breaks and hide shown indicators after its reset")
+
+    def test_fails_when_display_page_breaks_is_written_unconditionally(self) -> None:
+        self.repo.replace(BUILDER, "            If Shown Then\r\n", "            If True Then\r\n")
+        self.assertFails("page breaks: DisplayPageBreaks must be read first and written, counted, only when True")
 
 
 class PublicApiManifest(GateTestCase):

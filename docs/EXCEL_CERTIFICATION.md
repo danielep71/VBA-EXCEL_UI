@@ -15,6 +15,9 @@ cleanup on error paths), and it runs nothing but certification:
 `Test_EXCEL_UI_RunRibbonSdiProbe` is a characterization that asserts nothing
 (see [RIBBON_SDI_BEHAVIOR.md](RIBBON_SDI_BEHAVIOR.md)) and is not part of the
 release gate, so its output is not part of a bundle.
+`tools/Check-EXCEL_UI.ps1` runs this script unchanged and then the other
+runners and the demo checks, with a log for each
+([EXCEL_CHECKS.md](EXCEL_CHECKS.md)).
 
 ## ✅ Requirements
 
@@ -117,8 +120,8 @@ Keep a failed bundle as it is: it records what happened.
 | `session.json` | the script | Commit SHA, whether the working tree had changes, start and end times in UTC and local time, each step with its status and detail, the workbook's VBA components, the SHA-256 of each collected evidence file, the result and the exit code of the run. |
 | `host.json` | the script | Windows caption, version, build and architecture; Excel version, build, `Application.OperatingSystem` and bitness (read from the Excel process); the Click-to-Run version; the macro setting and VBA project access as found. |
 | `source-digests.json` | the script | For each module of the `development` configuration at the commit: its path, module name, SHA-256 of the commit's content with CRLF line endings as a checkout writes it, and SHA-256 of the file the build imported. |
-| `certification.json` | the workbook | The certification document: Excel version and build, bitness, unit counts and results, skips, cleanup and the verdict. |
-| `certification.txt` | the workbook | The text report with its `RESULT:` line. |
+| `certification.json` | the workbook | The certification document: Excel version and build, bitness, unit counts and results, skips, cleanup, whether every unit and skip was recorded, and the verdict. |
+| `certification.txt` | the workbook | The text report with its `RESULT:` line, and a `RECORDING` line when a unit or skip could not be recorded. |
 | `session.log` | the script | Everything the script printed, including the synchronizer's output. |
 | `EXCEL_UI-development.xlsm` | the synchronizer | The workbook that ran. It is not part of the validation. |
 
@@ -181,10 +184,12 @@ unknown commit, no bundle folder or an unusable policy). It checks that:
 - the workbook held exactly those modules as standard modules, and no class
   module or form;
 - `certification.json` reports `PASS` and `COMPLETE`, no failed or skipped
-  unit, cleanup `OK`, and the units that the commit's
-  `Test_EXCEL_UI_RunReleaseCertification` runs;
-- the `RESULT:` line and the unit lines of `certification.txt` agree with
-  `certification.json`;
+  unit, cleanup `OK`, recording `OK`, and the units that the commit's
+  `Test_EXCEL_UI_RunReleaseCertification` runs. A document without a
+  `recording` field comes from a runner that did not report it, and is read
+  as recording `OK`;
+- the `RESULT:` line, the unit lines and any `RECORDING` line of
+  `certification.txt` agree with `certification.json`;
 - `host.json` names Windows and the Excel version, build and bitness, and
   agrees with the Excel version, build, operating system and bitness that
   `certification.json` reports;
@@ -252,7 +257,9 @@ its first failed assertion and the unit stops there. A validated bundle whose
 for every row that names that unit, for that commit and that host only. The
 Immediate window holds each case's `PASS` or `FAIL` line and the `OBSERVED`
 line of the close-and-reopen case. The bundle does not collect them, so record
-them with the bundle when you need them. The Excel builds and bitnesses that a
+them with the bundle when you need them; `tools/Check-EXCEL_UI.ps1` writes the
+lines of each runner it runs, such as `Test_EXCEL_UI_RunTitleBarSdiIdentity`,
+to that runner's log ([EXCEL_CHECKS.md](EXCEL_CHECKS.md)). The Excel builds and bitnesses that a
 release must certify are governed by
 [#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51).
 

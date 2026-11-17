@@ -51,7 +51,9 @@ ALL_MODULES: list[str] = []
 
 # Modules that other checks read by name: the title-bar, WinAPI and
 # demo-cleanup regressions and the public API manifest inspect these files
-# directly, so they must exist. Which modules make up each configuration is not
+# directly, the title-bar control regression needs the case that the title-bar
+# suite holds, and .github/excel-evidence-policy.json names the certification
+# module, so they must exist. Which modules make up each configuration is not
 # written here: tools/vba-projects.json lists them, and the module-inventory
 # and VBA-project-manifest checks hold the tracked modules to it.
 REQUIRED_MODULES = [
@@ -59,7 +61,8 @@ REQUIRED_MODULES = [
     "src/M_EXCEL_UI_TITLEBAR.bas",
     "src/M_EXCEL_UI_SNAPSHOT.bas",
     "src/M_EXCEL_UI.bas",
-    "test/M_EXCEL_UI_REGRESSION_TESTS.bas",
+    "test/M_EXCEL_UI_TEST_TITLEBAR.bas",
+    "test/M_EXCEL_UI_TEST_CERTIFICATION.bas",
     "demo/M_DEMO_BUILDER.bas",
     "demo/M_EXCEL_UI_DEMO.bas",
 ]
@@ -543,7 +546,7 @@ def check_vba_analyzer_selftest() -> None:
 
 def check_titlebar_control() -> None:
     from titlebar_control_fixtures import selftest
-    for finding in selftest(REPO):
+    for finding in selftest(REPO, [rel for rel in TEST_MODULES if is_standard_module(rel)]):
         fail('title-bar control regression', finding)
 
 

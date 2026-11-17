@@ -10,8 +10,8 @@ and is rewritten from the manifest, never edited by hand. The table lists the
 modules of that configuration with their import order, the VBE component each
 one becomes, and the description that module_descriptions in the manifest gives
 it. A configuration that holds every module of another configuration lists only
-the modules it adds to it: the development table shows the regression module,
-not the production package again. The Order column is the module's position in
+the modules it adds to it: the development table shows the test modules, not
+the production package again. The Order column is the module's position in
 the configuration's list, which is the order in which the workbook tools import
 it.
 

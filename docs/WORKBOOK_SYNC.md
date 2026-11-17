@@ -80,7 +80,7 @@ A full synchronization imports the modules that one configuration of
 | Mode | Modules | Use |
 | --- | --- | --- |
 | Production | The four modules of `src/` | The package of [INSTALLATION.md](../INSTALLATION.md) |
-| Development | `src/` and `test/M_EXCEL_UI_REGRESSION_TESTS.bas` | Running the regression suite and the release certification |
+| Development | `src/` and the modules of `test/` | Running the regression suite and the release certification |
 | Demo | `src/` and the modules of `demo/` | Building the demo workbook and running the demo cleanup harness |
 
 When `-Mode` is omitted, the script asks; answer `1`, `P` or `production`,
@@ -90,9 +90,16 @@ code 2 and the workbook is not changed.
 Every module the configuration lists is replaced from the source. A
 synchronization never removes a module: modules that the configuration does
 not list stay in the workbook. When some of them are repository modules, such
-as `M_EXCEL_UI_REGRESSION_TESTS` in a workbook synchronized as production,
+as `M_EXCEL_UI_TEST_HARNESS` in a workbook synchronized as production,
 the script names them in a warning. For a workbook with exactly one
 configuration, start from a new workbook with `-NewWorkbook`.
+
+A development workbook synchronized from v1.1.2 or earlier also holds
+`M_EXCEL_UI_REGRESSION_TESTS`, which the five test modules replace. It is no
+longer a repository module, so the script does not name it, and it declares
+the same runners as the test modules, so the project does not compile while
+both are present. Remove it in the VBE, or start from a new workbook with
+`-NewWorkbook`.
 
 The manifest is the single list of the three sets. Each `.bas` file in
 `src/`, `test/` and `demo/` must be in at least one configuration: an

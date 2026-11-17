@@ -70,7 +70,7 @@ and never combines modules from different configurations:
 | Configuration | Modules |
 | --- | --- |
 | `production` | the four modules of `src/` |
-| `development` | `src/` and `test/M_EXCEL_UI_REGRESSION_TESTS.bas` |
+| `development` | `src/` and the modules of `test/` |
 | `demo` | `src/` and the modules of `demo/` |
 
 A call or macro target that resolves only to a module outside a configuration

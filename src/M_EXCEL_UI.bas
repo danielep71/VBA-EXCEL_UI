@@ -491,7 +491,8 @@ Public Function UI_SetExcelUI_WithResult( _
 '
 ' CALLED FROM
 '   - Workbook and add-in initialization and orchestration code
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_RUNTIME
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' NOTES
 '   TargetScope is deliberately declared after FailureCount and FailureList so
@@ -722,7 +723,9 @@ Public Function UI_CaptureExcelUIState_WithResult( _
 '
 ' CALLED FROM
 '   - Workbook and add-in initialization and orchestration code
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_SNAPSHOT
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'   - M_EXCEL_UI_TEST_CERTIFICATION
 '
 ' NOTES
 '   A False return does not mean no snapshot exists. A partial capture is still
@@ -835,7 +838,10 @@ Public Function UI_HasExcelUIStateSnapshot() _
 ' CALLED FROM
 '   - Workbook and add-in code
 '   - M_EXCEL_UI_DEMO
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_HARNESS
+'   - M_EXCEL_UI_TEST_SNAPSHOT
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'   - M_EXCEL_UI_TEST_CERTIFICATION
 '
 ' UPDATED
 '   2026-08-18
@@ -990,7 +996,8 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
 '
 ' CALLED FROM
 '   - Workbook and add-in orchestration code
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_SNAPSHOT
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' NOTES
 '   Calling this without a snapshot is not an unexpected error; it returns
@@ -1100,7 +1107,9 @@ Public Sub UI_ClearExcelUIStateSnapshot()
 '
 ' CALLED FROM
 '   - Workbook and add-in code
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_SNAPSHOT
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'   - M_EXCEL_UI_TEST_CERTIFICATION
 '
 ' NOTES
 '   Worth calling from Workbook_BeforeClose in solutions that capture a

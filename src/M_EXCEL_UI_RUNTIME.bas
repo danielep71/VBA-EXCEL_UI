@@ -842,7 +842,7 @@ Public Sub UI_InternalInjectFailureListGrowthFailure( _
 '   None.
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_RUNTIME
 '
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
@@ -904,7 +904,7 @@ Public Sub UI_InternalInjectFailureListFirstAllocationFailure( _
 '   None.
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_RUNTIME
 '
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
@@ -971,7 +971,7 @@ Public Sub UI_InternalInjectQuietUpdateFault( _
 '   None.
 '
 ' CALLED FROM
-'   - M_EXCEL_UI_REGRESSION_TESTS
+'   - M_EXCEL_UI_TEST_RUNTIME
 '
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module

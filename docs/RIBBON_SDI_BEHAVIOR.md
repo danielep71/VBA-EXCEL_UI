@@ -8,7 +8,7 @@
 > automatic activation remains
 > [#44](https://github.com/danielep71/VBA-EXCEL_UI/issues/44) for v1.2.0.
 > **Produced by:** `Test_EXCEL_UI_RunRibbonSdiProbe`
-> in `test/M_EXCEL_UI_REGRESSION_TESTS.bas`.
+> in `test/M_EXCEL_UI_TEST_SNAPSHOT.bas`.
 
 ---
 
@@ -49,7 +49,8 @@ answered.
 Save unsaved work first — the probe creates and closes temporary workbooks and
 toggles the Ribbon.
 
-1. Import all four `src/` modules and `test/M_EXCEL_UI_REGRESSION_TESTS.bas`.
+1. Import all four `src/` modules and the five modules of `test/`, or build a
+   development workbook as [WORKBOOK_SYNC.md](WORKBOOK_SYNC.md) describes.
 2. **Debug → Compile VBAProject.**
 3. In the Immediate Window (**Ctrl+G**):
 

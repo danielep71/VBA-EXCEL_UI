@@ -8,8 +8,9 @@ Option Explicit
 '   Bounded Excel harness for the single-pass cleanup of DEMO_Sheet_Reset and
 '   DEMO_Sheet_BuildTemplate (#71), for the fast-mode Application-state
 '   scope of M_DEMO_BUILDER (#70), for its Forms and ActiveX check-box
-'   helpers (#73), and for the layout validation and owned-sheet cleanup of
-'   DEMO_Sheet_BuildTemplate (#74).
+'   helpers (#73), for the layout validation and owned-sheet cleanup of
+'   DEMO_Sheet_BuildTemplate (#74), and for the page-break handling of both
+'   procedures (#187).
 '
 ' WHY THIS EXISTS
 '   The demo-cleanup source fixtures in tools/ check the shape of the cleanup
@@ -23,6 +24,8 @@ Option Explicit
 '
 ' PUBLIC SURFACE
 '   - Demo_Test_RunCleanupChecks
+'   - Demo_Test_RunLogged and Demo_Test_TitleBarState, which
+'     tools\Check-EXCEL_UI.ps1 calls through Application.Run
 '
 ' SCENARIOS
 '   S01  Reset success, protection options set A, reprotected
@@ -69,6 +72,10 @@ Option Explicit
 '   S42  BuildTemplate rename failure of a new sheet; no stray sheet
 '   S43  BuildTemplate name held by a chart sheet; nothing created
 '   S44  BuildTemplate valid rebuild of a populated sheet
+'   S45  Reset removes a manual row break and a manual column break
+'   S46  Reset leaves hidden page-break indicators unwritten
+'   S47  Reset hides shown page-break indicators with one write
+'   S48  BuildTemplate keeps a manual break and writes no page-break setting
 '
 ' EVIDENCE
 '   Each scenario checks the error that reaches the caller (number, source
@@ -79,6 +86,13 @@ Option Explicit
 '   writes reached and read back ScreenUpdating, EnableEvents, DisplayAlerts,
 '   Calculation and Cursor; a failed check prints the expected and actual
 '   values.
+'
+' LOG SINK
+'   Every line this module prints goes through DEMO_CT_Print. While
+'   Demo_Test_RunLogged runs a macro, the line is also appended to its log
+'   file as UTF-8. With no sink set, the Immediate window shows exactly
+'   what it showed before the sink existed. A failed write never raises: it
+'   ends writing and is reported in the verdict Demo_Test_RunLogged returns.
 '
 ' SAFETY
 '   - Works only in a temporary workbook it creates and closes without saving;
@@ -108,8 +122,16 @@ Option Explicit
 '   - S32-S34 create ActiveX controls in the temporary workbook. With ActiveX
 '     controls disabled in the Trust Center that creation fails, and so do
 '     those scenarios
+'   - S45 and S48 set and read manual page breaks and S47 shows the
+'     page-break indicators, which makes Excel lay those sheets out through
+'     the default printer driver; on a slow or offline printer they wait for
+'     it. The probe counts the page-break calls the demo code reaches; it
+'     cannot see whether Excel queried the printer
 '
 ' UPDATED
+'   2026-11-16 - Log sink, Demo_Test_RunLogged and Demo_Test_TitleBarState
+'                for the scripted Excel checks (#197).
+'   2026-11-15 - Page-break scenarios S45-S48 (#187).
 '   2026-11-14 - Layout scenarios S35-S44; S13 now injects its error and
 '                checks the created sheet is removed (#74).
 '   2026-11-14 - Check-box scenarios S31-S34 (#73).
@@ -146,6 +168,8 @@ Option Explicit
     Private Const PROBE_RESET_SELECTION As Long = 4
     Private Const PROBE_BUILD_HANDLER   As Long = 5
     Private Const PROBE_BUILD_CLEANUP   As Long = 6
+    Private Const PROBE_PAGE_BREAKS     As Long = 9
+    Private Const PROBE_DISPLAY_BREAKS  As Long = 10
 
     'One-shot cleanup fault bits; mirror M_DEMO_BUILDER
     Private Const FAULT_NONE            As Long = 0
@@ -214,6 +238,10 @@ Option Explicit
     Private Const VALID_CONTENT         As String = "C:M"
     Private Const VALID_HIDE_ROWS       As Long = 200
 
+    'Manual page-break positions inside the template's visible area
+    Private Const BREAK_ROW             As Long = 20
+    Private Const BREAK_COLUMN          As Long = 6
+
     'Layout and naming errors and seams; mirror M_DEMO_BUILDER
     Private Const BUILD_TITLE              As String = "CT Title"
     Private Const ERR_CONTENT_SHAPE        As Long = vbObjectError + 2022
@@ -258,6 +286,9 @@ Option Explicit
     'Raised by the runner when any check failed
     Private Const ERR_RUN_FAILED        As Long = vbObjectError + 2199
 
+    'Raised inside Demo_Test_RunLogged for a macro it does not run
+    Private Const ERR_UNKNOWN_MACRO     As Long = vbObjectError + 2200
+
 '------------------------------------------------------------------------------
 ' PRIVATE MODULE STATE
 '------------------------------------------------------------------------------
@@ -275,6 +306,9 @@ Option Explicit
     Private mSessionFormulaBar     As Boolean    'Session Application.DisplayFormulaBar
     Private mBaselineCalculation   As Long       'Calculation of the fast-mode baseline
 
+    Private mLogSinkPath           As String     'Log file of Demo_Test_RunLogged; empty = no sink
+    Private mLogSinkFailure        As String     'First failed write to it; empty = none
+
 
 Public Sub Demo_Test_RunCleanupChecks()
 '
@@ -283,9 +317,9 @@ Public Sub Demo_Test_RunCleanupChecks()
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Runs every #71 cleanup scenario, every #70 fast-mode scenario, every #73
-'   check-box scenario and every #74 layout scenario in a temporary workbook
-'   and prints one line per scenario and a PASS/FAIL summary to the
-'   Immediate window.
+'   check-box scenario, every #74 layout scenario and every #187 page-break
+'   scenario in a temporary workbook and prints one line per scenario and a
+'   PASS/FAIL summary to the Immediate window.
 '
 ' RETURNS
 '   None
@@ -312,6 +346,7 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   - Invoked directly, from the Immediate window or the Macros dialog
 '
 ' UPDATED
+'   2026-11-15 - S45-S48 (#187).
 '   2026-11-14 - S35-S44 (#74).
 '   2026-11-14 - S31-S34 (#73).
 '   2026-11-14 - Session settings captured and written back; S15-S30 (#70).
@@ -343,7 +378,7 @@ Public Sub Demo_Test_RunCleanupChecks()
 
         DEMO_InternalCleanupProbeEnd
 
-        Debug.Print PROC & ": START " & Format$(Now, "yyyy-mm-dd hh:nn:ss")
+        DEMO_CT_Print PROC & ": START " & Format$(Now, "yyyy-mm-dd hh:nn:ss")
 
     'Record the Application settings the scenarios change
         DEMO_CT_CaptureSession
@@ -422,6 +457,12 @@ Public Sub Demo_Test_RunCleanupChecks()
         DEMO_CT_BuildChartCollision WB, "S43_ChartCollision"
         DEMO_CT_BuildValidRebuild WB, "S44_ValidRebuild"
 
+    'Page breaks and their indicators without a needless printer query (#187)
+        DEMO_CT_ResetManualBreaks WB, "S45_ResetManualBreaks"
+        DEMO_CT_ResetBreakIndicators WB, "S46_BreaksHidden", False
+        DEMO_CT_ResetBreakIndicators WB, "S47_BreaksShown", True
+        DEMO_CT_BuildKeepsPageBreaks WB, "S48_BuildKeepsBreaks"
+
 Safe_Exit:
 '------------------------------------------------------------------------------
 ' RELEASE AND REPORT
@@ -455,7 +496,7 @@ Safe_Exit:
             Summary = Summary & " | run stopped: " & CStr(RaisedNumber) & _
                       " | " & RaisedSource & " | " & RaisedDescription
         End If
-        Debug.Print Summary
+        DEMO_CT_Print Summary
 
     'Report a failed run to the caller; the handler is already disabled
         If RaisedNumber <> 0 Then
@@ -479,6 +520,220 @@ Err_Handler:
         Resume Safe_Exit
 
 End Sub
+
+
+Public Function Demo_Test_RunLogged( _
+    ByVal MacroName As String, _
+    ByVal LogPath As String) _
+    As String
+'
+'==============================================================================
+' Demo_Test_RunLogged
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Runs one demo macro with the log sink set and returns its verdict as one
+'   line instead of raising.
+'
+' WHY THIS EXISTS
+'   tools\Check-EXCEL_UI.ps1 drives the demo through Application.Run. A
+'   script cannot read the Immediate window, and a macro that raises into
+'   Application.Run stops Excel on a run-time error message that someone must
+'   dismiss. Through this function every line this module prints also
+'   reaches LogPath, and the outcome comes back as a value.
+'
+' INPUTS
+'   MacroName
+'     Demo_Test_RunCleanupChecks, or one of the demo actions the script
+'     drives: Demo_CreateDemoSheet, Demo_ClearAllUI, Demo_HideSelectedUI and
+'     Demo_ShowSelectedUI
+'
+'   LogPath
+'     The log file to append to. Empty runs the macro with no sink
+'
+' RETURNS
+'   One line: "RESULT: PASS" when the macro returned, or
+'   "RESULT: FAIL | Error <n> | Source: <source> | <description>" when it
+'   raised. When a line could not be written to LogPath,
+'   " | LOG WRITE FAILED: <reason>" follows
+'
+' BEHAVIOR
+'   - Prints a START line, runs the macro, then prints the verdict line, which
+'     is also the last line of the log, and stops the sink
+'   - What the macro itself prints is unchanged; only its error is caught
+'
+' ERROR POLICY
+'   Does not raise; an unknown macro name gives a FAIL verdict. A log write
+'   failure never changes the macro's PASS or FAIL
+'
+' NOTES
+'   Only this module prints through the sink. The demo actions report a
+'   failure with Debug.Print in M_EXCEL_UI_DEMO, which stays in the
+'   Immediate window
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Verdict             As String          'The verdict line
+    Dim SinkFailure         As String          'First log write failure, if any
+    Dim RaisedNumber        As Long            'Error the macro raised
+    Dim RaisedSource        As String          'Source of that error
+    Dim RaisedDescription   As String          'Text of that error
+
+    Const PROC As String = "Demo_Test_RunLogged"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the sink; an earlier failure belongs to an earlier run
+        mLogSinkPath = LogPath
+        mLogSinkFailure = vbNullString
+
+        DEMO_CT_Print PROC & ": START " & MacroName & " " & _
+                      Format$(Now, "yyyy-mm-dd hh:nn:ss")
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' RUN
+'------------------------------------------------------------------------------
+        Select Case MacroName
+
+            Case "Demo_Test_RunCleanupChecks"
+                Demo_Test_RunCleanupChecks
+
+            Case "Demo_CreateDemoSheet"
+                Demo_CreateDemoSheet
+
+            Case "Demo_ClearAllUI"
+                Demo_ClearAllUI
+
+            Case "Demo_HideSelectedUI"
+                Demo_HideSelectedUI
+
+            Case "Demo_ShowSelectedUI"
+                Demo_ShowSelectedUI
+
+            Case Else
+                Err.Raise ERR_UNKNOWN_MACRO, PROC, "unknown macro: " & MacroName
+
+        End Select
+
+        Verdict = "RESULT: PASS"
+
+'------------------------------------------------------------------------------
+' REPORT VERDICT
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Every path arrives here with the handler disabled or released
+        On Error GoTo 0
+
+    'One line, whatever line breaks the error text held
+        Verdict = Replace(Replace(Replace(Verdict, vbCrLf, " / "), vbCr, " / "), _
+                          vbLf, " / ")
+
+        DEMO_CT_Print Verdict
+
+    'Stop the sink; a failed write is reported, never raised
+        SinkFailure = mLogSinkFailure
+        mLogSinkPath = vbNullString
+        mLogSinkFailure = vbNullString
+
+        If Len(SinkFailure) > 0 Then
+            Verdict = Verdict & " | LOG WRITE FAILED: " & _
+                      Replace(Replace(SinkFailure, vbCr, " "), vbLf, " ")
+        End If
+
+        Demo_Test_RunLogged = Verdict
+
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Capture before anything else touches Err
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+
+        Verdict = "RESULT: FAIL | Error " & CStr(RaisedNumber) & _
+                  " | Source: " & RaisedSource & _
+                  " | " & RaisedDescription
+
+        Resume Safe_Exit
+
+End Function
+
+
+Public Function Demo_Test_TitleBarState() As String
+'
+'==============================================================================
+' Demo_Test_TitleBarState
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the title-bar state of the frame Excel reports as active:
+'   VISIBLE or HIDDEN, read through UI_TryGetTitleBarVisible, or
+'   "UNKNOWN | <reason>" when it cannot be read.
+'
+' WHY THIS EXISTS
+'   tools\Check-EXCEL_UI.ps1 hides and shows the title bar through the
+'   chkTitleBar selection and the HIDE and SHOW actions of the demo sheet,
+'   then reads the state back. Application.Run returns a function's value but
+'   not its ByRef arguments, so the read is wrapped here.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim IsVisible           As Boolean         'Title-bar visibility read
+    Dim FailMsg             As String          'Reason the read failed
+    Dim RaisedNumber        As Long            'Unexpected error number
+    Dim RaisedDescription   As String          'Unexpected error text
+
+'------------------------------------------------------------------------------
+' READ STATE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        If UI_TryGetTitleBarVisible(IsVisible, FailMsg) Then
+            If IsVisible Then
+                Demo_Test_TitleBarState = "VISIBLE"
+            Else
+                Demo_Test_TitleBarState = "HIDDEN"
+            End If
+        Else
+            Demo_Test_TitleBarState = "UNKNOWN | " & FailMsg
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        RaisedNumber = Err.Number
+        RaisedDescription = Err.Description
+
+        Demo_Test_TitleBarState = "UNKNOWN | error " & CStr(RaisedNumber) & _
+                                  ": " & RaisedDescription
+
+        Resume Safe_Exit
+
+End Function
 
 
 Private Sub DEMO_CT_ResetSuccess( _
@@ -1330,8 +1585,8 @@ Private Sub DEMO_CT_FastModeSuccess( _
         DEMO_CT_CheckLong Scenario & ".End.Applied", 0, State.Applied
         DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
 
-        Debug.Print "    INFO " & Scenario & ": entry [" & EntryText & "] fast [" & FastText & _
-                    "] exit [" & ExitText & "]"
+        DEMO_CT_Print "    INFO " & Scenario & ": entry [" & EntryText & "] fast [" & FastText & _
+                      "] exit [" & ExitText & "]"
 
 Safe_Exit:
         On Error GoTo 0
@@ -2414,6 +2669,251 @@ Private Sub DEMO_CT_BuildValidRebuild( _
         DEMO_CT_CheckLong Scenario & ".Tables", 0, WS.ListObjects.Count
         DEMO_CT_CheckText Scenario & ".Title", BUILD_TITLE, CStr(WS.Range("B1").Value)
         DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_ResetManualBreaks( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_ResetManualBreaks
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S45: a default reset of a sheet with a manual row break and a manual
+'   column break leaves neither, through one ResetAllPageBreaks call, and
+'   leaves the page-break indicators hidden.
+'
+' NOTES
+'   Setting and reading the breaks makes Excel lay this sheet out through the
+'   default printer driver. On Excel 16.0 build 20430, 64-bit, the first
+'   read of Range.PageBreak after ResetAllPageBreaks lays the sheet out again
+'   and shows the indicators, so they are checked before the breaks are read.
+'
+' UPDATED
+'   2026-11-15 - Added for #187.
+'   2026-11-17 - Checks the indicators before reading the breaks.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual
+        WS.Columns(BREAK_COLUMN).PageBreak = xlPageBreakManual
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".ArrangeRow", _
+                      "the host did not keep the manual row break"
+        DEMO_CT_Check WS.Columns(BREAK_COLUMN).PageBreak = xlPageBreakManual, Scenario & ".ArrangeColumn", _
+                      "the host did not keep the manual column break"
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallReset WS, FAULT_NONE, vbNullString, False, _
+                          RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 0
+        DEMO_CT_CheckLong Scenario & ".ResetAllPageBreaks", 1, _
+                          DEMO_InternalCleanupProbeCount(PROBE_PAGE_BREAKS)
+    'Check the indicators before reading the breaks: the first PageBreak read
+    'after ResetAllPageBreaks lays the sheet out again and shows them
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
+                      "the page-break indicators are shown after the reset"
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak <> xlPageBreakManual, Scenario & ".RowBreak", _
+                      "the manual row break survived the reset"
+        DEMO_CT_Check WS.Columns(BREAK_COLUMN).PageBreak <> xlPageBreakManual, Scenario & ".ColumnBreak", _
+                      "the manual column break survived the reset"
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_ResetBreakIndicators( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String, _
+    ByVal Shown As Boolean)
+'
+'==============================================================================
+' DEMO_CT_ResetBreakIndicators
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S46: a default reset of a sheet whose page-break indicators are hidden
+'   leaves them hidden. ResetAllPageBreaks can show them (it does on Excel
+'   16.0 build 20430, 64-bit), so the reset may write DisplayPageBreaks once;
+'   S48 proves that hidden indicators are not written when nothing shows them.
+'   S47: when they are shown, the reset writes DisplayPageBreaks once and
+'   hides them.
+'
+' INPUTS
+'   Shown
+'     Whether the indicators are shown before the reset
+'
+' UPDATED
+'   2026-11-15 - Added for #187.
+'   2026-11-17 - Allows the write that ResetAllPageBreaks makes necessary.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Scenario sheet
+    Dim Writes              As Long            'DisplayPageBreaks writes expected
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        If Shown Then
+            WS.DisplayPageBreaks = True
+            Writes = 1
+        End If
+        DEMO_CT_Check WS.DisplayPageBreaks = Shown, Scenario & ".Arrange", _
+                      "the host did not keep DisplayPageBreaks=" & CStr(Shown)
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallReset WS, FAULT_NONE, vbNullString, False, _
+                          RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 0
+        If Shown Then
+            DEMO_CT_CheckLong Scenario & ".DisplayWrites", Writes, _
+                              DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS)
+        Else
+            DEMO_CT_Check DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS) <= 1, _
+                          Scenario & ".DisplayWrites", "expected at most 1 write but read " & _
+                          CStr(DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS))
+        End If
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
+                      "the page-break indicators are shown after the reset"
+
+Safe_Exit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+Err_Handler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub DEMO_CT_BuildKeepsPageBreaks( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'==============================================================================
+' DEMO_CT_BuildKeepsPageBreaks
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S48: a valid rebuild of a sheet with a manual row break and hidden
+'   indicators neither calls ResetAllPageBreaks nor writes
+'   DisplayPageBreaks, keeps the break and leaves the indicators hidden.
+'
+' NOTES
+'   Setting and reading the break makes Excel lay this sheet out through the
+'   default printer driver; the template itself must not. DisplayFormulaBar
+'   is requested at its current value, as in S44.
+'
+' UPDATED
+'   2026-11-15 - Added for #187.
+'   2026-11-17 - Reads the break before hiding the indicators and checks them
+'                before reading the break again, as S45 does.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS                  As Worksheet       'Existing sheet
+    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Dim RaisedNumber        As Long            'Error reaching the caller
+    Dim RaisedSource        As String          'Its source
+    Dim RaisedDescription   As String          'Its description
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+        Set WS = DEMO_CT_NewSheet(WB, Scenario)
+        WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".ArrangeRow", _
+                      "the host did not keep the manual row break"
+        WS.DisplayPageBreaks = False
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".ArrangeHidden", _
+                      "the host did not keep DisplayPageBreaks=False"
+
+'------------------------------------------------------------------------------
+' ACT
+'------------------------------------------------------------------------------
+        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _
+                          FAULT_NONE, RaisedNumber, RaisedSource, RaisedDescription
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+        DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription
+        DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 1
+        DEMO_CT_CheckLong Scenario & ".ResetAllPageBreaks", 0, _
+                          DEMO_InternalCleanupProbeCount(PROBE_PAGE_BREAKS)
+        DEMO_CT_CheckLong Scenario & ".DisplayWrites", 0, _
+                          DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS)
+        DEMO_CT_Check DEMO_CT_BodyRan(WS), Scenario & ".ResetRan", "the reset did not clear A1"
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
+                      "the page-break indicators are shown after the rebuild"
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".RowBreak", _
+                      "the template removed a manual page break"
 
 Safe_Exit:
         On Error GoTo 0
@@ -3543,10 +4043,10 @@ Private Sub DEMO_CT_EndScenario( _
         On Error GoTo 0
 
         If mFailures = FailuresBefore Then
-            Debug.Print "  PASS " & Scenario
+            DEMO_CT_Print "  PASS " & Scenario
         Else
             mScenarioFailures = mScenarioFailures + 1
-            Debug.Print "  FAIL " & Scenario & " (" & CStr(mFailures - FailuresBefore) & " check(s) failed)"
+            DEMO_CT_Print "  FAIL " & Scenario & " (" & CStr(mFailures - FailuresBefore) & " check(s) failed)"
         End If
 
 End Sub
@@ -3591,9 +4091,224 @@ Private Sub DEMO_CT_Fail( _
 '==============================================================================
 
         mFailures = mFailures + 1
-        Debug.Print "    FAIL " & CheckName & ": " & Detail
+        DEMO_CT_Print "    FAIL " & CheckName & ": " & Detail
 
 End Sub
+
+
+Private Sub DEMO_CT_Print(ByVal LineText As String)
+'
+'==============================================================================
+' DEMO_CT_Print
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prints one line to the Immediate window and appends it to the log sink
+'   when Demo_Test_RunLogged has set one.
+'
+' NOTES
+'   With no sink set, the Immediate window shows exactly what the
+'   Debug.Print this replaces showed.
+'
+' ERROR POLICY
+'   Does not raise
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+        Debug.Print LineText
+        DEMO_CT_LogSinkWrite LineText
+
+End Sub
+
+
+Private Sub DEMO_CT_LogSinkWrite(ByVal LineText As String)
+'
+'==============================================================================
+' DEMO_CT_LogSinkWrite
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Appends one line to the log sink as UTF-8, when a sink is set.
+'
+' BEHAVIOR
+'   - Does nothing when no sink is set, or after a write to it failed
+'   - Opens, appends to and closes the file for every line, so that nothing
+'     stays open when a macro stops part-way
+'
+' ERROR POLICY
+'   Does not raise. The first failure is kept for Demo_Test_RunLogged and
+'   ends writing until its next run
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LineBytes()         As Byte            'UTF-8 bytes of the line and CR LF
+    Dim FileNumber          As Integer         'Free file handle
+    Dim FileOpen            As Boolean         'TRUE while the file is open
+    Dim FailNumber          As Long            'Captured write error number
+    Dim FailDescription     As String          'Captured write error text
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'With no sink, or after a failed write, there is nothing to do
+        If Len(mLogSinkPath) = 0 Or Len(mLogSinkFailure) > 0 Then
+            Exit Sub
+        End If
+
+        On Error GoTo Err_Handler
+
+'------------------------------------------------------------------------------
+' APPEND LINE
+'------------------------------------------------------------------------------
+        LineBytes = DEMO_CT_LogSinkEncode(LineText)
+
+        FileNumber = FreeFile
+        Open mLogSinkPath For Binary Access Write As #FileNumber
+        FileOpen = True
+
+        Put #FileNumber, LOF(FileNumber) + 1, LineBytes
+
+        Close #FileNumber
+        FileOpen = False
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Close a file that a failed write left open
+        If FileOpen Then
+            On Error Resume Next
+                Close #FileNumber
+            On Error GoTo 0
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Capture before anything else touches Err, and keep the failure
+        FailNumber = Err.Number
+        FailDescription = Err.Description
+
+        mLogSinkFailure = "error " & CStr(FailNumber) & " writing " & _
+                          mLogSinkPath & ": " & FailDescription
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Function DEMO_CT_LogSinkEncode(ByVal LineText As String) As Byte()
+'
+'==============================================================================
+' DEMO_CT_LogSinkEncode
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns one log line as UTF-8 bytes followed by CR LF.
+'
+' WHY THIS EXISTS
+'   VBA file statements write text in the system code page, which cannot
+'   carry every character that a localized Excel error text may hold. The
+'   demo workbook does not hold the test harness, so this module has its own
+'   copy of the encoder in M_EXCEL_UI_TEST_HARNESS.
+'
+' RETURNS
+'   The UTF-8 bytes of LineText, then CR LF. A UTF-16 surrogate that is not
+'   part of a pair is written as U+FFFD
+'
+' ERROR POLICY
+'   Raises only when memory runs out; DEMO_CT_LogSinkWrite keeps that as a
+'   write failure
+'
+' UPDATED
+'   2026-11-16 - Added for the scripted Excel checks (#197).
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Bytes()             As Byte            'Encoded line
+    Dim TextLength          As Long            'UTF-16 code units in LineText
+    Dim CharIdx             As Long            'Current code unit, 1-based
+    Dim ByteIdx             As Long            'Next byte to write, 0-based
+    Dim CodeUnit            As Long            'Current UTF-16 code unit
+    Dim NextUnit            As Long            'Following UTF-16 code unit
+    Dim CodePoint           As Long            'Scalar value being encoded
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Three bytes per code unit is the most UTF-8 needs; two more hold CR LF
+        TextLength = Len(LineText)
+        ReDim Bytes(0 To 3 * TextLength + 1)
+
+        CharIdx = 1
+        ByteIdx = 0
+
+'------------------------------------------------------------------------------
+' ENCODE
+'------------------------------------------------------------------------------
+        Do While CharIdx <= TextLength
+
+            CodeUnit = AscW(Mid$(LineText, CharIdx, 1)) And &HFFFF&
+            CodePoint = CodeUnit
+
+        'Join a surrogate pair into one scalar; replace a lone surrogate
+            If CodeUnit >= &HD800& And CodeUnit <= &HDFFF& Then
+                CodePoint = &HFFFD&
+                If CodeUnit <= &HDBFF& And CharIdx < TextLength Then
+                    NextUnit = AscW(Mid$(LineText, CharIdx + 1, 1)) And &HFFFF&
+                    If NextUnit >= &HDC00& And NextUnit <= &HDFFF& Then
+                        CodePoint = &H10000 + (CodeUnit - &HD800&) * &H400& + _
+                                    (NextUnit - &HDC00&)
+                        CharIdx = CharIdx + 1
+                    End If
+                End If
+            End If
+
+        'Write one to four bytes
+            If CodePoint < &H80& Then
+                Bytes(ByteIdx) = CodePoint
+                ByteIdx = ByteIdx + 1
+            ElseIf CodePoint < &H800& Then
+                Bytes(ByteIdx) = &HC0& Or (CodePoint \ &H40&)
+                Bytes(ByteIdx + 1) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 2
+            ElseIf CodePoint < &H10000 Then
+                Bytes(ByteIdx) = &HE0& Or (CodePoint \ &H1000&)
+                Bytes(ByteIdx + 1) = &H80& Or ((CodePoint \ &H40&) And &H3F&)
+                Bytes(ByteIdx + 2) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 3
+            Else
+                Bytes(ByteIdx) = &HF0& Or (CodePoint \ &H40000)
+                Bytes(ByteIdx + 1) = &H80& Or ((CodePoint \ &H1000&) And &H3F&)
+                Bytes(ByteIdx + 2) = &H80& Or ((CodePoint \ &H40&) And &H3F&)
+                Bytes(ByteIdx + 3) = &H80& Or (CodePoint And &H3F&)
+                ByteIdx = ByteIdx + 4
+            End If
+
+            CharIdx = CharIdx + 1
+
+        Loop
+
+'------------------------------------------------------------------------------
+' RETURN LINE
+'------------------------------------------------------------------------------
+        Bytes(ByteIdx) = 13
+        Bytes(ByteIdx + 1) = 10
+
+        ReDim Preserve Bytes(0 To ByteIdx + 1)
+
+        DEMO_CT_LogSinkEncode = Bytes
+
+End Function
 
 
 Private Sub DEMO_CT_CheckLong( _

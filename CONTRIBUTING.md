@@ -180,14 +180,16 @@ attempt and the insufficiently isolated generation control):
 | #43 | Four one-runner-at-a-time refusal mutants | Prove caller-owned snapshots survive each refusal |
 | #43 | Cleanup-skipping mutant | Prove the success-path snapshot-release assertion detects leakage |
 | #26 | Two quiet-scope variants | Detect the old entry-read behavior and missing ownership readback; no dedicated End-side mutation |
-| #32 | Retained-Window generation-proof variant | Fails with the current distinct-handle seam; same-numeric-hWnd generation proof is still missing |
+| #32 | Retained-Window generation-proof variant | Failed with the earlier distinct-handle seam, which is not a same-numeric-hWnd generation proof |
 | #6 / #66 | Title-bar module with the v1.1.2 fallback condition restored | Negative control for captionless recovery; the first attempt hung. The bounded rerun below failed as intended on 2026-11-14, with Excel usable |
 | #45 | Active-frame-pair comparison control | Prove disagreement fails at `.Disagreed.Refused` |
 
 This inventories recorded types and purposes, not recoverable local filenames:
-the historical throwaway files were not committed. For #32, a true unchanged-
-hWnd generation control remains outstanding; do not count the distinct-handle
-seam as that evidence. Preserve reviewed results separately from disposable code.
+the historical throwaway files were not committed. For #32, the unchanged-hWnd
+generation control has not been run on Excel: with the retained-Window check
+removed, `TST_Case_TitleBarSameHwndGenerationReuse` must fail at `.Crossed`. Do
+not count the distinct-handle result as that evidence. Preserve reviewed results
+separately from disposable code.
 
 #### Title-bar negative control (#6, #66)
 
@@ -377,7 +379,12 @@ On Windows, the workbook tools shorten that step:
 - `tools\Certify-EXCEL_UI.cmd` builds, compiles and certifies a development
   workbook from the checked-out commit and writes an evidence folder that
   `tools/check_excel_evidence.py` validates
-  ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md)).
+  ([docs/EXCEL_CERTIFICATION.md](docs/EXCEL_CERTIFICATION.md));
+- `tools\Check-EXCEL_UI.cmd` runs that certification, then the
+  `Test_EXCEL_UI_Run*` runners, the demo cleanup harness and the demo build
+  and title-bar checks, and writes one bundle with a log per runner and check
+  and a `summary.txt` to quote in the pull request
+  ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)).
 
 The required job also runs `tools/check_vba_calls.py`, which resolves calls
 across the modules of each configuration
@@ -437,8 +444,8 @@ current tree) and at least one failing fixture (a named defect).
 a new check needs a `GateTestCase` subclass in `tests/test_gate_checks.py`
 before it can merge. Like the gate, the tests use only the standard library,
 except that `tests/test_check_issues.py` also needs Node.js, and
-`tests/test_certify_script.py` and most of `tests/test_sync_script.py` need
-PowerShell 7 (`pwsh`); those tests are skipped where `pwsh` is not installed.
+`tests/test_certify_script.py`, most of `tests/test_check_script.py` and most
+of `tests/test_sync_script.py` need PowerShell 7 (`pwsh`); those tests are skipped where `pwsh` is not installed.
 `tools/check_repo.py`, `tools/reformat.py`, `tools/vba_api.py` and
 `tools/wiki_badges.py` run their self-tests with `--selftest`; the Node.js
 label scripts under `.github/scripts/` use `--self-test`. `test/` is a
@@ -471,7 +478,10 @@ exact tested commit. When you change fast mode, fail each entry and
 restoration write in turn and read back the Application settings. When you
 change the check-box helpers, read and write real Forms and ActiveX controls.
 When you change the template's validation, check that an invalid request
-leaves an existing sheet and the sheet count unchanged.
+leaves an existing sheet and the sheet count unchanged. When you change how
+the reset or the template handles page breaks, check that a reset removes
+manual breaks and that the template neither removes them nor writes
+`DisplayPageBreaks` when the indicators are hidden.
 
 `demo/M_DEMO_CLEANUP_TESTS.bas` is that harness. Build a new demo workbook
 from the commit under test:
@@ -481,8 +491,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Sync-EXCEL_UI-VB
 ```
 
 Open it, run **Debug → Compile VBAProject**, and run
-`Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog. It
-creates a temporary workbook, runs forty-four scenarios on sheets of its own,
+`Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog, or
+let `tools\Check-EXCEL_UI.cmd` build the workbook and run it for you
+([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)). It
+creates a temporary workbook, runs forty-eight scenarios on sheets of its own,
 closes the workbook without saving and prints one `PASS` or `FAIL` line per
 scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
 `DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
@@ -501,8 +513,13 @@ session's calculation mode, or automatic calculation when the session is
 manual, which recalculates the open workbooks. Scenario S15 prints an `INFO`
 line with the entry, fast-mode and exit values. Scenarios S32-S34 add ActiveX
 controls to the temporary workbook, so they fail when ActiveX controls are
-disabled in the Trust Center. Record the commit, Excel build and bitness with
-the Immediate window output.
+disabled in the Trust Center. Scenarios S45-S48 set manual page breaks or show
+the page-break indicators on their own sheets, so Excel consults the default
+printer driver for those sheets. Run them with a default printer whose driver
+can lay out pages, such as Microsoft Print to PDF: when it cannot, they fail
+while arranging their sheets
+([#199](https://github.com/danielep71/VBA-EXCEL_UI/issues/199)). Record the commit, Excel build and bitness
+with the Immediate window output.
 
 ### Evidence principles
 

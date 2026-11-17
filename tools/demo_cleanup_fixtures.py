@@ -1,4 +1,4 @@
-"""#70/#71/#73/#74 source contracts and negative fixtures, not Excel execution evidence."""
+"""#70/#71/#73/#74/#187 source contracts and negative fixtures, not Excel execution evidence."""
 import re
 from pathlib import Path
 
@@ -20,6 +20,9 @@ FAST_MODE = (('ScreenUpdating', 'False'), ('EnableEvents', 'False'),
              ('Cursor', 'xlWait'))
 # Layout errors of DEMO_Sheet_BuildTemplate that must be raised before its reset.
 LAYOUT_ERRORS = (2013, 2014, 2015, 2016, 2017, 2019, 2020, 2021, 2022, 2023, 2024, 2027)
+# The one reset of the template: it keeps manual page breaks (#187).
+TEMPLATE_RESET = 'demo_sheet_reset ws, removepagebreaks:=false'
+HIDE_BREAKS = 'demo_sheet_hidepagebreaks ws'
 CALLER_END = ('DEMO_FastMode_EndPreservingError FastModeState, SavedErrNumber, '
               'SavedErrSource, SavedErrDescription')
 
@@ -177,8 +180,8 @@ def template_findings(source: str) -> list[str]:
     create = _procedure(source, 'Function', 'DEMO_Sheet_GetOrCreate')
     if build is None or create is None:
         return ['template: DEMO_Sheet_BuildTemplate or DEMO_Sheet_GetOrCreate missing']
-    reset = 'demo_sheet_reset ws'
-    if build.count(reset) != 1:
+    reset = TEMPLATE_RESET
+    if build.count(reset) != 1 or sum(line.startswith('demo_sheet_reset ') for line in build) != 1:
         return ['template: expected exactly one reset of the target worksheet']
     checks = _raise_lines(build, LAYOUT_ERRORS)
     find = next((i for i, line in enumerate(build) if 'demo_sheet_findworksheet(wb, ws_name,' in line), None)
@@ -209,11 +212,66 @@ def template_findings(source: str) -> list[str]:
     return errors
 
 
+def page_break_findings(source: str, demo: str) -> list[str]:
+    """#187: no needless printer query from the template or a hidden-indicator reset."""
+    errors = []
+    build = _procedure(source, 'Sub', 'DEMO_Sheet_BuildTemplate')
+    reset = _procedure(source, 'Sub', 'DEMO_Sheet_Reset')
+    hide = _procedure(source, 'Sub', 'DEMO_Sheet_HidePageBreaks')
+    if build is None or reset is None or hide is None:
+        return ['page breaks: DEMO_Sheet_BuildTemplate, DEMO_Sheet_Reset or DEMO_Sheet_HidePageBreaks missing']
+    if (TEMPLATE_RESET not in build or HIDE_BREAKS not in build
+            or build.index(HIDE_BREAKS) < build.index(TEMPLATE_RESET)):
+        errors.append('page breaks: the template must keep manual breaks and hide shown indicators after its reset')
+    calls = [i for i, line in enumerate(reset) if line == 'ws.resetallpagebreaks']
+    if len(calls) != 1 or reset[calls[0] - 1] != 'demo_cleanupprobehit demo_probe_page_breaks':
+        errors.append('page breaks: the reset must remove manual breaks in one counted ResetAllPageBreaks call')
+    if HIDE_BREAKS not in reset:
+        errors.append('page breaks: the reset must hide indicators through DEMO_Sheet_HidePageBreaks')
+    read, guard, write = 'shown = ws.displaypagebreaks', 'if shown then', 'ws.displaypagebreaks = false'
+    if (hide.count(write) != 1 or read not in hide or guard not in hide
+            or hide[hide.index(guard) - 1] != read or hide.index(write) < hide.index(guard)
+            or hide[hide.index(write) - 1] != 'demo_cleanupprobehit demo_probe_display_breaks'):
+        errors.append('page breaks: DisplayPageBreaks must be read first and written, counted, only when True')
+    writes = sum(1 for line in _code(source) if re.match(r'(?:\w+\.)?displaypagebreaks\s*=', line))
+    resets = sum(1 for line in _code(source) if line.endswith('.resetallpagebreaks'))
+    if writes != 1 or resets != 1:
+        errors.append('page breaks: DisplayPageBreaks and ResetAllPageBreaks belong to the reset and its helper only')
+    if re.search(r'\b(?:DisplayPageBreaks|ResetAllPageBreaks)\b', ''.join(_code(demo)), re.I):
+        errors.append('page breaks: M_EXCEL_UI_DEMO must leave page breaks to M_DEMO_BUILDER')
+    return errors
+
+
+def _page_break_selftest(source: str, demo: str) -> tuple[list[str], int]:
+    """#187 negative fixtures: each mutation must be reported."""
+    errors: list[str] = []
+    count = 0
+    page_break_mutations = [
+        ('        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\n', '        DEMO_Sheet_Reset WS\n'),
+        ("    'Hide page-break indicators, writing the property only when they are shown\n"
+         '        DEMO_Sheet_HidePageBreaks WS\n', ''),
+        ('                DEMO_Sheet_HidePageBreaks WS\n', '                WS.DisplayPageBreaks = False\n'),
+        ('            If Shown Then\n', '            If True Then\n'),
+        ('            Shown = WS.DisplayPageBreaks\n', ''),
+        ('                DEMO_CleanupProbeHit DEMO_PROBE_PAGE_BREAKS\n', ''),
+        ('                DEMO_CleanupProbeHit DEMO_PROBE_DISPLAY_BREAKS\n', ''),
+    ]
+    for old, new in page_break_mutations:
+        count += 1
+        if source.count(old) != 1 or not page_break_findings(source.replace(old, new), demo):
+            errors.append(f'negative page-break fixture not detected: {old.strip()}')
+    count += 1
+    if not page_break_findings(source, demo + '    ActiveSheet.ResetAllPageBreaks\n'):
+        errors.append('negative page-break fixture not detected: a page-break call in M_EXCEL_UI_DEMO')
+    return errors, count
+
+
 def selftest(root: str | Path) -> tuple[list[str], int]:
     source = (Path(root) / 'demo/M_DEMO_BUILDER.bas').read_text(encoding='ascii')
     demo = (Path(root) / 'demo/M_EXCEL_UI_DEMO.bas').read_text(encoding='ascii')
     errors = (reset_findings(source) + fast_mode_findings(source, demo)
-              + checkbox_findings(source, demo) + template_findings(source))
+              + checkbox_findings(source, demo) + template_findings(source)
+              + page_break_findings(source, demo))
     count = 0
     for name in PROCEDURES:
         errors += propagation_findings(source, name, 'clean_exit', 'clean_fail')
@@ -285,8 +343,8 @@ End Sub'''
         errors.append('negative check-box fixture not detected: a private copy in M_EXCEL_UI_DEMO')
     template_mutations = [
         ('        MaxCol = LimitSheet.Columns.Count\n',
-         '        MaxCol = LimitSheet.Columns.Count\n        DEMO_Sheet_Reset WS\n'),
-        ('        DEMO_Sheet_Reset WS\n', ''),
+         '        MaxCol = LimitSheet.Columns.Count\n        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\n'),
+        ('        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\n', ''),
         ('        If SavedErrNum <> 0 And CreatedSheet Then\n', '        If SavedErrNum <> 0 Then\n'),
         ('            CleanupFailures = DEMO_Sheet_DeleteOwned(WS)\n', ''),
         ('        NameProblem = DEMO_SheetNameProblem(SheetName)\n', ''),
@@ -296,4 +354,5 @@ End Sub'''
         count += 1
         if old not in source or not template_findings(source.replace(old, new)):
             errors.append(f'negative template fixture not detected: {old.strip()}')
-    return errors, count
+    found, extra = _page_break_selftest(source, demo)
+    return errors + found, count + extra

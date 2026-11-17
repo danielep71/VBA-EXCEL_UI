@@ -14,9 +14,10 @@ never Excel, and reports one PASS or FAIL line per check:
   certified configuration, with CRLF line endings as a checkout writes them,
   and the workbook held exactly those modules;
 - the certification document reports PASS and COMPLETE with no failed or
-  skipped unit, cleanup OK, and the units the commit's certification runner
-  runs;
-- the RESULT line of the text report agrees with the certification document;
+  skipped unit, cleanup OK, certification recording OK, and the units the
+  commit's certification runner runs;
+- the RESULT line, the unit lines and any RECORDING line of the text report
+  agree with the certification document;
 - the host record names Windows and the Excel version, build and bitness, and
   agrees with the host the certification document reports;
 - the certification document was written during the recorded session.
@@ -64,6 +65,7 @@ VB_NAME = re.compile(rb'^Attribute VB_Name = "([A-Za-z]\w*)"\r?$', re.MULTILINE)
 UNIT_CALL = re.compile(r'^[ \t]*TST_CertRunUnit[ \t]+"([^"]+)"[ \t]*(?:\'.*)?$', re.MULTILINE)
 RESULT_LINE = re.compile(r"^RESULT: .*$", re.MULTILINE)
 UNIT_LINE = re.compile(r"^  (PASS|FAIL)  (\S+)", re.MULTILINE)
+RECORDING_LINE = re.compile(r"^  RECORDING  (.*)$", re.MULTILINE)
 LONE_LF = re.compile(rb"(?<!\r)\n")
 
 
@@ -576,6 +578,26 @@ def certification_line(result: dict[str, Any], label: str) -> str:
             f" skipped={count_field(result, 'skipped', label)} cleanup={cleanup}")
 
 
+def recording_state(result: dict[str, Any], label: str) -> tuple[str, str]:
+    """Whether the runner stored every unit and skip: ("OK", "") or ("FAILED", detail).
+
+    A document without a "recording" field was written by a runner that did
+    not report recording; it is read as ("OK", "").
+    """
+    if "recording" not in result:
+        require("recordingDetail" not in result, f"{label}: recordingDetail without recording")
+        return "OK", ""
+    recording = result["recording"]
+    require(recording in ("OK", "FAILED"), f"{label}: recording must be OK or FAILED")
+    detail = field(result, "recordingDetail", label)
+    require(isinstance(detail, str), f"{label}: recordingDetail must be text")
+    if recording == "OK":
+        require(detail == "", f"{label}: recording is OK but recordingDetail is not empty")
+    else:
+        require(detail.strip() != "", f"{label}: recording FAILED without a recordingDetail")
+    return str(recording), str(detail)
+
+
 def unit_results(result: dict[str, Any], label: str) -> list[tuple[str, bool]]:
     units = field(result, "unitResults", label)
     require(isinstance(units, list) and all(isinstance(item, dict) for item in units),
@@ -590,6 +612,8 @@ def check_verdict(bundle: Bundle) -> str:
     require(result.get("component") == policy.component and result.get("schema") == policy.schema,
             f"{label}: not a schema {policy.schema} {policy.component} certification document")
     line = certification_line(result, label)
+    recording, recording_detail = recording_state(result, label)
+    require(recording == "OK", f"{label}: {recording_detail}")
     require(result["passed"] is True and result["complete"] is True,
             f"{label}: the verdict is {line.removeprefix('RESULT: ')}")
     require(result["unitsFailed"] == 0, f"{label}: {result['unitsFailed']} unit(s) failed")
@@ -618,6 +642,11 @@ def check_report(bundle: Bundle) -> str:
     listed = [(name, verdict == "PASS") for verdict, name in UNIT_LINE.findall(report)]
     require(listed == unit_results(result, label),
             f"{report_label}: unit lines {listed} differ from {label}")
+    recording, recording_detail = recording_state(result, label)
+    noted = [str(item).rstrip() for item in RECORDING_LINE.findall(report)]
+    expected_noted = [recording_detail] if recording == "FAILED" else []
+    require(noted == expected_noted,
+            f"{report_label}: RECORDING lines {noted} differ from {label}")
     return lines[0]
 
 

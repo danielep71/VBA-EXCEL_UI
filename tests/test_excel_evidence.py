@@ -35,14 +35,16 @@ for _name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
 
 UNITS = ["RegressionPack", "SnapshotIdentity", "TitleBarSdiIdentity"]
 RUNNER = (
-    "Attribute VB_Name = \"M_EXCEL_UI_REGRESSION_TESTS\"\n"
+    "Attribute VB_Name = \"M_EXCEL_UI_TEST_CERTIFICATION\"\n"
     "Option Explicit\n\n"
     "Public Sub Test_EXCEL_UI_RunReleaseCertification()\n"
     + "".join(f"        TST_CertRunUnit \"{unit}\"\n" for unit in UNITS)
     + "End Sub\n\n"
     "Private Sub TST_CertRunUnit( _\n    ByVal UnitName As String)\nEnd Sub\n"
 )
-DEVELOPMENT = ["src/M_EXCEL_UI.bas", "test/M_EXCEL_UI_REGRESSION_TESTS.bas"]
+RECORDING_DETAIL = ("certification recording FAILED | failures=1"
+                    " | first: growing the unit-outcome buffer | error 7")
+DEVELOPMENT = ["src/M_EXCEL_UI.bas", "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"]
 MANIFEST = {
     "schema_version": 1,
     "configurations": {
@@ -54,7 +56,7 @@ FILES = {
     ".gitattributes": "*.bas text eol=crlf\n",
     "tools/vba-projects.json": json.dumps(MANIFEST, indent=2) + "\n",
     "src/M_EXCEL_UI.bas": "Attribute VB_Name = \"M_EXCEL_UI\"\nOption Explicit\n\n'café is spelled in cp1252\n",
-    "test/M_EXCEL_UI_REGRESSION_TESTS.bas": RUNNER,
+    "test/M_EXCEL_UI_TEST_CERTIFICATION.bas": RUNNER,
 }
 
 
@@ -90,6 +92,8 @@ def report_text(result: dict[str, Any]) -> str:
     lines = ["VBA Excel UI - release certification",
              f"Excel {result['excelVersion']} build {result['excelBuild']}",
              result["operatingSystem"], result["timestampLocal"], "-" * 60, result_line(result)]
+    if result.get("recording") == "FAILED":
+        lines.append(f"  RECORDING  {result['recordingDetail']}")
     lines += [f"  {'PASS' if unit['passed'] else 'FAIL'}  {unit['name']}"
               + (f" | {unit['detail']}" if unit["detail"] else "") for unit in result["unitResults"]]
     lines += [f"  SKIP  {item}" for item in result["skipDetail"]]
@@ -107,7 +111,8 @@ def documents(root: Path, sha: str) -> dict[str, Any]:
         "component": "VBA Excel UI", "schema": 1, "timestampLocal": "2026-11-06 10:03:00",
         "excelVersion": "16.0", "excelBuild": "17928", "operatingSystem": "Windows (64-bit) NT 10.00",
         "bitness": "x64", "vbaGeneration": "VBA7", "units": len(UNITS), "unitsFailed": 0, "skipped": 0,
-        "cleanup": "OK", "cleanupDetail": "", "complete": True, "passed": True,
+        "cleanup": "OK", "cleanupDetail": "", "recording": "OK", "recordingDetail": "",
+        "complete": True, "passed": True,
         "unitResults": [{"name": unit, "passed": True, "detail": ""} for unit in UNITS],
         "skipDetail": [],
     }
@@ -197,7 +202,7 @@ class SourceTests(Fixture):
         inventory = evidence.source_inventory(self.root, self.sha)
         self.assertEqual([module["path"] for module in inventory["modules"]], DEVELOPMENT)
         self.assertEqual([module["name"] for module in inventory["modules"]],
-                         ["M_EXCEL_UI", "M_EXCEL_UI_REGRESSION_TESTS"])
+                         ["M_EXCEL_UI", "M_EXCEL_UI_TEST_CERTIFICATION"])
         for module in inventory["modules"]:
             on_disk = (self.root / module["path"]).read_bytes()
             self.assertIn(b"\r\n", on_disk)
@@ -231,6 +236,13 @@ class PassingBundleTests(Fixture):
         self.bundle_with()
         code, _, _ = self.run_main(str(self.bundle))
         self.assertEqual(code, 0)
+
+    def test_a_document_without_a_recording_field_passes(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            del docs["certification.json"]["recording"]
+            del docs["certification.json"]["recordingDetail"]
+        self.bundle_with(earlier_runner)
+        self.assertEqual(self.failed(), {})
 
     def test_an_ansi_report_with_a_non_ascii_detail_is_read(self) -> None:
         def detail(docs: dict[str, Any]) -> None:
@@ -367,7 +379,7 @@ class NegativeTests(Fixture):
         def wrong(docs: dict[str, Any]) -> None:
             docs["source-digests.json"]["modules"][1]["checked_out_sha256"] = "1" * 64
         self.bundle_with(wrong)
-        self.assert_fails("source digests", "checked-out test/M_EXCEL_UI_REGRESSION_TESTS.bas differs")
+        self.assert_fails("source digests", "checked-out test/M_EXCEL_UI_TEST_CERTIFICATION.bas differs")
 
     def test_a_missing_module_digest_fails(self) -> None:
         self.bundle_with(lambda docs: docs["source-digests.json"]["modules"].pop())
@@ -395,6 +407,42 @@ class NegativeTests(Fixture):
             docs["certification.json"].update(cleanup="FAILED", cleanupDetail="workbook count 2, expected 1")
         self.bundle_with(leaked)
         self.assert_fails("verdict", "cleanup FAILED: workbook count 2")
+
+    @staticmethod
+    def recording_failed(docs: dict[str, Any]) -> None:
+        docs["certification.json"].update(complete=False, passed=False, recording="FAILED",
+                                           recordingDetail=RECORDING_DETAIL)
+
+    def test_a_recording_failure_fails_and_is_named(self) -> None:
+        self.bundle_with(self.recording_failed)
+        failures = self.failed()
+        self.assertIn(RECORDING_DETAIL, failures["verdict"])
+        self.assertNotIn("report", failures)
+
+    def test_a_report_that_omits_the_recording_failure_fails(self) -> None:
+        result = copy.deepcopy(self.base)
+        self.recording_failed(result)
+        report = report_text(result["certification.json"]).replace(f"  RECORDING  {RECORDING_DETAIL}\r\n", "")
+        self.bundle_with(self.recording_failed, report=report)
+        self.assert_fails("report", "RECORDING lines [] differ")
+
+    def test_a_recording_line_in_a_clean_report_fails(self) -> None:
+        lines = report_text(self.base["certification.json"]).split("\r\n")
+        lines.insert(6, f"  RECORDING  {RECORDING_DETAIL}")
+        self.bundle_with(report="\r\n".join(lines))
+        self.assert_fails("report", "RECORDING lines")
+
+    def test_a_recording_value_other_than_ok_or_failed_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(recording="PARTIAL"))
+        self.assert_fails("verdict", "recording must be OK or FAILED")
+
+    def test_a_failed_recording_without_a_detail_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(recording="FAILED"))
+        self.assert_fails("verdict", "recording FAILED without a recordingDetail")
+
+    def test_a_recording_detail_on_a_clean_recording_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(recordingDetail=RECORDING_DETAIL))
+        self.assert_fails("verdict", "recording is OK but recordingDetail is not empty")
 
     def test_units_other_than_the_runners_fail(self) -> None:
         def renamed(docs: dict[str, Any]) -> None:
@@ -505,7 +553,7 @@ class RepositoryTests(unittest.TestCase):
     def test_this_repository_inventory_and_units_are_readable(self) -> None:
         sha = evidence.resolve_commit(ROOT, "HEAD")
         inventory = evidence.source_inventory(ROOT, sha)
-        self.assertIn("test/M_EXCEL_UI_REGRESSION_TESTS.bas", [module["path"] for module in inventory["modules"]])
+        self.assertIn("test/M_EXCEL_UI_TEST_CERTIFICATION.bas", [module["path"] for module in inventory["modules"]])
         for module in inventory["modules"]:
             self.assertEqual(module["name"], Path(module["path"]).stem)
         units = evidence.certification_units(ROOT, sha)

@@ -5,7 +5,7 @@
   "component": "VBA Excel UI",
   "manifest": "tools/vba-projects.json",
   "configuration": "development",
-  "certification_module": "test/M_EXCEL_UI_REGRESSION_TESTS.bas",
+  "certification_module": "test/M_EXCEL_UI_TEST_CERTIFICATION.bas",
   "certification_runner": "Test_EXCEL_UI_RunReleaseCertification",
   "required_files": {
     "session": "session.json",

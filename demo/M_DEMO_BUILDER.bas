@@ -46,6 +46,9 @@ Option Private Module
 '     DEMO_InternalCleanupProbeBegin.
 '
 ' UPDATED
+'   2026-11-15 - DEMO_Sheet_BuildTemplate keeps manual page breaks, and both
+'                procedures write DisplayPageBreaks only when it is True, so
+'                a demo build does not wait for the printer driver (#187).
 '   2026-11-14 - DEMO_Sheet_BuildTemplate validates its layout before any
 '                reset or creation; a sheet created by a failed call is
 '                removed (#74).
@@ -100,7 +103,9 @@ Option Private Module
     Private Const DEMO_PROBE_BUILD_CLEANUP   As Long = 6    'BuildTemplate Clean_Exit passes
     Private Const DEMO_PROBE_FM_ENTRY        As Long = 7    'Fast-mode entry writes reached
     Private Const DEMO_PROBE_FM_RESTORE      As Long = 8    'Fast-mode restoration writes reached
-    Private Const DEMO_PROBE_SITE_COUNT      As Long = 8    'Highest probe site
+    Private Const DEMO_PROBE_PAGE_BREAKS     As Long = 9    'ResetAllPageBreaks calls reached
+    Private Const DEMO_PROBE_DISPLAY_BREAKS  As Long = 10   'DisplayPageBreaks writes reached
+    Private Const DEMO_PROBE_SITE_COUNT      As Long = 10   'Highest probe site
 
     'One-shot cleanup fault bits; mirrored by M_DEMO_CLEANUP_TESTS
     Private Const DEMO_FAULT_RESET_BODY      As Long = 1    'Operation error after unprotect
@@ -291,7 +296,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   - Uses the requested workbook or defaults to ThisWorkbook
 '   - Refuses a name already used by a chart or other non-worksheet sheet
 '   - Gets or creates the requested worksheet
-'   - Resets the sheet before rebuilding it
+'   - Resets the sheet before rebuilding it, keeping its manual page breaks
 '   - Derives the separator column from ContentColumns
 '   - Derives the first hidden column from the separator column
 '   - Writes title/subtitle bands from column B to the last content column
@@ -306,14 +311,24 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   A rebuild of an existing worksheet is destructive by design: once the
 '   inputs are valid, DEMO_Sheet_Reset deletes its shapes and tables and
 '   clears its cells, formats, validation, comments, sizes, hidden rows and
-'   columns, tab colour and page breaks. A failure after that point is
-'   reported, but nothing is rolled back; only a worksheet this call created
-'   is removed.
+'   columns and tab colour. A failure after that point is reported, but
+'   nothing is rolled back; only a worksheet this call created is removed.
+'
+' PAGE BREAKS
+'   The template adds no manual page breaks, so it does not remove any: it
+'   resets the sheet with RemovePageBreaks:=False and keeps manual breaks
+'   that were already there. ResetAllPageBreaks makes Excel lay the sheet out
+'   through the default printer driver, which stalls the build on a slow,
+'   offline or network printer. Checking for manual breaks first would not
+'   avoid it: HPageBreaks, VPageBreaks and Range.PageBreak also report
+'   automatic breaks, which Excel computes from that layout. Page-break
+'   indicators are hidden only when they are shown (DEMO_Sheet_HidePageBreaks).
 '
 ' DEPENDENCIES
 '   - DEMO_Sheet_FindWorksheet
 '   - DEMO_Sheet_GetOrCreate
 '   - DEMO_Sheet_Reset
+'   - DEMO_Sheet_HidePageBreaks
 '   - DEMO_Sheet_DeleteOwned
 '   - DEMO_SheetNameProblem
 '   - DEMO_ParseColumnSpec
@@ -336,6 +351,8 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   DEMO_FastMode_Begin scope around this call does not capture or restore it.
 '
 ' UPDATED
+'   2026-11-15 - Manual page breaks kept; indicators hidden only when shown
+'                (#187).
 '   2026-11-14 - Layout validated before any reset or creation; a worksheet
 '                created by a failed call is removed (#74).
 '   2026-11-14 - Formula-bar ownership documented; fault seam (#70).
@@ -574,8 +591,12 @@ Public Sub DEMO_Sheet_BuildTemplate( _
         End If
 
     'Reset the worksheet to a clean reusable state before rebuilding it; from
-    'here on an existing worksheet is rebuilt destructively
-        DEMO_Sheet_Reset WS
+    'here on an existing worksheet is rebuilt destructively. Manual page
+    'breaks are kept: removing them waits for the printer driver (#187)
+        DEMO_Sheet_Reset WS, RemovePageBreaks:=False
+
+    'Hide page-break indicators, writing the property only when they are shown
+        DEMO_Sheet_HidePageBreaks WS
 
 '------------------------------------------------------------------------------
 ' DERIVE SEPARATOR / HIDDEN COLUMN LOGIC
@@ -2097,6 +2118,11 @@ Public Sub DEMO_Sheet_Reset( _
 '     TRUE  => remove manual page breaks and hide indicators on a best-effort basis
 '     FALSE => leave page-break settings unchanged
 '
+'     Removing manual page breaks makes Excel lay the sheet out through the
+'     default printer driver, which waits on a slow, offline or network
+'     printer. Pass FALSE for a sheet known to have no manual breaks. The
+'     indicators are hidden only when they are shown.
+'
 '   ProtectPassword (optional)
 '     Password used to temporarily unprotect and optionally re-protect the sheet
 '
@@ -2128,9 +2154,12 @@ Public Sub DEMO_Sheet_Reset( _
 '   fault can raise an operation error after the protection steps, fail the
 '   Protect statement while its arguments are evaluated, or fail the
 '   EnableSelection restoration the same way. Disarmed, every seam is inert:
-'   the password and selection values pass through unchanged.
+'   the password and selection values pass through unchanged. The
+'   ResetAllPageBreaks call and the DisplayPageBreaks write are counted too.
 '
 ' UPDATED
+'   2026-11-15 - DisplayPageBreaks written only when True; page-break calls
+'                counted by the probe (#187).
 '   2026-11-06
 '==============================================================================
 
@@ -2352,13 +2381,15 @@ Public Sub DEMO_Sheet_Reset( _
         If RemovePageBreaks Then
             On Error Resume Next
 
-            'Remove any manual page breaks
+            'Remove any manual page breaks; Excel lays the sheet out through
+            'the printer driver to do it
+                DEMO_CleanupProbeHit DEMO_PROBE_PAGE_BREAKS
                 WS.ResetAllPageBreaks
 
-            'Hide page-break indicators on the sheet
-                WS.DisplayPageBreaks = False
-
             On Error GoTo Clean_Fail
+
+            'Hide page-break indicators, writing the property only when shown
+                DEMO_Sheet_HidePageBreaks WS
         End If
 
 '------------------------------------------------------------------------------
@@ -2452,6 +2483,61 @@ Clean_Fail:
 
     'Continue through the centralized cleanup path
         Resume Clean_Exit
+
+End Sub
+
+
+Private Sub DEMO_Sheet_HidePageBreaks( _
+    ByVal WS As Worksheet)
+'
+'==============================================================================
+' DEMO_Sheet_HidePageBreaks
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Hides the page-break indicators of a worksheet when they are shown.
+'
+' WHY THIS EXISTS
+'   Writing Worksheet.DisplayPageBreaks can make Excel lay the sheet out
+'   through the default printer driver, even when the value does not change,
+'   and a slow, offline or network printer stalls that write. A new worksheet
+'   starts with the indicators hidden, so the write is needed only when they
+'   are shown (#187).
+'
+' INPUTS
+'   WS
+'     Worksheet whose indicators are hidden
+'
+' RETURNS
+'   None
+'
+' ERROR POLICY
+'   Best effort: does not raise. A read that fails leaves the indicators as
+'   they are, and nothing is written.
+'
+' REGRESSION SEAMS
+'   While M_DEMO_CLEANUP_TESTS has armed the cleanup probe, each write is
+'   counted before it is attempted.
+'
+' UPDATED
+'   2026-11-15 - Added for #187.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Shown               As Boolean         'Indicators shown on entry
+
+'------------------------------------------------------------------------------
+' HIDE
+'------------------------------------------------------------------------------
+    'Read first; a failed read leaves Shown False, so nothing is written
+        On Error Resume Next
+            Shown = WS.DisplayPageBreaks
+            If Shown Then
+                DEMO_CleanupProbeHit DEMO_PROBE_DISPLAY_BREAKS
+                WS.DisplayPageBreaks = False
+            End If
+        On Error GoTo 0
 
 End Sub
 
@@ -2556,6 +2642,8 @@ Public Function DEMO_InternalCleanupProbeCount( _
 '     6  DEMO_Sheet_BuildTemplate cleanup passes
 '     7  Fast-mode entry writes reached
 '     8  Fast-mode restoration writes reached
+'     9  DEMO_Sheet_Reset ResetAllPageBreaks calls reached
+'     10 DisplayPageBreaks writes reached (DEMO_Sheet_HidePageBreaks)
 '
 ' RETURNS
 '   Long
