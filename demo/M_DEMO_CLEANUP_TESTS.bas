@@ -2465,10 +2465,12 @@ Private Sub DEMO_CT_ResetManualBreaks( _
 '
 ' NOTES
 '   Setting and reading the breaks makes Excel lay this sheet out through the
-'   default printer driver.
+'   default printer driver. Reading Range.PageBreak also shows the indicators
+'   again, so the indicators are checked before the breaks are read.
 '
 ' UPDATED
 '   2026-11-15 - Added for #187.
+'   2026-11-17 - Checks the indicators before reading the breaks.
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2508,12 +2510,14 @@ Private Sub DEMO_CT_ResetManualBreaks( _
         DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 0
         DEMO_CT_CheckLong Scenario & ".ResetAllPageBreaks", 1, _
                           DEMO_InternalCleanupProbeCount(PROBE_PAGE_BREAKS)
+    'Check the indicators before reading the breaks: reading Range.PageBreak
+    'lays the sheet out again and shows them
+        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
+                      "the page-break indicators are shown after the reset"
         DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak <> xlPageBreakManual, Scenario & ".RowBreak", _
                       "the manual row break survived the reset"
         DEMO_CT_Check WS.Columns(BREAK_COLUMN).PageBreak <> xlPageBreakManual, Scenario & ".ColumnBreak", _
                       "the manual column break survived the reset"
-        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
-                      "the page-break indicators are shown after the reset"
 
 Safe_Exit:
         On Error GoTo 0
@@ -2537,7 +2541,9 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S46: a default reset of a sheet whose page-break indicators are hidden
-'   does not write DisplayPageBreaks, and they stay hidden.
+'   leaves them hidden. ResetAllPageBreaks can show them (it does on Excel
+'   16.0 build 20430, 64-bit), so the reset may write DisplayPageBreaks once;
+'   S48 proves that hidden indicators are not written when nothing shows them.
 '   S47: when they are shown, the reset writes DisplayPageBreaks once and
 '   hides them.
 '
@@ -2547,6 +2553,7 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
 '
 ' UPDATED
 '   2026-11-15 - Added for #187.
+'   2026-11-17 - Allows the write that ResetAllPageBreaks makes necessary.
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2585,8 +2592,14 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
 '------------------------------------------------------------------------------
         DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription
         DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 0
-        DEMO_CT_CheckLong Scenario & ".DisplayWrites", Writes, _
-                          DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS)
+        If Shown Then
+            DEMO_CT_CheckLong Scenario & ".DisplayWrites", Writes, _
+                              DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS)
+        Else
+            DEMO_CT_Check DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS) <= 1, _
+                          Scenario & ".DisplayWrites", "expected at most 1 write but read " & _
+                          CStr(DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS))
+        End If
         DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
                       "the page-break indicators are shown after the reset"
 
