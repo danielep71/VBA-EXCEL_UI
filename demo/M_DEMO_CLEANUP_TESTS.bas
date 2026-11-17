@@ -2696,8 +2696,9 @@ Private Sub DEMO_CT_ResetManualBreaks( _
 '
 ' NOTES
 '   Setting and reading the breaks makes Excel lay this sheet out through the
-'   default printer driver. Reading Range.PageBreak also shows the indicators
-'   again, so the indicators are checked before the breaks are read.
+'   default printer driver. On Excel 16.0 build 20430, 64-bit, the first
+'   read of Range.PageBreak after ResetAllPageBreaks lays the sheet out again
+'   and shows the indicators, so they are checked before the breaks are read.
 '
 ' UPDATED
 '   2026-11-15 - Added for #187.
@@ -2741,8 +2742,8 @@ Private Sub DEMO_CT_ResetManualBreaks( _
         DEMO_CT_CheckProbe Scenario & ".Probe", 0, 1, 0, 0, 0, 0
         DEMO_CT_CheckLong Scenario & ".ResetAllPageBreaks", 1, _
                           DEMO_InternalCleanupProbeCount(PROBE_PAGE_BREAKS)
-    'Check the indicators before reading the breaks: reading Range.PageBreak
-    'lays the sheet out again and shows them
+    'Check the indicators before reading the breaks: the first PageBreak read
+    'after ResetAllPageBreaks lays the sheet out again and shows them
         DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
                       "the page-break indicators are shown after the reset"
         DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak <> xlPageBreakManual, Scenario & ".RowBreak", _
@@ -2865,6 +2866,8 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
 '
 ' UPDATED
 '   2026-11-15 - Added for #187.
+'   2026-11-17 - Reads the break before hiding the indicators and checks them
+'                before reading the break again, as S45 does.
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2885,9 +2888,9 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
         WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual
-        WS.DisplayPageBreaks = False
         DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".ArrangeRow", _
                       "the host did not keep the manual row break"
+        WS.DisplayPageBreaks = False
         DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".ArrangeHidden", _
                       "the host did not keep DisplayPageBreaks=False"
 
@@ -2907,10 +2910,10 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
         DEMO_CT_CheckLong Scenario & ".DisplayWrites", 0, _
                           DEMO_InternalCleanupProbeCount(PROBE_DISPLAY_BREAKS)
         DEMO_CT_Check DEMO_CT_BodyRan(WS), Scenario & ".ResetRan", "the reset did not clear A1"
-        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".RowBreak", _
-                      "the template removed a manual page break"
         DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
                       "the page-break indicators are shown after the rebuild"
+        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".RowBreak", _
+                      "the template removed a manual page break"
 
 Safe_Exit:
         On Error GoTo 0
