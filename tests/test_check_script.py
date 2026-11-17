@@ -109,6 +109,19 @@ class ContractTests(unittest.TestCase):
         policy = json.loads(POLICY.read_text(encoding="utf-8"))
         self.assertNotIn(policy["certification_runner"], case_labels(body))
 
+    def test_each_runner_starts_after_the_active_frame_settles(self) -> None:
+        text = read(SCRIPT)
+        loop = text[text.index("foreach ($step in $runnerSteps)"):]
+        loop = loop[:loop.index("Complete-CloseStep 'close-development'")]
+        self.assertLess(loop.index("Wait-ActiveFrame $devState"), loop.index("Invoke-LoggedMacro"))
+        self.assertIn("the active frame did not settle before the run", loop)
+        settle = text[text.index("function Wait-ActiveFrame"):]
+        settle = settle[:settle.index("\n}\n")]
+        for read_back in ("$State.Excel.ActiveWindow", "$frameWindow.Hwnd", "$State.Excel.Hwnd"):
+            with self.subTest(read_back):
+                self.assertIn(read_back, settle)
+        self.assertRegex(text, r"(?m)^\$ActiveFrameSettleSeconds = \d+$")
+
     def test_the_demo_macros_are_what_the_demo_entry_point_runs(self) -> None:
         body = vba_procedure(DEMO_TESTS, script_value("DemoLoggedMacro"))
         macros = [script_value(name) for name in

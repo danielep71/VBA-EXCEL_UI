@@ -104,6 +104,7 @@ $DefaultRunners = @(
 )
 # A characterization that asserts nothing: run only when asked, recorded as INFO.
 $ProbeRunner = 'Test_EXCEL_UI_RunRibbonSdiProbe'
+$ActiveFrameSettleSeconds = 10
 $RunnerMacro = 'TST_RunRunnerWithLog'
 
 # The demo macros, run through Demo_Test_RunLogged of M_DEMO_CLEANUP_TESTS.
@@ -559,6 +560,40 @@ function Invoke-LoggedMacro {
                               Seconds = $stopwatch.Elapsed.TotalSeconds }
 }
 
+function Wait-ActiveFrame($State) {
+    # The identity runners refuse to start while Application.ActiveWindow and
+    # Application.Hwnd name different frames. A runner that opens and closes
+    # windows can leave the instance in that state, and you never meet it when
+    # you start a runner from the Excel window itself. Bring the instance to
+    # the foreground, activate the workbook and wait until both name one frame.
+    # Returns an empty string when they agree, otherwise what was last read.
+    try {
+        Add-Type -AssemblyName Microsoft.VisualBasic
+        [void][Microsoft.VisualBasic.Interaction]::AppActivate([int]$State.ProcessId)
+    }
+    catch { }
+    $deadline = (Get-Date).AddSeconds($ActiveFrameSettleSeconds)
+    $lastRead = ''
+    do {
+        try {
+            Invoke-Excel { $State.Workbook.Activate() }
+            $frameWindow = Invoke-Excel { $State.Excel.ActiveWindow }
+            $windowHandle = [int64](Invoke-Excel { $frameWindow.Hwnd })
+            Release-Com $frameWindow
+            $applicationHandle = [int64](Invoke-Excel { $State.Excel.Hwnd })
+            if ($windowHandle -eq $applicationHandle) {
+                return ''
+            }
+            $lastRead = 'ActiveWindow.Hwnd {0}, Application.Hwnd {1}' -f $windowHandle, $applicationHandle
+        }
+        catch {
+            $lastRead = Get-InnerMessage $_
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    return $lastRead
+}
+
 function Read-TitleBarState($State) {
     try {
         return [string](Invoke-Excel { $State.Excel.Run($State.Qualified + $DemoTitleBarStateMacro) })
@@ -862,10 +897,15 @@ try {
                 Write-Host 'Do not use Excel until the runners end. They open and close windows.'
                 foreach ($step in $runnerSteps) {
                     Set-CheckStep $step.name 'RUNNING' ('{0} via {1}' -f $step.name, $RunnerMacro)
+                    $unsettled = Wait-ActiveFrame $devState
                     $outcome = Invoke-LoggedMacro -State $devState -EntryPoint $RunnerMacro -Macro $step.name `
                         -LogPath (Join-Path $script:BundleDir $step.log)
                     $status = $(if ($step.name -eq $ProbeRunner) { 'INFO' } elseif ($outcome.Passed) { 'PASS' } else { 'FAIL' })
-                    Set-CheckStep $step.name $status $outcome.Detail -Seconds $outcome.Seconds
+                    $runnerDetail = $outcome.Detail
+                    if ($unsettled) {
+                        $runnerDetail += ' | the active frame did not settle before the run: ' + $unsettled
+                    }
+                    Set-CheckStep $step.name $status $runnerDetail -Seconds $outcome.Seconds
                 }
             }
             else {

@@ -110,7 +110,12 @@ cannot run because one it depends on failed is a `FAIL` that says which.
    bundle, as its `session.json` names it, in an Excel instance of its own
    that follows the Trust Center macro setting, and waits until its macros
    run.
-4. **One step per runner.** Runs `TST_RunRunnerWithLog` with
+4. **One step per runner.** First brings the instance to the foreground,
+   activates the workbook and waits up to 10 seconds until
+   `Application.ActiveWindow.Hwnd` and `Application.Hwnd` name the same frame.
+   The identity runners refuse to start while they differ, which a runner that
+   opens and closes windows can leave behind. If they still differ, the step's
+   detail says so and the runner runs anyway. Then runs `TST_RunRunnerWithLog` with
    `Application.Run`. That function runs the runner with the log sink set, so
    that everything the runner prints also goes to `runner-<name>.log`, and
    returns its verdict instead of raising. The step passes when the verdict is
