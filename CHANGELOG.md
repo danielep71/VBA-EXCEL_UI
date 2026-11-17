@@ -854,9 +854,10 @@ measured against that baseline.
   Both write `DisplayPageBreaks` only when it reads `True`, through the new
   `DEMO_Sheet_HidePageBreaks`. Scenarios S45-S48 of
   `Demo_Test_RunCleanupChecks` check that a reset removes a manual row and
-  column break, leaves hidden indicators unwritten and hides shown ones with
-  one write, and that a rebuild neither calls `ResetAllPageBreaks` nor writes
-  `DisplayPageBreaks` and keeps the break; the source fixtures of the gate
+  column break and leaves the indicators hidden, writing `DisplayPageBreaks`
+  at most once (`ResetAllPageBreaks` itself shows the indicators on Excel 16.0
+  build 20430, 64-bit), and that a rebuild neither calls `ResetAllPageBreaks`
+  nor writes `DisplayPageBreaks` and keeps the break; the source fixtures of the gate
   check the same contract. Whether reading `DisplayPageBreaks` avoids the
   printer query still needs an Excel host with a slow or offline default
   printer.
