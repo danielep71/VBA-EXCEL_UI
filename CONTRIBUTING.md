@@ -515,7 +515,10 @@ line with the entry, fast-mode and exit values. Scenarios S32-S34 add ActiveX
 controls to the temporary workbook, so they fail when ActiveX controls are
 disabled in the Trust Center. Scenarios S45-S48 set manual page breaks or show
 the page-break indicators on their own sheets, so Excel consults the default
-printer driver for those sheets. Record the commit, Excel build and bitness
+printer driver for those sheets. Run them with a default printer whose driver
+can lay out pages, such as Microsoft Print to PDF: when it cannot, they fail
+while arranging their sheets
+([#199](https://github.com/danielep71/VBA-EXCEL_UI/issues/199)). Record the commit, Excel build and bitness
 with the Immediate window output.
 
 ### Evidence principles
