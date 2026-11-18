@@ -490,16 +490,26 @@ Showing the title bar merges the captured owned bits into the current style. It 
 
 In v1.1.2, a show falls back to the safe visible frame only when the stored
 baseline is all zero, so a non-zero baseline without a caption can still be
-re-applied ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)). On `release/v1.1.3` a stored baseline is used only
-when `HasBaseline` is true and the baseline carries `WS_CAPTION`: a visible
-baseline requires `WS_CAPTION`, not merely a non-zero owned-bit value.
-Otherwise the show uses the safe visible frame. Every show, including a no-op,
-reads the live style back before reporting success. Both checks still accept a
-style that carries only one of the two bits that make up `WS_CAPTION`
-(`WS_BORDER` or `WS_DLGFRAME`); requiring the complete `WS_CAPTION` mask is
-open under [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6). Its bounded negative control passed under
-[#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66): with the v1.1.2 condition restored, the regression fails
-instead of hanging.
+re-applied ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)).
+
+`WS_CAPTION` is the composite `WS_BORDER` | `WS_DLGFRAME`. A style that carries
+only one of the two has a border or a dialog frame but no caption bar, so a
+title bar is visible only when the complete mask is set:
+`(style And WS_CAPTION) = WS_CAPTION`. On `release/v1.1.3` a stored baseline is
+used for a show only when `HasBaseline` is true and the baseline carries the
+complete mask. Every other baseline is unusable: none captured, all zero,
+non-zero without a caption, and one with only `WS_BORDER` or only
+`WS_DLGFRAME`. The show then merges the full owned frame into the current
+style, keeping every unrelated bit. Every show, including a no-op, reads the
+live style back and reports success only when the complete mask is set; a
+missing caption returns `False` with a `TitleBar` diagnostic. The visibility
+readers (`UI_TryGetTitleBarVisible` and the explicit-window reader) apply the
+same test. This correction is not yet certified on Excel, and
+[#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) stays open until
+`Test_EXCEL_UI_RunReleaseCertification` passes on the exact source. The bounded
+negative control for the v1.1.2 condition passed under
+[#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66): with that condition
+restored, the regression fails instead of hanging.
 
 Frame state is held per top-level window rather than once per process. In
 v1.1.2 a slot was proved by its owned style bits alone, which was a partial

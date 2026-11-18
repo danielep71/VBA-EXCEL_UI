@@ -645,6 +645,26 @@ measured against that baseline.
   failure and the recovery if Excel stops responding. That run has not been
   performed.
 
+- **Not yet certified.** Added the complete-caption regressions for
+  [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6), registered in the
+  title-bar pack and in the certification regression pack:
+  `TST_Case_TitleBarVisibilityRequiresCompleteCaption` (all readers, against
+  written expectations for no bits, `WS_BORDER` only, `WS_DLGFRAME` only, the
+  complete mask and the full owned set),
+  `TST_Case_TitleBarShowRejectsPartialCaptionBaseline` and
+  `TST_Case_TitleBarShowPublicPaths`. The two show cases run an all-zero
+  cold-start baseline, a non-zero captionless baseline, `WS_BORDER` only,
+  `WS_DLGFRAME` only, an already-visible no-op and a foreign captioned frame
+  through both `UI_ShowExcelUI` and `UI_SetExcelUI_WithResult`, and require
+  the complete caption, the expected owned bits and every unrelated bit
+  unchanged. Each run restores the entry style through the harness on every
+  exit and fails when it cannot. `tools/make_titlebar_mutant.py` gained
+  `--variant fallback|reader|readbacks|anybit`, which put the any-bit test back
+  for the matching decisions; the default `v112` control is unchanged.
+  CONTRIBUTING.md records the assertion each control must fail at. None of
+  these controls has been run on Excel, and `tests/test_make_titlebar_mutant.py`
+  checks them against a model of the show decision instead.
+
 - Strengthened static VBA analysis (#31): project reference and assignment
   resolution, procedure-local labels, exact procedure-end kinds, conditional
   declarations, known WinAPI contracts and bounded Err-preservation checks now
@@ -980,14 +1000,25 @@ measured against that baseline.
   crosses to the window. With the retained-Window check removed, the source
   predicts a failure at `TST_Case_TitleBarSameHwndGenerationReuse.Crossed` in
   the first pass; that control has not been run on Excel.
-- **Partial captionless-baseline correction; complete-mask verification remains
-  open** ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)).
-  **2026-10-28 status correction:** the merged show path consults
-  `HasBaseline` and reads the resulting style, but its any-bit checks accept
-  `WS_BORDER`-only or `WS_DLGFRAME`-only styles. Complete
-  `(style And WS_CAPTION) = WS_CAPTION` checks and the bounded,
-  host-restoring negative control under #66 remained required; that control
-  passed on 2026-11-14.
+- **Not yet certified.** A title bar is now visible only when the complete
+  `WS_CAPTION` mask is set ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)).
+  `WS_CAPTION` is `WS_BORDER` | `WS_DLGFRAME`, and the merged correction tested
+  `(style And WS_CAPTION) <> 0`, so a style or baseline carrying only one of
+  the two bits counted as a caption. The visibility reader, the show fallback
+  condition and both show readbacks (the no-op branch and the post-write
+  branch) now test `(style And WS_CAPTION) = WS_CAPTION`. A show uses the
+  stored baseline only when one was captured and it carries the complete
+  mask; a missing, all-zero, captionless, `WS_BORDER`-only or
+  `WS_DLGFRAME`-only baseline falls back to the full owned frame merged into
+  the live style, so unrelated bits are kept. A show whose readback lacks the
+  complete mask returns `False` with a `TitleBar` diagnostic, including on the
+  no-op branch. The demo's `Demo_TryGetTitleBarVisibility` and the test
+  harness's two visibility readers use the same rule, and the harness decides
+  it from `WS_BORDER` and `WS_DLGFRAME` separately, so the expectation is not a
+  copy of the production expression. The merged `HasBaseline` correction and
+  the bounded negative control under #66 (passed on 2026-11-14) are unchanged.
+  Supported public API unchanged. Needs
+  `Test_EXCEL_UI_RunReleaseCertification` on Excel before the issue closes.
 
 - Fixed four public destructive runners clearing a snapshot they had just
   refused because it belonged to the caller. Their precondition checks now run
@@ -1118,6 +1149,11 @@ measured against that baseline.
 
 ### 📖 Documentation
 
+- The README, INSTALLATION, CONTRIBUTING, the title-bar module header and the
+  procedure headers of the visibility reader and the show worker describe the
+  complete-mask rule for a title bar, `(style And WS_CAPTION) = WS_CAPTION`,
+  instead of only the zero-baseline case
+  ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)).
 - Brought the review finding crosswalk, the erratum to v1.1.2 and the
   release-blocker tables up to date with the issues as of 2026-11-15 (#48).
   Every disposition now starts with its issue's state, and the table names the
@@ -1468,8 +1504,9 @@ Ten throwaway variants were produced; none was committed. Their outcomes differ:
 
 Thus eight variants produced useful detecting failures, one generation control
 has insufficient isolation, and one attempt hung before #66 bounded it. #6 now has
-a completed negative control but still needs the complete composite `WS_CAPTION`
-mask correction, and remains open; #45 and #32 are closed. The #32 row records
+a completed negative control; its complete composite `WS_CAPTION` mask
+correction is implemented, not yet certified on Excel, and the issue remains
+open; #45 and #32 are closed. The #32 row records
 the earlier distinct-handle seam. The same-hWnd regression that replaced it
 passed on Excel on 2026-11-17; its mutant was checked against a model of the
 registry logic, not run on Excel.
@@ -1549,7 +1586,7 @@ Dispositions are as of 2026-11-15 and are updated with the issues.
 | `ICR-UI-112-P1-01` | v1.1.2 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | — | Open (v1.1.3); fail-closed restore certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
 | `ICR-UI-112-P2-01` | v1.1.2 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | — | Closed; certified on Excel 16.0 build 20430 x64 (2026-11-14) |
 | `ICR-UI-112-P2-02` | v1.1.2 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | — | Closed (v1.1.3); retained-Window generation identity merged (PR #63) and the same-numeric-hWnd regression certified on 2026-11-17 (PR #198) |
-| `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Reopened (v1.1.3); bounded negative control passed (#66, 2026-11-14); the composite `WS_CAPTION` mask correction is open |
+| `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Reopened (v1.1.3); bounded negative control passed (#66, 2026-11-14); the complete `WS_CAPTION` mask correction is implemented and not yet certified |
 | `ICR-UI-112-P2-04` | v1.1.2 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | — | Closed; corrected on `release/v1.1.3` at `32baef384ee306082483ea5dcaf40abfe3224118` |
 | `ICR-UI-112-P2-05` | v1.1.2 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | — | Open (v1.1.3) |
 | `ICR-UI-112-P2-06` | v1.1.2 | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | — | Reopened (v1.1.3) |
@@ -1590,10 +1627,11 @@ The captionless baseline (`ICR-UI-112-P2-03`,
 claim: the v1.1.2 entry does not list it. It is recorded here because #6 is
 reopened for v1.1.3. The title-bar recovery fallback covers an all-zero
 baseline, not a non-zero baseline without `WS_CAPTION`, and a visible baseline
-requires `WS_CAPTION`. Its bounded negative control passed on 2026-11-14
+requires the complete `WS_CAPTION` mask, `WS_BORDER` and `WS_DLGFRAME` together.
+Its bounded negative control passed on 2026-11-14
 under [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66), which is
-closed; the complete composite `WS_CAPTION` mask correction remains open
-under #6.
+closed; the complete-mask correction is implemented on `release/v1.1.3`, not
+yet certified on Excel, and #6 stays open until it is.
 
 ### ⚠️ Release-blocker status
 
