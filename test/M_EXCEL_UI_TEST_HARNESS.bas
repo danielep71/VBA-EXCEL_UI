@@ -26,13 +26,15 @@ Option Private Module
 '   - Fault injection: the one-shot post-capture fault that
 '     Test_EXCEL_UI_RunOwnershipCleanupChecks arms and the runner it checks
 '     takes, and the one-shot certification record fault
-'   - Certification records and evidence: one record of unit outcomes and
-'     skips that publishes an entry only once it is complete, snapshots a
-'     unit left behind, the verdict, and the JSON and text evidence files
+'   - Certification records and evidence: one record of unit outcomes,
+'     skips, cleanup findings and unverifiable surfaces that publishes an
+'     entry only once it is complete, snapshots a unit left behind, the
+'     verdict, and the JSON and text evidence files
 '   - Cleanup helpers: entry title-bar style restoration, cleanup-failure
 '     reporting, and best-effort window and workbook closing
 '   - Snapshot / restore helpers: the harness's own capture and restore of the
-'     managed Excel UI state, and the capped settle delay
+'     managed Excel UI state, which reports every step it could not complete
+'     as a structured finding, and the capped settle delay
 '   - Assertion helpers, including the structured-result assertions that
 '     report the failure count and list they rejected
 '   - State read/write helpers, including the GWL_STYLE read and write and the
@@ -46,10 +48,15 @@ Option Private Module
 '     entry that cannot be stored sets the record's scalar RecordFailed
 '     flag, which forces FAIL | INCOMPLETE and is named in both evidence
 '     documents; TST_CertResetCounters clears it before the next run
+'   - A cleanup finding is an entry of the same record, so a difference that
+'     cannot be stored fails the run, and any finding makes cleanup FAILED
+'     whatever the caller passes to the composer
 '   - The record fault is one-shot, and certification disarms it on start
+'   - The run fault is one-shot: the next certification call takes it
 '   - The post-capture fault is one-shot: taking it disarms it
 '   - Per-window test state is captured and restored by Application.Windows
-'     index
+'     index. The certification cleanup baseline does not use this capture: it
+'     keeps its own state, keyed by the retained Window objects
 '   - The log sink is off unless TST_LogSinkStart names a file; with no
 '     sink TST_Log prints exactly what it printed before the sink existed
 '   - Entry frame styles are put back through the harness WinAPI helpers,
@@ -71,6 +78,11 @@ Option Private Module
 '                WS_DLGFRAME separately, so a partial caption mask is not a
 '                visible title bar and the readers do not repeat the
 '                production predicate (#6).
+'   2026-11-18 - Certification records cleanup findings and unverifiable
+'                surfaces through the same record, composes cleanup=FAILED from
+'                any finding, and reports them in both documents. TST_RestoreState
+'                returns structured findings. Added a one-shot run fault
+'                that forces a cleanup failure (#35).
 '   2026-11-16 - TST_Log mirrors each line to an opt-in UTF-8 log sink,
 '                and a failed write is kept for the caller's verdict
 '                instead of being raised (#197).
@@ -119,8 +131,13 @@ Option Private Module
 
     'Kinds of certification record entry. A case kind is added here when
     'certification records cases (#42); TST_CertTryAppendEntry stores every kind.
+    'A finding is a difference between the exit state and the entry baseline and
+    'fails cleanup. An unverified entry names a surface cleanup could not compare
+    'and does not fail it.
     Public Const TEST_CERT_ENTRY_UNIT As Long = 1  'Entry: one unit outcome
     Public Const TEST_CERT_ENTRY_SKIP As Long = 2  'Entry: one skipped case
+    Public Const TEST_CERT_ENTRY_FINDING As Long = 3  'Entry: one cleanup finding
+    Public Const TEST_CERT_ENTRY_UNVERIFIED As Long = 4  'Entry: one surface cleanup could not compare
 
     'The parallel buffers of a certification record, in the order they grow.
     'TST_CertRecordIsConsistent walks them from the first to the last.
@@ -142,6 +159,9 @@ Option Private Module
     Public Const TEST_CERT_RECORD_FAULT_NONE As Long = 0  'No record fault armed
     Public Const TEST_CERT_RECORD_FAULT_FIRST As Long = 1  'Fail a buffer's first allocation
     Public Const TEST_CERT_RECORD_FAULT_GROWTH As Long = 2  'Fail an allocated buffer's growth
+
+    Public Const TEST_CERT_RUN_FAULT_NONE As Long = 0  'No run fault armed
+    Public Const TEST_CERT_RUN_FAULT_CLEANUP As Long = 1  'Run no unit; alter the host before cleanup is verified
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -256,8 +276,17 @@ Option Private Module
 'but an entry exists only once EntryCount includes it, and EntryCount grows
 'only after every buffer holds the complete entry. The invariants are
 '
-'    UnitCount + SkipCount = EntryCount >= 0
+'    UnitCount + SkipCount + FindingCount + UnverifiedCount = EntryCount >= 0
 '    every buffer is unallocated or 1-based, with UBound >= EntryCount
+'
+'Cleanup findings and unverified surfaces (#35) are entries of the same record,
+'stored by the same path, so
+'
+'    UnitCount + SkipCount + FindingCount + UnverifiedCount = EntryCount
+'
+'A finding has its identifier in EntryName and its detail in EntryDetail, and
+'any finding makes the cleanup verdict FAILED. CheckCount is the number of
+'comparisons cleanup completed.
 '
 'RecordFailed is the authoritative result when an entry cannot be stored. It
 'is a scalar, set before anything else is allocated, and it forces the
@@ -268,6 +297,9 @@ Public Type tCertRecord
     EntryCount          As Long                'Published entries
     UnitCount           As Long                'Published unit entries
     SkipCount           As Long                'Published skip entries
+    FindingCount        As Long                'Published cleanup findings
+    UnverifiedCount     As Long                'Published unverified surfaces
+    CheckCount          As Long                'Comparisons cleanup completed
     EntryKind()         As Long                'TEST_CERT_ENTRY_* per entry
     EntryName()         As String              'Unit name, or the skipping procedure
     EntryPassed()       As Boolean             'Unit outcome; FALSE for a skip
@@ -290,8 +322,8 @@ Public m_CertRecord                    As tCertRecord
 
 'Snapshots that units left behind, named by unit. Each one is released before
 'the next unit runs, so that one failure cannot fail every unit after it. The
-'exit state therefore no longer shows the leak, and the cleanup verdict reads
-'it from here instead.
+'exit state therefore no longer shows the leak, so the runner also records each
+'one as a cleanup finding. This text is kept for the unit-isolation case.
 Public m_CertLeakDetail                As String
 
 'One-shot record fault, consumed by the next buffer allocation it matches.
@@ -300,6 +332,13 @@ Public m_CertLeakDetail                As String
 'reach the next certification run.
 Private m_CertRecordFault               As Long
 Private m_CertRecordFaultBuffer         As Long
+
+'One-shot run fault, consumed by the next call of
+'Test_EXCEL_UI_RunReleaseCertification whether or not it fires. Only
+'TST_CertInjectRunFault arms it, and only the ownership-cleanup runner calls
+'that. It exists so that a cleanup failure can be forced and the outer call
+'seen to fail with it (#35).
+Private m_CertRunFault                  As Long
 
 'Post-capture fault injection, consumed by the first runner that reaches its
 'injection point. One-shot on purpose: a flag that stayed set would fault every
@@ -544,6 +583,88 @@ Private Function TST_CertTakeRecordFault( _
 End Function
 
 
+Public Sub TST_CertInjectRunFault( _
+    ByVal FaultKind As Long)
+
+'
+'==============================================================================
+' TST_CertInjectRunFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arm a one-shot fault for the next call of
+'   Test_EXCEL_UI_RunReleaseCertification.
+'
+' WHY THIS EXISTS
+'   A cleanup failure must fail the outer certification call with its
+'   diagnostic fields intact (#35). Certification leaves the host as it found
+'   it, so that outcome is unreachable without forcing it, and a full
+'   destructive run would be a poor way to check one comparison.
+'
+' INPUTS
+'   FaultKind
+'     TEST_CERT_RUN_FAULT_NONE disarms.
+'     TEST_CERT_RUN_FAULT_CLEANUP makes the run execute no unit, invert
+'     Application.DisplayStatusBar after the entry baseline is captured, and
+'     write no evidence file. Cleanup verification, the evidence and the raise
+'     are the real ones.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Cannot raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunOwnershipCleanupChecks
+'
+' NOTES
+'   The fault is consumed by the next certification call whether or not it
+'   fires, so a fault left armed cannot reach a later run. The caller restores
+'   the status bar itself; the run under fault does not.
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+        m_CertRunFault = FaultKind
+
+End Sub
+
+
+Public Function TST_CertTakeRunFault() As Long
+
+'
+'==============================================================================
+' TST_CertTakeRunFault
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Return the armed run fault and disarm it in the same step.
+'
+' WHY THIS EXISTS
+'   Reading and clearing separately would leave the fault armed on a path that
+'   read it and then failed, and the only reader acts on it at once.
+'
+' RETURNS
+'   The armed TEST_CERT_RUN_FAULT_* value, or TEST_CERT_RUN_FAULT_NONE.
+'
+' ERROR POLICY
+'   - Cannot raise.
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+        TST_CertTakeRunFault = m_CertRunFault
+        m_CertRunFault = TEST_CERT_RUN_FAULT_NONE
+
+End Function
+
+
 '
 '------------------------------------------------------------------------------
 '
@@ -688,6 +809,9 @@ Public Function TST_CertResetRecord( _
         Rec.EntryCount = 0
         Rec.UnitCount = 0
         Rec.SkipCount = 0
+        Rec.FindingCount = 0
+        Rec.UnverifiedCount = 0
+        Rec.CheckCount = 0
 
         Erase Rec.EntryKind
         Erase Rec.EntryName
@@ -944,6 +1068,444 @@ Private Function TST_CertRecordEntry( _
 End Function
 
 
+Public Function TST_CertAddFinding( _
+    ByRef Rec As tCertRecord, _
+    ByVal Code As String, _
+    ByVal Detail As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertAddFinding
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store one cleanup finding, a difference between the exit state and the
+'   entry baseline, in a certification record.
+'
+' WHY THIS EXISTS
+'   Cleanup used to join its differences into one string under On Error
+'   Resume Next, so a comparison that failed to run left no trace. A finding is
+'   an entry of the record, stored by the same path as a unit (#50): one that
+'   cannot be stored flags the record, which forces FAIL | INCOMPLETE.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to add to.
+'
+'   Code
+'     Stable machine-readable identifier, such as app.DisplayStatusBar.
+'
+'   Detail
+'     What differs, naming both values. Line breaks are replaced by spaces, so
+'     the finding stays one line in the text report.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => the finding is stored and counted.
+'     FALSE => it was not stored; Rec.RecordFailed is TRUE.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertAddCleanupEntry
+'
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_CERTIFICATION
+'   - TST_RestoreState
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+        TST_CertAddFinding = TST_CertAddCleanupEntry( _
+            Rec, TEST_CERT_ENTRY_FINDING, Code, Detail)
+
+End Function
+
+
+Public Function TST_CertAddUnverified( _
+    ByRef Rec As tCertRecord, _
+    ByVal Code As String, _
+    ByVal Detail As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertAddUnverified
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store the name of one surface that cleanup could not compare, in a
+'   certification record.
+'
+' WHY THIS EXISTS
+'   A surface that cannot be read or addressed must be named in the evidence,
+'   not treated as clean. It does not fail cleanup, because cleanup=OK claims
+'   only what it could verify, and the entry says what that excludes.
+'
+' INPUTS
+'   Rec / Code / Detail
+'     As TST_CertAddFinding.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the entry is stored; FALSE when it is not, in which case
+'     Rec.RecordFailed is TRUE.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertAddCleanupEntry
+'
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_CERTIFICATION
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+        TST_CertAddUnverified = TST_CertAddCleanupEntry( _
+            Rec, TEST_CERT_ENTRY_UNVERIFIED, Code, Detail)
+
+End Function
+
+
+Private Function TST_CertAddCleanupEntry( _
+    ByRef Rec As tCertRecord, _
+    ByVal Kind As Long, _
+    ByVal Code As String, _
+    ByVal Detail As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertAddCleanupEntry
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store one finding or one unverified surface, and make sure that an entry
+'   that was not stored is counted as a recording failure.
+'
+' WHY THIS EXISTS
+'   TST_CertTryAppendEntry flags the record from its own handler, but a failure
+'   before that handler is armed would return FALSE with nothing flagged.
+'   Comparing the failure count before and after closes that gap, as
+'   TST_CertRecordEntry does for units and skips.
+'
+' INPUTS
+'   Rec / Kind / Code / Detail
+'     The record, TEST_CERT_ENTRY_FINDING or TEST_CERT_ENTRY_UNVERIFIED, the
+'     identifier, and the detail.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the entry was stored and published.
+'
+' ERROR POLICY
+'   - Does not raise. An error flags the record.
+'
+' DEPENDENCIES
+'   - TST_CertTryAppendEntry
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - TST_CertAddFinding
+'   - TST_CertAddUnverified
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FailuresBefore      As Long            'Failure count before the append
+    Dim CleanDetail         As String          'Detail as a single line
+    Dim Stored              As Boolean         'TRUE once the entry is published
+    Dim FailNumber          As Long            'Error number of a failure
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertAddCleanupEntry = False
+        Stored = False
+
+        FailuresBefore = Rec.RecordFailCount
+
+'------------------------------------------------------------------------------
+' APPEND ENTRY
+'------------------------------------------------------------------------------
+    'One line, so the text report can list the entry as one line
+        CleanDetail = Replace(Replace(Detail, vbCr, " "), vbLf, " ")
+
+        Stored = TST_CertTryAppendEntry(Rec, Kind, Code, False, CleanDetail)
+
+    'A miss the append could not flag itself is still a recording failure
+        If Not Stored Then
+            If Rec.RecordFailCount = FailuresBefore Then
+                TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_WRITE, 0
+            End If
+        End If
+
+        TST_CertAddCleanupEntry = Stored
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Flag the record before anything else can allocate
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_WRITE, FailNumber
+
+        TST_CertAddCleanupEntry = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Public Sub TST_CertCountCheck( _
+    ByRef Rec As tCertRecord)
+
+'
+'==============================================================================
+' TST_CertCountCheck
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Count one comparison that cleanup completed.
+'
+' WHY THIS EXISTS
+'   cleanup=OK is only as strong as what was compared. The count is reported as
+'   cleanupChecked, and a clean verdict that compared nothing is rejected by the
+'   evidence validator.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record whose count is raised.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. The count saturates.
+'
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_CERTIFICATION
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+        If Rec.CheckCount < 2147483647 Then
+            Rec.CheckCount = Rec.CheckCount + 1
+        End If
+
+End Sub
+
+
+Public Function TST_CertEntryCodes( _
+    ByRef Rec As tCertRecord, _
+    ByVal Kind As Long) _
+    As String
+
+'
+'==============================================================================
+' TST_CertEntryCodes
+'------------------------------------------------------------------------------
+' PURPOSE
+'   List the identifiers of the findings or unverified surfaces of a record, in
+'   recording order, for a regression case to assert on.
+'
+' WHY THIS EXISTS
+'   A case that checks one finding must not depend on how many others the host
+'   produced, and a case that checks the order needs the order. Delimiting each
+'   identifier with a pipe lets InStr match whole identifiers.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to read. It is not changed.
+'
+'   Kind
+'     TEST_CERT_ENTRY_FINDING or TEST_CERT_ENTRY_UNVERIFIED.
+'
+' RETURNS
+'   String
+'     "|code1|code2|" in recording order; "|" when there is none. When the
+'     record cannot be read, "|UNREADABLE|".
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_CERTIFICATION
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the entries
+    Dim Codes               As String          'Identifiers listed so far
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertEntryCodes = "|UNREADABLE|"
+
+        If Not TST_CertRecordIsConsistent(Rec) Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' LIST IDENTIFIERS
+'------------------------------------------------------------------------------
+        Codes = "|"
+
+        For ScanIdx = 1 To Rec.EntryCount
+
+            If Rec.EntryKind(ScanIdx) = Kind Then
+                Codes = Codes & Rec.EntryName(ScanIdx) & "|"
+            End If
+
+        Next ScanIdx
+
+        TST_CertEntryCodes = Codes
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'An unreadable record is reported as one, never as an empty list
+        TST_CertEntryCodes = "|UNREADABLE|"
+
+        Resume Safe_Exit
+
+End Function
+
+
+Public Function TST_CertEntrySummary( _
+    ByRef Rec As tCertRecord, _
+    ByVal Kind As Long) _
+    As String
+
+'
+'==============================================================================
+' TST_CertEntrySummary
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Join the findings or unverified surfaces of a record into one line of
+'   "code: detail" items, in recording order.
+'
+' WHY THIS EXISTS
+'   The error certification raises, and the failure a regression pack raises
+'   when its state restoration did not complete, must carry what was found.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to read. It is not changed.
+'
+'   Kind
+'     TEST_CERT_ENTRY_FINDING or TEST_CERT_ENTRY_UNVERIFIED.
+'
+' RETURNS
+'   String
+'     The items joined by " | "; empty when there is none. When the record
+'     cannot be read, "the record could not be read".
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'   - TST_CertAppendDetail
+'
+' CALLED FROM
+'   - TST_RecordRestoreFailure
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the entries
+    Dim Summary             As String          'Items joined so far
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertEntrySummary = "the record could not be read"
+
+        If Not TST_CertRecordIsConsistent(Rec) Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' JOIN ITEMS
+'------------------------------------------------------------------------------
+        For ScanIdx = 1 To Rec.EntryCount
+
+            If Rec.EntryKind(ScanIdx) = Kind Then
+                Summary = TST_CertAppendDetail(Summary, _
+                    Rec.EntryName(ScanIdx) & ": " & Rec.EntryDetail(ScanIdx))
+            End If
+
+        Next ScanIdx
+
+        TST_CertEntrySummary = Summary
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'A summary that cannot be read must not look like an empty one
+        TST_CertEntrySummary = "the record could not be read"
+
+        Resume Safe_Exit
+
+End Function
+
+
 Public Function TST_CertTryAppendEntry( _
     ByRef Rec As tCertRecord, _
     ByVal Kind As Long, _
@@ -966,25 +1528,29 @@ Public Function TST_CertTryAppendEntry( _
 '   an entry that one array did not hold, and the verdict and evidence loops
 '   then read past the end of that array with every error suppressed (#50).
 '
-'   This is the one append path for every kind of entry: units and skips
-'   today, and cases when certification records them (#42). A new kind adds
-'   a TEST_CERT_ENTRY_* value and its count, not a new set of arrays.
+'   This is the one append path for every kind of entry: units, skips,
+'   cleanup findings and unverified surfaces today, and cases when
+'   certification records them (#42). A new kind adds a TEST_CERT_ENTRY_* value
+'   and its count, not a new set of arrays.
 '
 ' INPUTS
 '   Rec
 '     ByRef. The record to append to.
 '
 '   Kind
-'     TEST_CERT_ENTRY_UNIT or TEST_CERT_ENTRY_SKIP.
+'     TEST_CERT_ENTRY_UNIT, TEST_CERT_ENTRY_SKIP, TEST_CERT_ENTRY_FINDING or
+'     TEST_CERT_ENTRY_UNVERIFIED.
 '
 '   EntryName
-'     Unit name, or the procedure that skipped.
+'     Unit name, the procedure that skipped, or the identifier of a finding or
+'     unverified surface.
 '
 '   Passed
-'     Unit outcome. FALSE for a skip.
+'     Unit outcome. FALSE for every other kind.
 '
 '   Detail
-'     Unit failure text, or the skip reason.
+'     Unit failure text, the skip reason, or the detail of a finding or
+'     unverified surface.
 '
 ' RETURNS
 '   Boolean
@@ -1019,10 +1585,12 @@ Public Function TST_CertTryAppendEntry( _
 '
 ' CALLED FROM
 '   - TST_CertRecordEntry
+'   - TST_CertAddCleanupEntry
 '   - TST_CertCheckRecordFault
 '   - TST_Case_CertRecordFailsClosed
 '
 ' UPDATED
+'   2026-11-18 - Also stores cleanup findings and unverified surfaces (#35).
 '   2026-11-16 - Added (#50).
 '==============================================================================
 '
@@ -1047,9 +1615,14 @@ Public Function TST_CertTryAppendEntry( _
     'An entry no evidence section reads would be stored and never reported
         Stage = TEST_CERT_RECFAIL_KIND
 
-        If Kind <> TEST_CERT_ENTRY_UNIT And Kind <> TEST_CERT_ENTRY_SKIP Then
+        If Kind <> TEST_CERT_ENTRY_UNIT And _
+            Kind <> TEST_CERT_ENTRY_SKIP And _
+            Kind <> TEST_CERT_ENTRY_FINDING And _
+            Kind <> TEST_CERT_ENTRY_UNVERIFIED Then
+
             TST_CertMarkRecordFailure Rec, Stage, 0
             GoTo Safe_Exit
+
         End If
 
     'Growing a record whose buffers already disagree with its counts would
@@ -1086,11 +1659,21 @@ Public Function TST_CertTryAppendEntry( _
 ' PUBLISH
 '------------------------------------------------------------------------------
     'Scalar assignments only; EntryCount last, once the entry is complete
-        If Kind = TEST_CERT_ENTRY_UNIT Then
-            Rec.UnitCount = Rec.UnitCount + 1
-        Else
-            Rec.SkipCount = Rec.SkipCount + 1
-        End If
+        Select Case Kind
+
+            Case TEST_CERT_ENTRY_UNIT
+                Rec.UnitCount = Rec.UnitCount + 1
+
+            Case TEST_CERT_ENTRY_SKIP
+                Rec.SkipCount = Rec.SkipCount + 1
+
+            Case TEST_CERT_ENTRY_FINDING
+                Rec.FindingCount = Rec.FindingCount + 1
+
+            Case Else
+                Rec.UnverifiedCount = Rec.UnverifiedCount + 1
+
+        End Select
 
         Rec.EntryCount = NewIndex
 
@@ -1435,7 +2018,7 @@ Public Function TST_CertRecordIsConsistent( _
 '
 ' RETURNS
 '   Boolean
-'     TRUE when the counts are non-negative, UnitCount + SkipCount equals
+'     TRUE when the counts are non-negative, the four kind counts add up to
 '     EntryCount, and every buffer is either unallocated with EntryCount = 0
 '     or 1-based with an upper bound of at least EntryCount.
 '
@@ -1475,10 +2058,13 @@ Public Function TST_CertRecordIsConsistent( _
     'The kind counts partition the published entries
         Consistent = (Rec.EntryCount >= 0) And _
             (Rec.UnitCount >= 0) And _
-            (Rec.SkipCount >= 0)
+            (Rec.SkipCount >= 0) And _
+            (Rec.FindingCount >= 0) And _
+            (Rec.UnverifiedCount >= 0)
 
         If Consistent Then
-            Consistent = (Rec.UnitCount + Rec.SkipCount = Rec.EntryCount)
+            Consistent = (Rec.UnitCount + Rec.SkipCount + _
+                Rec.FindingCount + Rec.UnverifiedCount = Rec.EntryCount)
         End If
 
 '------------------------------------------------------------------------------
@@ -1521,7 +2107,7 @@ End Function
 Public Sub TST_CertComposeEvidence( _
     ByRef Rec As tCertRecord, _
     ByVal CleanupOK As Boolean, _
-    ByVal CleanupDetail As String, _
+    ByRef CleanupDetail As String, _
     ByRef UnitsFailed As Long, _
     ByRef Complete As Boolean, _
     ByRef Passed As Boolean, _
@@ -1552,7 +2138,10 @@ Public Sub TST_CertComposeEvidence( _
 '     ByRef. The record to report. A failure found while reading it flags it.
 '
 '   CleanupOK / CleanupDetail
-'     Cleanup verdict computed by the caller.
+'     Cleanup verdict computed by the caller, outside the record. Cleanup is
+'     also FAILED whenever the record holds a finding, whatever CleanupOK says.
+'     CleanupDetail is ByRef: on return it holds the caller's detail followed
+'     by the detail of every finding, joined by " | ".
 '
 '   UnitsFailed / Complete / Passed / Verdict / RecordingDetail /
 '   JsonText / ReportText
@@ -1567,9 +2156,13 @@ Public Sub TST_CertComposeEvidence( _
 '                    mismatch or a failed read flags the record and lists
 '                    nothing
 '   2  verdict       Complete requires no skip and no recording failure;
-'                    Passed requires Complete, no failed unit and cleanup OK
-'   3  documents     JSON with "recording" and "recordingDetail", and a text
-'                    report with a RECORDING line when recording failed
+'                    Passed requires Complete, no failed unit, no cleanup
+'                    finding and cleanup OK
+'   3  documents     JSON with "cleanupFindings", "cleanupUnverified",
+'                    "cleanupChecked", "recording" and "recordingDetail", and a
+'                    text report with a CLEANUP line per finding, an UNVERIFIED
+'                    line per unverified surface, and a RECORDING line when
+'                    recording failed
 '
 ' ERROR POLICY
 '   - Does not raise. An error flags the record with
@@ -1582,6 +2175,7 @@ Public Sub TST_CertComposeEvidence( _
 '   - TST_CertBuildEntryLists
 '   - TST_CertVerdictLine
 '   - TST_CertRecordingDetail
+'   - TST_CertAppendDetail
 '   - TST_CertBuildJsonEvidence
 '   - TST_CertBuildTextReport
 '   - TST_CertMarkRecordFailure
@@ -1592,6 +2186,9 @@ Public Sub TST_CertComposeEvidence( _
 '   - TST_Case_CertRecordFailsClosed
 '
 ' UPDATED
+'   2026-11-18 - Cleanup is FAILED whenever the record holds a finding, and
+'                both documents list the findings and unverified surfaces
+'                (#35).
 '   2026-11-16 - Added (#50).
 '==============================================================================
 '
@@ -1603,6 +2200,13 @@ Public Sub TST_CertComposeEvidence( _
     Dim SkipJson            As String          'skipDetail members
     Dim UnitLines           As String          'Unit lines of the report
     Dim SkipLines           As String          'Skip lines of the report
+    Dim FindingJson         As String          'cleanupFindings members
+    Dim UnverifiedJson      As String          'cleanupUnverified members
+    Dim FindingLines        As String          'CLEANUP lines of the report
+    Dim UnverifiedLines     As String          'UNVERIFIED lines of the report
+    Dim FindingSummary      As String          'Finding details joined
+    Dim CallerDetail        As String          'Detail the caller passed in
+    Dim CleanupPassed       As Boolean         'Cleanup verdict after the findings
     Dim FailNumber          As Long            'Error number of a failure
 
 '------------------------------------------------------------------------------
@@ -1629,7 +2233,12 @@ Public Sub TST_CertComposeEvidence( _
             UnitJson:=UnitJson, _
             SkipJson:=SkipJson, _
             UnitLines:=UnitLines, _
-            SkipLines:=SkipLines
+            SkipLines:=SkipLines, _
+            FindingJson:=FindingJson, _
+            UnverifiedJson:=UnverifiedJson, _
+            FindingLines:=FindingLines, _
+            UnverifiedLines:=UnverifiedLines, _
+            FindingSummary:=FindingSummary)
 
 '------------------------------------------------------------------------------
 ' DETERMINE VERDICT
@@ -1637,8 +2246,16 @@ Public Sub TST_CertComposeEvidence( _
     'Decided after the entries were read, so a failure found there counts.
     'Completeness and correctness are separate questions: a run that skipped
     'a mandatory unit, or could not record one, is not complete.
+    '
+    'Cleanup is judged on the record as well as on the caller's verdict: a
+    'finding fails it whatever the caller passed, so no caller can store a
+    'difference and still report cleanup OK.
+        CallerDetail = CleanupDetail
+        CleanupPassed = CleanupOK And (Rec.FindingCount = 0)
+        CleanupDetail = TST_CertAppendDetail(CleanupDetail, FindingSummary)
+
         Complete = (Rec.SkipCount = 0) And Not Rec.RecordFailed
-        Passed = (UnitsFailed = 0) And CleanupOK And Complete
+        Passed = (UnitsFailed = 0) And CleanupPassed And Complete
 
         Verdict = TST_CertVerdictLine( _
             Passed:=Passed, _
@@ -1646,7 +2263,7 @@ Public Sub TST_CertComposeEvidence( _
             Units:=Rec.UnitCount, _
             UnitsFailed:=UnitsFailed, _
             Skipped:=Rec.SkipCount, _
-            CleanupOK:=CleanupOK)
+            CleanupOK:=CleanupPassed)
 
         If Rec.RecordFailed Then
             RecordingDetail = TST_CertRecordingDetail(Rec)
@@ -1659,21 +2276,25 @@ Public Sub TST_CertComposeEvidence( _
         JsonText = TST_CertBuildJsonEvidence( _
             Rec:=Rec, _
             UnitsFailed:=UnitsFailed, _
-            CleanupOK:=CleanupOK, _
+            CleanupOK:=CleanupPassed, _
             CleanupDetail:=CleanupDetail, _
             Complete:=Complete, _
             Passed:=Passed, _
             RecordingDetail:=RecordingDetail, _
             UnitJson:=UnitJson, _
-            SkipJson:=SkipJson)
+            SkipJson:=SkipJson, _
+            FindingJson:=FindingJson, _
+            UnverifiedJson:=UnverifiedJson)
 
         ReportText = TST_CertBuildTextReport( _
             Rec:=Rec, _
             Verdict:=Verdict, _
-            CleanupDetail:=CleanupDetail, _
+            CleanupDetail:=CallerDetail, _
             RecordingDetail:=RecordingDetail, _
             UnitLines:=UnitLines, _
-            SkipLines:=SkipLines)
+            SkipLines:=SkipLines, _
+            FindingLines:=FindingLines, _
+            UnverifiedLines:=UnverifiedLines)
 
 '------------------------------------------------------------------------------
 ' RETURN
@@ -1706,7 +2327,12 @@ Private Function TST_CertBuildEntryLists( _
     ByRef UnitJson As String, _
     ByRef SkipJson As String, _
     ByRef UnitLines As String, _
-    ByRef SkipLines As String) _
+    ByRef SkipLines As String, _
+    ByRef FindingJson As String, _
+    ByRef UnverifiedJson As String, _
+    ByRef FindingLines As String, _
+    ByRef UnverifiedLines As String, _
+    ByRef FindingSummary As String) _
     As Boolean
 
 '
@@ -1714,8 +2340,8 @@ Private Function TST_CertBuildEntryLists( _
 ' TST_CertBuildEntryLists
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Read every published entry once and compose the unit and skip sections
-'   of both evidence documents.
+'   Read every published entry once and compose the unit, skip, finding and
+'   unverified sections of both evidence documents.
 '
 ' WHY THIS EXISTS
 '   Reading the record in one pass, after its invariants are checked, means
@@ -1730,6 +2356,15 @@ Private Function TST_CertBuildEntryLists( _
 '     ByRef outputs: the failed-unit count, the members of the unitResults
 '     and skipDetail arrays, and the unit and skip lines of the report.
 '
+'   FindingJson / UnverifiedJson / FindingLines / UnverifiedLines
+'     ByRef outputs: the members of the cleanupFindings and cleanupUnverified
+'     arrays, and the CLEANUP and UNVERIFIED lines of the report. A member is
+'     {"seq":n,"code":"...","detail":"..."}, numbered from 1 in recording
+'     order, and a line is "code | detail".
+'
+'   FindingSummary
+'     ByRef output: the details of the findings joined by " | ".
+'
 ' RETURNS
 '   Boolean
 '     TRUE  => every entry was read, and the kinds read match the counts.
@@ -1742,12 +2377,14 @@ Private Function TST_CertBuildEntryLists( _
 ' DEPENDENCIES
 '   - TST_CertRecordIsConsistent
 '   - TST_CertJsonEscape
+'   - TST_CertAppendDetail
 '   - TST_CertMarkRecordFailure
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
 '
 ' UPDATED
+'   2026-11-18 - Also lists cleanup findings and unverified surfaces (#35).
 '   2026-11-16 - Added (#50).
 '==============================================================================
 '
@@ -1758,6 +2395,8 @@ Private Function TST_CertBuildEntryLists( _
     Dim ScanIdx             As Long            'Cursor over the entries
     Dim UnitsSeen           As Long            'Unit entries read
     Dim SkipsSeen           As Long            'Skip entries read
+    Dim FindingsSeen        As Long            'Finding entries read
+    Dim UnverifiedSeen      As Long            'Unverified entries read
     Dim FailedSeen          As Long            'Failed units read
     Dim SkipText            As String          'One skip, as it is reported
     Dim Matched             As Boolean         'TRUE while kinds match counts
@@ -1771,6 +2410,11 @@ Private Function TST_CertBuildEntryLists( _
         SkipJson = vbNullString
         UnitLines = vbNullString
         SkipLines = vbNullString
+        FindingJson = vbNullString
+        UnverifiedJson = vbNullString
+        FindingLines = vbNullString
+        UnverifiedLines = vbNullString
+        FindingSummary = vbNullString
 
         TST_CertBuildEntryLists = False
 
@@ -1830,6 +2474,45 @@ Private Function TST_CertBuildEntryLists( _
                         SkipJson = SkipJson & """" & TST_CertJsonEscape(SkipText) & """"
                         SkipLines = SkipLines & "  SKIP  " & SkipText & vbNewLine
 
+                    Case TEST_CERT_ENTRY_FINDING
+                        FindingsSeen = FindingsSeen + 1
+
+                        If FindingsSeen > 1 Then
+                            FindingJson = FindingJson & ","
+                        End If
+
+                        FindingJson = FindingJson & "{""seq"":" & _
+                            CStr(FindingsSeen) & _
+                            ",""code"":""" & _
+                            TST_CertJsonEscape(Rec.EntryName(ScanIdx)) & """" & _
+                            ",""detail"":""" & _
+                            TST_CertJsonEscape(Rec.EntryDetail(ScanIdx)) & """}"
+
+                        FindingLines = FindingLines & "  CLEANUP  " & _
+                            Rec.EntryName(ScanIdx) & " | " & _
+                            Rec.EntryDetail(ScanIdx) & vbNewLine
+
+                        FindingSummary = TST_CertAppendDetail(FindingSummary, _
+                            Rec.EntryDetail(ScanIdx))
+
+                    Case TEST_CERT_ENTRY_UNVERIFIED
+                        UnverifiedSeen = UnverifiedSeen + 1
+
+                        If UnverifiedSeen > 1 Then
+                            UnverifiedJson = UnverifiedJson & ","
+                        End If
+
+                        UnverifiedJson = UnverifiedJson & "{""seq"":" & _
+                            CStr(UnverifiedSeen) & _
+                            ",""code"":""" & _
+                            TST_CertJsonEscape(Rec.EntryName(ScanIdx)) & """" & _
+                            ",""detail"":""" & _
+                            TST_CertJsonEscape(Rec.EntryDetail(ScanIdx)) & """}"
+
+                        UnverifiedLines = UnverifiedLines & "  UNVERIFIED  " & _
+                            Rec.EntryName(ScanIdx) & " | " & _
+                            Rec.EntryDetail(ScanIdx) & vbNewLine
+
                     Case Else
                         Matched = False
 
@@ -1845,7 +2528,10 @@ Private Function TST_CertBuildEntryLists( _
 
     'Every published entry must have been read as the kind it was counted as
         If Matched Then
-            Matched = (UnitsSeen = Rec.UnitCount) And (SkipsSeen = Rec.SkipCount)
+            Matched = (UnitsSeen = Rec.UnitCount) And _
+                (SkipsSeen = Rec.SkipCount) And _
+                (FindingsSeen = Rec.FindingCount) And _
+                (UnverifiedSeen = Rec.UnverifiedCount)
         End If
 
 '------------------------------------------------------------------------------
@@ -1862,6 +2548,11 @@ Private Function TST_CertBuildEntryLists( _
             SkipJson = vbNullString
             UnitLines = vbNullString
             SkipLines = vbNullString
+            FindingJson = vbNullString
+            UnverifiedJson = vbNullString
+            FindingLines = vbNullString
+            UnverifiedLines = vbNullString
+            FindingSummary = vbNullString
         End If
 
 '------------------------------------------------------------------------------
@@ -1885,6 +2576,11 @@ Err_Handler:
         SkipJson = vbNullString
         UnitLines = vbNullString
         SkipLines = vbNullString
+        FindingJson = vbNullString
+        UnverifiedJson = vbNullString
+        FindingLines = vbNullString
+        UnverifiedLines = vbNullString
+        FindingSummary = vbNullString
 
         TST_CertBuildEntryLists = False
 
@@ -2109,7 +2805,9 @@ Public Function TST_CertBuildJsonEvidence( _
     ByVal Passed As Boolean, _
     ByVal RecordingDetail As String, _
     ByVal UnitJson As String, _
-    ByVal SkipJson As String) _
+    ByVal SkipJson As String, _
+    ByVal FindingJson As String, _
+    ByVal UnverifiedJson As String) _
     As String
 
 '
@@ -2139,13 +2837,17 @@ Public Function TST_CertBuildJsonEvidence( _
 '   RecordingDetail
 '     Text naming a recording failure; empty when recording succeeded.
 '
-'   UnitJson / SkipJson
-'     Members of the unitResults and skipDetail arrays, composed by
-'     TST_CertBuildEntryLists after the record's invariants were checked.
+'   UnitJson / SkipJson / FindingJson / UnverifiedJson
+'     Members of the unitResults, skipDetail, cleanupFindings and
+'     cleanupUnverified arrays, composed by TST_CertBuildEntryLists after the
+'     record's invariants were checked.
 '
 ' RETURNS
 '   String
-'     A single-line JSON document.
+'     A single-line JSON document. Cleanup is reported as "cleanup",
+'     "cleanupDetail", "cleanupFindings" (every difference found),
+'     "cleanupUnverified" (every surface named as not compared) and
+'     "cleanupChecked" (the comparisons completed).
 '
 ' ERROR POLICY
 '   - Does not raise. A field that cannot be read is reported as unknown.
@@ -2164,6 +2866,8 @@ Public Function TST_CertBuildJsonEvidence( _
 '   describe the build that is executing rather than what the host reports.
 '
 ' UPDATED
+'   2026-11-18 - Reports "cleanupFindings", "cleanupUnverified" and
+'                "cleanupChecked" (#35).
 '   2026-11-16 - Reads the record it is given, and reports "recording" and
 '                "recordingDetail" (#50).
 '   2026-08-19
@@ -2221,6 +2925,9 @@ Public Function TST_CertBuildJsonEvidence( _
             ",""skipped"":" & CStr(Rec.SkipCount) & _
             ",""cleanup"":""" & IIf(CleanupOK, "OK", "FAILED") & """" & _
             ",""cleanupDetail"":""" & TST_CertJsonEscape(CleanupDetail) & """" & _
+            ",""cleanupFindings"":[" & FindingJson & "]" & _
+            ",""cleanupUnverified"":[" & UnverifiedJson & "]" & _
+            ",""cleanupChecked"":" & CStr(Rec.CheckCount) & _
             ",""recording"":""" & IIf(Recorded, "OK", "FAILED") & """" & _
             ",""recordingDetail"":""" & TST_CertJsonEscape(RecordingDetail) & """" & _
             ",""complete"":" & IIf(Complete And Recorded, "true", "false") & _
@@ -2311,7 +3018,9 @@ Public Function TST_CertBuildTextReport( _
     ByVal CleanupDetail As String, _
     ByVal RecordingDetail As String, _
     ByVal UnitLines As String, _
-    ByVal SkipLines As String) _
+    ByVal SkipLines As String, _
+    ByVal FindingLines As String, _
+    ByVal UnverifiedLines As String) _
     As String
 
 '
@@ -2334,18 +3043,23 @@ Public Function TST_CertBuildTextReport( _
 '     Pre-composed verdict line.
 '
 '   CleanupDetail
-'     Cleanup findings; empty when cleanup passed.
+'     Cleanup detail the caller passed to the composer, outside the record;
+'     empty when there was none. The findings of the record are listed by
+'     FindingLines.
 '
 '   RecordingDetail
 '     Text naming a recording failure; empty when recording succeeded.
 '
-'   UnitLines / SkipLines
-'     Unit and skip lines composed by TST_CertBuildEntryLists.
+'   UnitLines / SkipLines / FindingLines / UnverifiedLines
+'     Unit, skip, CLEANUP and UNVERIFIED lines composed by
+'     TST_CertBuildEntryLists.
 '
 ' RETURNS
 '   String
 '     A multi-line report. A recording failure adds a RECORDING line directly
-'     under the RESULT line, named even when RecordingDetail is empty.
+'     under the RESULT line, named even when RecordingDetail is empty. Every
+'     cleanup finding is a CLEANUP line, and every surface cleanup could not
+'     compare is an UNVERIFIED line after them.
 '
 ' ERROR POLICY
 '   - Does not raise.
@@ -2354,6 +3068,7 @@ Public Function TST_CertBuildTextReport( _
 '   - TST_CertComposeEvidence
 '
 ' UPDATED
+'   2026-11-18 - Lists every cleanup finding and unverified surface (#35).
 '   2026-11-16 - Takes the composed lines and reports a recording failure
 '                (#50).
 '   2026-08-19
@@ -2397,11 +3112,15 @@ Public Function TST_CertBuildTextReport( _
 '------------------------------------------------------------------------------
     'One line per unit, in execution order. Skips are named, because an
     'unnamed skip is what this runner exists to stop happening.
-        Report = Report & UnitLines & SkipLines
+        Report = Report & UnitLines & SkipLines & FindingLines
 
         If Len(CleanupDetail) > 0 Then
             Report = Report & "  CLEANUP  " & CleanupDetail & vbNewLine
         End If
+
+    'What cleanup could not compare is named after what it did compare, so
+    'that a clean verdict says what it excludes
+        Report = Report & UnverifiedLines
 
 '------------------------------------------------------------------------------
 ' RETURN REPORT
@@ -2993,7 +3712,7 @@ Public Sub TST_SnapshotState( _
 End Sub
 
 
-Public Sub TST_RestoreState( _
+Public Function TST_RestoreState( _
     ByVal RibbonKnown As Boolean, _
     ByVal RibbonVisible As Boolean, _
     ByVal StatusBarVisible As Boolean, _
@@ -3004,30 +3723,71 @@ Public Sub TST_RestoreState( _
     ByRef WorkbookTabsVisible() As Boolean, _
     ByRef GridlinesVisible() As Boolean, _
     ByVal TitleBarKnown As Boolean, _
-    ByVal TitleBarVisible As Boolean)
+    ByVal TitleBarVisible As Boolean, _
+    ByRef Findings As tCertRecord) _
+    As Boolean
 
 '
 '==============================================================================
 ' TST_RestoreState
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Attempt to restore the pre-test Excel UI state after the regression run
+'   Attempt to restore the pre-test Excel UI state after the regression run,
+'   and report every step that did not complete.
 '
 ' WHY THIS EXISTS
-'   Regression tests should clean up after themselves as much as possible
+'   Regression tests should clean up after themselves as much as possible. A
+'   restoration that discards its failures reports a pass over a host it did
+'   not put back (#35), so each step is verified and a step that fails or does
+'   not stick is a structured finding.
 '
 ' INPUTS
 '   [Captured snapshot values]
 '     Pre-test UI state captured by TST_SnapshotState
 '
+'   Findings
+'     ByRef. A record that receives one finding per step that failed, with
+'     the identifier restore.<element>. The caller owns the record and
+'     decides what a finding costs.
+'
 ' RETURNS
-'   None
+'   Boolean
+'     TRUE  => every step completed and every written value read back as
+'              written.
+'     FALSE => at least one step failed, or the restoration itself raised;
+'              Findings says which.
+'
+' BEHAVIOR
+'   - Attempts every step, whatever an earlier one reported.
+'   - Restores the title bar through the structured API, then the Ribbon, then
+'     the application-level properties, then the window-level properties.
+'   - Reads each Boolean property back after writing it.
+'   - Reports a window count that differs from the captured one, because
+'     window-level state is restored by index and may then reach another
+'     window.
 '
 ' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Best-effort restore only
+'   - Does not raise. A step that raises, or the restoration as a whole, is
+'     reported as a finding, never discarded.
+'
+' DEPENDENCIES
+'   - TST_RestoreTitleBarElement
+'   - TST_RestoreBoolean
+'   - TST_RestoreWindowBoolean
+'   - TST_TrySetRibbonVisible
+'   - TST_CertAddFinding
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'   - TST_RunTitleBarOnlyPack
+'
+' NOTES
+'   This is the pack-level restoration. Certification judges the whole run
+'   against its own entry baseline afterwards, whatever this reports.
 '
 ' UPDATED
+'   2026-11-18 - Became a Function that reports every step it could not
+'                complete instead of suppressing it (#35).
 '   2026-07-25
 '==============================================================================
 '
@@ -3037,12 +3797,17 @@ Public Sub TST_RestoreState( _
     Dim i                   As Long            'Current window index during restore
     Dim WindowLimit         As Long            'Minimum of saved and current window counts
     Dim Msg                 As String          'Diagnostic message from helper routines
+    Dim AllRestored         As Boolean         'TRUE while every step has completed
+    Dim StepRestored        As Boolean         'Outcome of the step just attempted
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Suppress local restore failures so all restore steps are attempted
-        On Error Resume Next
+    'Every step reports for itself, so a failure in one cannot hide the rest
+        On Error GoTo Err_Handler
+
+        TST_RestoreState = False
+        AllRestored = True
 
 '------------------------------------------------------------------------------
 ' RESTORE TITLE-BAR STATE
@@ -3050,12 +3815,9 @@ Public Sub TST_RestoreState( _
     'Restore TitleBar first when its original state was captured successfully
         If TitleBarKnown Then
 
-            'Restore TitleBar via the public API using explicit enum values
-                If TitleBarVisible Then
-                    UI_SetExcelUI TitleBar:=UI_Show
-                Else
-                    UI_SetExcelUI TitleBar:=UI_Hide
-                End If
+            'Restore TitleBar through the structured API and keep its verdict
+                StepRestored = TST_RestoreTitleBarElement(TitleBarVisible, Findings)
+                AllRestored = AllRestored And StepRestored
 
             'Allow the UI a short time to settle
                 TST_WaitUI TEST_WAIT_SECONDS
@@ -3071,6 +3833,9 @@ Public Sub TST_RestoreState( _
             'Attempt Ribbon restore through the test helper
                 If Not TST_TrySetRibbonVisible(RibbonVisible, Msg) Then
                     TST_Log "TST_RestoreState", "Ribbon", Msg
+                    TST_CertAddFinding Findings, "restore.Ribbon", _
+                        "the Ribbon could not be restored | " & Msg
+                    AllRestored = False
                 End If
 
         End If
@@ -3078,33 +3843,59 @@ Public Sub TST_RestoreState( _
 '------------------------------------------------------------------------------
 ' RESTORE APPLICATION-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Restore StatusBar visibility directly
-        Application.DisplayStatusBar = StatusBarVisible
+    'Restore StatusBar visibility and read it back
+        StepRestored = TST_RestoreBoolean(Application, _
+            "DisplayStatusBar", StatusBarVisible, _
+            "Application.DisplayStatusBar", Findings)
+        AllRestored = AllRestored And StepRestored
 
-    'Restore ScrollBars visibility directly
-        Application.DisplayScrollBars = ScrollBarsVisible
+    'Restore ScrollBars visibility and read it back
+        StepRestored = TST_RestoreBoolean(Application, _
+            "DisplayScrollBars", ScrollBarsVisible, _
+            "Application.DisplayScrollBars", Findings)
+        AllRestored = AllRestored And StepRestored
 
-    'Restore FormulaBar visibility directly
-        Application.DisplayFormulaBar = FormulaBarVisible
+    'Restore FormulaBar visibility and read it back
+        StepRestored = TST_RestoreBoolean(Application, _
+            "DisplayFormulaBar", FormulaBarVisible, _
+            "Application.DisplayFormulaBar", Findings)
+        AllRestored = AllRestored And StepRestored
 
 '------------------------------------------------------------------------------
 ' RESTORE WINDOW-LEVEL STATE
 '------------------------------------------------------------------------------
-    'Compute the number of windows that can be restored safely by index
+    'A different window count means the captured index no longer names the same
+    'window, which the restoration cannot repair, so it is reported
         WindowLimit = Application.Windows.Count
+
+        If WindowCount <> WindowLimit Then
+            TST_CertAddFinding Findings, "restore.windowCount", _
+                "Application.Windows.Count is " & CStr(WindowLimit) & _
+                ", not the " & CStr(WindowCount) & " captured; window-level " & _
+                "state is restored by index and may reach another window"
+            AllRestored = False
+        End If
+
+    'Compute the number of windows that can be restored safely by index
         If WindowCount < WindowLimit Then WindowLimit = WindowCount
 
     'Restore each saved window state up to the common window count
         For i = 1 To WindowLimit
 
             'Restore the current window's Headings visibility
-                TST_TryRestoreWindowProp Application.Windows(i), "DisplayHeadings", HeadingsVisible(i)
+                StepRestored = TST_RestoreWindowBoolean(i, _
+                    "DisplayHeadings", HeadingsVisible(i), Findings)
+                AllRestored = AllRestored And StepRestored
 
             'Restore the current window's WorkbookTabs visibility
-                TST_TryRestoreWindowProp Application.Windows(i), "DisplayWorkbookTabs", WorkbookTabsVisible(i)
+                StepRestored = TST_RestoreWindowBoolean(i, _
+                    "DisplayWorkbookTabs", WorkbookTabsVisible(i), Findings)
+                AllRestored = AllRestored And StepRestored
 
             'Restore the current window's Gridlines visibility
-                TST_TryRestoreWindowProp Application.Windows(i), "DisplayGridlines", GridlinesVisible(i)
+                StepRestored = TST_RestoreWindowBoolean(i, _
+                    "DisplayGridlines", GridlinesVisible(i), Findings)
+                AllRestored = AllRestored And StepRestored
 
         Next i
 
@@ -3113,6 +3904,448 @@ Public Sub TST_RestoreState( _
 '------------------------------------------------------------------------------
     'Allow the UI a short time to settle after restoration
         TST_WaitUI TEST_WAIT_SECONDS
+
+        TST_RestoreState = AllRestored
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'The restoration itself raised: say so, and report failure
+        Msg = TST_BuildRuntimeErrorText
+
+        TST_CertAddFinding Findings, "restore.raised", _
+            "UI state restoration raised | " & Msg
+
+        TST_RestoreState = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Private Function TST_RestoreTitleBarElement( _
+    ByVal TitleBarVisible As Boolean, _
+    ByRef Findings As tCertRecord) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_RestoreTitleBarElement
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restore the captured title-bar visibility through the structured API and
+'   report a failure as a finding.
+'
+' WHY THIS EXISTS
+'   The fire-and-forget call discarded the failure list, so a title bar the API
+'   could not restore left no trace. The structured call returns it.
+'
+' INPUTS
+'   TitleBarVisible
+'     The title-bar visibility captured before the run.
+'
+'   Findings
+'     ByRef. Receives restore.TitleBar when the restoration fails.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the structured call reported success.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI_WithResult
+'   - TST_DescribeResultBuffers
+'   - TST_CertAddFinding
+'
+' CALLED FROM
+'   - TST_RestoreState
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Succeeded           As Boolean         'Structured result of the call
+    Dim FailureCount        As Long            'Structured failure count
+    Dim FailureList         As Variant         'Structured failure list
+    Dim Msg                 As String          'Diagnostic from an error
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_RestoreTitleBarElement = False
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+        If TitleBarVisible Then
+            Succeeded = UI_SetExcelUI_WithResult( _
+                TitleBar:=UI_Show, _
+                FailureCount:=FailureCount, _
+                FailureList:=FailureList)
+        Else
+            Succeeded = UI_SetExcelUI_WithResult( _
+                TitleBar:=UI_Hide, _
+                FailureCount:=FailureCount, _
+                FailureList:=FailureList)
+        End If
+
+        If Succeeded Then
+            TST_RestoreTitleBarElement = True
+        Else
+            TST_CertAddFinding Findings, "restore.TitleBar", _
+                "the title bar could not be restored through the API | " & _
+                TST_DescribeResultBuffers(FailureCount, FailureList)
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        Msg = TST_BuildRuntimeErrorText
+
+        TST_CertAddFinding Findings, "restore.TitleBar", _
+            "the title-bar restoration raised | " & Msg
+
+        TST_RestoreTitleBarElement = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Private Function TST_RestoreBoolean( _
+    ByVal Target As Object, _
+    ByVal PropName As String, _
+    ByVal Value As Boolean, _
+    ByVal Label As String, _
+    ByRef Findings As tCertRecord) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_RestoreBoolean
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Write one Boolean property and read it back, reporting a write that failed
+'   or did not stick as a finding.
+'
+' WHY THIS EXISTS
+'   A write that raises no error need not achieve the value. Reading it back is
+'   what makes the restoration a restoration.
+'
+' INPUTS
+'   Target / PropName / Value
+'     The object, its Boolean property and the value to write.
+'
+'   Label
+'     What the property is called in a finding.
+'
+'   Findings
+'     ByRef. Receives restore.<PropName> when the restoration fails.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the value was written and read back as written.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_TrySetBooleanProperty
+'   - TST_TryGetBooleanProperty
+'   - TST_CertAddFinding
+'
+' CALLED FROM
+'   - TST_RestoreState
+'   - TST_RestoreWindowBoolean
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ReadBack            As Boolean         'Value read after the write
+    Dim Msg                 As String          'Diagnostic from a helper or error
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_RestoreBoolean = False
+
+'------------------------------------------------------------------------------
+' WRITE AND READ BACK
+'------------------------------------------------------------------------------
+        If Not TST_TrySetBooleanProperty(Target, PropName, Value, Msg) Then
+            TST_Log "TST_RestoreState", "Restore." & PropName, Msg
+            TST_CertAddFinding Findings, "restore." & PropName, _
+                Label & " could not be restored | " & Msg
+
+        ElseIf Not TST_TryGetBooleanProperty(Target, PropName, ReadBack, Msg) Then
+            TST_CertAddFinding Findings, "restore." & PropName, _
+                Label & " was written but could not be read back | " & Msg
+
+        ElseIf ReadBack <> Value Then
+            TST_CertAddFinding Findings, "restore." & PropName, _
+                Label & " was written as " & CStr(Value) & _
+                " but reads " & CStr(ReadBack)
+
+        Else
+            TST_RestoreBoolean = True
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        Msg = TST_BuildRuntimeErrorText
+
+        TST_CertAddFinding Findings, "restore." & PropName, _
+            Label & " restoration raised | " & Msg
+
+        TST_RestoreBoolean = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Private Function TST_RestoreWindowBoolean( _
+    ByVal WindowIndex As Long, _
+    ByVal PropName As String, _
+    ByVal Value As Boolean, _
+    ByRef Findings As tCertRecord) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_RestoreWindowBoolean
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restore one Boolean property of the window at a collection index, and
+'   report a failure as a finding.
+'
+' WHY THIS EXISTS
+'   Fetching the window inside the helper keeps a window that has gone from
+'   raising in the caller, where it would end the loop over the others.
+'
+' INPUTS
+'   WindowIndex
+'     Application.Windows index captured by TST_SnapshotState.
+'
+'   PropName / Value
+'     The window's Boolean property and the value to write.
+'
+'   Findings
+'     ByRef. Receives restore.<PropName> when the restoration fails.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the value was written and read back as written.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_RestoreBoolean
+'   - TST_CertAddFinding
+'
+' CALLED FROM
+'   - TST_RestoreState
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim TargetWindow        As Object          'Window at the captured index
+    Dim Caption             As String          'Its caption, for the finding
+    Dim Msg                 As String          'Diagnostic from an error
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_RestoreWindowBoolean = False
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+        Set TargetWindow = Application.Windows(WindowIndex)
+
+        Caption = TargetWindow.Caption
+
+        TST_RestoreWindowBoolean = TST_RestoreBoolean( _
+            TargetWindow, PropName, Value, _
+            "Window " & CStr(WindowIndex) & " [" & Caption & "]." & PropName, _
+            Findings)
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        Msg = TST_BuildRuntimeErrorText
+
+        TST_CertAddFinding Findings, "restore." & PropName, _
+            "Window " & CStr(WindowIndex) & "." & PropName & _
+            " restoration raised | " & Msg
+
+        TST_RestoreWindowBoolean = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Public Sub TST_RecordRestoreFailure( _
+    ByVal RestoreOK As Boolean, _
+    ByRef Findings As tCertRecord, _
+    ByVal CallerProc As String, _
+    ByRef FailNumber As Long, _
+    ByRef FailSource As String, _
+    ByRef FailDescription As String)
+
+'
+'==============================================================================
+' TST_RecordRestoreFailure
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Make a state restoration that did not complete part of the caller's
+'   result: the failure the caller raises when it had none, or an addition to
+'   the one it already holds.
+'
+' WHY THIS EXISTS
+'   A pack that cannot put the UI back has not finished, however its
+'   assertions went. Logging the miss and returning normally would let the pack
+'   report a pass over a host it left altered (#35).
+'
+' INPUTS
+'   RestoreOK
+'     Result of TST_RestoreState. Initialize it to FALSE before the call, so a
+'     restoration that raised past the caller's handler counts as failed.
+'
+'   Findings
+'     ByRef. The record TST_RestoreState wrote its findings to.
+'
+'   CallerProc
+'     Calling procedure, used for the log line and the failure source.
+'
+'   FailNumber / FailSource / FailDescription
+'     ByRef. The caller's saved failure; zero when it has none.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - Does nothing when RestoreOK is TRUE and the record stored every finding.
+'   - With no saved failure, sets TEST_ERR_BASE + 82, the source
+'     CallerProc & ".StateRestored" and the findings.
+'   - With a saved failure, keeps its number and source and appends the
+'     findings to its description.
+'
+' ERROR POLICY
+'   - Does not raise and reads no Err field. The failure is set before any
+'     text is composed, so a composition that fails still leaves a failure.
+'
+' DEPENDENCIES
+'   - TST_CertEntrySummary
+'   - TST_Log
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'   - TST_RunTitleBarOnlyPack
+'
+' UPDATED
+'   2026-11-18 - Added (#35).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Summary             As String          'Findings joined as one line
+
+'------------------------------------------------------------------------------
+' DECIDE
+'------------------------------------------------------------------------------
+        If RestoreOK And Not Findings.RecordFailed Then
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' RECORD FAILURE
+'------------------------------------------------------------------------------
+    'The failure first, with text that cannot fail to build
+        If FailNumber = 0 Then
+            FailNumber = TEST_ERR_BASE + 82
+            FailSource = CallerProc & ".StateRestored"
+            FailDescription = "UI state restoration failed"
+        Else
+            FailDescription = FailDescription & _
+                " | UI state restoration failed"
+        End If
+
+    'Then the detail; a failure here leaves the failure above in place
+        On Error Resume Next
+
+        Summary = TST_CertEntrySummary(Findings, TEST_CERT_ENTRY_FINDING)
+
+        If Len(Summary) = 0 Then
+            Summary = "restoration did not complete"
+        End If
+
+        If Findings.RecordFailed Then
+            Summary = Summary & " | the findings could not all be stored"
+        End If
+
+        TST_Log CallerProc, "FAIL", "UI state restoration failed | " & Summary
+
+        FailDescription = FailDescription & " | " & Summary
 
 End Sub
 
@@ -4143,7 +5376,7 @@ End Sub
 '
 
 
-Private Function TST_TryGetBooleanProperty( _
+Public Function TST_TryGetBooleanProperty( _
     ByVal Target As Object, _
     ByVal PropertyName As String, _
     ByRef ValueOut As Boolean, _
@@ -4180,7 +5413,12 @@ Private Function TST_TryGetBooleanProperty( _
 ' ERROR POLICY
 '   - Does NOT raise to callers
 '
+' CALLED FROM
+'   - TST_RestoreBoolean
+'   - M_EXCEL_UI_TEST_CERTIFICATION
+'
 ' UPDATED
+'   2026-11-18 - Public, so that certification reads through it (#35).
 '   2026-07-25
 '==============================================================================
 '
@@ -4963,63 +6201,6 @@ Err_Handler:
 End Function
 
 
-Private Sub TST_TryRestoreWindowProp( _
-    ByVal W As Window, _
-    ByVal PropName As String, _
-    ByVal Value As Boolean)
-
-'
-'==============================================================================
-' TST_TryRestoreWindowProp
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Attempt to restore a specific Boolean Window property during test cleanup
-'
-' WHY THIS EXISTS
-'   The restore path must be best-effort and should log window-specific restore
-'   failures without interrupting later cleanup steps
-'
-' INPUTS
-'   W
-'     Target Excel window
-'
-'   PropName
-'     Window Boolean property name to restore
-'
-'   Value
-'     Boolean value to assign
-'
-' RETURNS
-'   None
-'
-' ERROR POLICY
-'   - Does NOT raise to callers
-'   - Logs any failure to the Immediate Window
-'
-' DEPENDENCIES
-'   - TST_TrySetBooleanProperty
-'   - TST_Log
-'
-' UPDATED
-'   2026-07-25
-'==============================================================================
-'
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim Msg                 As String          'Diagnostic message from the property-write helper
-
-'------------------------------------------------------------------------------
-' APPLY PROPERTY RESTORE
-'------------------------------------------------------------------------------
-    'Attempt to restore the requested Window property and log any failure
-        If Not TST_TrySetBooleanProperty(W, PropName, Value, Msg) Then
-            TST_Log "TST_RestoreState", "Restore." & PropName & " [" & W.Caption & "]", Msg
-        End If
-
-End Sub
-
-
 '
 '------------------------------------------------------------------------------
 '
@@ -5117,6 +6298,9 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 '------------------------------------------------------------------------------
     'Visibility needs the complete caption mask, decided from its two bits
         TST_TitleBarVisibleForHwndOrRaise = TST_StyleHasCompleteCaption(StyleValue)
+    'Visibility is carried by the caption bit alone
+        TST_TitleBarVisibleForHwndOrRaise = _
+            ((StyleValue And TST_WS_CAPTION) <> 0)
 
 End Function
 
@@ -6028,7 +7212,7 @@ Public Function TST_BuildApiFailureText( _
 End Function
 
 
-Private Function TST_BuildRuntimeErrorText() As String
+Public Function TST_BuildRuntimeErrorText() As String
 
 '
 '==============================================================================

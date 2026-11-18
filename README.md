@@ -560,8 +560,10 @@ happened by then, so redraw may well be suppressed — but the component cannot
 prove it caused that, so it owns nothing and the matching exit restores nothing.
 The host can therefore be left suppressed. No rollback is attempted, because a
 rollback would be a second write this scope could not verify either, and that is
-the behavior being removed. Detecting such a leftover at the end of a run
-belongs to certification.
+the behavior being removed. Release certification detects such a leftover: its
+cleanup comparison reports `ScreenUpdating` changing from `True` to `False` as a
+finding, before the regression case that causes it sets the host back
+([What `cleanup=OK` covers](#what-cleanup-ok-covers)).
 
 The `WithResult` APIs return:
 
@@ -620,7 +622,7 @@ Test_EXCEL_UI_RunSnapshotIdentity
 Test_EXCEL_UI_RunTitleBarSdiIdentity      ' destructive: opens and closes windows
 Test_EXCEL_UI_RunRibbonSdiProbe           ' characterization, asserts nothing
 Test_EXCEL_UI_RunCertificationSelfTest    ' standalone: a failed certification must re-raise
-Test_EXCEL_UI_RunOwnershipCleanupChecks   ' standalone: runner-owned snapshots are always released
+Test_EXCEL_UI_RunOwnershipCleanupChecks   ' standalone: runner-owned snapshots are always released; a forced cleanup failure fails certification
 ```
 
 To certify a release, run one command:
@@ -639,9 +641,9 @@ the demo checks, and writes one bundle with a log per runner and a
 `summary.txt` ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)).
 
 It executes every mandatory unit, counts units, failures, skips and cleanup
-separately, verifies afterwards that no snapshot, stray workbook or suppressed
-screen update was left behind, and emits a JSON document and a text report
-naming the exact Excel build the verdict was obtained on:
+separately, compares the host afterwards with a baseline of its entry state, and
+emits a JSON document and a text report naming the exact Excel build the verdict
+was obtained on:
 
 ```text
 RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
@@ -649,8 +651,64 @@ RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
 
 Completeness and correctness are reported separately on purpose. A run that
 skipped a mandatory unit is not a pass, whatever the assertions that did execute
-reported. Neither is a run that could not record a unit or a skip: it reports
-`FAIL | INCOMPLETE`, and both documents name the recording failure.
+reported. Neither is a run that could not record a unit, a skip or a cleanup
+finding: it reports `FAIL | INCOMPLETE`, and both documents name the recording
+failure.
+
+<a id="what-cleanup-ok-covers"></a>
+
+### What `cleanup=OK` covers
+
+Certification takes its own baseline of Excel before the first unit runs. It
+keeps the baseline in a local variable and reads it without
+`UI_CaptureExcelUIState`, so the cleanup check does not rest on the snapshot code
+it checks. It retains every `Window` open on entry as an object, and it compares
+windows by the handle each object reports, never with `Is`, because Excel
+returns a new wrapper from every read of `Application.ActiveWindow`.
+
+`cleanup=OK` means that everything in this table that could be read on entry was
+read again on exit and matched:
+
+| Compared with its entry value | Reported as a finding when |
+|---|---|
+| The EXCEL_UI snapshot slot | a snapshot is left behind, by a unit or at the end |
+| `Workbooks.Count` and `Application.Windows.Count` | either differs |
+| Each window open on entry | its retained `Window` no longer responds, reports another handle, or is missing from `Application.Windows` |
+| Windows in `Application.Windows` | one is there that was not open on entry, even when the count matches |
+| `DisplayStatusBar`, `DisplayScrollBars`, `DisplayFormulaBar`, `ScreenUpdating` | a value differs |
+| `DisplayHeadings`, `DisplayWorkbookTabs`, `DisplayGridlines` of each entry window | a value differs |
+| The title bar of each entry window, read from the frame handle that window reports | the caption mask (`WS_CAPTION` complete) or any owned frame bit differs |
+| Frame refresh debt and component ownership of each entry window's frame, through the read-only registry seam | either differs |
+| The active window | another window is active; I then activate the entry window again and report it if that fails |
+| The Ribbon of the entry active window | the value differs, compared only while that window is active |
+
+Every difference is one finding, with a stable code and both values, in the
+order of the table. Findings are listed in `certification.json`
+(`cleanupFindings`) and in `certification.txt` (`CLEANUP` lines), and any
+finding makes the verdict `cleanup=FAILED`. A comparison that raises is a
+finding too, and a finding the record cannot store makes the run
+`FAIL | INCOMPLETE`. The error that `Test_EXCEL_UI_RunReleaseCertification`
+raises for a failed run carries the verdict and every finding.
+
+`cleanup=OK` does not cover what the documents list as unverified
+(`cleanupUnverified` and `UNVERIFIED` lines), and it never treats an unverified
+surface as clean:
+
+- **The Ribbon of every other window.** The Ribbon is per window, and every
+  mechanism that reads it acts on the active window and accepts no target. Only
+  the Ribbon of the entry active window is compared, and only while that window
+  is active on exit; otherwise the comparison is listed as not made. I do not
+  claim that any other window's Ribbon was restored.
+- **Frame-registry entries of windows opened and closed during the run.** The
+  read-only seam answers for a handle, so it cannot enumerate them.
+- **Any value that could not be read on entry** (a window property of a chart
+  sheet, a handle that reads as zero), which is named when it is captured.
+- **Everything the component does not manage**, such as `Calculation`,
+  `EnableEvents`, `DisplayAlerts`, the status bar text or the selection.
+
+`cleanupChecked` counts the comparisons that completed, and the validator
+rejects `cleanup=OK` with none. `cleanup=OK` is a statement about this table on
+the host that ran it, not a proof that no host state changed.
 
 `Test_EXCEL_UI_RunAll` remains the interactive runner and is **not** the release
 gate. It opens and closes temporary windows and workbooks for its targeting and

@@ -414,11 +414,13 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   None
 '
 ' ERROR POLICY
-'   - Raises after restoration on assertion failure or unexpected error
+'   - Raises after restoration on assertion failure, unexpected error or an
+'     incomplete restoration
 '
 ' DEPENDENCIES
 '   - TST_SnapshotState
 '   - TST_RestoreState
+'   - TST_RecordRestoreFailure
 '   - TST_Case_TitleBarRoundTrip
 '   - TST_Case_TitleBarOwnedBitPreservation
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
@@ -436,6 +438,8 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 ' UPDATED
 '   2026-11-18 - Registered the complete-caption cases after the captionless
 '                baseline case (#6).
+'   2026-11-18 - Failed the pack when the UI state restoration did not
+'                complete (#35).
 '   2026-11-16 - Registered the same-hWnd generation case in place of the
 '                same-style handle-reuse case (#32).
 '   2026-11-06 - Put the entry frame's style back through the harness and
@@ -472,6 +476,9 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     Dim EntryFrameCaptured  As Boolean         'TRUE once EntryFrameStyle was read
     Dim FrameRestored       As Boolean         'TRUE once the style is back
     Dim FrameRestoreMsg     As String          'Diagnostic from the restoration
+
+    Dim RestoreOK           As Boolean         'TRUE once every UI state step completed
+    Dim RestoreFindings     As tCertRecord     'Steps the restoration could not complete
 
     Dim OldScreenUpdating   As Boolean         'Cached ScreenUpdating state
     Dim HasFailure          As Boolean         'TRUE when a test failure occurred
@@ -568,9 +575,13 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
 Safe_Exit:
-    'Attempt to restore the original pre-test UI state
+    'Attempt to restore the original pre-test UI state. Both results start
+    'FALSE, so a step that raised past this boundary counts as failed.
+        RestoreOK = False
+        FrameRestored = False
+
         On Error Resume Next
-            TST_RestoreState _
+            RestoreOK = TST_RestoreState( _
                 RibbonKnown:=SavedRibbonKnown, _
                 RibbonVisible:=SavedRibbonVisible, _
                 StatusBarVisible:=SavedStatusBarVisible, _
@@ -581,7 +592,8 @@ Safe_Exit:
                 WorkbookTabsVisible:=SavedWorkbookTabsVisible, _
                 GridlinesVisible:=SavedGridlinesVisible, _
                 TitleBarKnown:=SavedTitleBarKnown, _
-                TitleBarVisible:=SavedTitleBarVisible
+                TitleBarVisible:=SavedTitleBarVisible, _
+                Findings:=RestoreFindings)
 
         'Put the entry frame's exact style back through the harness. The
         'restore above goes through the API under test, and a defect there
@@ -592,6 +604,12 @@ Safe_Exit:
 
     'Restore ScreenUpdating before leaving the harness
         Application.ScreenUpdating = OldScreenUpdating
+
+    'A restoration step that did not complete fails the pack, after any case
+    'failure
+        TST_RecordRestoreFailure _
+            RestoreOK, RestoreFindings, CallerProc, _
+            FailNumber, FailSource, FailDescription
 
     'A frame that cannot be put back fails the pack, after any case failure
         TST_RecordCleanupFailure _

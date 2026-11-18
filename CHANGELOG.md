@@ -182,6 +182,49 @@ measured against that baseline.
 
 ### ➕ Added
 
+- **Not yet certified.** Release certification now judges cleanup against a
+  baseline of the Excel host that it owns, not against four conditions
+  ([#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35),
+  `ICR-UI-112-P2-05`; the quiet-update handoff of
+  [#26](https://github.com/danielep71/VBA-EXCEL_UI/issues/26)). Before the
+  first unit it retains every open `Window` as an object and records
+  `Workbooks.Count`, `Application.Windows.Count`, `DisplayStatusBar`,
+  `DisplayScrollBars`, `DisplayFormulaBar` and `ScreenUpdating`, each window's
+  Headings, Workbook Tabs and Gridlines, its title bar and owned frame bits read
+  from the handle that window reports, its frame refresh debt and component
+  ownership through `UI_InternalTryReadFrameState`, the active window, and the
+  Ribbon of that window. The baseline is a local variable, read without
+  `UI_CaptureExcelUIState`, and shares no state with the snapshot subsystem.
+  On exit every difference is one finding with a code and both values, in a
+  fixed order: a leaked window, a window replaced while the count is unchanged,
+  an altered property, a title-bar or owned-bit mismatch, a different active
+  window and a different Ribbon. Windows are compared by handle, never with
+  `Is`. The entry active window is then activated again, and a failure to do so
+  is a finding. Findings are entries of the #50 record, so one that cannot be
+  stored makes the run `FAIL | INCOMPLETE`, a comparison that raises is a
+  finding, and any finding makes the verdict `cleanup=FAILED`. The error the
+  failed run raises carries the verdict and every finding.
+  `certification.json` gains `cleanupFindings`, `cleanupUnverified` and
+  `cleanupChecked`, and `certification.txt` gains `CLEANUP` and `UNVERIFIED`
+  lines; `tools/check_excel_evidence.py` rejects `cleanup=OK` with a finding or
+  with no comparison, and reads a document without these fields as before.
+  `cleanup=OK` does not cover the Ribbon of any other window, the registry
+  entries of windows opened and closed during the run, or a value that could
+  not be read on entry; each is listed as unverified, never treated as clean.
+  `TST_RestoreState` now returns structured findings, and a restoration step
+  that fails or does not read back as written fails its pack. Six new cases in
+  the RegressionPack unit inject faults into local baselines and records, or
+  restore the host themselves: an untouched host, a leaked window and a window
+  replaced at an unchanged count, an altered application and window property, a
+  title-bar and registry mismatch, a failing cleanup helper, and the residue of
+  a failed quiet-update readback (write succeeds, readback fails,
+  `QuietModeChanged` stays `False`, End restores nothing, and the comparison
+  reports `ScreenUpdating` changing from `True` to `False` before the case sets
+  it back). `Test_EXCEL_UI_RunOwnershipCleanupChecks` gains a case that forces a
+  cleanup failure and checks that
+  `Test_EXCEL_UI_RunReleaseCertification` raises with its verdict and finding
+  intact. No production module changed and the `[supported]` facade is
+  unchanged. This was checked by the static gate only; it needs an Excel run.
 - **Checked on Excel 16.0 build 20430, 64-bit (2026-11-17).** Added
   **tools/Check-EXCEL_UI.ps1** and its launcher **tools/Check-EXCEL_UI.cmd**
   ([#197](https://github.com/danielep71/VBA-EXCEL_UI/issues/197)). One command
