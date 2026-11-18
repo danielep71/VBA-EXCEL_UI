@@ -869,15 +869,16 @@ Public Sub TST_Case_TitleBarVisibilityRequiresCompleteCaption()
     Dim EntryStyle          As LongPtr         'Its style on entry
     Dim FixtureStyle        As LongPtr         'Style written for one fixture
     Dim ResultStyle         As LongPtr         'Style read back for one fixture
+    Dim FixtureOwned        As LongPtr         'Owned bits the fixture writes
 #Else
     Dim xlHnd               As Long            'Frame active on entry
     Dim EntryStyle          As Long            'Its style on entry
     Dim FixtureStyle        As Long            'Style written for one fixture
     Dim ResultStyle         As Long            'Style read back for one fixture
+    Dim FixtureOwned        As Long            'Owned bits the fixture writes
 #End If
 
     Dim Fixture             As Long            'Fixture index, 1 to 5
-    Dim FixtureOwned        As Long            'Owned bits the fixture writes
     Dim ExpectedVisible     As Boolean         'Written expectation for the fixture
     Dim CaseLabel           As String          'Assertion prefix for the fixture
     Dim ActualVisible       As Boolean         'Visibility a reader reported
@@ -1234,15 +1235,17 @@ Private Sub TST_RunCompleteCaptionShow( _
     Dim EntryStyle          As LongPtr         'Its style on entry
     Dim FixtureStyle        As LongPtr         'Style written as the baseline
     Dim ResultStyle         As LongPtr         'Style read back
+    Dim FixtureOwned        As LongPtr         'Owned bits the fixture writes
+    Dim ExpectedOwnedAfter  As LongPtr         'Owned bits a show must leave
 #Else
     Dim xlHnd               As Long            'Frame active on entry
     Dim EntryStyle          As Long            'Its style on entry
     Dim FixtureStyle        As Long            'Style written as the baseline
     Dim ResultStyle         As Long            'Style read back
-#End If
-
     Dim FixtureOwned        As Long            'Owned bits the fixture writes
     Dim ExpectedOwnedAfter  As Long            'Owned bits a show must leave
+#End If
+
     Dim ExpectedVisibleBefore As Boolean       'Written expectation before the show
     Dim WriteFixture        As Boolean         'FALSE for the already-visible frame
     Dim CaseLabel               As String          'Assertion prefix
