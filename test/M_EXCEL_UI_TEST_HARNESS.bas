@@ -2238,7 +2238,7 @@ Public Sub TST_CertComposeEvidence( _
             UnverifiedJson:=UnverifiedJson, _
             FindingLines:=FindingLines, _
             UnverifiedLines:=UnverifiedLines, _
-            FindingSummary:=FindingSummary)
+            FindingSummary:=FindingSummary
 
 '------------------------------------------------------------------------------
 ' DETERMINE VERDICT
