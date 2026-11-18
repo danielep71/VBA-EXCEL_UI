@@ -25,6 +25,12 @@ Option Private Module
 '   - hide / show round-trip
 '   - preservation of unrelated GWL_STYLE bits across hide / show
 '   - show recovers without a baseline and rejects a captionless baseline
+'   - title-bar visibility, and a show, need the complete WS_CAPTION mask
+'     (WS_BORDER and WS_DLGFRAME): a baseline or frame with only one of the two
+'     is not a caption. Covered for an all-zero cold start, a non-zero
+'     captionless baseline, each partial mask, an already-visible frame and a
+'     foreign captioned frame, through UI_ShowExcelUI and
+'     UI_SetExcelUI_WithResult, with unrelated style bits preserved (#6)
 '   - frame state never crosses to a new window generation that holds the
 '     same numeric hWnd with equal-zero or equal-nonzero owned bits
 '   - a failed frame refresh is owed and retried
@@ -53,6 +59,10 @@ Option Private Module
 '     runner
 '
 ' UPDATED
+'   2026-11-18 - Added the complete-caption cases: the read-side case, the
+'                partial-mask show case and the all-paths show case. The
+'                visibility checks in the SDI cases use the harness's
+'                complete-mask helper (#6).
 '   2026-11-16 - Replaced the same-style handle-reuse case with
 '                TST_Case_TitleBarSameHwndGenerationReuse, which keeps the
 '                stored hWnd and changes only the window generation (#32).
@@ -100,6 +110,16 @@ Option Private Module
     'the evidence a reissued handle presents to the registry.
     Private Const TST_TITLEBAR_FOREIGN_FRAME As Long = &HC80000
     Private Const TST_TITLEBAR_CAPTIONLESS_FRAME As Long = &H40000
+
+    'Fixtures and public paths of the #6 complete-caption cases
+    Private Const TST_SHOW_SCENARIO_ZERO As Long = 1
+    Private Const TST_SHOW_SCENARIO_CAPTIONLESS As Long = 2
+    Private Const TST_SHOW_SCENARIO_BORDER_ONLY As Long = 3
+    Private Const TST_SHOW_SCENARIO_DLGFRAME_ONLY As Long = 4
+    Private Const TST_SHOW_SCENARIO_VISIBLE As Long = 5
+    Private Const TST_SHOW_SCENARIO_FOREIGN As Long = 6
+    Private Const TST_SHOW_PATH_FIRE_AND_FORGET As Long = 1
+    Private Const TST_SHOW_PATH_WITH_RESULT As Long = 2
 
     'Win32 error codes the error-capture case injects. Any non-zero value would
     'do; real codes keep the expected failure text recognisable.
@@ -402,6 +422,10 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarRoundTrip
 '   - TST_Case_TitleBarOwnedBitPreservation
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
+'   - TST_Case_TitleBarShowRejectsCaptionlessBaseline
+'   - TST_Case_TitleBarVisibilityRequiresCompleteCaption
+'   - TST_Case_TitleBarShowRejectsPartialCaptionBaseline
+'   - TST_Case_TitleBarShowPublicPaths
 '   - TST_Case_TitleBarFrameRefreshDebtRetried
 '   - TST_Case_TitleBarStaleFrameEntryNotReused
 '   - TST_Case_TitleBarSameHwndGenerationReuse
@@ -410,6 +434,8 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_RecordCleanupFailure
 '
 ' UPDATED
+'   2026-11-18 - Registered the complete-caption cases after the captionless
+'                baseline case (#6).
 '   2026-11-16 - Registered the same-hWnd generation case in place of the
 '                same-style handle-reuse case (#32).
 '   2026-11-06 - Put the entry frame's style back through the harness and
@@ -508,6 +534,16 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
     'Verify that a non-zero captionless baseline is also unusable for show
         TST_Case_TitleBarShowRejectsCaptionlessBaseline
 
+    'Verify that visibility needs the complete WS_CAPTION mask, on every reader
+        TST_Case_TitleBarVisibilityRequiresCompleteCaption
+
+    'Verify that a baseline with only WS_BORDER or only WS_DLGFRAME is unusable
+    'for show on both public paths
+        TST_Case_TitleBarShowRejectsPartialCaptionBaseline
+
+    'Verify the zero, captionless, visible and foreign frames on both paths
+        TST_Case_TitleBarShowPublicPaths
+
     'Verify that a failed frame refresh is retried rather than short-circuited
         TST_Case_TitleBarFrameRefreshDebtRetried
 
@@ -526,7 +562,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 
     'Log successful completion before restoration
         TST_Log CallerProc, "PASS", _
-            "Title-bar round-trip, owned-bit preservation, show-recovery, refresh-debt and stale-entry cases passed"
+            "Title-bar round-trip, owned-bit preservation, show-recovery, complete-caption, refresh-debt and stale-entry cases passed"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
@@ -710,7 +746,7 @@ Public Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
             "captionless style read back | style=" & CStr(ResultStyle)
 
         If (ResultStyle And TST_TITLEBAR_OWNED_MASK) = 0 Or _
-            (ResultStyle And TST_WS_CAPTION) <> 0 Then
+            TST_StyleHasCompleteCaption(ResultStyle) Then
 
             Err.Raise TEST_ERR_BASE + 84, PROC & ".Precondition", _
                 "the frame did not keep a non-zero captionless owned-bit " & _
@@ -780,6 +816,711 @@ Err_Handler:
         Resume Safe_Exit
 
 End Sub
+
+
+Public Sub TST_Case_TitleBarVisibilityRequiresCompleteCaption()
+'
+'==============================================================================
+' TST_Case_TitleBarVisibilityRequiresCompleteCaption
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prove that title-bar visibility is read from the complete WS_CAPTION mask,
+'   so a frame with only WS_BORDER or only WS_DLGFRAME is reported as not
+'   visible by the production readers and by the harness readers.
+'
+' WHY THIS EXISTS
+'   This is the read-side regression for #6. WS_CAPTION is the composite
+'   WS_BORDER Or WS_DLGFRAME, and an any-bit test, (style And WS_CAPTION) <> 0,
+'   reports a title bar for a frame that has none. The expected value of each
+'   fixture is written down below from the Win32 definition. It is neither read
+'   from the production reader nor derived with its expression.
+'
+' BEHAVIOR
+'   - Writes five fixtures to the entry frame through the harness: no owned
+'     bits, WS_BORDER only, WS_DLGFRAME only, the complete WS_CAPTION mask and
+'     the full owned set.
+'   - Requires Windows to keep each fixture, so a host that normalised a
+'     partial mask would fail at .Precondition rather than pass.
+'   - Requires UI_TryGetTitleBarVisibleForHwnd, UI_TryGetTitleBarVisible and
+'     the harness readers to agree with the written expectation.
+'   - Puts the entry style back through the harness on every exit path.
+'
+' ERROR POLICY
+'   - Disables the handler before cleanup and raises the saved failure once.
+'   - Fails, with the restoration diagnostic, when the entry style cannot be
+'     written, refreshed and read back.
+'   - The loop has a fixed bound and the case waits nowhere.
+'
+' NOTES
+'   Against the any-bit reader in UI_TryGetTitleBarVisibleForHwnd this case
+'   fails at BorderOnly.ProductionReader (expected=False actual=True).
+'   tools/make_titlebar_mutant.py --variant reader produces that control.
+'
+' UPDATED
+'   2026-11-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim xlHnd               As LongPtr         'Frame active on entry
+    Dim EntryStyle          As LongPtr         'Its style on entry
+    Dim FixtureStyle        As LongPtr         'Style written for one fixture
+    Dim ResultStyle         As LongPtr         'Style read back for one fixture
+    Dim FixtureOwned        As LongPtr         'Owned bits the fixture writes
+#Else
+    Dim xlHnd               As Long            'Frame active on entry
+    Dim EntryStyle          As Long            'Its style on entry
+    Dim FixtureStyle        As Long            'Style written for one fixture
+    Dim ResultStyle         As Long            'Style read back for one fixture
+    Dim FixtureOwned        As Long            'Owned bits the fixture writes
+#End If
+
+    Dim Fixture             As Long            'Fixture index, 1 to 5
+    Dim ExpectedVisible     As Boolean         'Written expectation for the fixture
+    Dim CaseLabel           As String          'Assertion prefix for the fixture
+    Dim ActualVisible       As Boolean         'Visibility a reader reported
+    Dim ReadOK              As Boolean         'TRUE when a reader succeeded
+    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
+    Dim Msg                 As String          'Diagnostic from a helper
+    Dim RestoreOK           As Boolean         'TRUE once the style is back
+    Dim RestoreMsg          As String          'Diagnostic from the restoration
+    Dim FailNumber          As Long            'Saved failure number
+    Dim FailSource          As String          'Saved failure source
+    Dim FailDescription     As String          'Saved failure description
+
+    Const PROC As String = "TST_Case_TitleBarVisibilityRequiresCompleteCaption"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route assertion and runtime errors to the restoring handler
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that title-bar visibility needs the complete WS_CAPTION mask"
+
+        xlHnd = Application.hWnd
+
+        If xlHnd = 0 Then
+            Err.Raise TEST_ERR_BASE + 100, PROC, "invalid Excel window handle"
+        End If
+
+        If Not TST_TryGetWindowStyle(xlHnd, EntryStyle, Msg) Then
+            Err.Raise TEST_ERR_BASE + 101, PROC, _
+                "could not read the entry style | " & Msg
+        End If
+
+        StyleCaptured = True
+
+'------------------------------------------------------------------------------
+' READ EACH FIXTURE
+'------------------------------------------------------------------------------
+    'Five fixtures, a fixed bound: no condition here can keep the loop alive
+        For Fixture = 1 To 5
+
+            Select Case Fixture
+                Case 1
+                    CaseLabel = "NoOwnedBits"
+                    FixtureOwned = 0
+                    ExpectedVisible = False
+                Case 2
+                    CaseLabel = "BorderOnly"
+                    FixtureOwned = TST_WS_BORDER
+                    ExpectedVisible = False
+                Case 3
+                    CaseLabel = "DlgFrameOnly"
+                    FixtureOwned = TST_WS_DLGFRAME
+                    ExpectedVisible = False
+                Case 4
+                    CaseLabel = "CompleteCaption"
+                    FixtureOwned = TST_WS_CAPTION
+                    ExpectedVisible = True
+                Case Else
+                    CaseLabel = "FullOwnedFrame"
+                    FixtureOwned = TST_TITLEBAR_OWNED_MASK
+                    ExpectedVisible = True
+            End Select
+
+            TST_Log PROC, "TRACE", "fixture " & CaseLabel & ": write"
+
+            FixtureStyle = _
+                (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or FixtureOwned
+
+            If Not TST_TrySetWindowStyle(xlHnd, FixtureStyle, Msg) Then
+                Err.Raise TEST_ERR_BASE + 102, PROC & "." & CaseLabel, _
+                    "could not write the fixture style | " & Msg
+            End If
+
+            If Not TST_TryRefreshWindowFrame(xlHnd, Msg) Then
+                Err.Raise TEST_ERR_BASE + 103, PROC & "." & CaseLabel, _
+                    "could not refresh the fixture frame | " & Msg
+            End If
+
+            If Not TST_TryGetWindowStyle(xlHnd, ResultStyle, Msg) Then
+                Err.Raise TEST_ERR_BASE + 104, PROC & "." & CaseLabel, _
+                    "could not read the fixture style back | " & Msg
+            End If
+
+        'The fixture means something only while Windows keeps it
+            If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> FixtureOwned Then
+                Err.Raise TEST_ERR_BASE + 105, PROC & "." & CaseLabel & ".Precondition", _
+                    "the frame did not keep the fixture owned bits; expected=" & _
+                    CStr(FixtureOwned) & " actual=" & _
+                    CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK)
+            End If
+
+        'Production reader for an explicit window
+            ReadOK = UI_TryGetTitleBarVisibleForHwnd( _
+                TargetHwnd:=xlHnd, _
+                IsVisible:=ActualVisible, _
+                FailMsg:=Msg)
+
+            TST_AssertBooleanEquals True, ReadOK, CaseLabel & ".ProductionReaderSucceeded"
+            TST_AssertBooleanEquals ExpectedVisible, ActualVisible, _
+                CaseLabel & ".ProductionReader"
+
+        'Production reader for the active window
+            ReadOK = UI_TryGetTitleBarVisible( _
+                IsVisible:=ActualVisible, _
+                FailMsg:=Msg)
+
+            TST_AssertBooleanEquals True, ReadOK, CaseLabel & ".ActiveReaderSucceeded"
+            TST_AssertBooleanEquals ExpectedVisible, ActualVisible, _
+                CaseLabel & ".ActiveReader"
+
+        'Harness readers, which decide the mask from its two component bits
+            TST_AssertTitleBarVisible ExpectedVisible, CaseLabel & ".HarnessActiveReader"
+
+            TST_AssertBooleanEquals ExpectedVisible, _
+                TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC), _
+                CaseLabel & ".HarnessHwndReader"
+
+        Next Fixture
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Resume ends active handling but leaves the local handler enabled. Disable
+    'it before cleanup and before re-raising, or the saved failure re-enters
+    'Err_Handler and repeats the cleanup.
+        On Error GoTo 0
+
+        TST_Log PROC, "TRACE", "entry style restoration: enter"
+        RestoreOK = TST_RestoreTitleBarStyle( _
+            xlHnd, EntryStyle, StyleCaptured, RestoreMsg)
+
+        TST_Log PROC, "TRACE", _
+            "restoration helper returned | owned bits read back=" & _
+            CStr(RestoreOK)
+
+        TST_RecordCleanupFailure _
+            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+
+        If FailNumber <> 0 Then
+            TST_Log PROC, "FAIL", FailSource & " | " & FailDescription
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        TST_Log PROC, "PASS", _
+            "Partial caption masks read as not visible; complete masks as visible"
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Public Sub TST_Case_TitleBarShowRejectsPartialCaptionBaseline()
+'
+'==============================================================================
+' TST_Case_TitleBarShowRejectsPartialCaptionBaseline
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prove that a show cannot adopt a baseline that carries only one of the two
+'   bits of WS_CAPTION, and cannot report success while the caption is partial.
+'
+' WHY THIS EXISTS
+'   This is the regression for the part of #6 that the non-zero captionless
+'   case cannot reach. A frame with WS_BORDER only, or WS_DLGFRAME only, has a
+'   non-zero owned-bit set and satisfies an any-bit test of WS_CAPTION, so the
+'   baseline is adopted, the merge changes nothing and the show has to be
+'   judged by its readback.
+'
+' BEHAVIOR
+'   - Runs the WS_BORDER-only and the WS_DLGFRAME-only fixtures through both
+'     public show paths: UI_ShowExcelUI, which reports nothing, and
+'     UI_SetExcelUI_WithResult, which must return True with no failure.
+'   - Requires the complete WS_CAPTION mask afterwards, read by the harness
+'     from the two component bits, the full owned frame, and every unrelated
+'     bit unchanged.
+'   - Each run puts the entry style back through the harness on every exit.
+'
+' ERROR POLICY
+'   - Raises the first failure after that run has restored the host.
+'
+' DEPENDENCIES
+'   - TST_RunCompleteCaptionShow
+'
+' NOTES
+'   With the show fallback condition at its any-bit form the show worker keeps
+'   the partial baseline, finds nothing to write, and its complete-mask readback
+'   reports "title-bar show completed without a visible caption". The first
+'   failing assertion is then BorderOnly.FireAndForget.CaptionVisible, because
+'   the fire-and-forget path runs first and reports nothing; the structured
+'   path would fail at BorderOnly.WithResult.ShowReportsSuccess with a
+'   TitleBar failure entry.
+'   tools/make_titlebar_mutant.py --variant fallback produces that control.
+'
+' UPDATED
+'   2026-11-18
+'==============================================================================
+'
+
+    Dim ShowPath            As Long            'Public show path, 1 or 2
+    Dim Scenario            As Long            'Partial-mask fixture
+
+    Const PROC As String = "TST_Case_TitleBarShowRejectsPartialCaptionBaseline"
+
+        TST_Log PROC, "START", _
+            "Validating show against WS_BORDER-only and WS_DLGFRAME-only baselines"
+
+        For ShowPath = TST_SHOW_PATH_FIRE_AND_FORGET To TST_SHOW_PATH_WITH_RESULT
+            For Scenario = TST_SHOW_SCENARIO_BORDER_ONLY To TST_SHOW_SCENARIO_DLGFRAME_ONLY
+                TST_RunCompleteCaptionShow Scenario, ShowPath
+            Next Scenario
+        Next ShowPath
+
+        TST_Log PROC, "PASS", _
+            "Partial caption baselines were rejected and the frame recovered"
+
+End Sub
+
+
+Public Sub TST_Case_TitleBarShowPublicPaths()
+'
+'==============================================================================
+' TST_Case_TitleBarShowPublicPaths
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Prove the show contract of #6 through both public paths for the baselines
+'   other than a partial caption mask.
+'
+' BEHAVIOR
+'   - Runs four fixtures through UI_ShowExcelUI and through
+'     UI_SetExcelUI_WithResult:
+'       * all-zero cold-start baseline: owned bits cleared and the registry
+'         discarded, as after a VBA project reset;
+'       * non-zero captionless baseline: WS_THICKFRAME only;
+'       * already-visible frame: a no-op that must still be confirmed visible
+'         and must leave every bit as found;
+'       * foreign captioned frame: a complete caption with a different owned
+'         set, which a show must keep rather than overwrite.
+'   - Requires, after each, the complete WS_CAPTION mask, the expected owned
+'     bits and every unrelated bit unchanged.
+'
+' ERROR POLICY
+'   - Each run puts the entry style back through the harness on every exit and
+'     raises its failure after doing so.
+'
+' DEPENDENCIES
+'   - TST_RunCompleteCaptionShow
+'
+' UPDATED
+'   2026-11-18
+'==============================================================================
+'
+
+    Dim ShowPath            As Long            'Public show path, 1 or 2
+    Dim Scenario            As Long            'Baseline fixture
+
+    Const PROC As String = "TST_Case_TitleBarShowPublicPaths"
+
+        TST_Log PROC, "START", _
+            "Validating show through both public paths for zero, captionless, visible and foreign frames"
+
+        For ShowPath = TST_SHOW_PATH_FIRE_AND_FORGET To TST_SHOW_PATH_WITH_RESULT
+            TST_RunCompleteCaptionShow TST_SHOW_SCENARIO_ZERO, ShowPath
+            TST_RunCompleteCaptionShow TST_SHOW_SCENARIO_CAPTIONLESS, ShowPath
+            TST_RunCompleteCaptionShow TST_SHOW_SCENARIO_VISIBLE, ShowPath
+            TST_RunCompleteCaptionShow TST_SHOW_SCENARIO_FOREIGN, ShowPath
+        Next ShowPath
+
+        TST_Log PROC, "PASS", _
+            "Zero, captionless, visible and foreign frames behaved as expected on both paths"
+
+End Sub
+
+
+Private Sub TST_RunCompleteCaptionShow( _
+    ByVal Scenario As Long, _
+    ByVal ShowPath As Long)
+'
+'==============================================================================
+' TST_RunCompleteCaptionShow
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Run one baseline fixture through one public show path and check the
+'   resulting frame against written expectations.
+'
+' INPUTS
+'   Scenario
+'     One of the TST_SHOW_SCENARIO_* constants.
+'
+'   ShowPath
+'     TST_SHOW_PATH_FIRE_AND_FORGET (UI_ShowExcelUI) or
+'     TST_SHOW_PATH_WITH_RESULT (UI_SetExcelUI_WithResult).
+'
+' BEHAVIOR
+'   - Records the entry style, which must itself be a complete caption.
+'   - Writes the fixture through the harness, which the title-bar module never
+'     observes, discards the module's registry and requires the fixture to be
+'     in place and to read as written below before the show.
+'   - Shows through the chosen path. The structured path must return True with
+'     no failure.
+'   - Requires the complete WS_CAPTION mask, read by the harness from the two
+'     component bits, the expected owned bits and every unrelated bit unchanged.
+'   - Puts the entry style back through the harness on every exit path, with
+'     the handler disabled, and raises the saved failure once.
+'
+' EXPECTATIONS
+'   Written from the contract, not from the production code:
+'       fixture               visible before   owned bits after
+'       ZeroBaseline          False            full owned set
+'       CaptionlessBaseline   False            full owned set
+'       BorderOnly            False            full owned set
+'       DlgFrameOnly          False            full owned set
+'       VisibleNoOp           True             unchanged
+'       ForeignCaption        True             unchanged, not the full set
+'
+' ERROR POLICY
+'   - Raises after restoration. Fails, with the restoration diagnostic, when
+'     the entry style cannot be written, refreshed and read back.
+'   - Fails at .Precondition when Windows does not keep a fixture, because the
+'     run could not then detect the defect.
+'   - Contains no loop and no wait other than TST_WaitUI.
+'
+' DEPENDENCIES
+'   - TST_TryGetWindowStyle, TST_TrySetWindowStyle, TST_TryRefreshWindowFrame
+'   - TST_TitleBarVisibleForHwndOrRaise, TST_StyleHasCompleteCaption
+'   - TST_RestoreTitleBarStyle, TST_RecordCleanupFailure
+'   - UI_InternalResetTitleBarBaseline
+'   - UI_ShowExcelUI, UI_SetExcelUI_WithResult
+'
+' CALLED FROM
+'   - TST_Case_TitleBarShowRejectsPartialCaptionBaseline
+'   - TST_Case_TitleBarShowPublicPaths
+'
+' UPDATED
+'   2026-11-18
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+#If VBA7 Then
+    Dim xlHnd               As LongPtr         'Frame active on entry
+    Dim EntryStyle          As LongPtr         'Its style on entry
+    Dim FixtureStyle        As LongPtr         'Style written as the baseline
+    Dim ResultStyle         As LongPtr         'Style read back
+    Dim FixtureOwned        As LongPtr         'Owned bits the fixture writes
+    Dim ExpectedOwnedAfter  As LongPtr         'Owned bits a show must leave
+#Else
+    Dim xlHnd               As Long            'Frame active on entry
+    Dim EntryStyle          As Long            'Its style on entry
+    Dim FixtureStyle        As Long            'Style written as the baseline
+    Dim ResultStyle         As Long            'Style read back
+    Dim FixtureOwned        As Long            'Owned bits the fixture writes
+    Dim ExpectedOwnedAfter  As Long            'Owned bits a show must leave
+#End If
+
+    Dim ExpectedVisibleBefore As Boolean       'Written expectation before the show
+    Dim WriteFixture        As Boolean         'FALSE for the already-visible frame
+    Dim CaseLabel               As String          'Assertion prefix
+    Dim OK                  As Boolean         'Result of the structured path
+    Dim FailureCount        As Long            'Structured-path failure count
+    Dim FailureList         As Variant         'Structured-path failure list
+    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
+    Dim Msg                 As String          'Diagnostic from a helper
+    Dim RestoreOK           As Boolean         'TRUE once the style is back
+    Dim RestoreMsg          As String          'Diagnostic from the restoration
+    Dim FailNumber          As Long            'Saved failure number
+    Dim FailSource          As String          'Saved failure source
+    Dim FailDescription     As String          'Saved failure description
+
+    Const PROC As String = "TST_RunCompleteCaptionShow"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route assertion and runtime errors to the restoring handler
+        On Error GoTo Err_Handler
+
+        CaseLabel = TST_ShowScenarioName(Scenario) & "." & TST_ShowPathName(ShowPath)
+
+        TST_Log PROC, "START", "Show fixture " & CaseLabel
+
+        xlHnd = Application.hWnd
+
+        If xlHnd = 0 Then
+            Err.Raise TEST_ERR_BASE + 110, PROC & "." & CaseLabel, _
+                "invalid Excel window handle"
+        End If
+
+        If Not TST_TryGetWindowStyle(xlHnd, EntryStyle, Msg) Then
+            Err.Raise TEST_ERR_BASE + 111, PROC & "." & CaseLabel, _
+                "could not read the entry style | " & Msg
+        End If
+
+        StyleCaptured = True
+
+    'The run starts from a visible title bar, or it proves nothing
+        If Not TST_StyleHasCompleteCaption(EntryStyle) Then
+            Err.Raise TEST_ERR_BASE + 112, PROC & "." & CaseLabel & ".EntryPrecondition", _
+                "the entry frame does not show a complete caption; style=" & _
+                CStr(EntryStyle)
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE THE FIXTURE AND ITS WRITTEN EXPECTATIONS
+'------------------------------------------------------------------------------
+        WriteFixture = True
+        ExpectedOwnedAfter = TST_TITLEBAR_OWNED_MASK
+
+        Select Case Scenario
+            Case TST_SHOW_SCENARIO_ZERO
+                FixtureOwned = 0
+                ExpectedVisibleBefore = False
+            Case TST_SHOW_SCENARIO_CAPTIONLESS
+                FixtureOwned = TST_TITLEBAR_CAPTIONLESS_FRAME
+                ExpectedVisibleBefore = False
+            Case TST_SHOW_SCENARIO_BORDER_ONLY
+                FixtureOwned = TST_WS_BORDER
+                ExpectedVisibleBefore = False
+            Case TST_SHOW_SCENARIO_DLGFRAME_ONLY
+                FixtureOwned = TST_WS_DLGFRAME
+                ExpectedVisibleBefore = False
+            Case TST_SHOW_SCENARIO_VISIBLE
+                FixtureOwned = EntryStyle And TST_TITLEBAR_OWNED_MASK
+                ExpectedOwnedAfter = FixtureOwned
+                ExpectedVisibleBefore = True
+                WriteFixture = False
+            Case TST_SHOW_SCENARIO_FOREIGN
+                FixtureOwned = TST_TITLEBAR_FOREIGN_FRAME
+                ExpectedOwnedAfter = TST_TITLEBAR_FOREIGN_FRAME
+                ExpectedVisibleBefore = True
+            Case Else
+                Err.Raise TEST_ERR_BASE + 113, PROC & "." & CaseLabel, _
+                    "unknown show fixture " & CStr(Scenario)
+        End Select
+
+'------------------------------------------------------------------------------
+' ESTABLISH THE BASELINE WITHOUT TOUCHING MODULE STATE
+'------------------------------------------------------------------------------
+    'Write through the harness, which M_EXCEL_UI_TITLEBAR never observes, so
+    'the module captures no baseline from the change
+        If WriteFixture Then
+            FixtureStyle = _
+                (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or FixtureOwned
+
+            TST_Log PROC, "TRACE", "fixture style write: enter"
+            If Not TST_TrySetWindowStyle(xlHnd, FixtureStyle, Msg) Then
+                Err.Raise TEST_ERR_BASE + 114, PROC & "." & CaseLabel, _
+                    "could not write the fixture style | " & Msg
+            End If
+
+            If Not TST_TryRefreshWindowFrame(xlHnd, Msg) Then
+                Err.Raise TEST_ERR_BASE + 115, PROC & "." & CaseLabel, _
+                    "could not refresh the fixture frame | " & Msg
+            End If
+
+            TST_WaitUI TEST_WAIT_SECONDS
+        End If
+
+        If Not TST_TryGetWindowStyle(xlHnd, ResultStyle, Msg) Then
+            Err.Raise TEST_ERR_BASE + 116, PROC & "." & CaseLabel, _
+                "could not read the fixture style back | " & Msg
+        End If
+
+    'The run means something only while Windows keeps the fixture
+        If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> FixtureOwned Then
+            Err.Raise TEST_ERR_BASE + 117, PROC & "." & CaseLabel & ".Precondition", _
+                "the frame did not keep the fixture owned bits; expected=" & _
+                CStr(FixtureOwned) & " actual=" & _
+                CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK) & _
+                "; the run cannot tell the current condition from an any-bit one"
+        End If
+
+    'A frame that was never in the intended state would let the assertions
+    'of interest pass for the wrong reason
+        TST_AssertBooleanEquals ExpectedVisibleBefore, _
+            TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC), _
+            CaseLabel & ".Precondition.Visible"
+
+    'Discard any baseline captured earlier in the session, so the show below
+    'reaches the branch under test whatever ran before
+        UI_InternalResetTitleBarBaseline
+
+'------------------------------------------------------------------------------
+' SHOW THROUGH THE CHOSEN PUBLIC PATH
+'------------------------------------------------------------------------------
+        TST_Log PROC, "TRACE", "show: enter"
+
+        If ShowPath = TST_SHOW_PATH_WITH_RESULT Then
+
+            OK = UI_SetExcelUI_WithResult( _
+                TitleBar:=UI_Show, _
+                FailureCount:=FailureCount, _
+                FailureList:=FailureList)
+
+        'A show that left no complete caption must be reported, with the
+        'TitleBar stage named in the list
+            TST_AssertResultSuccess OK, FailureCount, FailureList, _
+                CaseLabel & ".ShowReportsSuccess"
+        Else
+            UI_ShowExcelUI
+        End If
+
+        TST_Log PROC, "TRACE", "show returned; assertions: enter"
+        TST_WaitUI TEST_WAIT_SECONDS
+
+'------------------------------------------------------------------------------
+' ASSERT THE RESULTING FRAME
+'------------------------------------------------------------------------------
+    'The complete caption mask, decided from its two component bits
+        TST_AssertBooleanEquals True, _
+            TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC), _
+            CaseLabel & ".CaptionVisible"
+
+        If Not TST_TryGetWindowStyle(xlHnd, ResultStyle, Msg) Then
+            Err.Raise TEST_ERR_BASE + 118, PROC & "." & CaseLabel, _
+                "could not read the resulting style | " & Msg
+        End If
+
+        If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> ExpectedOwnedAfter Then
+            Err.Raise TEST_ERR_BASE + 119, PROC & "." & CaseLabel & ".OwnedBits", _
+                CaseLabel & ".OwnedBits expected=" & CStr(ExpectedOwnedAfter) & _
+                " actual=" & CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK)
+        End If
+
+        If (ResultStyle And Not TST_TITLEBAR_OWNED_MASK) <> _
+            (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Then
+
+            Err.Raise TEST_ERR_BASE + 120, PROC & "." & CaseLabel & ".UnrelatedBits", _
+                CaseLabel & ".UnrelatedBits changed; entry=" & _
+                CStr(EntryStyle And Not TST_TITLEBAR_OWNED_MASK) & _
+                " actual=" & CStr(ResultStyle And Not TST_TITLEBAR_OWNED_MASK)
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Resume ends active handling but leaves the local handler enabled. Disable
+    'it before cleanup and before re-raising, or the saved failure re-enters
+    'Err_Handler and repeats the cleanup.
+        On Error GoTo 0
+
+        TST_Log PROC, "TRACE", "entry style restoration: enter"
+        RestoreOK = TST_RestoreTitleBarStyle( _
+            xlHnd, EntryStyle, StyleCaptured, RestoreMsg)
+
+        TST_Log PROC, "TRACE", _
+            "restoration helper returned | owned bits read back=" & _
+            CStr(RestoreOK)
+
+    'Leave no registry entry that describes a frame this run has put back
+        UI_InternalResetTitleBarBaseline
+
+        TST_RecordCleanupFailure _
+            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+
+        If FailNumber <> 0 Then
+            TST_Log PROC, "FAIL", CaseLabel & " | " & FailSource & " | " & FailDescription
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        TST_Log PROC, "PASS", "Show fixture " & CaseLabel & " recovered a complete caption"
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Function TST_ShowScenarioName(ByVal Scenario As Long) As String
+'
+'==============================================================================
+' TST_ShowScenarioName
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Name a show fixture for assertion text.
+'
+' UPDATED
+'   2026-11-18
+'==============================================================================
+'
+
+        Select Case Scenario
+            Case TST_SHOW_SCENARIO_ZERO
+                TST_ShowScenarioName = "ZeroBaseline"
+            Case TST_SHOW_SCENARIO_CAPTIONLESS
+                TST_ShowScenarioName = "CaptionlessBaseline"
+            Case TST_SHOW_SCENARIO_BORDER_ONLY
+                TST_ShowScenarioName = "BorderOnly"
+            Case TST_SHOW_SCENARIO_DLGFRAME_ONLY
+                TST_ShowScenarioName = "DlgFrameOnly"
+            Case TST_SHOW_SCENARIO_VISIBLE
+                TST_ShowScenarioName = "VisibleNoOp"
+            Case TST_SHOW_SCENARIO_FOREIGN
+                TST_ShowScenarioName = "ForeignCaption"
+            Case Else
+                TST_ShowScenarioName = "Scenario" & CStr(Scenario)
+        End Select
+
+End Function
+
+
+Private Function TST_ShowPathName(ByVal ShowPath As Long) As String
+'
+'==============================================================================
+' TST_ShowPathName
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Name a public show path for assertion text.
+'
+' UPDATED
+'   2026-11-18
+'==============================================================================
+'
+
+        If ShowPath = TST_SHOW_PATH_WITH_RESULT Then
+            TST_ShowPathName = "WithResult"
+        Else
+            TST_ShowPathName = "FireAndForget"
+        End If
+
+End Function
 
 
 Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
@@ -2627,7 +3368,7 @@ Private Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
         StyleCaptured = True
 
     'Ask for the opposite of the entry state, so a write would show
-        If (EntryStyle And TST_WS_CAPTION) <> 0 Then
+        If TST_StyleHasCompleteCaption(EntryStyle) Then
             WrongfulMode = UI_Hide
         Else
             WrongfulMode = UI_Show
@@ -2746,7 +3487,7 @@ Private Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
     'Invert the owned bits through the harness, which the title-bar module
     'never observes. A restore that wrote either visibility would now change
     'the frame in one of the two branches.
-        If (EntryStyle And TST_WS_CAPTION) <> 0 Then
+        If TST_StyleHasCompleteCaption(EntryStyle) Then
             InvertedStyle = EntryStyle And Not TST_TITLEBAR_OWNED_MASK
         Else
             InvertedStyle = _
@@ -2774,8 +3515,8 @@ Private Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 
     'A frame Windows refused to invert would make this branch prove nothing
         TST_AssertBooleanEquals _
-            ((EntryStyle And TST_WS_CAPTION) = 0), _
-            ((FrameBefore And TST_WS_CAPTION) <> 0), _
+            Not TST_StyleHasCompleteCaption(EntryStyle), _
+            TST_StyleHasCompleteCaption(FrameBefore), _
             PROC & ".RestoreInvertedFrame.Precondition"
 
         FailureCount = 99
@@ -3086,7 +3827,7 @@ Private Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 
         TST_AssertBooleanEquals _
             False, _
-            ((ReplacementFrameBefore And TST_WS_CAPTION) <> 0), _
+            TST_StyleHasCompleteCaption(ReplacementFrameBefore), _
             "ClosedFrameReopened.ReplacementHiddenBeforeRestore"
 
 '------------------------------------------------------------------------------

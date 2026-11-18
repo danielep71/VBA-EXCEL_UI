@@ -82,6 +82,9 @@ Option Explicit
 '   - Demo_CreateDemoSheet is the canonical builder
 '
 ' UPDATED
+'   2026-11-18 - The title-bar read tests the complete WS_CAPTION mask, so a
+'                style with only WS_BORDER or only WS_DLGFRAME is not reported
+'                as a visible title bar (#6).
 '   2026-11-15 - The title-bar read captures Err.LastDllError right after
 '                the WinAPI call; GetLastError is no longer declared (#144).
 '   2026-11-14 - Check-box reads and writes moved to M_DEMO_BUILDER, which
@@ -157,7 +160,7 @@ Option Explicit
 ' API CONSTANTS FOR TITLE-BAR STATE READ
 '------------------------------------------------------------------------------
     Private Const DEMO_GWL_STYLE          As Long = -16       'Window style index
-    Private Const DEMO_WS_CAPTION         As Long = &HC00000  'Caption / title-bar style bit
+    Private Const DEMO_WS_CAPTION         As Long = &HC00000  'Caption mask (WS_BORDER Or WS_DLGFRAME)
 
 
 '                               '
@@ -1529,7 +1532,8 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '
 ' INPUTS
 '   IsVisible
-'     Receives current title-bar visibility on success
+'     Receives current title-bar visibility on success: TRUE only when the
+'     complete WS_CAPTION mask (WS_BORDER and WS_DLGFRAME) is set
 '
 '   FailMsg
 '     Receives a diagnostic reason when the function returns FALSE
@@ -1549,6 +1553,8 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '   style with a non-zero captured error is a failure.
 '
 ' UPDATED
+'   2026-11-18 - Tests the complete WS_CAPTION mask instead of any caption
+'                bit (#6).
 '   2026-11-15 - Err.LastDllError captured right after the call (#144).
 '   2026-07-25
 '==============================================================================
@@ -1615,8 +1621,9 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '------------------------------------------------------------------------------
 ' MAP STYLE TO TITLE-BAR VISIBILITY
 '------------------------------------------------------------------------------
-    'Treat the caption style bit as the title-bar visibility signal
-        IsVisible = ((StyleValue And DEMO_WS_CAPTION) <> 0)
+    'Treat the complete caption mask as the title-bar visibility signal.
+    'WS_CAPTION is WS_BORDER Or WS_DLGFRAME; one of the two is not a caption.
+        IsVisible = ((StyleValue And DEMO_WS_CAPTION) = DEMO_WS_CAPTION)
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS

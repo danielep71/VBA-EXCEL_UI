@@ -1911,6 +1911,9 @@ Private Sub TST_RunRegressionPack( _
             TST_Case_TitleBarOwnedBitPreservation
             TST_Case_TitleBarShowRecoversWithoutBaseline
             TST_Case_TitleBarShowRejectsCaptionlessBaseline
+            TST_Case_TitleBarVisibilityRequiresCompleteCaption
+            TST_Case_TitleBarShowRejectsPartialCaptionBaseline
+            TST_Case_TitleBarShowPublicPaths
             TST_Case_TitleBarFrameRefreshDebtRetried
             TST_Case_TitleBarStaleFrameEntryNotReused
             TST_Case_TitleBarSameHwndGenerationReuse

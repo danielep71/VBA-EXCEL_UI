@@ -66,6 +66,11 @@ Option Private Module
 '   - Assumes the EXCEL_UI modules are present in the same VBA project
 '
 ' UPDATED
+'   2026-11-18 - Both title-bar visibility readers decide visibility through
+'                TST_StyleHasCompleteCaption, which requires WS_BORDER and
+'                WS_DLGFRAME separately, so a partial caption mask is not a
+'                visible title bar and the readers do not repeat the
+'                production predicate (#6).
 '   2026-11-16 - TST_Log mirrors each line to an opt-in UTF-8 log sink,
 '                and a failed write is kept for the caller's verdict
 '                instead of being raised (#197).
@@ -137,7 +142,6 @@ Option Private Module
     Public Const TEST_CERT_RECORD_FAULT_NONE As Long = 0  'No record fault armed
     Public Const TEST_CERT_RECORD_FAULT_FIRST As Long = 1  'Fail a buffer's first allocation
     Public Const TEST_CERT_RECORD_FAULT_GROWTH As Long = 2  'Fail an allocated buffer's growth
-    Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -212,6 +216,8 @@ Option Private Module
 '------------------------------------------------------------------------------
     Private Const TST_GWL_STYLE             As Long = -16
     Public Const TST_WS_CAPTION            As Long = &HC00000
+    Public Const TST_WS_BORDER             As Long = &H800000
+    Public Const TST_WS_DLGFRAME           As Long = &H400000
     Public Const TST_TITLEBAR_OWNED_MASK   As Long = &HCF0000
 
     Private Const TST_SWP_NOSIZE            As Long = &H1
@@ -2603,6 +2609,8 @@ Public Function TST_RestoreTitleBarStyle( _
 '   - TST_Case_TitleBarRoundTrip
 '   - TST_Case_TitleBarShowRecoversWithoutBaseline
 '   - TST_Case_TitleBarShowRejectsCaptionlessBaseline
+'   - TST_Case_TitleBarVisibilityRequiresCompleteCaption
+'   - TST_RunCompleteCaptionShow
 '   - TST_Case_TitleBarSameHwndGenerationReuse
 '   - TST_Case_TitleBarFrameRefreshDebtRetried
 '   - TST_Case_TitleBarStaleFrameEntryNotReused
@@ -4792,6 +4800,64 @@ Err_Handler:
 End Function
 
 
+#If VBA7 Then
+Public Function TST_StyleHasCompleteCaption( _
+    ByVal StyleValue As LongPtr) As Boolean
+#Else
+Public Function TST_StyleHasCompleteCaption( _
+    ByVal StyleValue As Long) As Boolean
+#End If
+
+'
+'==============================================================================
+' TST_StyleHasCompleteCaption
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Report whether a GWL_STYLE value carries a complete caption: both
+'   WS_BORDER and WS_DLGFRAME.
+'
+' WHY THIS EXISTS
+'   WS_CAPTION is the composite WS_BORDER Or WS_DLGFRAME. A style with only one
+'   of the two has a border or a dialog frame but no caption bar, so testing
+'   (style And WS_CAPTION) <> 0 reports a title bar that is not there (#6).
+'
+'   The regression readers need an expectation that is not a copy of the
+'   production predicate, (style And WS_CAPTION) = WS_CAPTION. This helper
+'   therefore asks about the two component bits separately, so an any-bit
+'   mistake in the title-bar module cannot be matched by the same mistake here.
+'
+' INPUTS
+'   StyleValue
+'     GWL_STYLE value to inspect.
+'
+' RETURNS
+'   TRUE  => WS_BORDER and WS_DLGFRAME are both set.
+'   FALSE => either is missing.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' CALLED FROM
+'   - TST_TryGetTitleBarVisible
+'   - TST_TitleBarVisibleForHwndOrRaise
+'   - TST_AssertFrameUntouched
+'   - The title-bar cases that classify a frame as visible
+'
+' UPDATED
+'   2026-11-18
+'==============================================================================
+'
+
+        TST_StyleHasCompleteCaption = _
+            ((StyleValue And TST_WS_BORDER) <> 0) And _
+            ((StyleValue And TST_WS_DLGFRAME) <> 0)
+
+End Function
+
+
 Private Function TST_TryGetTitleBarVisible( _
     ByRef IsVisible As Boolean, _
     ByRef FailMsg As String) As Boolean
@@ -4816,13 +4882,16 @@ Private Function TST_TryGetTitleBarVisible( _
 '     Receives a diagnostic reason when the function returns FALSE
 '
 ' RETURNS
-'   TRUE  => title-bar visibility was read successfully
+'   TRUE  => title-bar visibility was read successfully; IsVisible is TRUE
+'            only when the complete WS_CAPTION mask is set
 '   FALSE => read failed
 '
 ' DEPENDENCIES
 '   - TST_TryGetWindowStyle
+'   - TST_StyleHasCompleteCaption
 '
 ' UPDATED
+'   2026-11-18 - Requires the complete caption mask (#6).
 '   2026-11-06 - Reads the style through TST_TryGetWindowStyle, so the
 '                harness has one GWL_STYLE read and one capture (#27).
 '   2026-07-25
@@ -4869,8 +4938,10 @@ Private Function TST_TryGetTitleBarVisible( _
 '------------------------------------------------------------------------------
 ' MAP STYLE TO TITLE-BAR VISIBILITY
 '------------------------------------------------------------------------------
-    'Treat the caption style bit as the title-bar visibility signal
-        IsVisible = ((StyleValue And TST_WS_CAPTION) <> 0)
+    'A title bar needs the complete caption mask. The harness decides it from
+    'the two component bits, not from the production expression, so a partial
+    'mask cannot read as visible on both sides of an assertion.
+        IsVisible = TST_StyleHasCompleteCaption(StyleValue)
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
@@ -4996,19 +5067,24 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 '
 ' RETURNS
 '   Boolean
-'     TRUE when WS_CAPTION is set on the supplied window.
+'     TRUE when the complete WS_CAPTION mask (WS_BORDER and WS_DLGFRAME) is
+'     set on the supplied window. A style with only one of the two is not a
+'     caption.
 '
 ' ERROR POLICY
 '   - Raises when the style cannot be read.
 '
 ' DEPENDENCIES
 '   - TST_TryGetWindowStyle
+'   - TST_StyleHasCompleteCaption
 '
 ' CALLED FROM
 '   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
 '   - TST_Case_TitleBarCapturedFrameClosedIsReported
+'   - The #6 complete-caption cases
 '
 ' UPDATED
+'   2026-11-18 - Requires the complete caption mask (#6).
 '   2026-08-19
 '==============================================================================
 '
@@ -5039,9 +5115,8 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 '------------------------------------------------------------------------------
 ' RETURN RESULT
 '------------------------------------------------------------------------------
-    'Visibility is carried by the caption bit alone
-        TST_TitleBarVisibleForHwndOrRaise = _
-            ((StyleValue And TEST_WS_CAPTION) <> 0)
+    'Visibility needs the complete caption mask, decided from its two bits
+        TST_TitleBarVisibleForHwndOrRaise = TST_StyleHasCompleteCaption(StyleValue)
 
 End Function
 
@@ -5210,8 +5285,8 @@ Public Sub TST_AssertFrameUntouched( _
                 CStr(StyleBefore And TST_TITLEBAR_OWNED_MASK) & _
                 " after=" & CStr(StyleAfter And TST_TITLEBAR_OWNED_MASK) & _
                 "; caption before=" & _
-                CStr((StyleBefore And TST_WS_CAPTION) <> 0) & _
-                " after=" & CStr((StyleAfter And TST_WS_CAPTION) <> 0)
+                CStr(TST_StyleHasCompleteCaption(StyleBefore)) & _
+                " after=" & CStr(TST_StyleHasCompleteCaption(StyleAfter))
         End If
 
 End Sub
