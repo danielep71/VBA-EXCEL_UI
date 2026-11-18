@@ -15,9 +15,12 @@ never Excel, and reports one PASS or FAIL line per check:
   and the workbook held exactly those modules;
 - the certification document reports PASS and COMPLETE with no failed or
   skipped unit, cleanup OK, certification recording OK, and the units the
-  commit's certification runner runs;
-- the RESULT line, the unit lines and any RECORDING line of the text report
-  agree with the certification document;
+  commit's certification runner runs; when it itemizes cleanup, a cleanup OK
+  comes with no finding and at least one comparison made, and every
+  unverified surface is listed;
+- the RESULT line, the unit lines, any RECORDING line and, when cleanup is
+  itemized, the CLEANUP and UNVERIFIED lines of the text report agree with
+  the certification document;
 - the host record names Windows and the Excel version, build and bitness, and
   agrees with the host the certification document reports;
 - the certification document was written during the recorded session.
@@ -66,6 +69,10 @@ UNIT_CALL = re.compile(r'^[ \t]*TST_CertRunUnit[ \t]+"([^"]+)"[ \t]*(?:\'.*)?$',
 RESULT_LINE = re.compile(r"^RESULT: .*$", re.MULTILINE)
 UNIT_LINE = re.compile(r"^  (PASS|FAIL)  (\S+)", re.MULTILINE)
 RECORDING_LINE = re.compile(r"^  RECORDING  (.*)$", re.MULTILINE)
+CLEANUP_LINE = re.compile(r"^  CLEANUP  (.*)$", re.MULTILINE)
+UNVERIFIED_LINE = re.compile(r"^  UNVERIFIED  (.*)$", re.MULTILINE)
+# The fields that itemize cleanup. A runner that reports one reports all three.
+CLEANUP_FIELDS = ("cleanupFindings", "cleanupUnverified", "cleanupChecked")
 LONE_LF = re.compile(rb"(?<!\r)\n")
 
 
@@ -598,6 +605,63 @@ def recording_state(result: dict[str, Any], label: str) -> tuple[str, str]:
     return str(recording), str(detail)
 
 
+@dataclass(frozen=True)
+class CleanupState:
+    """What an itemizing runner reports about cleanup, as (code, detail) pairs."""
+
+    findings: tuple[tuple[str, str], ...]
+    unverified: tuple[tuple[str, str], ...]
+    checked: int
+
+    @staticmethod
+    def lines(items: tuple[tuple[str, str], ...]) -> list[str]:
+        """The report lines (without their keyword) that list ``items``."""
+        return [f"{code} | {detail}".rstrip() for code, detail in items]
+
+
+def cleanup_items(result: dict[str, Any], key: str, label: str) -> tuple[tuple[str, str], ...]:
+    """The numbered {seq, code, detail} objects of a cleanup list."""
+    items = field(result, key, label)
+    require(isinstance(items, list) and all(isinstance(item, dict) for item in items),
+            f"{label}: {key} must be a list of objects")
+    pairs = []
+    for position, item in enumerate(items, start=1):
+        where = f"{label}: {key}[{position - 1}]"
+        require(type(item.get("seq")) is int and item["seq"] == position, f"{where} must have seq {position}")
+        code, detail = item.get("code"), item.get("detail")
+        require(isinstance(code, str) and code.strip(), f"{where} has no code")
+        require(isinstance(detail, str) and detail.strip(), f"{where} has no detail")
+        pairs.append((str(code), str(detail)))
+    return tuple(pairs)
+
+
+def cleanup_state(result: dict[str, Any], label: str) -> CleanupState | None:
+    """The itemized cleanup of a document, or None when its runner did not itemize it.
+
+    A document without any of the cleanup fields was written by a runner that
+    reported only the cleanup verdict and its detail, and stays valid. A
+    document with some of them is malformed. When cleanup is OK it must hold no
+    finding, and must have compared something: a clean verdict that checked
+    nothing proves nothing.
+    """
+    present = [key for key in CLEANUP_FIELDS if key in result]
+    if not present:
+        return None
+    missing = [key for key in CLEANUP_FIELDS if key not in result]
+    require(not missing, f"{label}: cleanup is itemized but has no {', '.join(missing)}")
+    state = CleanupState(cleanup_items(result, "cleanupFindings", label),
+                         cleanup_items(result, "cleanupUnverified", label),
+                         count_field(result, "cleanupChecked", label))
+    if result.get("cleanup") == "OK":
+        require(not state.findings, f"{label}: cleanup is OK but cleanupFindings is not empty")
+        require(state.checked > 0, f"{label}: cleanup is OK but compared nothing (cleanupChecked is 0)")
+    else:
+        detail = result.get("cleanupDetail")
+        require(state.findings or (isinstance(detail, str) and detail.strip()),
+                f"{label}: cleanup FAILED without a finding or a cleanupDetail")
+    return state
+
+
 def unit_results(result: dict[str, Any], label: str) -> list[tuple[str, bool]]:
     units = field(result, "unitResults", label)
     require(isinstance(units, list) and all(isinstance(item, dict) for item in units),
@@ -614,8 +678,11 @@ def check_verdict(bundle: Bundle) -> str:
     line = certification_line(result, label)
     recording, recording_detail = recording_state(result, label)
     require(recording == "OK", f"{label}: {recording_detail}")
+    cleanup_state(result, label)
+    # A failed cleanup fails the verdict too; say what it found, not only that it failed.
+    why = "" if result["cleanup"] == "OK" else f"; cleanup FAILED: {result.get('cleanupDetail', '')}"
     require(result["passed"] is True and result["complete"] is True,
-            f"{label}: the verdict is {line.removeprefix('RESULT: ')}")
+            f"{label}: the verdict is {line.removeprefix('RESULT: ')}{why}")
     require(result["unitsFailed"] == 0, f"{label}: {result['unitsFailed']} unit(s) failed")
     require(result["skipped"] == 0, f"{label}: {result['skipped']} unit(s) skipped")
     require(result["cleanup"] == "OK", f"{label}: cleanup FAILED: {result.get('cleanupDetail', '')}")
@@ -628,6 +695,22 @@ def check_verdict(bundle: Bundle) -> str:
     failed = [name for name, passed in units if not passed]
     require(not failed, f"{label}: failed units: " + ", ".join(failed))
     return line
+
+
+def check_cleanup_lines(report: str, report_label: str, label: str, result: dict[str, Any],
+                        state: CleanupState) -> None:
+    """The CLEANUP and UNVERIFIED lines of the report list what the document itemizes."""
+    cleanup_lines = [str(item).rstrip() for item in CLEANUP_LINE.findall(report)]
+    wanted = CleanupState.lines(state.findings)
+    if result["cleanup"] == "OK":
+        require(cleanup_lines == wanted, f"{report_label}: CLEANUP lines {cleanup_lines} differ from {label}")
+    else:
+        # A failed cleanup may add a line for detail the runner kept outside the findings.
+        require(cleanup_lines[:len(wanted)] == wanted,
+                f"{report_label}: CLEANUP lines {cleanup_lines} do not begin with the findings of {label}")
+    unverified_lines = [str(item).rstrip() for item in UNVERIFIED_LINE.findall(report)]
+    require(unverified_lines == CleanupState.lines(state.unverified),
+            f"{report_label}: UNVERIFIED lines {unverified_lines} differ from {label}")
 
 
 def check_report(bundle: Bundle) -> str:
@@ -647,6 +730,9 @@ def check_report(bundle: Bundle) -> str:
     expected_noted = [recording_detail] if recording == "FAILED" else []
     require(noted == expected_noted,
             f"{report_label}: RECORDING lines {noted} differ from {label}")
+    state = cleanup_state(result, label)
+    if state is not None:
+        check_cleanup_lines(report, report_label, label, result, state)
     return lines[0]
 
 
