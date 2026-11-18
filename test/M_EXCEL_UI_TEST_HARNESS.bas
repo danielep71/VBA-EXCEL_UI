@@ -157,7 +157,6 @@ Option Private Module
 
     Public Const TEST_CERT_RUN_FAULT_NONE As Long = 0  'No run fault armed
     Public Const TEST_CERT_RUN_FAULT_CLEANUP As Long = 1  'Run no unit; alter the host before cleanup is verified
-    Private Const TEST_WS_CAPTION     As Long = &HC00000              'Caption bit read by the per-window helper
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -6222,7 +6221,7 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 '------------------------------------------------------------------------------
     'Visibility is carried by the caption bit alone
         TST_TitleBarVisibleForHwndOrRaise = _
-            ((StyleValue And TEST_WS_CAPTION) <> 0)
+            ((StyleValue And TST_WS_CAPTION) <> 0)
 
 End Function
 
