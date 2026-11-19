@@ -3474,6 +3474,8 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
         TST_Log PROC, "START", _
             "Validating runner-owned snapshot cleanup on every exit"
 
+        TST_LogHostWindows PROC & ".Entry"
+
 '------------------------------------------------------------------------------
 ' CASE A - NORMAL SUCCESS RELEASES THE SNAPSHOT
 '------------------------------------------------------------------------------
@@ -3562,6 +3564,8 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
     'structured result, a window the self-test does not have. It also creates a
     'replacement window, so cleanup has more than the snapshot to release.
         WindowsBefore = ThisWorkbook.Windows.Count
+
+        TST_LogHostWindows PROC & ".BeforeCaseD"
 
         TST_InjectPostCapture TEST_FAULT_ASSERTION
 
@@ -7016,5 +7020,51 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 '------------------------------------------------------------------------------
         TST_Log PROC, "PASS", _
             "All four destructive runners refused and preserved the snapshot"
+
+End Sub
+
+Private Sub TST_LogHostWindows( _
+    ByVal Tag As String)
+
+'
+'==============================================================================
+' TST_LogHostWindows
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Log the windows Excel holds and their state, so a run that fails because a
+'   window refused a property can be compared with one that did not.
+'
+' INPUTS
+'   Tag
+'     The label of the point in the run
+'
+' NOTES
+'   - Writes one TST_Log line and changes nothing.
+'   - A read that fails is left out of the line; this helper never raises.
+'
+' UPDATED
+'   2026-11-19 - Added to diagnose DisplayHeadings refusals after the
+'                self-test cases (#35).
+'==============================================================================
+
+    Dim Index               As Long            'Window index
+    Dim StateText                As String          'Text logged
+
+    On Error Resume Next
+
+    StateText = "windows=" & CStr(Application.Windows.Count) & _
+           " active=" & Application.ActiveWindow.Caption & _
+           " screenUpdating=" & CStr(Application.ScreenUpdating) & _
+           " statusBar=" & CStr(Application.DisplayStatusBar)
+
+    For Index = 1 To Application.Windows.Count
+        StateText = StateText & " | " & CStr(Index) & ":" & _
+               Application.Windows(Index).Caption & _
+               " visible=" & CStr(Application.Windows(Index).Visible) & _
+               " state=" & CStr(Application.Windows(Index).WindowState) & _
+               " sheet=" & TypeName(Application.Windows(Index).ActiveSheet)
+    Next Index
+
+    TST_Log "TST_LogHostWindows", Tag, StateText
 
 End Sub
