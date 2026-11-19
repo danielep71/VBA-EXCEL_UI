@@ -6298,9 +6298,6 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 '------------------------------------------------------------------------------
     'Visibility needs the complete caption mask, decided from its two bits
         TST_TitleBarVisibleForHwndOrRaise = TST_StyleHasCompleteCaption(StyleValue)
-    'Visibility is carried by the caption bit alone
-        TST_TitleBarVisibleForHwndOrRaise = _
-            ((StyleValue And TST_WS_CAPTION) <> 0)
 
 End Function
 
