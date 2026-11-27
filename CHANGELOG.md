@@ -192,8 +192,10 @@ measured against that baseline.
   parenthesis in a logical statement (continuations joined, strings and
   comments masked), an `If`, `Select Case`, `With`, `For`, `Do` or `While`
   block that does not pair up, a statement of more than 24 line continuations,
-  a procedure of 64 KB or more, under VBA7 x64 a `LongPtr` expression
-  assigned to a `Long` variable, and a bare variable passed `ByRef` to a
+  a procedure whose active code reaches 64 KB (comments, blank lines and
+  inactive conditional branches are not counted, so the measure is a
+  conservative proxy of the compiled size, not the compiled size itself),
+  under VBA7 x64 a `LongPtr` expression assigned to a `Long` variable, and a bare variable passed `ByRef` to a
   parameter of another declared type. A finding names the file, the first
   physical line, the compilations, the procedure, the rule and the statement.
   Each rule stays silent where the text does not settle the question, and

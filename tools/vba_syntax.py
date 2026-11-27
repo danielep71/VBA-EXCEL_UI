@@ -12,7 +12,13 @@ module, per compilation, and reports six classes of compile error:
     ``End With``, ``For``/``Next``, ``Do``/``Loop`` or ``While``/``Wend`` that
     do not pair up inside one procedure;
   * continuations: a logical statement with more than 24 line continuations;
-  * procedure size: a procedure of 64 KB of source or more;
+  * procedure size: a procedure whose active code reaches 64 KB. Only the code
+    of the compilation being read counts: comment-only lines, trailing comments,
+    blank lines and the text of inactive conditional branches are dropped, and
+    each logical statement counts its text plus a two-byte line ending. VBA
+    limits the compiled code, which this module cannot see, so the measure is a
+    conservative proxy that stays below the source size and is not the compiled
+    size itself;
   * LongPtr assignment: under VBA7 x64, an expression of integer arithmetic
     that reads a ``LongPtr`` variable, assigned to a variable declared ``Long``;
   * ByRef type: a bare variable passed ``ByRef`` to a parameter of another
@@ -153,6 +159,7 @@ class Procedure:
     result: str | None
     variables: dict[str, Variable] = field(default_factory=dict)
     statements: list[Stmt] = field(default_factory=list)
+    size: int = 0  # bytes of active code: statement text plus two bytes of line ending
 
 
 @dataclass
@@ -280,21 +287,29 @@ def declarations(code: str) -> list[tuple[str, Variable, bool]]:
 class Reader:
     """One module read in one compilation: its model and the findings that need no other module."""
 
-    def __init__(self, file: str, counts: Mapping[int, int], lines: Sequence[str], cov: Coverage) -> None:
+    def __init__(self, file: str, counts: Mapping[int, int], cov: Coverage) -> None:
         self.module = Module(file)
         self.raws: list[Raw] = []
-        self.counts, self.lines, self.cov = counts, lines, cov
+        self.counts, self.cov = counts, cov
         self.current: Procedure | None = None
         self.block: tuple[str, bool] | None = None
+        self.closed: Procedure | None = None
 
     def read(self, text: str, config: Config) -> None:
         for n, raw in active_lines(text, dict(config)):
             self.cov.statements.add((self.module.file, n))
             self.check_statement(n, raw)
+            before = self.current
             for stmt in statements(raw):
                 code = code_only(stmt).strip()
                 if code:
                     self.read_statement(n, stmt, code)
+            owner = self.current or self.closed or before  # the End statement belongs to the procedure it closes
+            if owner is not None:
+                owner.size += len(raw.strip()) + 2
+            if self.closed is not None:
+                self.measure(self.closed)
+                self.closed = None
 
     def check_statement(self, n: int, raw: str) -> None:
         """The rules that read a whole logical statement: parentheses and continuations."""
@@ -319,7 +334,7 @@ class Reader:
         elif proc:
             self.open_procedure(proc, code, stmt, n)
         elif END_PROCEDURE.fullmatch(code):
-            self.close_procedure(n + self.counts.get(n, 0))
+            self.close_procedure()
         elif blk and self.current is None:
             self.block = (blk[2].lower(), blk[1] is None or blk[1].lower() == 'public')
         elif self.current is not None:
@@ -356,17 +371,17 @@ class Reader:
         self.module.procedures.append(current)
         self.current = current
 
-    def close_procedure(self, end_line: int) -> None:
-        current = self.current
-        if current is None:
-            return
-        size = sum(len(line) for line in self.lines[current.line - 1:end_line])
-        self.cov.sizes[(self.module.file, current.line)] = size
-        if size >= PROCEDURE_LIMIT:
+    def close_procedure(self) -> None:
+        """End a procedure; its size is judged once the End line itself is counted."""
+        self.closed, self.current = self.current, None
+
+    def measure(self, current: Procedure) -> None:
+        self.cov.sizes[(self.module.file, current.line)] = current.size
+        if current.size >= PROCEDURE_LIMIT:
             self.raws.append((self.module.file, current.line, current.name, 'procedure-size',
-                              f'{size} bytes of source; VBA refuses a procedure of {PROCEDURE_LIMIT} bytes or more',
+                              f'{current.size} bytes of active code; VBA limits the compiled procedure to less '
+                              f'than {PROCEDURE_LIMIT} bytes, and the active code is a conservative proxy of it',
                               current.header))
-        self.current = None
 
 
 def leaves(code: str) -> list[str]:
@@ -655,7 +670,7 @@ def read_modules(sources: Mapping[str, str], config_name: str, config: Config, c
         counts, errors = continuation_counts(text)
         if errors:
             continue
-        reader = Reader(rel, counts, text.splitlines(keepends=True), cov)
+        reader = Reader(rel, counts, cov)
         try:
             reader.read(text, config)
         except LexicalError as exc:
@@ -729,7 +744,7 @@ def summary(coverage: Mapping[str, Coverage]) -> list[str]:
         lines.append(f'{name}: {len(cov.modules)} modules, {len(cov.procedures)} procedures, '
                      f'{len(cov.statements)} logical statements; {len(cov.assignments)} assignments to '
                      f'a Long variable, {len(cov.arguments)} ByRef arguments compared; '
-                     f'largest procedure {largest} of {PROCEDURE_LIMIT} bytes')
+                     f'largest procedure {largest} of {PROCEDURE_LIMIT} bytes of active code')
     return lines
 
 

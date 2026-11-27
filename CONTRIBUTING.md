@@ -371,9 +371,11 @@ re-import the affected modules into the VBE.
 The gate's *VBA syntax* check catches mistakes that Excel would otherwise
 report only when it compiles the project on a Windows host: an unbalanced
 parenthesis, an `If`, `Select Case`, `With`, `For`, `Do` or `While` block that
-does not close, a statement of more than 24 line continuations, a procedure of
-64 KB or more, a `LongPtr` expression assigned to a `Long` variable, and a bare
-variable passed `ByRef` to a parameter of another type. It reads every module of
+does not close, a statement of more than 24 line continuations, a procedure
+whose active code reaches 64 KB (comments and inactive branches do not count, so
+this is a conservative proxy of the compiled size, not the compiled size), a
+`LongPtr` expression assigned to a `Long` variable, and a bare variable passed
+`ByRef` to a parameter of another type. It reads every module of
 every configuration of `tools/vba-projects.json`, in each compilation. Run
 `python3 tools/vba_syntax.py` to see its findings and what it read, and
 [docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md#vba-syntax-rules-203) for each

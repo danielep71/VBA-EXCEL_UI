@@ -162,8 +162,13 @@ fails on these six mistakes:
   `While`/`Wend` that does not pair up, or an `Else`, `ElseIf` or `Case` outside
   its block. Only the first mismatch of a procedure is reported.
 - **Continuations.** A logical statement with more than 24 line continuations.
-- **Procedure size.** A procedure of 64 KB (65,536 bytes) of source or more, from
-  its header to its `End`, comments and line endings included.
+- **Procedure size.** A procedure whose active code reaches 64 KB (65,536
+  bytes), from its header to its `End`. Only the code of the compilation being
+  read counts: comment-only lines, trailing comments, blank lines and the text
+  of inactive conditional branches are dropped, and each statement counts its
+  text plus two bytes of line ending. VBA limits the compiled code, which this
+  check cannot see, so the measure is a conservative proxy that stays below the
+  source size, not the compiled size itself.
 - **LongPtr assignment.** Under VBA7 x64, an assignment to a variable declared
   `Long` of an expression that reads a `LongPtr` variable, such as
   `FixtureOwned = EntryStyle And TST_TITLEBAR_OWNED_MASK`. The expression must

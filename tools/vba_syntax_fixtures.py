@@ -157,11 +157,19 @@ def continued(count: int) -> str:
     return f'Private Sub FX_Long()\n    Dim Msg As String\n    Msg = {pieces}\nEnd Sub\n'
 
 
-def sized(total: int) -> str:
-    """A module of one procedure, ``total`` bytes of source from header to End."""
-    head, tail = 'Private Sub FX_Big()\r\n', 'End Sub\r\n'
-    pad = total - len(head) - len(tail)
-    return f"{head}'{'x' * (pad - 3)}\r\n{tail}"
+def sized(total: int, wrap: str = '{}') -> str:
+    """A module of one procedure whose active code is ``total`` bytes, header to End.
+
+    The code is one statement; ``wrap`` places it, for example inside a branch.
+    """
+    head, tail = 'Private Sub FX_Big()', 'End Sub'
+    pad = total - (len(head) + 2) - (len(tail) + 2) - len('Text = ""') - 2
+    return f"{head}\n{wrap.format('Text = ' + chr(34) + 'x' * pad + chr(34))}\n{tail}\n"
+
+
+COMMENTS = 'Private Sub FX_Small()\n' + ("    ' " + 'c' * 139 + '\n') * 500 + 'End Sub\n'
+INACTIVE = '#If False Then\n{}\n#End If'
+LEGACY_ARM = '#If VBA7 Then\n    Text = ""\n#Else\n{}\n#End If'
 
 
 RULES = frozenset({'parentheses', 'lexical', 'blocks', 'continuations', 'procedure-size', 'longptr-assignment',
@@ -250,10 +258,19 @@ CASES: list[tuple[str, Sources, str, str, tuple[str, ...]]] = [
      {'a.bas': continued(CONTINUATION_LIMIT + 1)},
      'continuations', f'{CONTINUATION_LIMIT + 1} line continuations', ALL),
     # procedure size
-    ('a procedure one byte under the limit passes',
+    ('a procedure whose active code is one byte under the limit passes',
      {'a.bas': sized(PROCEDURE_LIMIT - 1)}, '', '', ()),
-    ('a procedure of the limit is rejected',
-     {'a.bas': sized(PROCEDURE_LIMIT)}, 'procedure-size', f'{PROCEDURE_LIMIT} bytes of source', ALL),
+    ('a procedure whose active code reaches the limit is rejected',
+     {'a.bas': sized(PROCEDURE_LIMIT)}, 'procedure-size', 'bytes of active code', ALL),
+    ('a procedure of 500 comment lines passes however large its source',
+     {'a.bas': COMMENTS}, '', '', ()),
+    ('trailing comments and blank lines do not count',
+     {'a.bas': sized(PROCEDURE_LIMIT - 1).replace('\nEnd Sub', "\n\n    ' " + 'c' * 70000 + '\nEnd Sub')},
+     '', '', ()),
+    ('a large branch the compilation does not read passes',
+     {'a.bas': sized(PROCEDURE_LIMIT + 1000, INACTIVE)}, '', '', ()),
+    ('a large arm is judged in the compilation that reads it',
+     {'a.bas': sized(PROCEDURE_LIMIT, LEGACY_ARM)}, 'procedure-size', 'bytes of active code', LEGACY),
     # LongPtr assigned to Long
     ('a LongPtr expression assigned to a Long is rejected (EntryStyle And mask)',
      {'a.bas': swap('    Owned = Total + 1\n', STYLE_DEFECT)},

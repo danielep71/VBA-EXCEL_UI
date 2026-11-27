@@ -304,9 +304,13 @@ class VbaSyntax(GateTestCase):
         self.repo.replace(RUNTIME, self.END_SUB, "\r\n" + call + self.END_SUB)
         self.assertFails(f"{RUNTIME}:", "continuations: 25 line continuations; VBA allows at most 24")
 
-    def test_fails_on_a_procedure_of_64_kb(self) -> None:
-        self.repo.replace(RUNTIME, self.END_SUB, "\r\n    '" + "x" * 65536 + self.END_SUB)
-        self.assertFails(f"{RUNTIME}:", "procedure-size: ", "bytes of source; VBA refuses a procedure of 65536")
+    def test_fails_on_a_procedure_whose_active_code_reaches_64_kb(self) -> None:
+        self.repo.replace(RUNTIME, self.END_SUB, '\r\n    Debug.Print "' + "x" * 65536 + '"' + self.END_SUB)
+        self.assertFails(f"{RUNTIME}:", "procedure-size: ", "bytes of active code; VBA limits the compiled procedure")
+
+    def test_passes_when_the_bytes_of_a_procedure_are_comments(self) -> None:
+        self.repo.replace(RUNTIME, self.END_SUB, "".join(f"\r\n    '{'c' * 140}" for _ in range(500)) + self.END_SUB)
+        self.assertPasses()
 
     def test_fails_when_a_long_goes_to_a_byref_longptr(self) -> None:
         planted = ("\r\n    Dim Small As Integer\r\n    UI_FixtureCount Small\r\nEnd Sub\r\n"
