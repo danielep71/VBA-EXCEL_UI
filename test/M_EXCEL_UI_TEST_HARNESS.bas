@@ -27,9 +27,10 @@ Option Private Module
 '     Test_EXCEL_UI_RunOwnershipCleanupChecks arms and the runner it checks
 '     takes, and the one-shot certification record fault
 '   - Certification records and evidence: one record of unit outcomes,
-'     skips, cleanup findings and unverifiable surfaces that publishes an
-'     entry only once it is complete, snapshots a unit left behind, the
-'     verdict, and the JSON and text evidence files
+'     skips, cleanup findings, unverifiable surfaces, expected cases, case
+'     starts, case results and inventory findings that publishes an entry only
+'     once it is complete, snapshots a unit left behind, the verdict, and the
+'     JSON and text evidence files
 '   - Cleanup helpers: entry title-bar style restoration, cleanup-failure
 '     reporting, and best-effort window and workbook closing
 '   - Snapshot / restore helpers: the harness's own capture and restore of the
@@ -51,6 +52,10 @@ Option Private Module
 '   - A cleanup finding is an entry of the same record, so a difference that
 '     cannot be stored fails the run, and any finding makes cleanup FAILED
 '     whatever the caller passes to the composer
+'   - A case records one start and one terminal status under its identifier,
+'     only while a certification run is active. The expected cases are entries
+'     of the record too; TST_CertEvaluateInventory compares them with what ran,
+'     and a run whose inventory was not compared, or differs, is INCOMPLETE
 '   - The record fault is one-shot, and certification disarms it on start
 '   - The run fault is one-shot: the next certification call takes it
 '   - The post-capture fault is one-shot: taking it disarms it
@@ -73,6 +78,11 @@ Option Private Module
 '   - Assumes the EXCEL_UI modules are present in the same VBA project
 '
 ' UPDATED
+'   2026-11-27 - Certification records each case it runs under its stable
+'                identifier, compares the observed case inventory with the
+'                expected one, and reports both in the evidence. The record
+'                gains the expected-case, case-start, case-end and inventory
+'                kinds (#42).
 '   2026-11-18 - Both title-bar visibility readers decide visibility through
 '                TST_StyleHasCompleteCaption, which requires WS_BORDER and
 '                WS_DLGFRAME separately, so a partial caption mask is not a
@@ -129,15 +139,25 @@ Option Private Module
     Public Const TEST_FAULT_ASSERTION As Long = 1  'Fail an assertion after capture
     Public Const TEST_FAULT_UNEXPECTED As Long = 2  'Raise an unexpected error after capture
 
-    'Kinds of certification record entry. A case kind is added here when
-    'certification records cases (#42); TST_CertTryAppendEntry stores every kind.
-    'A finding is a difference between the exit state and the entry baseline and
-    'fails cleanup. An unverified entry names a surface cleanup could not compare
-    'and does not fail it.
+    'Kinds of certification record entry; TST_CertTryAppendEntry stores every
+    'kind. A finding is a difference between the exit state and the entry
+    'baseline and fails cleanup. An unverified entry names a surface cleanup
+    'could not compare and does not fail it. An expected entry is one case the
+    'manifest lists, a case start and a case end are what one case recorded under
+    'its identifier, and an inventory entry is one difference between the
+    'expected and the observed cases (#42).
     Public Const TEST_CERT_ENTRY_UNIT As Long = 1  'Entry: one unit outcome
     Public Const TEST_CERT_ENTRY_SKIP As Long = 2  'Entry: one skipped case
     Public Const TEST_CERT_ENTRY_FINDING As Long = 3  'Entry: one cleanup finding
     Public Const TEST_CERT_ENTRY_UNVERIFIED As Long = 4  'Entry: one surface cleanup could not compare
+    Public Const TEST_CERT_ENTRY_EXPECTED As Long = 5  'Entry: one case the manifest expects
+    Public Const TEST_CERT_ENTRY_CASE_START As Long = 6  'Entry: a case started
+    Public Const TEST_CERT_ENTRY_CASE_END As Long = 7  'Entry: a case recorded its terminal status
+    Public Const TEST_CERT_ENTRY_INVENTORY As Long = 8  'Entry: one difference between expected and observed cases
+
+    'Version of the mandatory-case manifest. tools/certification-manifest.json
+    'holds the same number, and the static gate fails when they differ.
+    Public Const TEST_CERT_MANIFEST_VERSION As Long = 1  'Version of the registered manifest
 
     'The parallel buffers of a certification record, in the order they grow.
     'TST_CertRecordIsConsistent walks them from the first to the last.
@@ -155,6 +175,7 @@ Option Private Module
     Public Const TEST_CERT_RECFAIL_EVIDENCE As Long = 7  'Reading entries for evidence failed
     Public Const TEST_CERT_RECFAIL_KIND As Long = 8  'An entry of no known kind was offered
     Public Const TEST_CERT_RECFAIL_RESET As Long = 9  'The record could not be cleared
+    Public Const TEST_CERT_RECFAIL_INVENTORY As Long = 10  'Comparing the case inventory failed
 
     Public Const TEST_CERT_RECORD_FAULT_NONE As Long = 0  'No record fault armed
     Public Const TEST_CERT_RECORD_FAULT_FIRST As Long = 1  'Fail a buffer's first allocation
@@ -162,6 +183,8 @@ Option Private Module
 
     Public Const TEST_CERT_RUN_FAULT_NONE As Long = 0  'No run fault armed
     Public Const TEST_CERT_RUN_FAULT_CLEANUP As Long = 1  'Run no unit; alter the host before cleanup is verified
+    Public Const TEST_CERT_RUN_FAULT_UNIT As Long = 2  'Run one synthetic mandatory unit that fails; the inventory is exact
+    Public Const TEST_CERT_RUN_FAULT_INVENTORY As Long = 3  'Run one synthetic unit that passes while an expected case never starts
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -268,25 +291,31 @@ Option Private Module
 '==============================================================================
 
 'One certification record: every stored entry and the counts that publish
-'them. Units and skips share the same parallel buffers and the same append
-'path, TST_CertTryAppendEntry, so the rule below is enforced in one place.
+'them. Units, skips, cleanup findings, expected cases, case starts, case
+'results and inventory findings share the same parallel buffers and the same
+'append path, TST_CertTryAppendEntry, so the rule below is enforced in one
+'place.
 '
 'EntryCount is the logical length of every buffer. A buffer may be larger,
 'because an append that grew some buffers and then failed leaves them grown,
 'but an entry exists only once EntryCount includes it, and EntryCount grows
 'only after every buffer holds the complete entry. The invariants are
 '
-'    UnitCount + SkipCount + FindingCount + UnverifiedCount = EntryCount >= 0
+'    the eight kind counts add up to EntryCount >= 0
 '    every buffer is unallocated or 1-based, with UBound >= EntryCount
 '
 'Cleanup findings and unverified surfaces (#35) are entries of the same record,
-'stored by the same path, so
+'stored by the same path. A finding has its identifier in EntryName and its
+'detail in EntryDetail, and any finding makes the cleanup verdict FAILED.
+'CheckCount is the number of comparisons cleanup completed.
 '
-'    UnitCount + SkipCount + FindingCount + UnverifiedCount = EntryCount
-'
-'A finding has its identifier in EntryName and its detail in EntryDetail, and
-'any finding makes the cleanup verdict FAILED. CheckCount is the number of
-'comparisons cleanup completed.
+'The case inventory (#42) is held the same way. An expected entry names a case
+'in EntryName and its unit in EntryDetail. A case start names the case; a case
+'end names it too, with the outcome in EntryPassed and the failure text in
+'EntryDetail. An inventory entry is one difference, with its code and the case
+'in EntryName and its explanation in EntryDetail. InventoryChecked is TRUE only
+'after TST_CertEvaluateInventory compared the expected and observed cases, and
+'a verdict cannot be complete without it.
 '
 'RecordFailed is the authoritative result when an entry cannot be stored. It
 'is a scalar, set before anything else is allocated, and it forces the
@@ -299,6 +328,10 @@ Public Type tCertRecord
     SkipCount           As Long                'Published skip entries
     FindingCount        As Long                'Published cleanup findings
     UnverifiedCount     As Long                'Published unverified surfaces
+    ExpectedCount       As Long                'Published expected cases
+    CaseStartCount      As Long                'Published case starts
+    CaseEndCount        As Long                'Published case terminal statuses
+    InventoryCount      As Long                'Published inventory findings
     CheckCount          As Long                'Comparisons cleanup completed
     EntryKind()         As Long                'TEST_CERT_ENTRY_* per entry
     EntryName()         As String              'Unit name, or the skipping procedure
@@ -308,6 +341,7 @@ Public Type tCertRecord
     RecordFailCount     As Long                'Recording failures since the reset
     RecordFailStage     As Long                'TEST_CERT_RECFAIL_* of the first one
     RecordFailError     As Long                'Runtime error number of the first one
+    InventoryChecked    As Boolean             'TRUE once expected and observed cases were compared
 End Type
 
 'Accrued only while a certification run is active. The regression packs are
@@ -811,6 +845,11 @@ Public Function TST_CertResetRecord( _
         Rec.SkipCount = 0
         Rec.FindingCount = 0
         Rec.UnverifiedCount = 0
+        Rec.ExpectedCount = 0
+        Rec.CaseStartCount = 0
+        Rec.CaseEndCount = 0
+        Rec.InventoryCount = 0
+        Rec.InventoryChecked = False
         Rec.CheckCount = 0
 
         Erase Rec.EntryKind
@@ -1506,6 +1545,1045 @@ Err_Handler:
 End Function
 
 
+Public Sub TST_CertCaseStart( _
+    ByVal CaseId As String)
+
+'
+'==============================================================================
+' TST_CertCaseStart
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Record that one mandatory case started, under its stable identifier.
+'
+' WHY THIS EXISTS
+'   A case that never starts leaves no trace, which is how a case came to exist
+'   in source and run in a focused pack without ever reaching a release verdict
+'   (#42). The start is the first half of what a case owes the record; its one
+'   terminal status is the other.
+'
+' INPUTS
+'   CaseId
+'     Stable identifier of the case: the name of the procedure that runs it.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. A start that cannot be stored sets
+'     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE.
+'   - Inert outside a certification run, so the legacy runners behave exactly
+'     as they did before cases were recorded.
+'
+' DEPENDENCIES
+'   - TST_CertRecordEntry
+'
+' CALLED FROM
+'   - TST_CertRunCase
+'   - TST_CertRecordIsolatedUnit
+'   - TST_CertSelfTestInventoryGapUnit
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' RECORD START
+'------------------------------------------------------------------------------
+    'Recording must never be the thing that breaks a run
+        On Error Resume Next
+
+        If m_CertActive Then
+
+            If Not TST_CertRecordEntry(TEST_CERT_ENTRY_CASE_START, CaseId, False, vbNullString) Then
+                TST_Log "TST_CertCaseStart", "RECORD FAIL", _
+                    "the start of " & CaseId & " could not be stored; the " & _
+                    "verdict will be FAIL | INCOMPLETE"
+            End If
+
+        End If
+
+End Sub
+
+
+Public Sub TST_CertCaseEnd( _
+    ByVal CaseId As String, _
+    ByVal Passed As Boolean, _
+    ByVal Detail As String)
+
+'
+'==============================================================================
+' TST_CertCaseEnd
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Record the one terminal status of a mandatory case, under its stable
+'   identifier.
+'
+' WHY THIS EXISTS
+'   A case that started and recorded no status is not a pass, whatever the
+'   assertions it ran reported. The inventory comparison reads the start and
+'   the status separately, so a case with only one of them is named (#42).
+'
+' INPUTS
+'   CaseId
+'     Stable identifier of the case, as given to TST_CertCaseStart.
+'
+'   Passed
+'     TRUE when the case completed without raising.
+'
+'   Detail
+'     The failure text; empty on success. Line breaks are replaced by spaces,
+'     so the status stays one line in the text report.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. A status that cannot be stored sets
+'     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE.
+'   - Inert outside a certification run.
+'
+' DEPENDENCIES
+'   - TST_CertRecordEntry
+'
+' CALLED FROM
+'   - TST_CertRunCase
+'   - TST_CertRecordIsolatedUnit
+'   - TST_CertSelfTestInventoryGapUnit
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CleanDetail         As String          'Detail as a single line
+
+'------------------------------------------------------------------------------
+' RECORD TERMINAL STATUS
+'------------------------------------------------------------------------------
+    'Recording must never be the thing that breaks a run
+        On Error Resume Next
+
+        If m_CertActive Then
+
+            CleanDetail = Replace(Replace(Detail, vbCr, " "), vbLf, " ")
+
+            If Not TST_CertRecordEntry(TEST_CERT_ENTRY_CASE_END, CaseId, Passed, CleanDetail) Then
+                TST_Log "TST_CertCaseEnd", "RECORD FAIL", _
+                    "the status of " & CaseId & " could not be stored; the " & _
+                    "verdict will be FAIL | INCOMPLETE"
+            End If
+
+            TST_Log "TST_CertCaseEnd", IIf(Passed, "CASE PASS", "CASE FAIL"), _
+                CaseId & IIf(Len(CleanDetail) > 0, " | " & CleanDetail, vbNullString)
+
+        End If
+
+End Sub
+
+
+Public Function TST_CertAddExpected( _
+    ByRef Rec As tCertRecord, _
+    ByVal UnitName As String, _
+    ByVal CaseId As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertAddExpected
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store one case the manifest expects, with its unit, in a certification
+'   record.
+'
+' WHY THIS EXISTS
+'   The expected cases travel in the record they are compared with, so the
+'   composer needs nothing beyond the record to list them, and one that cannot
+'   be stored flags the record and forces FAIL | INCOMPLETE (#50).
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to add to.
+'
+'   UnitName / CaseId
+'     The unit the manifest lists the case under, and the identifier of the
+'     case.
+'
+' RETURNS
+'   Boolean
+'     TRUE when the entry is stored; FALSE when it is not, in which case
+'     Rec.RecordFailed is TRUE.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertAddCleanupEntry
+'
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_CERTIFICATION
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+        TST_CertAddExpected = TST_CertAddCleanupEntry( _
+            Rec, TEST_CERT_ENTRY_EXPECTED, CaseId, UnitName)
+
+End Function
+
+
+Public Function TST_CertEvaluateInventory( _
+    ByRef Rec As tCertRecord) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertEvaluateInventory
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Compare the expected cases of a certification record with the cases that
+'   started and recorded a status, and store every difference as an inventory
+'   finding.
+'
+' WHY THIS EXISTS
+'   units=3 failed=0 skipped=0 proves only the outcomes of the units that were
+'   dispatched. It does not prove that the required cases were present, unique
+'   and executed (#42). This is the check that does.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to read and to add findings to.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => the comparison completed and found no difference.
+'     FALSE => a difference was found, or the comparison could not complete.
+'
+' BEHAVIOR
+'   For each expected case, by identifier:
+'     missing      never started, and no status
+'     noStart      a status, but never started
+'     duplicate    started more than once, or more statuses than starts
+'     noResult     started and recorded fewer statuses than starts
+'   For each identifier that started or reported a status and is not
+'   expected, once:
+'     unexpected
+'   An inventory entry is named "<code>:<case>". Rec.InventoryChecked is set
+'   only when the comparison ran to its end.
+'
+' ERROR POLICY
+'   - Does not raise. A record whose buffers disagree with its counts, or an
+'     error while comparing, flags the record with
+'     TEST_CERT_RECFAIL_INVENTORY and leaves InventoryChecked FALSE.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'   - TST_CertCountEntries
+'   - TST_CertIsFirstCaseEntry
+'   - TST_CertNoteInventory
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_CertCheckInventoryScenario
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Total               As Long            'Entries present before findings are added
+    Dim ScanIdx             As Long            'Cursor over the entries
+    Dim CaseId              As String          'Identifier under examination
+    Dim Starts              As Long            'Starts recorded for it
+    Dim Ends                As Long            'Terminal statuses recorded for it
+    Dim ScanKind            As Long            'Kind of the entry under examination
+    Dim FailNumber          As Long            'Error number of a failure
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertEvaluateInventory = False
+        Rec.InventoryChecked = False
+
+    'Nothing is indexed until every buffer is known to hold every entry. The
+    'record is flagged here, and the composer does not flag it a second time.
+        If Not TST_CertRecordIsConsistent(Rec) Then
+            TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_INVARIANT, 0
+            GoTo Safe_Exit
+        End If
+
+        Total = Rec.EntryCount
+
+'------------------------------------------------------------------------------
+' COMPARE EXPECTED WITH OBSERVED
+'------------------------------------------------------------------------------
+    'One pass over the entries that existed before the first finding
+        For ScanIdx = 1 To Total
+
+            ScanKind = Rec.EntryKind(ScanIdx)
+
+            If ScanKind = TEST_CERT_ENTRY_EXPECTED Then
+
+                CaseId = Rec.EntryName(ScanIdx)
+
+                Starts = TST_CertCountEntries( _
+                    Rec, Total, TEST_CERT_ENTRY_CASE_START, CaseId)
+
+                Ends = TST_CertCountEntries( _
+                    Rec, Total, TEST_CERT_ENTRY_CASE_END, CaseId)
+
+                If Starts = 0 And Ends = 0 Then
+
+                    TST_CertNoteInventory Rec, "missing", CaseId, _
+                        "the expected case was never started"
+
+                ElseIf Starts = 0 Then
+
+                    TST_CertNoteInventory Rec, "noStart", CaseId, _
+                        "the case recorded a terminal status without a start"
+
+                Else
+
+                    If Starts > 1 Then
+                        TST_CertNoteInventory Rec, "duplicate", CaseId, _
+                            "the case started " & CStr(Starts) & " times"
+                    End If
+
+                    If Ends < Starts Then
+                        TST_CertNoteInventory Rec, "noResult", CaseId, _
+                            "the case started " & CStr(Starts) & _
+                            " time(s) and recorded " & CStr(Ends) & _
+                            " terminal status(es)"
+                    ElseIf Ends > Starts Then
+                        TST_CertNoteInventory Rec, "duplicate", CaseId, _
+                            "the case recorded " & CStr(Ends) & _
+                            " terminal statuses for " & CStr(Starts) & " start(s)"
+                    End If
+
+                End If
+
+            ElseIf ScanKind = TEST_CERT_ENTRY_CASE_START Or _
+                ScanKind = TEST_CERT_ENTRY_CASE_END Then
+
+                CaseId = Rec.EntryName(ScanIdx)
+
+                If TST_CertCountEntries(Rec, Total, TEST_CERT_ENTRY_EXPECTED, CaseId) = 0 Then
+
+                    If TST_CertIsFirstCaseEntry(Rec, ScanIdx) Then
+                        TST_CertNoteInventory Rec, "unexpected", CaseId, _
+                            "the manifest does not list this case"
+                    End If
+
+                End If
+
+            End If
+
+        Next ScanIdx
+
+'------------------------------------------------------------------------------
+' RETURN RESULT
+'------------------------------------------------------------------------------
+    'Reached only when the comparison ran to its end
+        Rec.InventoryChecked = True
+
+        TST_CertEvaluateInventory = (Rec.InventoryCount = 0)
+
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Flag the record before anything else can allocate
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_INVENTORY, FailNumber
+
+        Rec.InventoryChecked = False
+
+        TST_CertEvaluateInventory = False
+
+        Resume Safe_Exit
+
+End Function
+
+
+Private Sub TST_CertNoteInventory( _
+    ByRef Rec As tCertRecord, _
+    ByVal Code As String, _
+    ByVal CaseId As String, _
+    ByVal Detail As String)
+
+'
+'==============================================================================
+' TST_CertNoteInventory
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store one inventory finding, named "<code>:<case>".
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to add to.
+'
+'   Code / CaseId / Detail
+'     The kind of difference, the case it concerns, and what is wrong.
+'
+' ERROR POLICY
+'   - Does not raise. A finding that cannot be stored flags the record, which
+'     forces FAIL | INCOMPLETE.
+'
+' DEPENDENCIES
+'   - TST_CertAddCleanupEntry
+'
+' CALLED FROM
+'   - TST_CertEvaluateInventory
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+        TST_CertAddCleanupEntry Rec, TEST_CERT_ENTRY_INVENTORY, _
+            Code & ":" & CaseId, Detail
+
+End Sub
+
+
+Private Function TST_CertCountEntries( _
+    ByRef Rec As tCertRecord, _
+    ByVal Upto As Long, _
+    ByVal Kind As Long, _
+    ByVal EntryName As String) _
+    As Long
+
+'
+'==============================================================================
+' TST_CertCountEntries
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Count the entries of one kind and one name among the first entries of a
+'   record.
+'
+' INPUTS
+'   Rec
+'     ByRef. A record whose buffers hold at least Upto entries.
+'
+'   Upto
+'     How many entries to read, from the first.
+'
+'   Kind / EntryName
+'     The TEST_CERT_ENTRY_* kind and the name to match exactly.
+'
+' RETURNS
+'   Long
+'     The number of matching entries.
+'
+' ERROR POLICY
+'   - Raises what an out-of-range read raises; the caller checked the record.
+'
+' CALLED FROM
+'   - TST_CertEvaluateInventory
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the entries
+    Dim Matches             As Long            'Matching entries so far
+
+'------------------------------------------------------------------------------
+' COUNT
+'------------------------------------------------------------------------------
+        For ScanIdx = 1 To Upto
+
+            If Rec.EntryKind(ScanIdx) = Kind Then
+
+                If Rec.EntryName(ScanIdx) = EntryName Then
+                    Matches = Matches + 1
+                End If
+
+            End If
+
+        Next ScanIdx
+
+        TST_CertCountEntries = Matches
+
+End Function
+
+
+Private Function TST_CertIsFirstCaseEntry( _
+    ByRef Rec As tCertRecord, _
+    ByVal Index As Long) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertIsFirstCaseEntry
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Report whether no earlier case start or case status has the name of the
+'   entry at Index.
+'
+' WHY THIS EXISTS
+'   An unexpected case is named once, however many entries it left.
+'
+' INPUTS
+'   Rec / Index
+'     ByRef. A record whose buffers hold at least Index entries, and the
+'     position of a case start or case status.
+'
+' RETURNS
+'   Boolean
+'     TRUE when it is the first entry of its name among starts and statuses.
+'
+' ERROR POLICY
+'   - Raises what an out-of-range read raises; the caller checked the record.
+'
+' CALLED FROM
+'   - TST_CertEvaluateInventory
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the earlier entries
+
+'------------------------------------------------------------------------------
+' SEARCH
+'------------------------------------------------------------------------------
+        TST_CertIsFirstCaseEntry = True
+
+        For ScanIdx = 1 To Index - 1
+
+            If Rec.EntryKind(ScanIdx) = TEST_CERT_ENTRY_CASE_START Or _
+                Rec.EntryKind(ScanIdx) = TEST_CERT_ENTRY_CASE_END Then
+
+                If Rec.EntryName(ScanIdx) = Rec.EntryName(Index) Then
+                    TST_CertIsFirstCaseEntry = False
+                    Exit For
+                End If
+
+            End If
+
+        Next ScanIdx
+
+End Function
+
+
+Private Function TST_CertExpectedUnit( _
+    ByRef Rec As tCertRecord, _
+    ByVal CaseId As String) _
+    As String
+
+'
+'==============================================================================
+' TST_CertExpectedUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Return the unit the manifest lists a case under.
+'
+' INPUTS
+'   Rec
+'     ByRef. A record whose buffers hold every published entry.
+'
+'   CaseId
+'     The identifier of the case.
+'
+' RETURNS
+'   String
+'     The unit of the first expected entry of that name; empty when the
+'     manifest does not list the case.
+'
+' ERROR POLICY
+'   - Raises what an out-of-range read raises; the caller checked the record.
+'
+' CALLED FROM
+'   - TST_CertBuildInventoryLists
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the entries
+
+'------------------------------------------------------------------------------
+' SEARCH
+'------------------------------------------------------------------------------
+        TST_CertExpectedUnit = vbNullString
+
+        For ScanIdx = 1 To Rec.EntryCount
+
+            If Rec.EntryKind(ScanIdx) = TEST_CERT_ENTRY_EXPECTED Then
+
+                If Rec.EntryName(ScanIdx) = CaseId Then
+                    TST_CertExpectedUnit = Rec.EntryDetail(ScanIdx)
+                    Exit For
+                End If
+
+            End If
+
+        Next ScanIdx
+
+End Function
+
+
+Public Function TST_CertSummarize( _
+    ByRef Rec As tCertRecord, _
+    ByVal Kind As Long, _
+    ByVal FailedOnly As Boolean, _
+    ByVal MaxItems As Long) _
+    As String
+
+'
+'==============================================================================
+' TST_CertSummarize
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Join the entries of one kind into one line of "name: detail" items, in
+'   recording order, naming at most MaxItems of them.
+'
+' WHY THIS EXISTS
+'   The error certification raises must carry what failed: the units that
+'   failed and the differences in the case inventory. A run with many missing
+'   cases must not produce an error text nobody can read, so the line names the
+'   first few and counts the rest.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to read. It is not changed.
+'
+'   Kind
+'     The TEST_CERT_ENTRY_* kind to list.
+'
+'   FailedOnly
+'     TRUE to list only entries whose outcome is FALSE; meaningful for units.
+'
+'   MaxItems
+'     How many items to name before the count of the rest.
+'
+' RETURNS
+'   String
+'     The items joined by " | ", each limited to 300 characters, followed by
+'     "(+n more)" when items were left out; empty when there is none. When the
+'     record cannot be read, "the record could not be read".
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'   - TST_CertAppendDetail
+'
+' CALLED FROM
+'   - TST_CertComposeEvidence
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the entries
+    Dim Named               As Long            'Items named so far
+    Dim Skipped             As Long            'Items left out
+    Dim Summary             As String          'Items joined so far
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertSummarize = "the record could not be read"
+
+        If Not TST_CertRecordIsConsistent(Rec) Then
+            GoTo Safe_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' JOIN ITEMS
+'------------------------------------------------------------------------------
+        For ScanIdx = 1 To Rec.EntryCount
+
+            If Rec.EntryKind(ScanIdx) = Kind Then
+
+                If Not FailedOnly Or Not Rec.EntryPassed(ScanIdx) Then
+
+                    If Named < MaxItems Then
+                        Summary = TST_CertAppendDetail(Summary, _
+                            Left$(Rec.EntryName(ScanIdx) & ": " & _
+                            Rec.EntryDetail(ScanIdx), 300))
+                        Named = Named + 1
+                    Else
+                        Skipped = Skipped + 1
+                    End If
+
+                End If
+
+            End If
+
+        Next ScanIdx
+
+        If Skipped > 0 Then
+            Summary = TST_CertAppendDetail(Summary, "(+" & CStr(Skipped) & " more)")
+        End If
+
+        TST_CertSummarize = Summary
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'A summary that cannot be read must not look like an empty one
+        TST_CertSummarize = "the record could not be read"
+
+        Resume Safe_Exit
+
+End Function
+
+
+Private Function TST_CertBuildInventoryLists( _
+    ByRef Rec As tCertRecord, _
+    ByRef ExpectedJson As String, _
+    ByRef CaseJson As String, _
+    ByRef InventoryJson As String, _
+    ByRef ExpectedLines As String, _
+    ByRef CaseLines As String, _
+    ByRef InventoryLines As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertBuildInventoryLists
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Read the expected cases, the case starts and statuses and the inventory
+'   findings of a record once, and compose the case sections of both evidence
+'   documents.
+'
+' WHY THIS EXISTS
+'   The JSON and the text report must list the same inventory, so both are
+'   composed from one pass over the record, after its invariants are checked
+'   (#42).
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to read.
+'
+'   ExpectedJson / CaseJson / InventoryJson
+'     ByRef outputs: the members of the expectedCases, caseResults and
+'     inventoryFindings arrays. An expected member is
+'     {"seq":n,"unit":"...","case":"..."}. A case member is
+'     {"seq":n,"unit":"...","case":"...","started":true,"status":"...",
+'     "detail":"..."}, one per start in order, whose status is PASS or FAIL,
+'     NO-RESULT when no status followed, and NO-START for a status with no
+'     start. An inventory member is {"seq":n,"code":"...","detail":"..."}.
+'
+'   ExpectedLines / CaseLines / InventoryLines
+'     ByRef outputs: the EXPECTED, CASE and INVENTORY lines of the report.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => every entry was read, and the counts match.
+'     FALSE => every output is empty. The record is flagged only when the kind
+'              counts disagree with the entries; a record whose buffers
+'              disagree was flagged by TST_CertBuildEntryLists already.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'   - TST_CertExpectedUnit
+'   - TST_CertJsonEscape
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - TST_CertComposeEvidence
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the entries
+    Dim RowIdx              As Long            'Cursor over the case rows
+    Dim RowCount            As Long            'Case rows so far
+    Dim Capacity            As Long            'Most case rows the record can hold
+    Dim ExpectedSeen        As Long            'Expected entries read
+    Dim StartsSeen          As Long            'Case starts read
+    Dim EndsSeen            As Long            'Case statuses read
+    Dim InventorySeen       As Long            'Inventory entries read
+    Dim Matched             As Boolean         'TRUE while the entries match the counts
+    Dim Found               As Boolean         'TRUE when a status found its start
+    Dim RowId()             As String          'Case identifier of each row
+    Dim RowStatus()         As String          'Status of each row; empty until one is recorded
+    Dim RowDetail()         As String          'Failure text of each row
+    Dim RowStarted()        As Boolean         'TRUE when the row began with a start
+    Dim UnitName            As String          'Unit of one row
+    Dim StatusText          As String          'Status of one row as it is reported
+    Dim FailNumber          As Long            'Error number of a failed read
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        ExpectedJson = vbNullString
+        CaseJson = vbNullString
+        InventoryJson = vbNullString
+        ExpectedLines = vbNullString
+        CaseLines = vbNullString
+        InventoryLines = vbNullString
+
+        TST_CertBuildInventoryLists = False
+
+        On Error GoTo Err_Handler
+
+    'A record that fails its check lists nothing, and is not flagged again
+        If Not TST_CertRecordIsConsistent(Rec) Then
+            GoTo Safe_Exit
+        End If
+
+        Matched = True
+
+        Capacity = Rec.CaseStartCount + Rec.CaseEndCount
+
+        If Capacity > 0 Then
+            ReDim RowId(1 To Capacity)
+            ReDim RowStatus(1 To Capacity)
+            ReDim RowDetail(1 To Capacity)
+            ReDim RowStarted(1 To Capacity)
+        End If
+
+'------------------------------------------------------------------------------
+' READ ENTRIES
+'------------------------------------------------------------------------------
+    'One pass, in recording order
+        For ScanIdx = 1 To Rec.EntryCount
+
+            Select Case Rec.EntryKind(ScanIdx)
+
+                Case TEST_CERT_ENTRY_EXPECTED
+                    ExpectedSeen = ExpectedSeen + 1
+
+                    If ExpectedSeen > 1 Then
+                        ExpectedJson = ExpectedJson & ","
+                    End If
+
+                    ExpectedJson = ExpectedJson & "{""seq"":" & _
+                        CStr(ExpectedSeen) & _
+                        ",""unit"":""" & _
+                        TST_CertJsonEscape(Rec.EntryDetail(ScanIdx)) & """" & _
+                        ",""case"":""" & _
+                        TST_CertJsonEscape(Rec.EntryName(ScanIdx)) & """}"
+
+                    ExpectedLines = ExpectedLines & "  EXPECTED  " & _
+                        Rec.EntryDetail(ScanIdx) & "  " & _
+                        Rec.EntryName(ScanIdx) & vbNewLine
+
+                Case TEST_CERT_ENTRY_CASE_START
+                    StartsSeen = StartsSeen + 1
+                    RowCount = RowCount + 1
+
+                    RowId(RowCount) = Rec.EntryName(ScanIdx)
+                    RowStatus(RowCount) = vbNullString
+                    RowDetail(RowCount) = vbNullString
+                    RowStarted(RowCount) = True
+
+                Case TEST_CERT_ENTRY_CASE_END
+                    EndsSeen = EndsSeen + 1
+                    Found = False
+
+                    'The status belongs to the latest start of that case that has
+                    'none yet
+                    For RowIdx = RowCount To 1 Step -1
+
+                        If RowStarted(RowIdx) And _
+                            Len(RowStatus(RowIdx)) = 0 And _
+                            RowId(RowIdx) = Rec.EntryName(ScanIdx) Then
+
+                            RowStatus(RowIdx) = IIf(Rec.EntryPassed(ScanIdx), "PASS", "FAIL")
+                            RowDetail(RowIdx) = Rec.EntryDetail(ScanIdx)
+                            Found = True
+                            Exit For
+
+                        End If
+
+                    Next RowIdx
+
+                    'A status with no start is a row of its own
+                    If Not Found Then
+                        RowCount = RowCount + 1
+
+                        RowId(RowCount) = Rec.EntryName(ScanIdx)
+                        RowStatus(RowCount) = "NO-START"
+                        RowStarted(RowCount) = False
+                        RowDetail(RowCount) = IIf(Rec.EntryPassed(ScanIdx), "PASS", "FAIL") & _
+                            IIf(Len(Rec.EntryDetail(ScanIdx)) > 0, _
+                                ": " & Rec.EntryDetail(ScanIdx), vbNullString)
+                    End If
+
+                Case TEST_CERT_ENTRY_INVENTORY
+                    InventorySeen = InventorySeen + 1
+
+                    If InventorySeen > 1 Then
+                        InventoryJson = InventoryJson & ","
+                    End If
+
+                    InventoryJson = InventoryJson & "{""seq"":" & _
+                        CStr(InventorySeen) & _
+                        ",""code"":""" & _
+                        TST_CertJsonEscape(Rec.EntryName(ScanIdx)) & """" & _
+                        ",""detail"":""" & _
+                        TST_CertJsonEscape(Rec.EntryDetail(ScanIdx)) & """}"
+
+                    InventoryLines = InventoryLines & "  INVENTORY  " & _
+                        Rec.EntryName(ScanIdx) & " | " & _
+                        Rec.EntryDetail(ScanIdx) & vbNewLine
+
+                Case TEST_CERT_ENTRY_UNIT, TEST_CERT_ENTRY_SKIP, _
+                    TEST_CERT_ENTRY_FINDING, TEST_CERT_ENTRY_UNVERIFIED
+                    'Listed by TST_CertBuildEntryLists
+
+                Case Else
+                    Matched = False
+
+            End Select
+
+            If Not Matched Then
+                Exit For
+            End If
+
+        Next ScanIdx
+
+    'Every published entry must have been read as the kind it was counted as
+        If Matched Then
+            Matched = (ExpectedSeen = Rec.ExpectedCount) And _
+                (StartsSeen = Rec.CaseStartCount) And _
+                (EndsSeen = Rec.CaseEndCount) And _
+                (InventorySeen = Rec.InventoryCount)
+        End If
+
+'------------------------------------------------------------------------------
+' LIST THE CASES
+'------------------------------------------------------------------------------
+    'One row per start, in order, with the one status that followed it
+        If Matched Then
+
+            For RowIdx = 1 To RowCount
+
+                UnitName = TST_CertExpectedUnit(Rec, RowId(RowIdx))
+
+                StatusText = RowStatus(RowIdx)
+
+                If Len(StatusText) = 0 Then
+                    StatusText = "NO-RESULT"
+                End If
+
+                If RowIdx > 1 Then
+                    CaseJson = CaseJson & ","
+                End If
+
+                CaseJson = CaseJson & "{""seq"":" & CStr(RowIdx) & _
+                    ",""unit"":""" & TST_CertJsonEscape(UnitName) & """" & _
+                    ",""case"":""" & TST_CertJsonEscape(RowId(RowIdx)) & """" & _
+                    ",""started"":" & IIf(RowStarted(RowIdx), "true", "false") & _
+                    ",""status"":""" & StatusText & """" & _
+                    ",""detail"":""" & TST_CertJsonEscape(RowDetail(RowIdx)) & """}"
+
+                CaseLines = CaseLines & "  CASE  " & StatusText & "  " & _
+                    IIf(Len(UnitName) > 0, UnitName, "-") & "  " & _
+                    RowId(RowIdx) & _
+                    IIf(Len(RowDetail(RowIdx)) > 0, _
+                        " | " & RowDetail(RowIdx), vbNullString) & vbNewLine
+
+            Next RowIdx
+
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN LISTS
+'------------------------------------------------------------------------------
+    'A record that does not match its counts lists nothing
+        If Matched Then
+            TST_CertBuildInventoryLists = True
+        Else
+            TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_INVARIANT, 0
+
+            ExpectedJson = vbNullString
+            CaseJson = vbNullString
+            InventoryJson = vbNullString
+            ExpectedLines = vbNullString
+            CaseLines = vbNullString
+            InventoryLines = vbNullString
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Flag the record first, then drop whatever was half read
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_EVIDENCE, FailNumber
+
+        ExpectedJson = vbNullString
+        CaseJson = vbNullString
+        InventoryJson = vbNullString
+        ExpectedLines = vbNullString
+        CaseLines = vbNullString
+        InventoryLines = vbNullString
+
+        TST_CertBuildInventoryLists = False
+
+        Resume Safe_Exit
+
+End Function
+
+
 Public Function TST_CertTryAppendEntry( _
     ByRef Rec As tCertRecord, _
     ByVal Kind As Long, _
@@ -1529,28 +2607,27 @@ Public Function TST_CertTryAppendEntry( _
 '   then read past the end of that array with every error suppressed (#50).
 '
 '   This is the one append path for every kind of entry: units, skips,
-'   cleanup findings and unverified surfaces today, and cases when
-'   certification records them (#42). A new kind adds a TEST_CERT_ENTRY_* value
-'   and its count, not a new set of arrays.
+'   cleanup findings, unverified surfaces and, for the case inventory (#42),
+'   expected cases, case starts, case results and inventory findings. A new
+'   kind adds a TEST_CERT_ENTRY_* value and its count, not a new set of arrays.
 '
 ' INPUTS
 '   Rec
 '     ByRef. The record to append to.
 '
 '   Kind
-'     TEST_CERT_ENTRY_UNIT, TEST_CERT_ENTRY_SKIP, TEST_CERT_ENTRY_FINDING or
-'     TEST_CERT_ENTRY_UNVERIFIED.
+'     Any TEST_CERT_ENTRY_* value.
 '
 '   EntryName
-'     Unit name, the procedure that skipped, or the identifier of a finding or
-'     unverified surface.
+'     Unit name, the procedure that skipped, the identifier of a finding or
+'     unverified surface, or the identifier of a case.
 '
 '   Passed
-'     Unit outcome. FALSE for every other kind.
+'     Unit or case outcome. FALSE for every other kind.
 '
 '   Detail
-'     Unit failure text, the skip reason, or the detail of a finding or
-'     unverified surface.
+'     Unit or case failure text, the skip reason, the detail of a finding or
+'     unverified surface, or, for an expected case, its unit.
 '
 ' RETURNS
 '   Boolean
@@ -1590,6 +2667,8 @@ Public Function TST_CertTryAppendEntry( _
 '   - TST_Case_CertRecordFailsClosed
 '
 ' UPDATED
+'   2026-11-27 - Also stores expected cases, case starts, case results and
+'                inventory findings (#42).
 '   2026-11-18 - Also stores cleanup findings and unverified surfaces (#35).
 '   2026-11-16 - Added (#50).
 '==============================================================================
@@ -1615,10 +2694,8 @@ Public Function TST_CertTryAppendEntry( _
     'An entry no evidence section reads would be stored and never reported
         Stage = TEST_CERT_RECFAIL_KIND
 
-        If Kind <> TEST_CERT_ENTRY_UNIT And _
-            Kind <> TEST_CERT_ENTRY_SKIP And _
-            Kind <> TEST_CERT_ENTRY_FINDING And _
-            Kind <> TEST_CERT_ENTRY_UNVERIFIED Then
+        If Kind < TEST_CERT_ENTRY_UNIT Or _
+            Kind > TEST_CERT_ENTRY_INVENTORY Then
 
             TST_CertMarkRecordFailure Rec, Stage, 0
             GoTo Safe_Exit
@@ -1670,8 +2747,20 @@ Public Function TST_CertTryAppendEntry( _
             Case TEST_CERT_ENTRY_FINDING
                 Rec.FindingCount = Rec.FindingCount + 1
 
-            Case Else
+            Case TEST_CERT_ENTRY_UNVERIFIED
                 Rec.UnverifiedCount = Rec.UnverifiedCount + 1
+
+            Case TEST_CERT_ENTRY_EXPECTED
+                Rec.ExpectedCount = Rec.ExpectedCount + 1
+
+            Case TEST_CERT_ENTRY_CASE_START
+                Rec.CaseStartCount = Rec.CaseStartCount + 1
+
+            Case TEST_CERT_ENTRY_CASE_END
+                Rec.CaseEndCount = Rec.CaseEndCount + 1
+
+            Case Else
+                Rec.InventoryCount = Rec.InventoryCount + 1
 
         End Select
 
@@ -2018,7 +3107,7 @@ Public Function TST_CertRecordIsConsistent( _
 '
 ' RETURNS
 '   Boolean
-'     TRUE when the counts are non-negative, the four kind counts add up to
+'     TRUE when the counts are non-negative, the eight kind counts add up to
 '     EntryCount, and every buffer is either unallocated with EntryCount = 0
 '     or 1-based with an upper bound of at least EntryCount.
 '
@@ -2060,11 +3149,17 @@ Public Function TST_CertRecordIsConsistent( _
             (Rec.UnitCount >= 0) And _
             (Rec.SkipCount >= 0) And _
             (Rec.FindingCount >= 0) And _
-            (Rec.UnverifiedCount >= 0)
+            (Rec.UnverifiedCount >= 0) And _
+            (Rec.ExpectedCount >= 0) And _
+            (Rec.CaseStartCount >= 0) And _
+            (Rec.CaseEndCount >= 0) And _
+            (Rec.InventoryCount >= 0)
 
         If Consistent Then
             Consistent = (Rec.UnitCount + Rec.SkipCount + _
-                Rec.FindingCount + Rec.UnverifiedCount = Rec.EntryCount)
+                Rec.FindingCount + Rec.UnverifiedCount + _
+                Rec.ExpectedCount + Rec.CaseStartCount + _
+                Rec.CaseEndCount + Rec.InventoryCount = Rec.EntryCount)
         End If
 
 '------------------------------------------------------------------------------
@@ -2152,17 +3247,23 @@ Public Sub TST_CertComposeEvidence( _
 '   None.
 '
 ' BEHAVIOR
-'   1  read entries  check the invariants, then list units and skips; a
+'   1  read entries  check the invariants, then list units and skips, and the
+'                    expected cases, case results and inventory findings; a
 '                    mismatch or a failed read flags the record and lists
 '                    nothing
-'   2  verdict       Complete requires no skip and no recording failure;
-'                    Passed requires Complete, no failed unit, no cleanup
-'                    finding and cleanup OK
+'   2  verdict       Complete requires no skip, no recording failure and a
+'                    case inventory that was compared and is exact; Passed
+'                    requires Complete, no failed unit, no cleanup finding and
+'                    cleanup OK. Unit counters and the case inventory are
+'                    separate parts of the verdict
 '   3  documents     JSON with "cleanupFindings", "cleanupUnverified",
-'                    "cleanupChecked", "recording" and "recordingDetail", and a
-'                    text report with a CLEANUP line per finding, an UNVERIFIED
-'                    line per unverified surface, and a RECORDING line when
-'                    recording failed
+'                    "cleanupChecked", "manifestVersion", "inventory",
+'                    "expectedCases", "caseResults", "inventoryFindings",
+'                    "recording" and "recordingDetail", and a text report with
+'                    a CLEANUP line per finding, an UNVERIFIED line per
+'                    unverified surface, a CASES summary with an EXPECTED, a
+'                    CASE and an INVENTORY line per entry, and a RECORDING line
+'                    when recording failed
 '
 ' ERROR POLICY
 '   - Does not raise. An error flags the record with
@@ -2173,6 +3274,8 @@ Public Sub TST_CertComposeEvidence( _
 '
 ' DEPENDENCIES
 '   - TST_CertBuildEntryLists
+'   - TST_CertBuildInventoryLists
+'   - TST_CertSummarize
 '   - TST_CertVerdictLine
 '   - TST_CertRecordingDetail
 '   - TST_CertAppendDetail
@@ -2186,6 +3289,8 @@ Public Sub TST_CertComposeEvidence( _
 '   - TST_Case_CertRecordFailsClosed
 '
 ' UPDATED
+'   2026-11-27 - A run is complete only when its case inventory was compared
+'                and is exact, and both documents list the inventory (#42).
 '   2026-11-18 - Cleanup is FAILED whenever the record holds a finding, and
 '                both documents list the findings and unverified surfaces
 '                (#35).
@@ -2205,6 +3310,14 @@ Public Sub TST_CertComposeEvidence( _
     Dim FindingLines        As String          'CLEANUP lines of the report
     Dim UnverifiedLines     As String          'UNVERIFIED lines of the report
     Dim FindingSummary      As String          'Finding details joined
+    Dim ExpectedJson        As String          'expectedCases members
+    Dim CaseJson            As String          'caseResults members
+    Dim InventoryJson       As String          'inventoryFindings members
+    Dim ExpectedLines       As String          'EXPECTED lines of the report
+    Dim CaseLines           As String          'CASE lines of the report
+    Dim InventoryLines      As String          'INVENTORY lines of the report
+    Dim InventoryDetail     As String          'Inventory findings joined
+    Dim InventoryPassed     As Boolean         'TRUE when the inventory was compared and is exact
     Dim CallerDetail        As String          'Detail the caller passed in
     Dim CleanupPassed       As Boolean         'Cleanup verdict after the findings
     Dim FailNumber          As Long            'Error number of a failure
@@ -2240,6 +3353,16 @@ Public Sub TST_CertComposeEvidence( _
             UnverifiedLines:=UnverifiedLines, _
             FindingSummary:=FindingSummary
 
+    'The case inventory is read from the same record, after the same check
+        TST_CertBuildInventoryLists _
+            Rec:=Rec, _
+            ExpectedJson:=ExpectedJson, _
+            CaseJson:=CaseJson, _
+            InventoryJson:=InventoryJson, _
+            ExpectedLines:=ExpectedLines, _
+            CaseLines:=CaseLines, _
+            InventoryLines:=InventoryLines
+
 '------------------------------------------------------------------------------
 ' DETERMINE VERDICT
 '------------------------------------------------------------------------------
@@ -2254,7 +3377,20 @@ Public Sub TST_CertComposeEvidence( _
         CleanupPassed = CleanupOK And (Rec.FindingCount = 0)
         CleanupDetail = TST_CertAppendDetail(CleanupDetail, FindingSummary)
 
-        Complete = (Rec.SkipCount = 0) And Not Rec.RecordFailed
+    'The unit counters and the case inventory are separate parts of the
+    'verdict: a run whose units all passed is still incomplete when the
+    'expected and observed cases were not compared, or differ
+        InventoryPassed = Rec.InventoryChecked And (Rec.InventoryCount = 0)
+
+        InventoryDetail = TST_CertSummarize( _
+            Rec, TEST_CERT_ENTRY_INVENTORY, False, 5)
+
+        If Not Rec.InventoryChecked Then
+            InventoryDetail = TST_CertAppendDetail( _
+                InventoryDetail, "the case inventory was not compared")
+        End If
+
+        Complete = (Rec.SkipCount = 0) And Not Rec.RecordFailed And InventoryPassed
         Passed = (UnitsFailed = 0) And CleanupPassed And Complete
 
         Verdict = TST_CertVerdictLine( _
@@ -2284,7 +3420,12 @@ Public Sub TST_CertComposeEvidence( _
             UnitJson:=UnitJson, _
             SkipJson:=SkipJson, _
             FindingJson:=FindingJson, _
-            UnverifiedJson:=UnverifiedJson)
+            UnverifiedJson:=UnverifiedJson, _
+            InventoryPassed:=InventoryPassed, _
+            InventoryDetail:=InventoryDetail, _
+            ExpectedJson:=ExpectedJson, _
+            CaseJson:=CaseJson, _
+            InventoryJson:=InventoryJson)
 
         ReportText = TST_CertBuildTextReport( _
             Rec:=Rec, _
@@ -2294,7 +3435,11 @@ Public Sub TST_CertComposeEvidence( _
             UnitLines:=UnitLines, _
             SkipLines:=SkipLines, _
             FindingLines:=FindingLines, _
-            UnverifiedLines:=UnverifiedLines)
+            UnverifiedLines:=UnverifiedLines, _
+            InventoryPassed:=InventoryPassed, _
+            ExpectedLines:=ExpectedLines, _
+            CaseLines:=CaseLines, _
+            InventoryLines:=InventoryLines)
 
 '------------------------------------------------------------------------------
 ' RETURN
@@ -2513,6 +3658,12 @@ Private Function TST_CertBuildEntryLists( _
                             Rec.EntryName(ScanIdx) & " | " & _
                             Rec.EntryDetail(ScanIdx) & vbNewLine
 
+                    Case TEST_CERT_ENTRY_EXPECTED, _
+                        TEST_CERT_ENTRY_CASE_START, _
+                        TEST_CERT_ENTRY_CASE_END, _
+                        TEST_CERT_ENTRY_INVENTORY
+                        'The case inventory is listed by TST_CertBuildInventoryLists
+
                     Case Else
                         Matched = False
 
@@ -2724,6 +3875,9 @@ Private Function TST_CertRecordingDetail( _
             Case TEST_CERT_RECFAIL_RESET
                 StageText = "clearing the record"
 
+            Case TEST_CERT_RECFAIL_INVENTORY
+                StageText = "comparing the case inventory"
+
             Case Else
                 StageText = "stage " & CStr(Rec.RecordFailStage)
 
@@ -2807,7 +3961,12 @@ Public Function TST_CertBuildJsonEvidence( _
     ByVal UnitJson As String, _
     ByVal SkipJson As String, _
     ByVal FindingJson As String, _
-    ByVal UnverifiedJson As String) _
+    ByVal UnverifiedJson As String, _
+    ByVal InventoryPassed As Boolean, _
+    ByVal InventoryDetail As String, _
+    ByVal ExpectedJson As String, _
+    ByVal CaseJson As String, _
+    ByVal InventoryJson As String) _
     As String
 
 '
@@ -2842,12 +4001,24 @@ Public Function TST_CertBuildJsonEvidence( _
 '     cleanupUnverified arrays, composed by TST_CertBuildEntryLists after the
 '     record's invariants were checked.
 '
+'   InventoryPassed / InventoryDetail
+'     Whether the expected and observed cases were compared and agree, and the
+'     findings that say otherwise.
+'
+'   ExpectedJson / CaseJson / InventoryJson
+'     Members of the expectedCases, caseResults and inventoryFindings arrays,
+'     composed by TST_CertBuildInventoryLists.
+'
 ' RETURNS
 '   String
 '     A single-line JSON document. Cleanup is reported as "cleanup",
 '     "cleanupDetail", "cleanupFindings" (every difference found),
 '     "cleanupUnverified" (every surface named as not compared) and
-'     "cleanupChecked" (the comparisons completed).
+'     "cleanupChecked" (the comparisons completed). The case inventory is
+'     reported as "manifestVersion", "inventory", "inventoryDetail",
+'     "expectedCases" (every case the manifest lists), "caseResults" (every
+'     case that started, in order, with its one terminal status) and
+'     "inventoryFindings" (every difference between the two).
 '
 ' ERROR POLICY
 '   - Does not raise. A field that cannot be read is reported as unknown.
@@ -2866,6 +4037,7 @@ Public Function TST_CertBuildJsonEvidence( _
 '   describe the build that is executing rather than what the host reports.
 '
 ' UPDATED
+'   2026-11-27 - Reports the case inventory (#42).
 '   2026-11-18 - Reports "cleanupFindings", "cleanupUnverified" and
 '                "cleanupChecked" (#35).
 '   2026-11-16 - Reads the record it is given, and reports "recording" and
@@ -2928,6 +4100,12 @@ Public Function TST_CertBuildJsonEvidence( _
             ",""cleanupFindings"":[" & FindingJson & "]" & _
             ",""cleanupUnverified"":[" & UnverifiedJson & "]" & _
             ",""cleanupChecked"":" & CStr(Rec.CheckCount) & _
+            ",""manifestVersion"":" & CStr(TEST_CERT_MANIFEST_VERSION) & _
+            ",""inventory"":""" & IIf(InventoryPassed, "OK", "FAILED") & """" & _
+            ",""inventoryDetail"":""" & TST_CertJsonEscape(InventoryDetail) & """" & _
+            ",""expectedCases"":[" & ExpectedJson & "]" & _
+            ",""caseResults"":[" & CaseJson & "]" & _
+            ",""inventoryFindings"":[" & InventoryJson & "]" & _
             ",""recording"":""" & IIf(Recorded, "OK", "FAILED") & """" & _
             ",""recordingDetail"":""" & TST_CertJsonEscape(RecordingDetail) & """" & _
             ",""complete"":" & IIf(Complete And Recorded, "true", "false") & _
@@ -3020,7 +4198,11 @@ Public Function TST_CertBuildTextReport( _
     ByVal UnitLines As String, _
     ByVal SkipLines As String, _
     ByVal FindingLines As String, _
-    ByVal UnverifiedLines As String) _
+    ByVal UnverifiedLines As String, _
+    ByVal InventoryPassed As Boolean, _
+    ByVal ExpectedLines As String, _
+    ByVal CaseLines As String, _
+    ByVal InventoryLines As String) _
     As String
 
 '
@@ -3054,12 +4236,18 @@ Public Function TST_CertBuildTextReport( _
 '     Unit, skip, CLEANUP and UNVERIFIED lines composed by
 '     TST_CertBuildEntryLists.
 '
+'   InventoryPassed / ExpectedLines / CaseLines / InventoryLines
+'     Whether the case inventory was compared and agrees, and the EXPECTED,
+'     CASE and INVENTORY lines composed by TST_CertBuildInventoryLists.
+'
 ' RETURNS
 '   String
 '     A multi-line report. A recording failure adds a RECORDING line directly
 '     under the RESULT line, named even when RecordingDetail is empty. Every
 '     cleanup finding is a CLEANUP line, and every surface cleanup could not
-'     compare is an UNVERIFIED line after them.
+'     compare is an UNVERIFIED line after them. The case inventory follows: a
+'     CASES summary line, then an EXPECTED line per case the manifest lists, a
+'     CASE line per case that started, and an INVENTORY line per difference.
 '
 ' ERROR POLICY
 '   - Does not raise.
@@ -3068,6 +4256,7 @@ Public Function TST_CertBuildTextReport( _
 '   - TST_CertComposeEvidence
 '
 ' UPDATED
+'   2026-11-27 - Lists the case inventory (#42).
 '   2026-11-18 - Lists every cleanup finding and unverified surface (#35).
 '   2026-11-16 - Takes the composed lines and reports a recording failure
 '                (#50).
@@ -3121,6 +4310,15 @@ Public Function TST_CertBuildTextReport( _
     'What cleanup could not compare is named after what it did compare, so
     'that a clean verdict says what it excludes
         Report = Report & UnverifiedLines
+
+    'The case inventory: the counts first, then every entry in recording order
+        Report = Report & "  CASES  expected=" & CStr(Rec.ExpectedCount) & _
+            " started=" & CStr(Rec.CaseStartCount) & _
+            " results=" & CStr(Rec.CaseEndCount) & _
+            " manifest=" & CStr(TEST_CERT_MANIFEST_VERSION) & _
+            " inventory=" & IIf(InventoryPassed, "OK", "FAILED") & vbNewLine
+
+        Report = Report & ExpectedLines & CaseLines & InventoryLines
 
 '------------------------------------------------------------------------------
 ' RETURN REPORT

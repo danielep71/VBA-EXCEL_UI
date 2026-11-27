@@ -21,15 +21,36 @@ Option Private Module
 '   - Test_EXCEL_UI_RunReleaseCertification
 '   - Test_EXCEL_UI_RunCertificationSelfTest
 '   - Test_EXCEL_UI_RunOwnershipCleanupChecks
+'   - TST_CertRunCase, which a pack or a runner calls to run one mandatory
+'     case under its stable identifier
 '   - TST_RunRunnerWithLog, which runs one public runner of the suites
 '     with the log sink set and returns its verdict instead of raising;
 '     tools\Check-EXCEL_UI.ps1 calls it
 '
 ' TEST SCOPE
-'   Release certification units
+'   Release certification units, in the order tools/certification-manifest.json
+'   lists them
+'     - CertificationSelfTest and OwnershipCleanupChecks: isolated units. Each
+'       calls certification itself, so each runs before the live record
+'       opens, with its outcome held outside it, and is recorded once the
+'       record is open
 '     - RegressionPack: the full regression pack, title-bar cases included
 '     - SnapshotIdentity
 '     - TitleBarSdiIdentity
+'
+'   Case inventory
+'     - every mandatory case is a procedure the manifest names, and runs
+'       through TST_CertRunCase, which records its start and its one terminal
+'       status under its identifier
+'     - TST_CertManifestCase registers the manifest, TST_CertDispatchCase runs
+'       each case, and the static gate holds the two, the call sites and
+'       tools/certification-manifest.json to each other
+'     - at the end of the run the expected cases are compared with the cases
+'       that ran; a missing, duplicate, unexpected or result-less case gives
+'       FAIL | INCOMPLETE however many assertions passed
+'     - the public interactive runners (RunAll, RunCore, RunTitleBarOnly,
+'       RunRibbonSdiProbe) stay usable and record no inventory; they are not
+'       release certification
 '
 '   Certification and ownership cases
 '     - the cleanup verdict compares the host with a baseline of its entry
@@ -69,6 +90,11 @@ Option Private Module
 '   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' UPDATED
+'   2026-11-27 - Certification runs every mandatory case through one wrapper
+'                that records its start and terminal status, compares the
+'                expected and observed cases, runs the self-test and the
+'                ownership checks as isolated units, and fails the outer call
+'                for a failed unit and for an inexact inventory alike (#42).
 '   2026-11-18 - Certification cleanup compares a baseline it owns instead of
 '                four conditions, reports every difference as a finding, and
 '                fails the outer call when cleanup fails; added the cleanup
@@ -110,6 +136,9 @@ Option Private Module
     Private Const TST_CERT_HELPER_FAULT_NONE As Long = 0  'Helper fault: none armed
     Private Const TST_CERT_HELPER_FAULT_READ As Long = 1  'Helper fault: the next property read fails
     Private Const TST_CERT_HELPER_FAULT_STAGE As Long = 2  'Helper fault: the next window comparison raises
+
+    'Unknown case raised by the dispatcher
+    Private Const TST_CERT_ERR_UNKNOWN_CASE As Long = 11  'Offset from TEST_CERT_ERR_BASE
 
     'Quiet-update fault kinds of UI_InternalInjectQuietUpdateFault, mirrored here
     'as the runtime regression module mirrors them
@@ -153,6 +182,17 @@ Private Type tCertBaseline
     WinStyle()          As Long                'Complete GWL_STYLE of each frame
     ActiveHwnd          As Long                'hWnd of the active window
 #End If
+End Type
+
+'The outcome of one isolated unit, held outside the certification record until
+'that record is open. The unit runs while no certification is active, because
+'it calls certification itself; the record it would otherwise write to is
+'cleared by that call.
+Private Type tCertIsolated
+    Ran                 As Boolean             'TRUE once the unit was dispatched
+    Passed              As Boolean             'TRUE when it completed without raising
+    Detail              As String              'Failure text, and any release of a leaked snapshot
+    LeftSnapshot        As Boolean             'TRUE when it left a snapshot behind
 End Type
 
 '------------------------------------------------------------------------------
@@ -201,7 +241,10 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '   handler is reached, so the handler path cannot be exercised from within a
 '   certification run at all.
 '
-'   It is therefore a standalone runner, invoked directly.
+'   It is therefore not a case of the regression pack. It stays a runner that
+'   can be invoked directly, and release certification runs it exactly once,
+'   as the isolated unit CertificationSelfTest: before the live record opens,
+'   while no certification is active, with its outcome recorded afterwards.
 '
 ' RETURNS
 '   None.
@@ -228,6 +271,7 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '   which is what every other destructive runner in this module does.
 '
 ' UPDATED
+'   2026-11-27 - Release certification runs it once, as an isolated unit (#42).
 '   2026-08-21 - Refused to run while an explicit snapshot exists, rather than
 '                replacing and then discarding it.
 '   2026-08-21
@@ -431,9 +475,13 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '     title bar and frame registry state, the active window, and the Ribbon of
 '     its owner. A surface that cannot be read or addressed is named as
 '     unverified, not treated as clean.
+'   - Runs the certification self-test and the ownership checks first, as
+'     isolated units: each calls certification itself, so each runs before the
+'     live record opens and is recorded once it is open.
 '   - Runs the full regression pack, the snapshot-identity runner and the SDI
 '     title-bar identity runner, each under its own error boundary so one
-'     failing unit does not conceal the rest.
+'     failing unit does not conceal the rest. Every mandatory case records its
+'     start and one terminal status under its identifier.
 '   - Releases a snapshot a unit left behind before the next unit runs, so the
 '     next unit is not refused because of it, and records the leak.
 '   - Verifies cleanup by comparing the exit state with that baseline, and
@@ -442,12 +490,17 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '     altered application or window property, a title bar or frame registry
 '     that differs, a different active window, a different Ribbon. Then makes
 '     the entry active window active again, and reports a failure to.
+'   - Compares the cases the manifest expects with the cases that started and
+'     recorded a status. A missing, duplicate, unexpected or result-less case
+'     is an inventory finding, and gives FAIL | INCOMPLETE even when every
+'     assertion passed.
 '   - Emits a JSON evidence document and a text summary, and writes both to the
 '     temporary folder on a best-effort basis.
 '   - Reports FAIL | INCOMPLETE, and names the failure in both documents,
 '     when a unit or skip could not be recorded.
 '   - Raises when the verdict is anything other than a complete pass, with the
-'     verdict and every cleanup finding in the error it raises.
+'     verdict, every cleanup finding, the failed units and the inventory
+'     findings in the error it raises.
 '
 ' ERROR POLICY
 '   - Individual unit failures are captured, not propagated.
@@ -455,9 +508,13 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '
 ' DEPENDENCIES
 '   - TST_CertResetCounters
+'   - TST_CertRunIsolatedUnit
+'   - TST_CertRecordIsolatedUnit
 '   - TST_CertCaptureBaseline
 '   - TST_CertRunUnit
 '   - TST_CertEvaluateCleanup
+'   - TST_CertLoadExpected
+'   - TST_CertEvaluateInventory
 '   - TST_CertRestoreActiveWindow
 '   - TST_CertComposeEvidence
 '   - TST_CertTryWriteEvidence
@@ -467,10 +524,20 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   managed UI element. Save unsaved work before running it.
 '
 '   A one-shot run fault, armed only by Test_EXCEL_UI_RunOwnershipCleanupChecks,
-'   makes the run execute no unit, invert the status bar and write no evidence
-'   file, so that a forced cleanup failure can be seen to fail this call.
+'   changes what the run does, and writes no evidence file, so that each way
+'   the call can fail is seen to fail it: a forced cleanup failure (no unit
+'   runs and the status bar is inverted), a forced failed unit, and a forced
+'   gap in the case inventory. A faulted run expects a synthetic inventory in
+'   place of the manifest and runs no isolated unit.
+'
+'   The isolated units run with no certification active, so each may call
+'   certification itself. Their outcome is held in local variables, because
+'   that nested call clears the record.
 '
 ' UPDATED
+'   2026-11-27 - Runs the isolated units, records and compares the case
+'                inventory, and adds the failed-unit and inventory-gap run
+'                faults (#42).
 '   2026-11-18 - Cleanup compares a baseline certification owns and records
 '                every difference as a finding (#35).
 '   2026-11-16 - The verdict and both documents come from
@@ -487,6 +554,11 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '------------------------------------------------------------------------------
     Dim Baseline            As tCertBaseline   'Host state captured on entry
     Dim FaultKind           As Long            'Run fault taken for this call
+    Dim IsolatedSelfTest    As tCertIsolated   'Outcome of the self-test unit, held outside the record
+    Dim IsolatedOwnership   As tCertIsolated   'Outcome of the ownership unit, held outside the record
+    Dim InventoryOK         As Boolean         'TRUE when the expected and observed cases agree
+    Dim UnitDetail          As String          'Failed units, for the error raised
+    Dim InventoryDetail     As String          'Inventory findings, for the error raised
 
     Dim UnitsFailed         As Long            'Units that reported failure
     Dim CleanupOK           As Boolean         'TRUE when no state leaked
@@ -564,6 +636,33 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
         End If
 
 '------------------------------------------------------------------------------
+' RUN THE ISOLATED UNITS
+'------------------------------------------------------------------------------
+    'The self-test and the ownership checks call certification, and each call
+    'clears the record. They therefore run while no certification is active,
+    'with their outcomes held in locals, and are recorded once the record has
+    'been cleared for the live run. A faulted run runs neither: it is itself
+    'the nested call those units make.
+        If FaultKind = TEST_CERT_RUN_FAULT_NONE Then
+
+            m_CertActive = False
+
+            TST_CertRunIsolatedUnit "CertificationSelfTest", IsolatedSelfTest
+            TST_CertRunIsolatedUnit "OwnershipCleanupChecks", IsolatedOwnership
+
+            TST_CertResetCounters
+
+            m_CertActive = True
+
+            TST_CertRecordIsolatedUnit "CertificationSelfTest", _
+                "Test_EXCEL_UI_RunCertificationSelfTest", IsolatedSelfTest
+
+            TST_CertRecordIsolatedUnit "OwnershipCleanupChecks", _
+                "Test_EXCEL_UI_RunOwnershipCleanupChecks", IsolatedOwnership
+
+        End If
+
+'------------------------------------------------------------------------------
 ' CAPTURE THE ENTRY BASELINE
 '------------------------------------------------------------------------------
     'What cleanup is judged against, held here and read by nothing else. A stage
@@ -579,14 +678,25 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 ' RUN MANDATORY UNITS
 '------------------------------------------------------------------------------
     'Each unit is run under its own boundary so that one failure does not hide
-    'the state of everything after it. An armed run fault runs none of them.
-        If FaultKind = TEST_CERT_RUN_FAULT_CLEANUP Then
-            TST_CertApplyRunFault
-        Else
-            TST_CertRunUnit "RegressionPack"
-            TST_CertRunUnit "SnapshotIdentity"
-            TST_CertRunUnit "TitleBarSdiIdentity"
-        End If
+    'the state of everything after it. An armed run fault runs none of them:
+    'it alters the host, or runs one synthetic unit, in their place.
+        Select Case FaultKind
+
+            Case TEST_CERT_RUN_FAULT_CLEANUP
+                TST_CertApplyRunFault
+
+            Case TEST_CERT_RUN_FAULT_UNIT
+                TST_CertRunUnit "SelfTest.ForcedFailure"
+
+            Case TEST_CERT_RUN_FAULT_INVENTORY
+                TST_CertRunUnit "SelfTest.InventoryGap"
+
+            Case Else
+                TST_CertRunUnit "RegressionPack"
+                TST_CertRunUnit "SnapshotIdentity"
+                TST_CertRunUnit "TitleBarSdiIdentity"
+
+        End Select
 
 '------------------------------------------------------------------------------
 ' VERIFY CLEANUP
@@ -602,6 +712,23 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
     'The comparison changed nothing. Putting the entry window back is a
     'separate, test-owned step, and a failure of it is a finding of its own.
         TST_CertRestoreActiveWindow Baseline, m_CertRecord
+
+'------------------------------------------------------------------------------
+' COMPARE THE CASE INVENTORY
+'------------------------------------------------------------------------------
+    'Unit counters say how the dispatched units ended. They cannot say that the
+    'required cases were present, unique and executed, so the manifest's cases
+    'are stored as expected and compared with the cases that recorded a start
+    'and a status. A difference is an inventory finding, and the run is then
+    'incomplete however many assertions passed.
+        TST_CertLoadExpected FaultKind
+
+        InventoryOK = TST_CertEvaluateInventory(m_CertRecord)
+
+        If Not InventoryOK Then
+            TST_Log PROC, "INVENTORY", _
+                "The expected and observed cases differ; the verdict will be FAIL | INCOMPLETE"
+        End If
 
 '------------------------------------------------------------------------------
 ' DETERMINE VERDICT AND COMPOSE EVIDENCE
@@ -654,14 +781,32 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '------------------------------------------------------------------------------
 ' RAISE ON A NON-PASSING VERDICT
 '------------------------------------------------------------------------------
-    'Raise only after the evidence exists, so a failed run is still documented
+    'Raise only after the evidence exists, so a failed run is still documented.
+    'The error carries what failed, not only that something did: the verdict,
+    'the cleanup findings, the recording failure, the units that failed and the
+    'differences in the case inventory.
         If Not Passed Then
+
+            UnitDetail = TST_CertSummarize( _
+                m_CertRecord, TEST_CERT_ENTRY_UNIT, True, 3)
+
+            InventoryDetail = TST_CertSummarize( _
+                m_CertRecord, TEST_CERT_ENTRY_INVENTORY, False, 3)
+
+            If Not m_CertRecord.InventoryChecked Then
+                InventoryDetail = TST_CertAppendDetail( _
+                    InventoryDetail, "the case inventory was not compared")
+            End If
+
             Err.Raise _
                 TEST_CERT_ERR_BASE + 3, _
                 PROC, _
                 Verdict & _
                 IIf(Len(CleanupDetail) > 0, " | " & CleanupDetail, vbNullString) & _
-                IIf(Len(RecordingDetail) > 0, " | " & RecordingDetail, vbNullString)
+                IIf(Len(RecordingDetail) > 0, " | " & RecordingDetail, vbNullString) & _
+                IIf(Len(UnitDetail) > 0, " | failed units: " & UnitDetail, vbNullString) & _
+                IIf(Len(InventoryDetail) > 0, " | inventory: " & InventoryDetail, vbNullString)
+
         End If
 
 '------------------------------------------------------------------------------
@@ -728,22 +873,21 @@ Private Sub TST_CertRunUnit( _
 ' BEHAVIOR
 '   - Executes the unit through TST_CertExecuteUnit, which traps its failure
 '     and releases any snapshot it left behind.
-'   - Records the outcome and, when the unit left a snapshot, records a cleanup
-'     finding that names the unit.
+'   - Records the outcome through TST_CertRecordOutcome.
 '
 ' ERROR POLICY
 '   - Does not raise. A failing unit is recorded and the run continues.
 '
 ' DEPENDENCIES
 '   - TST_CertExecuteUnit
-'   - TST_CertRecordUnit
-'   - TST_CertAddFinding
-'   - TST_CertAppendDetail
+'   - TST_CertRecordOutcome
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
 ' UPDATED
+'   2026-11-27 - Recording moved to TST_CertRecordOutcome, which the isolated
+'                units share (#42).
 '   2026-11-18 - The leak is recorded as a cleanup finding (#35).
 '   2026-11-06 - Execution moved to TST_CertExecuteUnit; a snapshot the unit
 '                left behind is recorded for the cleanup verdict (#135).
@@ -772,6 +916,57 @@ Private Sub TST_CertRunUnit( _
 '------------------------------------------------------------------------------
 ' RECORD OUTCOME
 '------------------------------------------------------------------------------
+        TST_CertRecordOutcome UnitName, Passed, Detail, LeftSnapshot
+
+End Sub
+
+
+Private Sub TST_CertRecordOutcome( _
+    ByVal UnitName As String, _
+    ByVal Passed As Boolean, _
+    ByVal Detail As String, _
+    ByVal LeftSnapshot As Boolean)
+
+'
+'==============================================================================
+' TST_CertRecordOutcome
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Record the outcome of one unit and, when it left a snapshot behind, record
+'   a cleanup finding that names the unit.
+'
+' WHY THIS EXISTS
+'   A unit that runs in the live record and a unit that runs outside it
+'   (TST_CertRunIsolatedUnit) are recorded the same way, so they cannot drift.
+'
+' INPUTS
+'   UnitName / Passed / Detail / LeftSnapshot
+'     As TST_CertExecuteUnit reported them.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. A record that cannot be stored is flagged, which forces
+'     FAIL | INCOMPLETE.
+'
+' DEPENDENCIES
+'   - TST_CertRecordUnit
+'   - TST_CertAddFinding
+'   - TST_CertAppendDetail
+'
+' CALLED FROM
+'   - TST_CertRunUnit
+'   - TST_CertRecordIsolatedUnit
+'
+' UPDATED
+'   2026-11-27 - Extracted from TST_CertRunUnit (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' RECORD OUTCOME
+'------------------------------------------------------------------------------
     'Recording must never be the thing that breaks a run
         On Error Resume Next
 
@@ -786,6 +981,139 @@ Private Sub TST_CertRunUnit( _
 
             TST_CertAddFinding m_CertRecord, "unit.snapshotLeft", _
                 UnitName & " left an EXCEL_UI snapshot behind"
+        End If
+
+End Sub
+
+
+Private Sub TST_CertRunIsolatedUnit( _
+    ByVal UnitName As String, _
+    ByRef Outcome As tCertIsolated)
+
+'
+'==============================================================================
+' TST_CertRunIsolatedUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Execute one unit outside the live certification record and hold its
+'   outcome in the caller's variable.
+'
+' WHY THIS EXISTS
+'   The self-test and the ownership checks call certification, which clears the
+'   record and the active flag. Run inside a live run, they would corrupt the
+'   accounting of the run that executes them, and the re-entrancy guard would
+'   refuse them. The caller therefore runs them while no certification is
+'   active, so they cannot reach the live record, and records them afterwards
+'   (#42).
+'
+' INPUTS
+'   UnitName
+'     Identifier of the unit to execute.
+'
+'   Outcome
+'     ByRef. Receives whether the unit ran, whether it passed, its detail and
+'     whether it left a snapshot behind.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. A failing unit is reported through Outcome.
+'
+' DEPENDENCIES
+'   - TST_CertExecuteUnit
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' EXECUTE UNIT
+'------------------------------------------------------------------------------
+        Outcome.Ran = False
+        Outcome.Passed = False
+        Outcome.Detail = vbNullString
+        Outcome.LeftSnapshot = False
+
+        TST_Log "TST_CertRunIsolatedUnit", "UNIT", _
+            "Running " & UnitName & " outside the live record"
+
+        TST_CertExecuteUnit _
+            UnitName:=UnitName, _
+            Passed:=Outcome.Passed, _
+            Detail:=Outcome.Detail, _
+            LeftSnapshot:=Outcome.LeftSnapshot
+
+        Outcome.Ran = True
+
+End Sub
+
+
+Private Sub TST_CertRecordIsolatedUnit( _
+    ByVal UnitName As String, _
+    ByVal CaseId As String, _
+    ByRef Outcome As tCertIsolated)
+
+'
+'==============================================================================
+' TST_CertRecordIsolatedUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Record an isolated unit and its one case in the live record, once that
+'   record is open.
+'
+' WHY THIS EXISTS
+'   The unit ran before the record opened, so its start and status are written
+'   here, one after the other, from what TST_CertRunIsolatedUnit held. A unit
+'   that never ran records nothing, so its case is missing from the inventory
+'   and the run is incomplete.
+'
+' INPUTS
+'   UnitName / CaseId
+'     The unit and the identifier of its one case.
+'
+'   Outcome
+'     ByRef. What TST_CertRunIsolatedUnit held.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. A record that cannot be stored is flagged, which forces
+'     FAIL | INCOMPLETE.
+'
+' DEPENDENCIES
+'   - TST_CertCaseStart
+'   - TST_CertCaseEnd
+'   - TST_CertRecordOutcome
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' RECORD UNIT AND CASE
+'------------------------------------------------------------------------------
+    'Recording must never be the thing that breaks a run
+        On Error Resume Next
+
+        If Outcome.Ran Then
+
+            TST_CertCaseStart CaseId
+
+            TST_CertCaseEnd CaseId, Outcome.Passed, Outcome.Detail
+
+            TST_CertRecordOutcome UnitName, Outcome.Passed, Outcome.Detail, _
+                Outcome.LeftSnapshot
+
         End If
 
 End Sub
@@ -847,15 +1175,18 @@ Private Sub TST_CertExecuteUnit( _
 '   - Does not raise. A failing unit is reported through Passed and Detail.
 '
 ' DEPENDENCIES
+'   - TST_CertRunCase
 '   - TST_RunRegressionPack
-'   - Test_EXCEL_UI_RunSnapshotIdentity
 '   - Test_EXCEL_UI_RunTitleBarSdiIdentity
 '   - TST_CertSelfTestCaptureFailureUnit
 '   - TST_CertSelfTestFollowingUnit
+'   - TST_CertSelfTestForcedFailureUnit
+'   - TST_CertSelfTestInventoryGapUnit
 '   - TST_CertAppendDetail
 '
 ' CALLED FROM
 '   - TST_CertRunUnit
+'   - TST_CertRunIsolatedUnit
 '   - TST_Case_CertUnitIsolatesCaptureFailure
 '
 ' NOTES
@@ -863,10 +1194,19 @@ Private Sub TST_CertExecuteUnit( _
 '   units include Private procedures and a name-based call would fail silently
 '   or bind to the wrong project. A compile-time reference cannot rot.
 '
-'   The SelfTest units are dispatched only by
-'   TST_Case_CertUnitIsolatesCaptureFailure. Certification never runs them.
+'   The SelfTest.CaptureFailure and SelfTest.FollowingUnit units are
+'   dispatched only by TST_Case_CertUnitIsolatesCaptureFailure. The
+'   SelfTest.ForcedFailure and SelfTest.InventoryGap units are dispatched only
+'   by a certification run under a run fault. Certification never runs any of
+'   them otherwise.
+'
+'   A unit with one case runs it through TST_CertRunCase, so the case records
+'   its start and status when the run is live and nothing when the unit runs
+'   in isolation. TST_CertDispatchCase holds the dispatch of every case.
 '
 ' UPDATED
+'   2026-11-27 - Dispatches the isolated units and the run-fault units, and
+'                runs single-case units through TST_CertRunCase (#42).
 '   2026-11-06
 '==============================================================================
 '
@@ -897,13 +1237,19 @@ Private Sub TST_CertExecuteUnit( _
     'An unknown identifier is a defect in the registry, not a pass
         Select Case UnitName
 
+            Case "CertificationSelfTest"
+                TST_CertRunCase "Test_EXCEL_UI_RunCertificationSelfTest", True
+
+            Case "OwnershipCleanupChecks"
+                TST_CertRunCase "Test_EXCEL_UI_RunOwnershipCleanupChecks", True
+
             Case "RegressionPack"
                 TST_RunRegressionPack _
                     IncludeTitleBarTests:=True, _
                     CallerProc:="Certification.RegressionPack"
 
             Case "SnapshotIdentity"
-                Test_EXCEL_UI_RunSnapshotIdentity
+                TST_CertRunCase "Test_EXCEL_UI_RunSnapshotIdentity", True
 
             Case "TitleBarSdiIdentity"
                 Test_EXCEL_UI_RunTitleBarSdiIdentity
@@ -913,6 +1259,12 @@ Private Sub TST_CertExecuteUnit( _
 
             Case "SelfTest.FollowingUnit"
                 TST_CertSelfTestFollowingUnit
+
+            Case "SelfTest.ForcedFailure"
+                TST_CertSelfTestForcedFailureUnit
+
+            Case "SelfTest.InventoryGap"
+                TST_CertSelfTestInventoryGapUnit
 
             Case Else
                 Err.Raise _
@@ -1087,6 +1439,790 @@ Private Sub TST_CertSelfTestFollowingUnit()
 
         TST_Log "TST_CertSelfTestFollowingUnit", "PASS", _
             "No snapshot was left for this unit to refuse"
+
+End Sub
+
+
+Private Sub TST_CertSelfTestForcedFailureUnit()
+
+'
+'==============================================================================
+' TST_CertSelfTestForcedFailureUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Fail as a mandatory unit does, so that the failure can be seen to fail the
+'   outer certification call.
+'
+' WHY THIS EXISTS
+'   A failed mandatory unit must make Test_EXCEL_UI_RunReleaseCertification
+'   fail observably with its error details, not only print a FAIL line (#42).
+'   A real unit does not fail on demand, so the run fault
+'   TEST_CERT_RUN_FAULT_UNIT runs this one in its place.
+'
+'   It runs its one case through TST_CertRunCase. The identifier is not in the
+'   dispatcher, so the wrapper records the start, the dispatcher's refusal as
+'   the failed status, and raises it, which is the path a failing case takes.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises the dispatcher's refusal, on purpose.
+'
+' DEPENDENCIES
+'   - TST_CertRunCase
+'
+' CALLED FROM
+'   - TST_CertExecuteUnit
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+        TST_CertRunCase "SelfTest.ForcedCase", True
+
+End Sub
+
+
+Private Sub TST_CertSelfTestInventoryGapUnit()
+
+'
+'==============================================================================
+' TST_CertSelfTestInventoryGapUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Pass as a unit while one case that the run expects is never started, so
+'   that the gap in the inventory can be seen to fail the outer certification
+'   call on its own.
+'
+' WHY THIS EXISTS
+'   An incomplete inventory is a different failure from a failed unit, and the
+'   verdict must say so (#42). The run fault TEST_CERT_RUN_FAULT_INVENTORY
+'   expects SelfTest.PresentCase and SelfTest.AbsentCase, and runs this unit,
+'   which starts and passes only the first.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertCaseStart
+'   - TST_CertCaseEnd
+'
+' CALLED FROM
+'   - TST_CertExecuteUnit
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+        TST_CertCaseStart "SelfTest.PresentCase"
+
+        TST_CertCaseEnd "SelfTest.PresentCase", True, vbNullString
+
+End Sub
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                         MANDATORY CASE MANIFEST
+'
+'------------------------------------------------------------------------------
+'
+
+
+Private Function TST_CertManifestCase( _
+    ByVal Index As Long, _
+    ByRef UnitName As String, _
+    ByRef CaseId As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertManifestCase
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Register the mandatory cases of release certification, one per index, with
+'   the unit each belongs to.
+'
+' WHY THIS EXISTS
+'   Certification compares the cases that ran with the cases it expects. This
+'   is where it learns what it expects. tools/certification-manifest.json is
+'   the release contract this registry mirrors: the static gate fails when the
+'   two differ, when a case is not dispatched or is dispatched twice, and when
+'   a case is wired into a pack that the manifest does not list (#42).
+'
+' INPUTS
+'   Index
+'     1-based position in the manifest, in the order the cases run.
+'
+'   UnitName / CaseId
+'     ByRef. Receive the unit and the stable identifier of the case.
+'
+' RETURNS
+'   Boolean
+'     TRUE when Index names a case; FALSE after the last one.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertLoadExpected
+'
+' NOTES
+'   A case identifier is the name of the procedure that runs it. Version 1 of
+'   the manifest names TST_Case_TitleBarSameHwndGenerationReuse where #42 named
+'   TST_Case_TitleBarSameStyleHandleReuse: #32 replaced that case.
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' LOOK UP THE CASE
+'------------------------------------------------------------------------------
+        UnitName = vbNullString
+        CaseId = vbNullString
+        TST_CertManifestCase = False
+
+        Select Case Index
+
+            Case 1
+                UnitName = "CertificationSelfTest"
+                CaseId = "Test_EXCEL_UI_RunCertificationSelfTest"
+
+            Case 2
+                UnitName = "OwnershipCleanupChecks"
+                CaseId = "Test_EXCEL_UI_RunOwnershipCleanupChecks"
+
+            Case 3
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_ShowAllBaseline"
+
+            Case 4
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_SelectiveHide"
+
+            Case 5
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_SelectiveShow"
+
+            Case 6
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_NoOpLeaveUnchanged"
+
+            Case 7
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_WithResult_AllSuccess"
+
+            Case 8
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_WithResult_NoOpSuccess"
+
+            Case 9
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_WithResult_SuccessWithoutFailureList"
+
+            Case 10
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_WithResult_InvalidVisibility"
+
+            Case 11
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TargetScope_ActiveWindow"
+
+            Case 12
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TargetScope_ActiveWorkbookWindows"
+
+            Case 13
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TargetScope_InvalidValue"
+
+            Case 14
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_ScreenUpdatingPreserved"
+
+            Case 15
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_FailureAccumulatorDegradesSafely"
+
+            Case 16
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_FirstFailureAllocationKeepsContract"
+
+            Case 17
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertificationCleanupUsesBaseline"
+
+            Case 18
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertBaselineMatchesUntouchedHost"
+
+            Case 19
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertCleanupDetectsLeakedAndReplacedWindows"
+
+            Case 20
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertCleanupDetectsPropertyDrift"
+
+            Case 21
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertCleanupDetectsTitleBarMismatch"
+
+            Case 22
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertCleanupHelperFailureIsFinding"
+
+            Case 23
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertCleanupReportsQuietUpdateResidue"
+
+            Case 24
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertRecordFailsClosed"
+
+            Case 25
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertInventoryDetectsDrift"
+
+            Case 26
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_SnapshotCaptureResultSuccess"
+
+            Case 27
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_SnapshotResetResultSuccess"
+
+            Case 28
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_SnapshotResetResultNoSnapshot"
+
+            Case 29
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_SnapshotCapturePartialApplicationRead"
+
+            Case 30
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_SnapshotLifecycle"
+
+            Case 31
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_ResetWithoutSnapshot_NoOp"
+
+            Case 32
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_DestructiveRunnersPreserveCallerSnapshot"
+
+            Case 33
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_CertUnitIsolatesCaptureFailure"
+
+            Case 34
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_QuietScopeOwnershipIsVerified"
+
+            Case 35
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_ConvenienceWrappers"
+
+            Case 36
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarRoundTrip"
+
+            Case 37
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarOwnedBitPreservation"
+
+            Case 38
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarShowRecoversWithoutBaseline"
+
+            Case 39
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarShowRejectsCaptionlessBaseline"
+
+            Case 40
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarVisibilityRequiresCompleteCaption"
+
+            Case 41
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarShowRejectsPartialCaptionBaseline"
+
+            Case 42
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarShowPublicPaths"
+
+            Case 43
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarFrameRefreshDebtRetried"
+
+            Case 44
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarStaleFrameEntryNotReused"
+
+            Case 45
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarSameHwndGenerationReuse"
+
+            Case 46
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_ActiveFramePairRefusesMismatch"
+
+            Case 47
+                UnitName = "RegressionPack"
+                CaseId = "TST_Case_TitleBarApiErrorCapture"
+
+            Case 48
+                UnitName = "SnapshotIdentity"
+                CaseId = "Test_EXCEL_UI_RunSnapshotIdentity"
+
+            Case 49
+                UnitName = "TitleBarSdiIdentity"
+                CaseId = "TST_Case_TitleBarSdiRestoreTargetsCapturedFrame"
+
+            Case 50
+                UnitName = "TitleBarSdiIdentity"
+                CaseId = "TST_Case_TitleBarCapturedFrameClosedIsReported"
+
+            Case 51
+                UnitName = "TitleBarSdiIdentity"
+                CaseId = "TST_Case_RibbonRestoreRefusesOtherActiveWindow"
+
+            Case 52
+                UnitName = "TitleBarSdiIdentity"
+                CaseId = "TST_Case_RibbonRestoreRefusesClosedWindow"
+
+            Case 53
+                UnitName = "TitleBarSdiIdentity"
+                CaseId = "TST_Case_TitleBarPairRefusalLeavesFrameUntouched"
+
+            Case 54
+                UnitName = "TitleBarSdiIdentity"
+                CaseId = "TST_Case_TitleBarClosedFrameReopenedIsRefused"
+
+            Case Else
+                Exit Function
+
+        End Select
+
+        TST_CertManifestCase = True
+
+End Function
+
+
+Private Sub TST_CertLoadExpected( _
+    ByVal FaultKind As Long)
+
+'
+'==============================================================================
+' TST_CertLoadExpected
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store the cases the run expects in the certification record.
+'
+' WHY THIS EXISTS
+'   The expected cases travel in the record they are compared with, so the
+'   evidence lists both from one place and a case that cannot be stored fails
+'   the run (#42).
+'
+' INPUTS
+'   FaultKind
+'     The run fault taken for this call. A run without one expects every case
+'     of the manifest. A faulted run expects a synthetic inventory instead:
+'     none for a forced cleanup failure, one case for a forced failed unit, and
+'     two cases for a forced gap, of which the run starts one.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Does not raise. A case that cannot be stored flags the record, which
+'     forces FAIL | INCOMPLETE.
+'
+' DEPENDENCIES
+'   - TST_CertManifestCase
+'   - TST_CertAddExpected
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Index               As Long            'Position in the manifest
+    Dim UnitName            As String          'Unit of the case
+    Dim CaseId              As String          'Identifier of the case
+
+'------------------------------------------------------------------------------
+' STORE EXPECTED CASES
+'------------------------------------------------------------------------------
+    'A failure to store is flagged by the record itself
+        On Error Resume Next
+
+        Select Case FaultKind
+
+            Case TEST_CERT_RUN_FAULT_CLEANUP
+                'No unit runs, so no case is expected
+
+            Case TEST_CERT_RUN_FAULT_UNIT
+                TST_CertAddExpected m_CertRecord, _
+                    "SelfTest.ForcedFailure", "SelfTest.ForcedCase"
+
+            Case TEST_CERT_RUN_FAULT_INVENTORY
+                TST_CertAddExpected m_CertRecord, _
+                    "SelfTest.InventoryGap", "SelfTest.PresentCase"
+
+                TST_CertAddExpected m_CertRecord, _
+                    "SelfTest.InventoryGap", "SelfTest.AbsentCase"
+
+            Case Else
+                Index = 1
+
+                Do While TST_CertManifestCase(Index, UnitName, CaseId)
+                    TST_CertAddExpected m_CertRecord, UnitName, CaseId
+                    Index = Index + 1
+                Loop
+
+        End Select
+
+End Sub
+
+
+Private Sub TST_CertDispatchCase( _
+    ByVal CaseId As String, _
+    ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+' TST_CertDispatchCase
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Run one mandatory case by its stable identifier.
+'
+' WHY THIS EXISTS
+'   The cases include Private procedures, so a name-based Application.Run would
+'   fail silently or bind to the wrong project. An explicit Select Case is a
+'   compile-time reference that cannot rot. It is the only place a case is run
+'   by identifier, and the static gate holds its labels to the manifest: one
+'   per case, none repeated, and each calling the procedure it names (#42).
+'
+' INPUTS
+'   CaseId
+'     Stable identifier of the case.
+'
+'   IncludeTitleBarTests
+'     The title-bar switch of the pack, for the cases that take it.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises the failure of the case, unchanged.
+'   - Raises TEST_CERT_ERR_BASE + 11 for an identifier it does not dispatch.
+'
+' CALLED FROM
+'   - TST_CertRunCase
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DISPATCH CASE
+'------------------------------------------------------------------------------
+    'An unknown identifier is a defect in the registry, not a pass
+        Select Case CaseId
+
+            Case "Test_EXCEL_UI_RunCertificationSelfTest"
+                Test_EXCEL_UI_RunCertificationSelfTest
+
+            Case "Test_EXCEL_UI_RunOwnershipCleanupChecks"
+                Test_EXCEL_UI_RunOwnershipCleanupChecks
+
+            Case "TST_Case_ShowAllBaseline"
+                TST_Case_ShowAllBaseline IncludeTitleBarTests
+
+            Case "TST_Case_SelectiveHide"
+                TST_Case_SelectiveHide IncludeTitleBarTests
+
+            Case "TST_Case_SelectiveShow"
+                TST_Case_SelectiveShow IncludeTitleBarTests
+
+            Case "TST_Case_NoOpLeaveUnchanged"
+                TST_Case_NoOpLeaveUnchanged IncludeTitleBarTests
+
+            Case "TST_Case_WithResult_AllSuccess"
+                TST_Case_WithResult_AllSuccess IncludeTitleBarTests
+
+            Case "TST_Case_WithResult_NoOpSuccess"
+                TST_Case_WithResult_NoOpSuccess IncludeTitleBarTests
+
+            Case "TST_Case_WithResult_SuccessWithoutFailureList"
+                TST_Case_WithResult_SuccessWithoutFailureList IncludeTitleBarTests
+
+            Case "TST_Case_WithResult_InvalidVisibility"
+                TST_Case_WithResult_InvalidVisibility
+
+            Case "TST_Case_TargetScope_ActiveWindow"
+                TST_Case_TargetScope_ActiveWindow
+
+            Case "TST_Case_TargetScope_ActiveWorkbookWindows"
+                TST_Case_TargetScope_ActiveWorkbookWindows
+
+            Case "TST_Case_TargetScope_InvalidValue"
+                TST_Case_TargetScope_InvalidValue
+
+            Case "TST_Case_ScreenUpdatingPreserved"
+                TST_Case_ScreenUpdatingPreserved
+
+            Case "TST_Case_FailureAccumulatorDegradesSafely"
+                TST_Case_FailureAccumulatorDegradesSafely
+
+            Case "TST_Case_FirstFailureAllocationKeepsContract"
+                TST_Case_FirstFailureAllocationKeepsContract
+
+            Case "TST_Case_CertificationCleanupUsesBaseline"
+                TST_Case_CertificationCleanupUsesBaseline
+
+            Case "TST_Case_CertBaselineMatchesUntouchedHost"
+                TST_Case_CertBaselineMatchesUntouchedHost
+
+            Case "TST_Case_CertCleanupDetectsLeakedAndReplacedWindows"
+                TST_Case_CertCleanupDetectsLeakedAndReplacedWindows
+
+            Case "TST_Case_CertCleanupDetectsPropertyDrift"
+                TST_Case_CertCleanupDetectsPropertyDrift
+
+            Case "TST_Case_CertCleanupDetectsTitleBarMismatch"
+                TST_Case_CertCleanupDetectsTitleBarMismatch
+
+            Case "TST_Case_CertCleanupHelperFailureIsFinding"
+                TST_Case_CertCleanupHelperFailureIsFinding
+
+            Case "TST_Case_CertCleanupReportsQuietUpdateResidue"
+                TST_Case_CertCleanupReportsQuietUpdateResidue
+
+            Case "TST_Case_CertRecordFailsClosed"
+                TST_Case_CertRecordFailsClosed
+
+            Case "TST_Case_CertInventoryDetectsDrift"
+                TST_Case_CertInventoryDetectsDrift
+
+            Case "TST_Case_SnapshotCaptureResultSuccess"
+                TST_Case_SnapshotCaptureResultSuccess IncludeTitleBarTests
+
+            Case "TST_Case_SnapshotResetResultSuccess"
+                TST_Case_SnapshotResetResultSuccess IncludeTitleBarTests
+
+            Case "TST_Case_SnapshotResetResultNoSnapshot"
+                TST_Case_SnapshotResetResultNoSnapshot IncludeTitleBarTests
+
+            Case "TST_Case_SnapshotCapturePartialApplicationRead"
+                TST_Case_SnapshotCapturePartialApplicationRead
+
+            Case "TST_Case_SnapshotLifecycle"
+                TST_Case_SnapshotLifecycle IncludeTitleBarTests
+
+            Case "TST_Case_ResetWithoutSnapshot_NoOp"
+                TST_Case_ResetWithoutSnapshot_NoOp IncludeTitleBarTests
+
+            Case "TST_Case_DestructiveRunnersPreserveCallerSnapshot"
+                TST_Case_DestructiveRunnersPreserveCallerSnapshot
+
+            Case "TST_Case_CertUnitIsolatesCaptureFailure"
+                TST_Case_CertUnitIsolatesCaptureFailure
+
+            Case "TST_Case_QuietScopeOwnershipIsVerified"
+                TST_Case_QuietScopeOwnershipIsVerified
+
+            Case "TST_Case_ConvenienceWrappers"
+                TST_Case_ConvenienceWrappers IncludeTitleBarTests
+
+            Case "TST_Case_TitleBarRoundTrip"
+                TST_Case_TitleBarRoundTrip
+
+            Case "TST_Case_TitleBarOwnedBitPreservation"
+                TST_Case_TitleBarOwnedBitPreservation
+
+            Case "TST_Case_TitleBarShowRecoversWithoutBaseline"
+                TST_Case_TitleBarShowRecoversWithoutBaseline
+
+            Case "TST_Case_TitleBarShowRejectsCaptionlessBaseline"
+                TST_Case_TitleBarShowRejectsCaptionlessBaseline
+
+            Case "TST_Case_TitleBarVisibilityRequiresCompleteCaption"
+                TST_Case_TitleBarVisibilityRequiresCompleteCaption
+
+            Case "TST_Case_TitleBarShowRejectsPartialCaptionBaseline"
+                TST_Case_TitleBarShowRejectsPartialCaptionBaseline
+
+            Case "TST_Case_TitleBarShowPublicPaths"
+                TST_Case_TitleBarShowPublicPaths
+
+            Case "TST_Case_TitleBarFrameRefreshDebtRetried"
+                TST_Case_TitleBarFrameRefreshDebtRetried
+
+            Case "TST_Case_TitleBarStaleFrameEntryNotReused"
+                TST_Case_TitleBarStaleFrameEntryNotReused
+
+            Case "TST_Case_TitleBarSameHwndGenerationReuse"
+                TST_Case_TitleBarSameHwndGenerationReuse
+
+            Case "TST_Case_ActiveFramePairRefusesMismatch"
+                TST_Case_ActiveFramePairRefusesMismatch
+
+            Case "TST_Case_TitleBarApiErrorCapture"
+                TST_Case_TitleBarApiErrorCapture
+
+            Case "Test_EXCEL_UI_RunSnapshotIdentity"
+                Test_EXCEL_UI_RunSnapshotIdentity
+
+            Case "TST_Case_TitleBarSdiRestoreTargetsCapturedFrame"
+                TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+
+            Case "TST_Case_TitleBarCapturedFrameClosedIsReported"
+                TST_Case_TitleBarCapturedFrameClosedIsReported
+
+            Case "TST_Case_RibbonRestoreRefusesOtherActiveWindow"
+                TST_Case_RibbonRestoreRefusesOtherActiveWindow
+
+            Case "TST_Case_RibbonRestoreRefusesClosedWindow"
+                TST_Case_RibbonRestoreRefusesClosedWindow
+
+            Case "TST_Case_TitleBarPairRefusalLeavesFrameUntouched"
+                TST_Case_TitleBarPairRefusalLeavesFrameUntouched
+
+            Case "TST_Case_TitleBarClosedFrameReopenedIsRefused"
+                TST_Case_TitleBarClosedFrameReopenedIsRefused
+
+            Case Else
+                Err.Raise _
+                    TEST_CERT_ERR_BASE + TST_CERT_ERR_UNKNOWN_CASE, _
+                    "TST_CertDispatchCase", _
+                    "unknown certification case: " & CaseId
+
+        End Select
+
+End Sub
+
+
+Public Sub TST_CertRunCase( _
+    ByVal CaseId As String, _
+    ByVal IncludeTitleBarTests As Boolean)
+
+'
+'==============================================================================
+' TST_CertRunCase
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Run one mandatory case and record its start and its one terminal status
+'   under its stable identifier.
+'
+' WHY THIS EXISTS
+'   A case that is dispatched but never recorded cannot be told apart from a
+'   case that never ran. Every mandatory case runs through here, so a case
+'   cannot report PASS without a start and one terminal status in the record
+'   (#42).
+'
+' INPUTS
+'   CaseId
+'     Stable identifier of the case, which TST_CertDispatchCase dispatches.
+'
+'   IncludeTitleBarTests
+'     The title-bar switch of the pack.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   - While no certification is active, runs the case and records nothing, so
+'     the legacy runners and the interactive packs behave as they did.
+'   - While one is active, records the start, runs the case, and records PASS;
+'     when the case raises, records FAIL with the failure text and raises the
+'     same error, unchanged.
+'
+' ERROR POLICY
+'   - Raises the failure of the case with its number, source and description,
+'     after the status is recorded.
+'
+' DEPENDENCIES
+'   - TST_CertDispatchCase
+'   - TST_CertCaseStart
+'   - TST_CertCaseEnd
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'   - TST_CertExecuteUnit
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'   - TST_CertSelfTestForcedFailureUnit
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FailNumber          As Long            'Error number of a failed case
+    Dim FailSource          As String          'Error source of a failed case
+    Dim FailDescription     As String          'Error text of a failed case
+
+'------------------------------------------------------------------------------
+' RUN WITHOUT RECORDING
+'------------------------------------------------------------------------------
+    'Outside a certification run the case behaves exactly as it always did
+        If Not m_CertActive Then
+            TST_CertDispatchCase CaseId, IncludeTitleBarTests
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' RECORD START, RUN, RECORD STATUS
+'------------------------------------------------------------------------------
+        TST_CertCaseStart CaseId
+
+        On Error GoTo Err_Handler
+
+        TST_CertDispatchCase CaseId, IncludeTitleBarTests
+
+        On Error GoTo 0
+
+        TST_CertCaseEnd CaseId, True, vbNullString
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Capture every error field BEFORE calling anything, then disable the
+    'handler so that the raise below leaves this procedure
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+
+        On Error GoTo 0
+
+        TST_CertCaseEnd CaseId, False, CStr(FailNumber) & ": " & FailDescription
+
+    'Re-raise from the captured values, so the failure keeps its identity
+        Err.Raise FailNumber, FailSource, FailDescription
 
 End Sub
 
@@ -3397,6 +4533,11 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '                                number, source, verdict and finding intact,
 '                                the finding is recorded, and both evidence
 '                                documents list it
+'   F  forced failed unit      - the outer call fails with the failed unit and
+'                                its error in the text it raises, while the
+'                                case inventory is exact
+'   G  forced inventory gap    - the outer call fails as INCOMPLETE and names
+'                                the missing case, while every unit passed
 '
 ' ERROR POLICY
 '   - Raises on assertion failure
@@ -3413,17 +4554,27 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '   - Invoked directly
 '
 ' NOTES
-'   Deliberately not registered in TST_RunRegressionPack. The self-test calls
+'   Deliberately not a case of TST_RunRegressionPack. The self-test calls
 '   certification, and while a certification run is active that call meets the
 '   re-entrancy guard instead of the snapshot precondition this exercises, so
 '   inside the pack these cases would assert the wrong refusal.
 '
+'   Its role in the manifest is a mandatory isolated unit, OwnershipCleanupChecks.
+'   Release certification runs it once, before the live record opens and with
+'   no certification active, so the nested certification runs of cases E, F and
+'   G cannot reach the accounting of the run that executes it. It remains a
+'   runner that can be invoked directly, and tools\Check-EXCEL_UI.ps1 runs it
+'   that way as well.
+'
 '   Run it with no explicit snapshot held.
 '
-'   Case E runs the real certification call with no unit and the status bar
-'   inverted, writes no evidence file, and restores the status bar itself.
+'   Cases E, F and G run the real certification call under a run fault, write no
+'   evidence file, and check what the call raises and records. Case E inverts
+'   the status bar and restores it itself.
 '
 ' UPDATED
+'   2026-11-27 - Added cases F and G, the forced failed unit and the forced
+'                inventory gap, and its role as an isolated unit (#42).
 '   2026-11-18 - Added case E, the forced cleanup failure (#35).
 '   2026-08-29
 '==============================================================================
@@ -3704,12 +4855,199 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             PROC & ".ForcedCleanup.Evidence.ReportListsTheFinding"
 
 '------------------------------------------------------------------------------
+' CASE F - A FORCED FAILED UNIT FAILS THE OUTER CERTIFICATION
+'------------------------------------------------------------------------------
+    'The run fault replaces the mandatory units with one synthetic unit that
+    'fails, and expects the one case it runs, so the inventory is exact and
+    'only the unit counters fail. This proves that a failed mandatory unit
+    'reaches the caller of Test_EXCEL_UI_RunReleaseCertification with its error
+    'details, rather than being printed as a FAIL line and returned from.
+        TST_CertInjectRunFault TEST_CERT_RUN_FAULT_UNIT
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunReleaseCertification
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+        TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
+
+        TST_AssertTrue _
+            (RaisedNumber = TEST_CERT_ERR_BASE + 3), _
+            PROC & ".ForcedUnit.ErrorNumberPreserved"
+
+        TST_AssertTrue _
+            (RaisedSource = "Test_EXCEL_UI_RunReleaseCertification"), _
+            PROC & ".ForcedUnit.ErrorSourcePreserved"
+
+    'The text carries the verdict and the failure of the unit, not only a number
+        TST_AssertTrue _
+            (InStr(1, RaisedDescription, _
+                "RESULT: FAIL | COMPLETE | units=1 failed=1 skipped=0 cleanup=", _
+                vbBinaryCompare) > 0), _
+            PROC & ".ForcedUnit.DescriptionCarriesTheVerdict"
+
+        TST_AssertTrue _
+            (InStr(1, RaisedDescription, _
+                "failed units: SelfTest.ForcedFailure: ", vbBinaryCompare) > 0) And _
+            (InStr(1, RaisedDescription, _
+                "unknown certification case: SelfTest.ForcedCase", _
+                vbBinaryCompare) > 0), _
+            PROC & ".ForcedUnit.DescriptionCarriesTheFailure"
+
+        TST_AssertBooleanEquals False, m_CertActive, _
+            PROC & ".ForcedUnit.RunClosed"
+
+    'The record holds the whole run: one failed unit, and one case that started
+    'and recorded a status, so the inventory is exact
+        TST_AssertTrue _
+            (m_CertRecord.UnitCount = 1) And _
+            (m_CertRecord.CaseStartCount = 1) And _
+            (m_CertRecord.CaseEndCount = 1) And _
+            (m_CertRecord.InventoryCount = 0) And _
+            m_CertRecord.InventoryChecked And _
+            Not m_CertRecord.RecordFailed, _
+            PROC & ".ForcedUnit.RecordHoldsTheRun"
+
+        TST_AssertTrue _
+            (TST_CertTakeRunFault() = TEST_CERT_RUN_FAULT_NONE), _
+            PROC & ".ForcedUnit.FaultConsumed"
+
+        ForcedDetail = vbNullString
+
+        TST_CertComposeEvidence _
+            Rec:=m_CertRecord, _
+            CleanupOK:=True, _
+            CleanupDetail:=ForcedDetail, _
+            UnitsFailed:=ForcedUnitsFailed, _
+            Complete:=ForcedComplete, _
+            Passed:=ForcedPassed, _
+            Verdict:=ForcedVerdict, _
+            RecordingDetail:=ForcedRecordingDetail, _
+            JsonText:=ForcedJson, _
+            ReportText:=ForcedReport
+
+        TST_AssertBooleanEquals False, ForcedPassed, _
+            PROC & ".ForcedUnit.Evidence.NotPassed"
+
+        TST_AssertTrue _
+            (InStr(1, ForcedJson, """unitsFailed"":1", vbBinaryCompare) > 0) And _
+            (InStr(1, ForcedJson, """inventory"":""OK""", vbBinaryCompare) > 0), _
+            PROC & ".ForcedUnit.Evidence.JsonFailsTheUnitNotTheInventory"
+
+        TST_AssertTrue _
+            (InStr(1, ForcedReport, vbNewLine & "  CASE  FAIL  " & _
+                "SelfTest.ForcedFailure  SelfTest.ForcedCase | ", _
+                vbBinaryCompare) > 0), _
+            PROC & ".ForcedUnit.Evidence.ReportListsTheFailedCase"
+
+'------------------------------------------------------------------------------
+' CASE G - A FORCED INVENTORY GAP FAILS THE OUTER CERTIFICATION
+'------------------------------------------------------------------------------
+    'The run fault expects two cases and runs one unit that starts and passes
+    'only the first. Every unit passes, so only the case inventory can fail the
+    'run, and the verdict says INCOMPLETE rather than counting a failed unit.
+        TST_CertInjectRunFault TEST_CERT_RUN_FAULT_INVENTORY
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunReleaseCertification
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+        TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
+
+        TST_AssertTrue _
+            (RaisedNumber = TEST_CERT_ERR_BASE + 3), _
+            PROC & ".ForcedGap.ErrorNumberPreserved"
+
+        TST_AssertTrue _
+            (RaisedSource = "Test_EXCEL_UI_RunReleaseCertification"), _
+            PROC & ".ForcedGap.ErrorSourcePreserved"
+
+        TST_AssertTrue _
+            (InStr(1, RaisedDescription, _
+                "RESULT: FAIL | INCOMPLETE | units=1 failed=0 skipped=0 cleanup=", _
+                vbBinaryCompare) > 0), _
+            PROC & ".ForcedGap.DescriptionCarriesTheVerdict"
+
+        TST_AssertTrue _
+            (InStr(1, RaisedDescription, _
+                "inventory: missing:SelfTest.AbsentCase: ", vbBinaryCompare) > 0), _
+            PROC & ".ForcedGap.DescriptionCarriesTheFinding"
+
+        TST_AssertBooleanEquals False, m_CertActive, _
+            PROC & ".ForcedGap.RunClosed"
+
+        TST_AssertTrue _
+            (m_CertRecord.UnitCount = 1) And _
+            (m_CertRecord.CaseStartCount = 1) And _
+            (m_CertRecord.CaseEndCount = 1) And _
+            (m_CertRecord.InventoryCount = 1) And _
+            m_CertRecord.InventoryChecked And _
+            Not m_CertRecord.RecordFailed, _
+            PROC & ".ForcedGap.RecordHoldsTheRun"
+
+        TST_AssertTrue _
+            (TST_CertTakeRunFault() = TEST_CERT_RUN_FAULT_NONE), _
+            PROC & ".ForcedGap.FaultConsumed"
+
+        ForcedDetail = vbNullString
+
+        TST_CertComposeEvidence _
+            Rec:=m_CertRecord, _
+            CleanupOK:=True, _
+            CleanupDetail:=ForcedDetail, _
+            UnitsFailed:=ForcedUnitsFailed, _
+            Complete:=ForcedComplete, _
+            Passed:=ForcedPassed, _
+            Verdict:=ForcedVerdict, _
+            RecordingDetail:=ForcedRecordingDetail, _
+            JsonText:=ForcedJson, _
+            ReportText:=ForcedReport
+
+        TST_AssertBooleanEquals False, ForcedPassed, _
+            PROC & ".ForcedGap.Evidence.NotPassed"
+
+        TST_AssertBooleanEquals False, ForcedComplete, _
+            PROC & ".ForcedGap.Evidence.NotComplete"
+
+    'The units passed, and the inventory alone failed the run
+        TST_AssertTrue _
+            (ForcedUnitsFailed = 0) And _
+            (InStr(1, ForcedJson, """inventory"":""FAILED""", vbBinaryCompare) > 0) And _
+            (InStr(1, ForcedJson, """code"":""missing:SelfTest.AbsentCase""", _
+                vbBinaryCompare) > 0), _
+            PROC & ".ForcedGap.Evidence.JsonFailsTheInventoryNotTheUnit"
+
+        TST_AssertTrue _
+            (InStr(1, ForcedReport, vbNewLine & "  PASS  SelfTest.InventoryGap", _
+                vbBinaryCompare) > 0) And _
+            (InStr(1, ForcedReport, vbNewLine & _
+                "  INVENTORY  missing:SelfTest.AbsentCase | ", _
+                vbBinaryCompare) > 0), _
+            PROC & ".ForcedGap.Evidence.ReportListsTheFinding"
+
+'------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
         TST_Log PROC, "PASS", _
             "Runner-owned snapshots were released on every exit, every " & _
-            "failure survived cleanup, and a forced cleanup failure failed " & _
-            "the certification call"
+            "failure survived cleanup, and a forced cleanup failure, a forced " & _
+            "failed unit and a forced inventory gap each failed the " & _
+            "certification call"
 
 Safe_Exit:
     'Disarm whatever this run armed. A fault left armed would fire inside an
@@ -3781,8 +5119,9 @@ Public Sub Test_EXCEL_UI_RunAll()
 '
 ' NOTES
 '   This is NOT the release gate. It does not run the snapshot-identity and SDI
-'   identity units, it can skip snapshot cases silently when a snapshot
-'   already exists, and it produces no machine-readable evidence. Use
+'   identity units or the isolated units, it can skip snapshot cases silently
+'   when a snapshot already exists, it records no case inventory, and it
+'   produces no machine-readable evidence. Use
 '   Test_EXCEL_UI_RunReleaseCertification to certify a release.
 '
 ' UPDATED
@@ -3829,7 +5168,13 @@ Public Sub Test_EXCEL_UI_RunCore()
 ' DEPENDENCIES
 '   - TST_RunRegressionPack
 '
+' NOTES
+'   An interactive runner, not release certification: it skips the title-bar
+'   cases, so it cannot stand for the mandatory case inventory, and it records
+'   none. Use Test_EXCEL_UI_RunReleaseCertification to certify a release.
+'
 ' UPDATED
+'   2026-11-27 - States that it is not release certification (#42).
 '   2026-07-25
 '==============================================================================
 '
@@ -4058,8 +5403,16 @@ Private Sub TST_RunRegressionPack( _
 '   - This pack is the body of the RegressionPack certification unit, so a case
 '     reachable only from the title-bar-only pack is absent from the evidence a
 '     release is tagged on. Every frame-state case is registered here as well.
+'   - Every case runs through TST_CertRunCase under its stable identifier, so
+'     certification records its start and one terminal status. The static gate
+'     holds this sequence to the RegressionPack unit of the manifest, and the
+'     end of a certification run compares what ran with what the manifest
+'     expects. Under Test_EXCEL_UI_RunAll and Test_EXCEL_UI_RunCore the same
+'     calls record nothing.
 '
 ' UPDATED
+'   2026-11-27 - Runs every case through TST_CertRunCase and registered the
+'                case-inventory case (#42).
 '   2026-11-18 - Registered the cleanup cases and failed the pack when the UI
 '                state restoration did not complete (#35).
 '   2026-11-16 - Registered the certification-record case (#50).
@@ -4162,73 +5515,77 @@ Private Sub TST_RunRegressionPack( _
 ' RUN CORE REGRESSION CASES
 '------------------------------------------------------------------------------
     'Run the show-all baseline case
-        TST_Case_ShowAllBaseline IncludeTitleBarTests
+        TST_CertRunCase "TST_Case_ShowAllBaseline", IncludeTitleBarTests
 
     'Run the selective-hide case
-        TST_Case_SelectiveHide IncludeTitleBarTests
+        TST_CertRunCase "TST_Case_SelectiveHide", IncludeTitleBarTests
 
     'Run the selective-show case
-        TST_Case_SelectiveShow IncludeTitleBarTests
+        TST_CertRunCase "TST_Case_SelectiveShow", IncludeTitleBarTests
 
     'Run the no-op / leave-unchanged case
-        TST_Case_NoOpLeaveUnchanged IncludeTitleBarTests
+        TST_CertRunCase "TST_Case_NoOpLeaveUnchanged", IncludeTitleBarTests
 
     'Run the structured-result success case
-        TST_Case_WithResult_AllSuccess IncludeTitleBarTests
+        TST_CertRunCase "TST_Case_WithResult_AllSuccess", IncludeTitleBarTests
 
     'Run the structured-result no-op case
-        TST_Case_WithResult_NoOpSuccess IncludeTitleBarTests
+        TST_CertRunCase "TST_Case_WithResult_NoOpSuccess", IncludeTitleBarTests
 
     'Run the structured-result success case without FailureList capture
-        TST_Case_WithResult_SuccessWithoutFailureList IncludeTitleBarTests
+        TST_CertRunCase "TST_Case_WithResult_SuccessWithoutFailureList", IncludeTitleBarTests
 
     'Run the structured-result invalid-visibility failure case
-        TST_Case_WithResult_InvalidVisibility
+        TST_CertRunCase "TST_Case_WithResult_InvalidVisibility", IncludeTitleBarTests
 
     'Run active-window targeting
-        TST_Case_TargetScope_ActiveWindow
+        TST_CertRunCase "TST_Case_TargetScope_ActiveWindow", IncludeTitleBarTests
 
     'Run active-workbook-window targeting
-        TST_Case_TargetScope_ActiveWorkbookWindows
+        TST_CertRunCase "TST_Case_TargetScope_ActiveWorkbookWindows", IncludeTitleBarTests
 
     'Run invalid-target-scope structured failure and continuation
-        TST_Case_TargetScope_InvalidValue
+        TST_CertRunCase "TST_Case_TargetScope_InvalidValue", IncludeTitleBarTests
 
     'Run the ScreenUpdating preservation case
-        TST_Case_ScreenUpdatingPreserved
+        TST_CertRunCase "TST_Case_ScreenUpdatingPreserved", IncludeTitleBarTests
 
     'Verify diagnostics degrade rather than raise when the list cannot grow
-        TST_Case_FailureAccumulatorDegradesSafely
+        TST_CertRunCase "TST_Case_FailureAccumulatorDegradesSafely", IncludeTitleBarTests
 
     'Verify a failed first list allocation leaves a count and an Empty list
-        TST_Case_FirstFailureAllocationKeepsContract
+        TST_CertRunCase "TST_Case_FirstFailureAllocationKeepsContract", IncludeTitleBarTests
 
     'Verify cleanup is judged against the entry state, not an assumed ideal
-        TST_Case_CertificationCleanupUsesBaseline
+        TST_CertRunCase "TST_Case_CertificationCleanupUsesBaseline", IncludeTitleBarTests
 
     'Verify an untouched host matches its own baseline, and names what it
     'cannot compare
-        TST_Case_CertBaselineMatchesUntouchedHost
+        TST_CertRunCase "TST_Case_CertBaselineMatchesUntouchedHost", IncludeTitleBarTests
 
     'Verify a leaked window, and a window replaced at an unchanged count, are
     'reported
-        TST_Case_CertCleanupDetectsLeakedAndReplacedWindows
+        TST_CertRunCase "TST_Case_CertCleanupDetectsLeakedAndReplacedWindows", IncludeTitleBarTests
 
     'Verify an altered application or window property is reported
-        TST_Case_CertCleanupDetectsPropertyDrift
+        TST_CertRunCase "TST_Case_CertCleanupDetectsPropertyDrift", IncludeTitleBarTests
 
     'Verify a title-bar, owned-bit or frame-registry mismatch is reported
-        TST_Case_CertCleanupDetectsTitleBarMismatch
+        TST_CertRunCase "TST_Case_CertCleanupDetectsTitleBarMismatch", IncludeTitleBarTests
 
     'Verify a failing cleanup helper or stage is a finding, not a clean verdict
-        TST_Case_CertCleanupHelperFailureIsFinding
+        TST_CertRunCase "TST_Case_CertCleanupHelperFailureIsFinding", IncludeTitleBarTests
 
     'Verify the residue of a failed quiet-update readback is reported before
     'it is recovered
-        TST_Case_CertCleanupReportsQuietUpdateResidue
+        TST_CertRunCase "TST_Case_CertCleanupReportsQuietUpdateResidue", IncludeTitleBarTests
 
     'Verify a certification record that cannot be stored fails closed
-        TST_Case_CertRecordFailsClosed
+        TST_CertRunCase "TST_Case_CertRecordFailsClosed", IncludeTitleBarTests
+
+    'Verify that a missing, duplicate, unexpected or result-less case is reported
+    'and that the unit counters cannot hide it
+        TST_CertRunCase "TST_Case_CertInventoryDetectsDrift", IncludeTitleBarTests
 
 '------------------------------------------------------------------------------
 ' RUN OPTIONAL SNAPSHOT CASES
@@ -4246,34 +5603,34 @@ Private Sub TST_RunRegressionPack( _
         Else
 
             'Run structured snapshot capture clean-success case
-                TST_Case_SnapshotCaptureResultSuccess IncludeTitleBarTests
+                TST_CertRunCase "TST_Case_SnapshotCaptureResultSuccess", IncludeTitleBarTests
 
             'Run structured snapshot restoration clean-success case
-                TST_Case_SnapshotResetResultSuccess IncludeTitleBarTests
+                TST_CertRunCase "TST_Case_SnapshotResetResultSuccess", IncludeTitleBarTests
 
             'Run structured restoration no-snapshot failure case
-                TST_Case_SnapshotResetResultNoSnapshot IncludeTitleBarTests
+                TST_CertRunCase "TST_Case_SnapshotResetResultNoSnapshot", IncludeTitleBarTests
 
             'Run per-element application-level capture and restoration case
-                TST_Case_SnapshotCapturePartialApplicationRead
+                TST_CertRunCase "TST_Case_SnapshotCapturePartialApplicationRead", IncludeTitleBarTests
 
             'Run the compatibility-wrapper snapshot lifecycle case
-                TST_Case_SnapshotLifecycle IncludeTitleBarTests
+                TST_CertRunCase "TST_Case_SnapshotLifecycle", IncludeTitleBarTests
 
             'Run the compatibility-wrapper reset-without-snapshot no-op case
-                TST_Case_ResetWithoutSnapshot_NoOp IncludeTitleBarTests
+                TST_CertRunCase "TST_Case_ResetWithoutSnapshot_NoOp", IncludeTitleBarTests
 
             'Run the destructive-runner snapshot-ownership case
-                TST_Case_DestructiveRunnersPreserveCallerSnapshot
+                TST_CertRunCase "TST_Case_DestructiveRunnersPreserveCallerSnapshot", IncludeTitleBarTests
 
             'Run the certification unit-isolation case for a failed capture
-                TST_Case_CertUnitIsolatesCaptureFailure
+                TST_CertRunCase "TST_Case_CertUnitIsolatesCaptureFailure", IncludeTitleBarTests
 
         End If
 
     'Quiet-scope ownership captures no snapshot, so it runs whether or not the
     'caller already held one
-        TST_Case_QuietScopeOwnershipIsVerified
+        TST_CertRunCase "TST_Case_QuietScopeOwnershipIsVerified", IncludeTitleBarTests
 
 '------------------------------------------------------------------------------
 ' RUN OPTIONAL TITLE-BAR / WRAPPER CASES
@@ -4281,7 +5638,7 @@ Private Sub TST_RunRegressionPack( _
     'Run the convenience-wrapper case only when title-bar testing is enabled
     'because the wrappers also affect TitleBar
         If IncludeTitleBarTests Then
-            TST_Case_ConvenienceWrappers True
+            TST_CertRunCase "TST_Case_ConvenienceWrappers", IncludeTitleBarTests
         Else
             TST_CertRecordSkip CallerProc, _
                 "Convenience-wrapper case skipped in core mode because the wrappers also toggle TitleBar"
@@ -4292,18 +5649,18 @@ Private Sub TST_RunRegressionPack( _
     'certification runner executes, so a case reachable only from the other
     'pack is absent from the evidence a release is tagged on.
         If IncludeTitleBarTests Then
-            TST_Case_TitleBarRoundTrip
-            TST_Case_TitleBarOwnedBitPreservation
-            TST_Case_TitleBarShowRecoversWithoutBaseline
-            TST_Case_TitleBarShowRejectsCaptionlessBaseline
-            TST_Case_TitleBarVisibilityRequiresCompleteCaption
-            TST_Case_TitleBarShowRejectsPartialCaptionBaseline
-            TST_Case_TitleBarShowPublicPaths
-            TST_Case_TitleBarFrameRefreshDebtRetried
-            TST_Case_TitleBarStaleFrameEntryNotReused
-            TST_Case_TitleBarSameHwndGenerationReuse
-            TST_Case_ActiveFramePairRefusesMismatch
-            TST_Case_TitleBarApiErrorCapture
+            TST_CertRunCase "TST_Case_TitleBarRoundTrip", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarOwnedBitPreservation", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarShowRecoversWithoutBaseline", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarShowRejectsCaptionlessBaseline", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarVisibilityRequiresCompleteCaption", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarShowRejectsPartialCaptionBaseline", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarShowPublicPaths", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarFrameRefreshDebtRetried", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarStaleFrameEntryNotReused", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarSameHwndGenerationReuse", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_ActiveFramePairRefusesMismatch", IncludeTitleBarTests
+            TST_CertRunCase "TST_Case_TitleBarApiErrorCapture", IncludeTitleBarTests
         End If
 
 '------------------------------------------------------------------------------
@@ -6561,6 +7918,549 @@ Private Sub TST_CertAssertFailedEvidence( _
             Scenario & ".Evidence.ReportNamesRecordingFailure"
 
 End Sub
+
+
+Private Sub TST_Case_CertInventoryDetectsDrift()
+
+'
+'==============================================================================
+' TST_Case_CertInventoryDetectsDrift
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verify that a missing, duplicate, unexpected or result-less case, and an
+'   inventory that was never compared, each make the verdict FAIL | INCOMPLETE
+'   although every unit passed, and that both evidence documents list the
+'   inventory.
+'
+' WHY THIS EXISTS
+'   units=3 failed=0 skipped=0 proves only the outcomes of the units that were
+'   dispatched. A case could exist in source, run in a focused pack and never
+'   appear in the release verdict (#42). The comparison of expected and
+'   observed cases is what makes that visible, and nothing but this case
+'   asserts it.
+'
+' RETURNS
+'   None.
+'
+' BEHAVIOR
+'   Each scenario builds a record of its own with one passing unit, so that
+'   only the case inventory can fail it, stores expected cases, starts and
+'   statuses, compares them and composes the evidence:
+'   exact        every expected case started once and recorded one status
+'   missing      an expected case never started
+'   duplicate    a case started twice, and a case with two statuses
+'   unexpected   a case the manifest does not list started, and one reported a
+'                status
+'   noResult     a case started and recorded no status
+'   noStart      a case recorded a status and never started
+'   not compared the same record, never compared
+'   And a record whose buffers disagree with its counts is not compared, and a
+'   reset clears the comparison.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - TST_CertCheckInventoryScenario
+'   - TST_CertEvaluateInventory
+'   - TST_CertResetRecord
+'
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' NOTES
+'   Every record here is a local one, so the run executing this case records
+'   nothing from it; the case asserts that its own record is unchanged.
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Rec                 As tCertRecord     'Record for the invariant scenario
+
+    Dim RunEntries          As Long            'Run record: entries on entry
+    Dim RunUnits            As Long            'Run record: units on entry
+    Dim RunStarts           As Long            'Run record: case starts on entry
+    Dim RunExpected         As Long            'Run record: expected cases on entry
+    Dim RunChecked          As Boolean         'Run record: inventory compared on entry
+    Dim RunFailed           As Boolean         'Run record: fatal flag on entry
+
+    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
+    Dim FailNumber          As Long            'Captured failure number
+    Dim FailSource          As String          'Captured failure source
+    Dim FailDescription     As String          'Captured failure description
+
+    Const PROC As String = "TST_Case_CertInventoryDetectsDrift"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_Log PROC, "START", _
+            "Validating that a case inventory that differs fails the verdict"
+
+    'The record of the run executing this case, compared again at the end
+        RunEntries = m_CertRecord.EntryCount
+        RunUnits = m_CertRecord.UnitCount
+        RunStarts = m_CertRecord.CaseStartCount
+        RunExpected = m_CertRecord.ExpectedCount
+        RunChecked = m_CertRecord.InventoryChecked
+        RunFailed = m_CertRecord.RecordFailed
+
+'------------------------------------------------------------------------------
+' EVERY DIFFERENCE FAILS THE VERDICT
+'------------------------------------------------------------------------------
+    'Two expected cases, A and B, under the unit U
+        TST_CertCheckInventoryScenario PROC & ".Exact", _
+            "A|B", "A|B", "A|B", vbNullString, True
+
+        TST_CertCheckInventoryScenario PROC & ".Missing", _
+            "A|B", "A", "A", "missing:B", True
+
+        TST_CertCheckInventoryScenario PROC & ".DuplicateStart", _
+            "A|B", "A|B|A", "A|B|A", "duplicate:A", True
+
+        TST_CertCheckInventoryScenario PROC & ".DuplicateStatus", _
+            "A|B", "A|B", "A|B|B", "duplicate:B", True
+
+        TST_CertCheckInventoryScenario PROC & ".Unexpected", _
+            "A|B", "A|B|X", "A|B|X", "unexpected:X", True
+
+        TST_CertCheckInventoryScenario PROC & ".UnexpectedStatus", _
+            "A|B", "A|B", "A|B|X", "unexpected:X", True
+
+        TST_CertCheckInventoryScenario PROC & ".NoResult", _
+            "A|B", "A|B", "A", "noResult:B", True
+
+        TST_CertCheckInventoryScenario PROC & ".NoStart", _
+            "A|B", "A", "A|B", "noStart:B", True
+
+    'The same record as the exact one, never compared
+        TST_CertCheckInventoryScenario PROC & ".NotCompared", _
+            "A|B", "A|B", "A|B", "notCompared", False
+
+'------------------------------------------------------------------------------
+' A RECORD THAT CANNOT BE READ IS NOT COMPARED
+'------------------------------------------------------------------------------
+    'A comparison of nothing is still a comparison
+        TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
+            PROC & ".Empty.Reset"
+
+        TST_AssertBooleanEquals True, TST_CertEvaluateInventory(Rec), _
+            PROC & ".Empty.Compared"
+
+        TST_AssertBooleanEquals True, Rec.InventoryChecked, _
+            PROC & ".Empty.Checked"
+
+    'A reset clears the comparison, so the next run starts clean
+        TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
+            PROC & ".Reset.AfterComparison"
+
+        TST_AssertBooleanEquals False, Rec.InventoryChecked, _
+            PROC & ".Reset.ClearsTheComparison"
+
+    'Publish a count that no buffer holds: found by the check, not read
+        TST_AssertBooleanEquals True, _
+            TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_CASE_START, "A", False, vbNullString), _
+            PROC & ".Overcount.EntryStored"
+
+        Rec.EntryCount = 2
+        Rec.CaseStartCount = 2
+
+        TST_AssertBooleanEquals False, TST_CertEvaluateInventory(Rec), _
+            PROC & ".Overcount.NotClean"
+
+        TST_AssertBooleanEquals False, Rec.InventoryChecked, _
+            PROC & ".Overcount.NotChecked"
+
+        TST_AssertTrue _
+            Rec.RecordFailed And _
+            (Rec.RecordFailStage = TEST_CERT_RECFAIL_INVARIANT), _
+            PROC & ".Overcount.Flagged"
+
+'------------------------------------------------------------------------------
+' THE RUN'S OWN RECORD IS UNCHANGED
+'------------------------------------------------------------------------------
+    'Nothing above may reach the record of the run executing this case
+        TST_AssertTrue _
+            (m_CertRecord.EntryCount = RunEntries) And _
+            (m_CertRecord.UnitCount = RunUnits) And _
+            (m_CertRecord.CaseStartCount = RunStarts) And _
+            (m_CertRecord.ExpectedCount = RunExpected) And _
+            (m_CertRecord.InventoryChecked = RunChecked) And _
+            (m_CertRecord.RecordFailed = RunFailed), _
+            PROC & ".RunRecordUnchanged"
+
+'------------------------------------------------------------------------------
+' LOG PASS
+'------------------------------------------------------------------------------
+        TST_Log PROC, "PASS", _
+            "Every difference in the case inventory failed the verdict although the unit passed"
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Raise the captured failure after cleanup when needed
+        If HasFailure Then
+            Err.Raise FailNumber, FailSource, FailDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+        FailNumber = Err.Number
+        FailSource = Err.Source
+        FailDescription = Err.Description
+        HasFailure = True
+
+        Resume Safe_Exit
+
+End Sub
+
+
+Private Sub TST_CertCheckInventoryScenario( _
+    ByVal Scenario As String, _
+    ByVal ExpectedIds As String, _
+    ByVal StartIds As String, _
+    ByVal EndIds As String, _
+    ByVal ExpectedCode As String, _
+    ByVal Compare As Boolean)
+
+'
+'==============================================================================
+' TST_CertCheckInventoryScenario
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Build one local record with one passing unit, expected cases, case starts
+'   and case statuses, compare it, compose the evidence and assert the
+'   verdict.
+'
+' WHY THIS EXISTS
+'   Each way the inventory can differ must meet the same contract, and writing
+'   it out nine times would let one copy drift from the others.
+'
+' INPUTS
+'   Scenario
+'     Assertion-name prefix.
+'
+'   ExpectedIds / StartIds / EndIds
+'     Case identifiers joined by "|": the cases the manifest expects, the cases
+'     that start and the cases that record a passing status. Every expected
+'     case belongs to the unit U, and the first one, A, starts and records a
+'     status in every scenario.
+'
+'   ExpectedCode
+'     Empty when the inventory is exact. Otherwise the code, as
+'     "<code>:<case>", that the comparison must record.
+'
+'   Compare
+'     FALSE to leave the record uncompared, for the scenario that asserts the
+'     verdict is not complete without a comparison.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - TST_CertStoreCaseIds
+'   - TST_CertIdCount
+'   - TST_CertEvaluateInventory
+'   - TST_CertComposeEvidence
+'   - TST_CertEntryCodes
+'
+' CALLED FROM
+'   - TST_Case_CertInventoryDetectsDrift
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Rec                 As tCertRecord     'Record for this scenario
+    Dim Clean               As Boolean         'Result of the comparison
+    Dim CasesLine           As String          'Counts line the report must carry
+
+    Dim UnitsFailed         As Long            'Composed failed-unit count
+    Dim Complete            As Boolean         'Composed completeness
+    Dim Passed              As Boolean         'Composed verdict
+    Dim Verdict             As String          'Composed RESULT line
+    Dim RecordingDetail     As String          'Composed recording failure
+    Dim JsonText            As String          'Composed JSON evidence
+    Dim ReportText          As String          'Composed text evidence
+
+'------------------------------------------------------------------------------
+' BUILD THE RECORD
+'------------------------------------------------------------------------------
+        TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
+            Scenario & ".Reset"
+
+    'One passing unit, so that only the case inventory can fail the run
+        TST_AssertBooleanEquals True, _
+            TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "U", True, vbNullString), _
+            Scenario & ".UnitStored"
+
+        TST_AssertBooleanEquals True, _
+            TST_CertStoreCaseIds(Rec, TEST_CERT_ENTRY_EXPECTED, ExpectedIds), _
+            Scenario & ".ExpectedStored"
+
+        TST_AssertBooleanEquals True, _
+            TST_CertStoreCaseIds(Rec, TEST_CERT_ENTRY_CASE_START, StartIds), _
+            Scenario & ".StartsStored"
+
+        TST_AssertBooleanEquals True, _
+            TST_CertStoreCaseIds(Rec, TEST_CERT_ENTRY_CASE_END, EndIds), _
+            Scenario & ".StatusesStored"
+
+'------------------------------------------------------------------------------
+' COMPARE AND COMPOSE
+'------------------------------------------------------------------------------
+        If Compare Then
+
+            Clean = TST_CertEvaluateInventory(Rec)
+
+            TST_AssertBooleanEquals (Len(ExpectedCode) = 0), Clean, _
+                Scenario & ".Compared"
+
+        End If
+
+    'Cleanup is passed as OK, so only the case inventory can fail the run
+        TST_CertComposeEvidence _
+            Rec:=Rec, _
+            CleanupOK:=True, _
+            CleanupDetail:=vbNullString, _
+            UnitsFailed:=UnitsFailed, _
+            Complete:=Complete, _
+            Passed:=Passed, _
+            Verdict:=Verdict, _
+            RecordingDetail:=RecordingDetail, _
+            JsonText:=JsonText, _
+            ReportText:=ReportText
+
+'------------------------------------------------------------------------------
+' THE COUNTS AND THE CASES ARE LISTED IN BOTH DOCUMENTS
+'------------------------------------------------------------------------------
+        CasesLine = "  CASES  expected=" & CStr(TST_CertIdCount(ExpectedIds)) & _
+            " started=" & CStr(TST_CertIdCount(StartIds)) & _
+            " results=" & CStr(TST_CertIdCount(EndIds)) & _
+            " manifest=" & CStr(TEST_CERT_MANIFEST_VERSION) & _
+            " inventory=" & IIf(Len(ExpectedCode) = 0, "OK", "FAILED")
+
+        TST_AssertTrue _
+            (InStr(1, ReportText, vbNewLine & CasesLine & vbNewLine, vbBinaryCompare) > 0), _
+            Scenario & ".Report.CarriesTheCounts"
+
+        TST_AssertTrue _
+            (InStr(1, ReportText, vbNewLine & "  EXPECTED  U  A" & vbNewLine & _
+                "  EXPECTED  U  B" & vbNewLine, vbBinaryCompare) > 0), _
+            Scenario & ".Report.ListsTheExpectedCases"
+
+        TST_AssertTrue _
+            (InStr(1, ReportText, vbNewLine & "  CASE  PASS  U  A" & vbNewLine, _
+                vbBinaryCompare) > 0), _
+            Scenario & ".Report.ListsTheFirstCase"
+
+        TST_AssertTrue _
+            (InStr(1, JsonText, """expectedCases"":[" & _
+                "{""seq"":1,""unit"":""U"",""case"":""A""}," & _
+                "{""seq"":2,""unit"":""U"",""case"":""B""}],""caseResults"":[" & _
+                "{""seq"":1,""unit"":""U"",""case"":""A"",""started"":true," & _
+                """status"":""PASS"",""detail"":""""}", vbBinaryCompare) > 0), _
+            Scenario & ".Json.ListsTheExpectedAndObservedCases"
+
+        TST_AssertTrue _
+            (InStr(1, JsonText, """unitsFailed"":0", vbBinaryCompare) > 0), _
+            Scenario & ".Json.UnitCountersAreClean"
+
+'------------------------------------------------------------------------------
+' THE VERDICT
+'------------------------------------------------------------------------------
+        If Len(ExpectedCode) = 0 Then
+
+            TST_AssertBooleanEquals True, Passed, Scenario & ".Passed"
+            TST_AssertBooleanEquals True, Complete, Scenario & ".Complete"
+
+            TST_AssertTrue _
+                (Verdict = "RESULT: PASS | COMPLETE | units=1 failed=0 skipped=0 cleanup=OK"), _
+                Scenario & ".Verdict"
+
+            TST_AssertTrue _
+                (InStr(1, JsonText, """inventory"":""OK"",""inventoryDetail"":""""," & _
+                    """expectedCases"":[", vbBinaryCompare) > 0) And _
+                (InStr(1, JsonText, """inventoryFindings"":[]", vbBinaryCompare) > 0), _
+                Scenario & ".Json.InventoryOK"
+
+        Else
+
+            TST_AssertBooleanEquals False, Passed, Scenario & ".NotPassed"
+            TST_AssertBooleanEquals False, Complete, Scenario & ".NotComplete"
+
+        'The unit passed and its counters are clean: only the inventory fails
+            TST_AssertTrue _
+                (InStr(1, Verdict, _
+                    "RESULT: FAIL | INCOMPLETE | units=1 failed=0 skipped=0 cleanup=OK", _
+                    vbBinaryCompare) = 1), _
+                Scenario & ".Verdict.FailIncomplete"
+
+            TST_AssertTrue _
+                (InStr(1, JsonText, """inventory"":""FAILED""", vbBinaryCompare) > 0) And _
+                (InStr(1, JsonText, """complete"":false,""passed"":false", _
+                    vbBinaryCompare) > 0), _
+                Scenario & ".Json.InventoryFailed"
+
+            If Compare Then
+
+                TST_AssertTrue _
+                    (InStr(1, TST_CertEntryCodes(Rec, TEST_CERT_ENTRY_INVENTORY), _
+                        "|" & ExpectedCode & "|", vbBinaryCompare) > 0), _
+                    Scenario & ".FindingRecorded"
+
+                TST_AssertTrue _
+                    (InStr(1, JsonText, """code"":""" & ExpectedCode & """", _
+                        vbBinaryCompare) > 0), _
+                    Scenario & ".Json.ListsTheFinding"
+
+                TST_AssertTrue _
+                    (InStr(1, ReportText, vbNewLine & "  INVENTORY  " & ExpectedCode & _
+                        " | ", vbBinaryCompare) > 0), _
+                    Scenario & ".Report.ListsTheFinding"
+
+            Else
+
+                TST_AssertTrue _
+                    (InStr(1, JsonText, """inventory"":""FAILED"",""inventoryDetail"":" & _
+                        """the case inventory was not compared""", vbBinaryCompare) > 0), _
+                    Scenario & ".Json.NamesTheMissingComparison"
+
+            End If
+
+        End If
+
+End Sub
+
+
+Private Function TST_CertStoreCaseIds( _
+    ByRef Rec As tCertRecord, _
+    ByVal Kind As Long, _
+    ByVal Ids As String) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertStoreCaseIds
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store one entry of one kind for each identifier of a "|"-joined list.
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to add to.
+'
+'   Kind
+'     TEST_CERT_ENTRY_EXPECTED, TEST_CERT_ENTRY_CASE_START or
+'     TEST_CERT_ENTRY_CASE_END. An expected entry names the unit U, and a case
+'     status passes.
+'
+'   Ids
+'     Identifiers joined by "|"; empty for none.
+'
+' RETURNS
+'   Boolean
+'     TRUE when every entry was stored.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertCheckInventoryScenario
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Parts()             As String          'The identifiers
+    Dim PartIdx             As Long            'Cursor over the identifiers
+
+'------------------------------------------------------------------------------
+' STORE
+'------------------------------------------------------------------------------
+        TST_CertStoreCaseIds = True
+
+        If Len(Ids) > 0 Then
+
+            Parts = Split(Ids, "|")
+
+            For PartIdx = LBound(Parts) To UBound(Parts)
+
+                If Not TST_CertTryAppendEntry(Rec, Kind, Parts(PartIdx), _
+                    (Kind = TEST_CERT_ENTRY_CASE_END), _
+                    IIf(Kind = TEST_CERT_ENTRY_EXPECTED, "U", vbNullString)) Then
+
+                    TST_CertStoreCaseIds = False
+
+                End If
+
+            Next PartIdx
+
+        End If
+
+End Function
+
+
+Private Function TST_CertIdCount( _
+    ByVal Ids As String) _
+    As Long
+
+'
+'==============================================================================
+' TST_CertIdCount
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Count the identifiers of a "|"-joined list.
+'
+' INPUTS
+'   Ids
+'     Identifiers joined by "|"; empty for none.
+'
+' RETURNS
+'   Long
+'     The number of identifiers.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' CALLED FROM
+'   - TST_CertCheckInventoryScenario
+'
+' UPDATED
+'   2026-11-27 - Added (#42).
+'==============================================================================
+'
+
+        If Len(Ids) = 0 Then
+            TST_CertIdCount = 0
+        Else
+            TST_CertIdCount = UBound(Split(Ids, "|")) - LBound(Split(Ids, "|")) + 1
+        End If
+
+End Function
 
 
 Private Sub TST_Case_CertUnitIsolatesCaptureFailure()

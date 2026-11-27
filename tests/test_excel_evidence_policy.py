@@ -129,6 +129,8 @@ def checker_problems(policy: evidence.Policy, source: str) -> list[str]:
     """Values of the policy that the checker's code restates."""
     problems = []
     contained = [*policy.required_files, policy.certification_runner, policy.manifest, policy.certification_module]
+    if policy.case_manifest is not None:
+        contained.append(policy.case_manifest)
     # A step may share its name with a host field, such as build.
     host_fields = {name for fields in policy.host_fields.values() for name in fields}
     exact = [*(step for step in policy.steps if step not in host_fields), policy.configuration, policy.component]
@@ -185,7 +187,9 @@ def guide_problems(policy: evidence.Policy, markdown: str) -> list[str]:
         if f"`{value}`" not in markdown:
             problems.append(f"the guide does not name `{value}`")
     described = section(markdown, "evidence policy")
-    for key in evidence.POLICY_KEYS:
+    if policy.case_manifest is not None and f"`{policy.case_manifest}`" not in markdown:
+        problems.append(f"the guide does not name `{policy.case_manifest}`")
+    for key in evidence.ALL_POLICY_KEYS:
         if f"`{key}`" not in described:
             problems.append(f"the evidence policy section does not describe `{key}`")
     return problems
@@ -220,6 +224,9 @@ class AgreementTests(unittest.TestCase):
         self.assertIn(self.policy.certification_module, modules)
         module = (ROOT / self.policy.certification_module).read_text(encoding="cp1252")
         self.assertRegex(module, rf"(?m)^Public Sub {self.policy.certification_runner}\(\)")
+        self.assertIsNotNone(self.policy.case_manifest)
+        assert self.policy.case_manifest is not None
+        self.assertTrue((ROOT / self.policy.case_manifest).is_file())
 
 
 class DisagreementTests(unittest.TestCase):
@@ -308,7 +315,12 @@ class PolicyValidationTests(unittest.TestCase):
         policy = evidence.load_policy(POLICY)
         self.assertEqual(policy.required_files, tuple(self.document["required_files"][role] for role in evidence.ROLES))
         self.assertEqual(list(policy.steps), self.document["steps"])
-        self.assertEqual(sorted(self.document), sorted(evidence.POLICY_KEYS))
+        self.assertEqual(sorted(self.document), sorted(evidence.ALL_POLICY_KEYS))
+        self.assertEqual(policy.case_manifest, self.document["case_manifest"])
+
+    def test_a_policy_without_a_case_manifest_describes_the_earlier_contract(self) -> None:
+        policy = self.load(lambda document: document.pop("case_manifest"))
+        self.assertIsNone(policy.case_manifest)
 
     def test_an_unusable_policy_is_rejected(self) -> None:
         def put(key: str, value: Any) -> Callable[[dict[str, Any]], None]:
@@ -343,6 +355,9 @@ class PolicyValidationTests(unittest.TestCase):
                                     "must not include the session record"),
             "path outside the repository": (put("manifest", "../vba-projects.json"),
                                             "must not contain . or .. segments"),
+            "case manifest outside the repository": (put("case_manifest", "../certification-manifest.json"),
+                                                     "must not contain . or .. segments"),
+            "case manifest not text": (put("case_manifest", 3), "case_manifest must be non-empty text"),
             "runner not an identifier": (put("certification_runner", "Run Me"), "is not a valid name"),
             "missing host section": (lambda document: document["host_fields"].pop("excel"),
                                      "host_fields must have exactly the sections"),

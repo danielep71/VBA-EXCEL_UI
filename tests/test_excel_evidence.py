@@ -34,6 +34,24 @@ for _name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
     GIT_ENV.pop(_name, None)
 
 UNITS = ["RegressionPack", "SnapshotIdentity", "TitleBarSdiIdentity"]
+CASE_MANIFEST: dict[str, Any] = {
+    "schema_version": 1,
+    "manifest_version": 2,
+    "description": "A fixture manifest.",
+    "units": [
+        {"name": "RegressionPack", "execution": "live", "runner": "TST_RunRegressionPack",
+         "cases": ["TST_Case_A", "TST_Case_B"]},
+        {"name": "SnapshotIdentity", "execution": "live", "cases": ["Test_EXCEL_UI_RunSnapshotIdentity"]},
+        {"name": "TitleBarSdiIdentity", "execution": "live", "runner": "Test_EXCEL_UI_RunTitleBarSdiIdentity",
+         "cases": ["TST_Case_Sdi"]},
+    ],
+    "required_cases": [{"case": "TST_Case_B", "note": "named by the issue"}],
+    "focused_cases": {},
+    "interactive_runners": {},
+}
+PAIRS = [(unit["name"], case) for unit in CASE_MANIFEST["units"] for case in unit["cases"]]
+INVENTORY_KEYS = ("manifestVersion", "inventory", "inventoryDetail", "expectedCases", "caseResults",
+                  "inventoryFindings")
 RUNNER = (
     "Attribute VB_Name = \"M_EXCEL_UI_TEST_CERTIFICATION\"\n"
     "Option Explicit\n\n"
@@ -63,6 +81,7 @@ MANIFEST = {
 FILES = {
     ".gitattributes": "*.bas text eol=crlf\n",
     "tools/vba-projects.json": json.dumps(MANIFEST, indent=2) + "\n",
+    "tools/certification-manifest.json": json.dumps(CASE_MANIFEST, indent=2) + "\n",
     "src/M_EXCEL_UI.bas": "Attribute VB_Name = \"M_EXCEL_UI\"\nOption Explicit\n\n'café is spelled in cp1252\n",
     "test/M_EXCEL_UI_TEST_CERTIFICATION.bas": RUNNER,
 }
@@ -109,6 +128,16 @@ def report_text(result: dict[str, Any]) -> str:
     if result["cleanupDetail"] and not result.get("cleanupFindings"):
         lines.append(f"  CLEANUP  {result['cleanupDetail']}")
     lines += [f"  UNVERIFIED  {item['code']} | {item['detail']}" for item in result.get("cleanupUnverified", [])]
+    if "caseResults" in result:
+        results = result["caseResults"]
+        started = sum(1 for row in results if row["started"])
+        resulted = sum(1 for row in results if row["status"] != "NO-RESULT")
+        lines.append(f"  CASES  expected={len(result['expectedCases'])} started={started} results={resulted}"
+                     f" manifest={result['manifestVersion']} inventory={result['inventory']}")
+        lines += [f"  EXPECTED  {item['unit']}  {item['case']}" for item in result["expectedCases"]]
+        lines += [f"  CASE  {row['status']}  {row['unit'] or '-'}  {row['case']}"
+                  + (f" | {row['detail']}" if row["detail"] else "") for row in results]
+        lines += [f"  INVENTORY  {item['code']} | {item['detail']}" for item in result["inventoryFindings"]]
     return "\r\n".join(lines) + "\r\n"
 
 
@@ -122,7 +151,12 @@ def documents(root: Path, sha: str) -> dict[str, Any]:
         "excelVersion": "16.0", "excelBuild": "17928", "operatingSystem": "Windows (64-bit) NT 10.00",
         "bitness": "x64", "vbaGeneration": "VBA7", "units": len(UNITS), "unitsFailed": 0, "skipped": 0,
         "cleanup": "OK", "cleanupDetail": "", "cleanupFindings": [], "cleanupUnverified": copy.deepcopy(UNVERIFIED),
-        "cleanupChecked": 14, "recording": "OK", "recordingDetail": "",
+        "cleanupChecked": 14, "manifestVersion": CASE_MANIFEST["manifest_version"], "inventory": "OK",
+        "inventoryDetail": "",
+        "expectedCases": [{"seq": index, "unit": unit, "case": case} for index, (unit, case) in enumerate(PAIRS, 1)],
+        "caseResults": [{"seq": index, "unit": unit, "case": case, "started": True, "status": "PASS", "detail": ""}
+                        for index, (unit, case) in enumerate(PAIRS, 1)],
+        "inventoryFindings": [], "recording": "OK", "recordingDetail": "",
         "complete": True, "passed": True,
         "unitResults": [{"name": unit, "passed": True, "detail": ""} for unit in UNITS],
         "skipDetail": [],
@@ -255,6 +289,13 @@ class PassingBundleTests(Fixture):
         self.bundle_with(earlier_runner)
         self.assertEqual(self.failed(), {})
 
+    def test_the_manifest_is_read_from_the_commit(self) -> None:
+        manifest = evidence.case_manifest(self.root, self.sha, evidence.default_policy())
+        self.assertEqual(manifest.version, 2)
+        self.assertEqual(list(manifest.pairs), PAIRS)
+        self.assertEqual(self.outcomes(self.bundle_with())["case inventory"],
+                         (True, "4 cases of 3 units, manifest version 2, each started once and passed"))
+
     def test_a_document_without_itemized_cleanup_passes(self) -> None:
         def earlier_runner(docs: dict[str, Any]) -> None:
             for key in CLEANUP_KEYS:
@@ -296,7 +337,7 @@ class PolicyDrivenTests(Fixture):
         code, out, _ = self.run_main(str(self.bundle), "--commit", self.sha, "--policy", str(self.policy_file()))
         self.assertEqual(code, 0, out)
         self.assertEqual(out.count("  PASS  "), len(evidence.CHECKS))
-        self.assertEqual(len(evidence.CHECKS), 9)
+        self.assertEqual(len(evidence.CHECKS), 10)
 
     def test_a_bundle_follows_renamed_files_steps_schema_and_component(self) -> None:
         def contract(document: dict[str, Any]) -> None:
@@ -644,6 +685,198 @@ class NegativeTests(Fixture):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
             evidence.main(["--inventory", str(self.bundle)])
         self.assertEqual(raised.exception.code, 2)
+
+
+class InventoryTests(Fixture):
+    """The case inventory is a part of the verdict that the unit counters cannot supply."""
+
+    def assert_fails(self, check: str, fragment: str) -> None:
+        failed = self.failed()
+        self.assertIn(check, failed)
+        self.assertIn(fragment, failed[check])
+
+    @staticmethod
+    def rows(docs: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = docs["certification.json"]["caseResults"]
+        return rows
+
+    def test_a_pass_without_case_results_is_rejected(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            for key in INVENTORY_KEYS:
+                del docs["certification.json"][key]
+        self.bundle_with(earlier_runner)
+        self.assert_fails("case inventory", "no case inventory")
+        self.assertNotIn("verdict", self.failed())
+
+    def test_some_inventory_fields_without_the_others_fail(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].pop("caseResults"))
+        self.assert_fails("verdict", "the case inventory is itemized but has no caseResults")
+
+    def test_a_missing_case_fails_even_when_every_unit_passed(self) -> None:
+        def missing(docs: dict[str, Any]) -> None:
+            self.rows(docs).pop(1)
+            for index, row in enumerate(self.rows(docs), 1):
+                row["seq"] = index
+        self.bundle_with(missing)
+        self.assert_fails("case inventory", "missing [('RegressionPack', 'TST_Case_B')]")
+        self.assertEqual(self.base["certification.json"]["unitsFailed"], 0)
+
+    def test_a_repeated_case_fails(self) -> None:
+        def repeated(docs: dict[str, Any]) -> None:
+            self.rows(docs).append(dict(self.rows(docs)[0], seq=len(self.rows(docs)) + 1))
+        self.bundle_with(repeated)
+        self.assert_fails("case inventory", "repeated [('RegressionPack', 'TST_Case_A')]")
+
+    def test_a_case_the_manifest_does_not_list_fails(self) -> None:
+        def unexpected(docs: dict[str, Any]) -> None:
+            self.rows(docs).append({"seq": 5, "unit": "", "case": "TST_Case_New", "started": True,
+                                    "status": "PASS", "detail": ""})
+        self.bundle_with(unexpected)
+        self.assert_fails("case inventory", "unexpected [('', 'TST_Case_New')]")
+
+    def test_a_case_that_failed_or_never_reported_fails(self) -> None:
+        self.bundle_with(lambda docs: self.rows(docs)[0].update(status="FAIL", detail="1004: failed"))
+        self.assert_fails("case inventory", "cases that did not start and pass: TST_Case_A")
+        self.bundle_with(lambda docs: self.rows(docs)[2].update(status="NO-RESULT"))
+        self.assert_fails("case inventory", "cases that did not start and pass: Test_EXCEL_UI_RunSnapshotIdentity")
+
+    def test_cases_in_another_order_fail(self) -> None:
+        def swapped(docs: dict[str, Any]) -> None:
+            rows = self.rows(docs)
+            rows[0], rows[1] = rows[1], rows[0]
+            for index, row in enumerate(rows, 1):
+                row["seq"] = index
+        self.bundle_with(swapped)
+        self.assert_fails("case inventory", "another order")
+
+    def test_expected_cases_that_are_not_the_manifest_fail(self) -> None:
+        def shortened(docs: dict[str, Any]) -> None:
+            docs["certification.json"]["expectedCases"].pop()
+        self.bundle_with(shortened)
+        self.assert_fails("case inventory", "expectedCases are not the commit's manifest")
+
+    def test_a_manifest_version_that_differs_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(manifestVersion=1))
+        self.assert_fails("case inventory", "manifestVersion is 1, the commit's manifest is 2")
+
+    @staticmethod
+    def inexact(docs: dict[str, Any]) -> None:
+        docs["certification.json"].update(
+            complete=False, passed=False, inventory="FAILED",
+            inventoryDetail="missing:TST_Case_B: the expected case was never started",
+            inventoryFindings=[{"seq": 1, "code": "missing:TST_Case_B",
+                                "detail": "the expected case was never started"}])
+
+    def test_an_inexact_inventory_fails_the_verdict_and_is_named(self) -> None:
+        self.bundle_with(self.inexact)
+        failures = self.failed()
+        self.assertIn("the verdict is FAIL | INCOMPLETE | units=3 failed=0 skipped=0 cleanup=OK", failures["verdict"])
+        self.assertIn("case inventory FAILED: missing:TST_Case_B", failures["verdict"])
+        self.assertIn("missing:TST_Case_B", failures["case inventory"])
+        self.assertNotIn("report", failures)
+
+    def test_an_inventory_that_claims_ok_with_a_finding_or_detail_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(
+            inventoryFindings=[{"seq": 1, "code": "missing:TST_Case_B", "detail": "never started"}]))
+        self.assert_fails("verdict", "inventory is OK but inventoryFindings is not empty")
+        self.bundle_with(lambda docs: docs["certification.json"].update(inventoryDetail="something"))
+        self.assert_fails("verdict", "inventory is OK but inventoryDetail is not empty")
+
+    def test_an_inventory_that_failed_without_saying_why_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(inventory="FAILED"))
+        self.assert_fails("verdict", "inventory FAILED without a finding or an inventoryDetail")
+
+    def test_malformed_inventory_rows_fail(self) -> None:
+        self.bundle_with(lambda docs: self.rows(docs)[0].update(status="DONE"))
+        self.assert_fails("verdict", "status must be one of")
+        self.bundle_with(lambda docs: self.rows(docs)[0].update(started="yes"))
+        self.assert_fails("verdict", "started must be true or false")
+        self.bundle_with(lambda docs: self.rows(docs)[1].update(seq=7))
+        self.assert_fails("verdict", "caseResults[1] must have seq 2")
+        self.bundle_with(lambda docs: docs["certification.json"].update(manifestVersion="1"))
+        self.assert_fails("verdict", "manifestVersion must be a positive integer")
+
+    def test_a_report_without_the_case_lines_fails(self) -> None:
+        report = report_text(self.base["certification.json"]).replace(
+            "  CASE  PASS  RegressionPack  TST_Case_A\r\n", "")
+        self.bundle_with(report=report)
+        self.assert_fails("report", "CASE lines")
+
+    def test_a_report_whose_counts_differ_fails(self) -> None:
+        report = report_text(self.base["certification.json"]).replace("started=4", "started=3")
+        self.bundle_with(report=report)
+        self.assert_fails("report", "CASES lines")
+
+    def test_a_report_without_the_expected_lines_fails(self) -> None:
+        report = report_text(self.base["certification.json"]).replace("  EXPECTED  RegressionPack  TST_Case_B\r\n", "")
+        self.bundle_with(report=report)
+        self.assert_fails("report", "EXPECTED lines")
+
+    def test_a_report_that_omits_an_inventory_finding_fails(self) -> None:
+        result = copy.deepcopy(self.base)
+        self.inexact(result)
+        report = report_text(result["certification.json"]).replace(
+            "  INVENTORY  missing:TST_Case_B | the expected case was never started\r\n", "")
+        self.bundle_with(self.inexact, report=report)
+        self.assert_fails("report", "INVENTORY lines")
+
+    def test_a_missing_manifest_at_the_commit_is_reported(self) -> None:
+        self.bundle_with()
+        git(self.root, "rm", "-q", "tools/certification-manifest.json")
+        git(self.root, "commit", "-q", "-m", "drop the manifest")
+        later = git(self.root, "rev-parse", "HEAD")
+        failed = self.failed(sha=later)
+        self.assertIn("has no tools/certification-manifest.json", failed["case inventory"])
+        self.assertIn("has no tools/certification-manifest.json", failed["verdict"])
+
+    def test_an_unusable_manifest_at_the_commit_is_reported(self) -> None:
+        self.bundle_with()
+        (self.root / "tools" / "certification-manifest.json").write_text("{}", encoding="utf-8")
+        git(self.root, "commit", "-q", "-am", "break the manifest")
+        later = git(self.root, "rev-parse", "HEAD")
+        self.assertIn("missing schema_version", self.failed(sha=later)["case inventory"])
+
+
+class EarlierContractTests(Fixture):
+    """A policy without a case manifest describes the contract that had no case inventory."""
+
+    def earlier_policy(self) -> evidence.Policy:
+        return dataclasses.replace(evidence.default_policy(), case_manifest=None)
+
+    def outcomes_under(self, policy: evidence.Policy) -> dict[str, tuple[bool, str]]:
+        found = evidence.evaluate(self.bundle, self.sha, self.root, policy)
+        return {name: (passed, detail) for name, passed, detail in found}
+
+    def test_a_bundle_without_an_inventory_passes_under_the_earlier_policy(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            for key in INVENTORY_KEYS:
+                del docs["certification.json"][key]
+        self.bundle_with(earlier_runner)
+        outcomes = self.outcomes_under(self.earlier_policy())
+        self.assertEqual({name for name, (passed, _) in outcomes.items() if not passed}, set())
+        self.assertIn("predates", outcomes["case inventory"][1])
+        # The units come from the commit's certification runner, as they did.
+        self.assertEqual(evidence.certification_units(self.root, self.sha), UNITS)
+
+    def test_the_current_policy_rejects_the_same_bundle(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            for key in INVENTORY_KEYS:
+                del docs["certification.json"][key]
+        self.bundle_with(earlier_runner)
+        self.assertIn("case inventory", self.failed())
+
+    def test_an_earlier_report_with_case_lines_is_not_read_as_clean(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            for key in INVENTORY_KEYS:
+                del docs["certification.json"][key]
+        self.bundle_with(earlier_runner, report=report_text(self.base["certification.json"]))
+        failed = {name for name, (passed, _) in self.outcomes_under(self.earlier_policy()).items() if not passed}
+        self.assertEqual(failed, {"report"})
+
+    def test_a_bundle_with_an_inventory_also_passes_under_the_earlier_policy(self) -> None:
+        self.bundle_with()
+        outcomes = self.outcomes_under(self.earlier_policy())
+        self.assertEqual({name for name, (passed, _) in outcomes.items() if not passed}, set())
 
 
 @unittest.skipUnless((ROOT / ".git").exists(), "needs a Git checkout of this repository")
