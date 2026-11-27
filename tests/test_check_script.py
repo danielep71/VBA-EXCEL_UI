@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "Check-EXCEL_UI.ps1"
 LAUNCHER = ROOT / "tools" / "Check-EXCEL_UI.cmd"
 CERTIFY = ROOT / "tools" / "Certify-EXCEL_UI.ps1"
+CERTIFY_LAUNCHER = ROOT / "tools" / "Certify-EXCEL_UI.cmd"
 POLICY = ROOT / ".github" / "excel-evidence-policy.json"
 TEST_CERTIFICATION = ROOT / "test" / "M_EXCEL_UI_TEST_CERTIFICATION.bas"
 TEST_HARNESS = ROOT / "test" / "M_EXCEL_UI_TEST_HARNESS.bas"
@@ -66,6 +67,13 @@ def script_list(name: str) -> list[str]:
     match = re.search(rf"^\${name} = @\((.*?)\)$", read(SCRIPT), re.M | re.S)
     assert match is not None, name
     return re.findall(r"'([^']*)'", match.group(1))
+
+
+def function_body(text: str, name: str) -> str:
+    """The text of a PowerShell function, from its header to its closing brace."""
+    match = re.search(rf"^function {re.escape(name)}\b.*?^}}$", text, re.M | re.S)
+    assert match is not None, name
+    return match.group(0)
 
 
 def vba_procedure(path: Path, name: str) -> str:
@@ -158,13 +166,34 @@ class ContractTests(unittest.TestCase):
                 self.assertRegex(certify, rf"(?m)^\${name} = ")
         self.assertEqual(script_value("CertifyScriptName"), CERTIFY.name)
 
-    def test_macro_security_is_never_lowered_or_written(self) -> None:
+    def test_macro_security_is_lowered_only_behind_unattended_and_nothing_is_written(self) -> None:
         text = read(SCRIPT)
-        self.assertEqual(re.findall(r"AutomationSecurity = (\S+)", text), ["$MsoAutomationSecurityByUI"])
-        for pattern in (r"Set-ItemProperty", r"New-ItemProperty", r"\breg(?:\.exe)? add", r"VBAWarnings\s*=",
-                        r"AccessVBOM\s*=", r"Trusted Locations"):
-            with self.subTest(pattern):
-                self.assertIsNone(re.search(pattern, text, re.I))
+        certify = read(CERTIFY)
+        # This script never sets AutomationSecurity itself: it calls the
+        # certification script's function, so both start an instance alike.
+        self.assertEqual(re.findall(r"AutomationSecurity\s*=", text), [])
+        self.assertEqual(len(re.findall(r"\bSet-ExcelAutomationSecurity \$State\.Excel", text)), 1)
+        self.assertEqual(re.findall(r"\$MsoAutomationSecurityLow\b", text),
+                         ["$MsoAutomationSecurityLow"])
+        # There, the only assignments are in one function, and the lowering is
+        # the branch that runs only when -Unattended is given.
+        self.assertEqual(re.findall(r"\.AutomationSecurity = (\S+)", certify),
+                         ["$MsoAutomationSecurityLow", "$MsoAutomationSecurityByUI"])
+        body = function_body(certify, "Set-ExcelAutomationSecurity")
+        self.assertRegex(body, r"if \(\$Unattended\) \{\n\s+Invoke-Excel \{ \$Excel\.AutomationSecurity = "
+                               r"\$MsoAutomationSecurityLow \}\n\s+\}\n\s+else \{\n\s+Invoke-Excel \{ "
+                               r"\$Excel\.AutomationSecurity = \$MsoAutomationSecurityByUI \}")
+        self.assertEqual(re.findall(r"\$MsoAutomationSecurityLow\b", certify.replace(body, "")),
+                         ["$MsoAutomationSecurityLow"])
+        self.assertRegex(certify, r"(?m)^\$MsoAutomationSecurityLow = 1$")
+        # Nothing writes the Trust Center, the registry or a Trusted Location.
+        for name, source in (("check", text), ("certify", certify), ("check launcher", read(LAUNCHER)),
+                             ("certify launcher", read(CERTIFY_LAUNCHER))):
+            for pattern in (r"Set-ItemProperty", r"New-ItemProperty", r"Remove-ItemProperty",
+                            r"\breg(?:\.exe)? (?:add|delete)", r"VBAWarnings\s*=", r"AccessVBOM\s*=",
+                            r"TrustedLocations?\s*=", r"\.SetValue\("):
+                with self.subTest(name=name, pattern=pattern):
+                    self.assertIsNone(re.search(pattern, source, re.I))
 
     def test_no_two_script_variables_differ_only_in_case(self) -> None:
         text = re.sub(r"^function [^\n]*\{.*?^\}[ \t]*$", "", read(SCRIPT), flags=re.MULTILINE | re.DOTALL)
@@ -176,9 +205,76 @@ class ContractTests(unittest.TestCase):
 
     def test_the_launcher_passes_its_arguments_to_the_script(self) -> None:
         self.assertIn('set "SCRIPT=%~dp0Check-EXCEL_UI.ps1"', read(LAUNCHER))
-        self.assertIn('-File "%SCRIPT%" %*', read(LAUNCHER))
+        self.assertIn('-File "%SCRIPT%" %UNATTENDED_ARG% %*', read(LAUNCHER))
         self.assertEqual(SCRIPT.read_bytes().count(b"\r\n"), SCRIPT.read_bytes().count(b"\n"))
         self.assertEqual(LAUNCHER.read_bytes().count(b"\r\n"), LAUNCHER.read_bytes().count(b"\n"))
+
+    def test_the_check_launcher_is_unattended_and_never_pauses(self) -> None:
+        text = read(LAUNCHER)
+        # It passes -Unattended itself, once, even when the caller also gives it.
+        self.assertIn('set "UNATTENDED_ARG=-Unattended"', text)
+        self.assertIn('if /i "%~1"=="-Unattended" set "UNATTENDED_ARG="', text)
+        self.assertIn("shift /1", text)
+        self.assertNotRegex(text, r"(?m)^\s*(?:if [^\n]* )?pause\b")
+        self.assertEqual(text.count("powershell.exe "), 1)
+
+    def test_the_certify_launcher_pauses_unless_unattended_is_an_argument(self) -> None:
+        text = read(CERTIFY_LAUNCHER)
+        self.assertIn('-File "%SCRIPT%" %*', text)
+        # It never adds the switch: an attended run stays attended.
+        self.assertNotIn("%UNATTENDED_ARG%", text)
+        self.assertNotRegex(text, r'-File "%SCRIPT%"[^\n]*-Unattended')
+        self.assertIn('set "PAUSE_AT_END=1"', text)
+        self.assertIn('if /i "%~1"=="-Unattended" set "PAUSE_AT_END="', text)
+        self.assertIn("shift /1", text)
+        self.assertEqual(len(re.findall(r"(?m)^\s*pause\b", text)), 0)
+        self.assertEqual(len(re.findall(r"(?m)^\s*if defined PAUSE_AT_END pause$", text)), 2)
+        self.assertEqual(CERTIFY_LAUNCHER.read_bytes().count(b"\r\n"), CERTIFY_LAUNCHER.read_bytes().count(b"\n"))
+
+    def test_both_scripts_take_an_unattended_switch_and_check_forwards_it(self) -> None:
+        for path in (SCRIPT, CERTIFY):
+            with self.subTest(path.name):
+                param = re.search(r"(?s)\[CmdletBinding\(\)\]\nparam\((.*?)\n\)", read(path))
+                assert param is not None
+                self.assertIn("[switch]$Unattended", param.group(1))
+        text = read(SCRIPT)
+        self.assertRegex(text, r"if \(\$Unattended\) \{\n\s+\$certifyArguments \+= '-Unattended'\n\s+\}")
+        self.assertIn("(Get-AutomationSecurityLabel)", text)
+        self.assertNotIn("'msoAutomationSecurityByUI'", text)
+        self.assertIn("msoAutomationSecurityLow (-Unattended)", read(CERTIFY))
+
+    def test_no_prompt_is_reachable_when_unattended(self) -> None:
+        check = read(SCRIPT)
+        certify = read(CERTIFY)
+        self.assertNotIn("Read-Host", check)
+        # One place reads the console, and it refuses to when unattended.
+        self.assertEqual(len(re.findall(r"\bRead-Host\b", certify)), 1)
+        reader = function_body(certify, "Read-OperatorAnswer")
+        self.assertRegex(reader, r"(?s)if \(\$Unattended\) \{\n\s+throw .*?\n\s+\}\n\s+return \(Read-Host \$Prompt\)")
+        # Every caller leaves an unattended run before it reaches the prompt:
+        # by throwing or, while it polls, by continuing the loop.
+        callers = [name for name in re.findall(r"(?m)^function ([\w-]+)", certify)
+                   if name != "Read-OperatorAnswer" and "Read-OperatorAnswer " in function_body(certify, name)]
+        self.assertEqual(callers, ["Wait-ExcelMacros", "Resolve-CompileFallback"])
+        for name in callers:
+            with self.subTest(name):
+                body = function_body(certify, name)
+                guard = body.index("if ($Unattended) {")
+                prompt = body.index("Read-OperatorAnswer ")
+                self.assertLess(guard, prompt)
+                self.assertRegex(body[guard:prompt], r"\n\s+(?:throw|continue)\b")
+        # The script bodies outside the functions have no prompt of their own.
+        for name, source in (("check", check), ("certify", certify)):
+            with self.subTest(name):
+                outside = re.sub(r"(?m)^function [\w-]+.*?^}$", "", source, flags=re.S)
+                for pattern in (r"Read-Host", r"Read-OperatorAnswer ", r"\bPause\b", r"\[Console\]::Read", r"ReadKey",
+                                r"Out-GridView", r"MessageBox"):
+                    self.assertIsNone(re.search(pattern, outside), pattern)
+        # Each wait an unattended run makes has a bound, which the help states.
+        self.assertRegex(certify, r"(?m)^\$MacrosWaitSeconds = 60$")
+        self.assertRegex(certify, r"(?m)^\$CompileWaitSeconds = 30$")
+        self.assertIn("at most 60 seconds", certify)
+        self.assertIn("at most 30 seconds", certify)
 
 
 class LogSinkSourceTests(unittest.TestCase):
@@ -256,6 +352,109 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(result["text"])
         self.assertIn("no longer defines No-SuchFunction, NoSuchValue.", result["error"])
         self.assertIn("The certification script is missing", result["gone"])
+
+    # Loads the shared Excel helpers and their constants from the certification
+    # script, as the script does, with stand-ins for the Excel application
+    # (its Run call fails for the first calls) and for the VBE.
+    HELPERS_LOAD = (
+        "$names = @('Get-ComHResult', 'Invoke-Excel', 'Release-Com', 'Get-AutomationSecurityLabel', "
+        "'Set-ExcelAutomationSecurity', 'Read-OperatorAnswer', 'Wait-ExcelMacros', 'Wait-CompileCommand', "
+        "'Resolve-CompileFallback')\n"
+        "$d = Import-CertifyDefinitions -Path $env:CERTIFY_SCRIPT -Functions $names `\n"
+        "    -Variables @('MsoAutomationSecurityByUI', 'MsoAutomationSecurityLow', 'CompileControlId', "
+        "'ReadinessMacro', 'MacrosWaitSeconds', 'MacrosPollSeconds', 'CompileWaitSeconds')\n"
+        ". $d.Definitions\n"
+        "foreach ($k in $d.Values.Keys) { Set-Variable -Name $k -Value $d.Values[$k] }\n"
+        "function New-FakeExcel([int]$FailFirst) {\n"
+        "    $e = [pscustomobject]@{ Calls = 0; AutomationSecurity = 0; FailFirst = $FailFirst }\n"
+        "    $e | Add-Member -MemberType ScriptMethod -Name Run -Value {\n"
+        "        param($Macro)\n"
+        "        $this.Calls++\n"
+        "        if ($this.Calls -le $this.FailFirst) { throw 'Cannot run the macro' }\n"
+        "        return $null\n"
+        "    }\n"
+        "    return $e\n"
+        "}\n"
+        "function New-FakeVbe([bool]$Enabled) {\n"
+        "    $control = [pscustomobject]@{ Enabled = $Enabled }\n"
+        "    $bars = [pscustomobject]@{ Control = $control; Looks = 0 }\n"
+        "    $bars | Add-Member -MemberType ScriptMethod -Name FindControl -Value {\n"
+        "        param($Type, $Id)\n"
+        "        $this.Looks++\n"
+        "        return $this.Control\n"
+        "    }\n"
+        "    return [pscustomobject]@{ CommandBars = $bars }\n"
+        "}\n"
+    )
+
+    def test_unattended_starts_the_instance_with_low_automation_security_and_says_so(self) -> None:
+        result = self.run_body(
+            self.HELPERS_LOAD +
+            "$first = New-FakeExcel 0\n$second = New-FakeExcel 0\n"
+            "$Unattended = $false\n$a = Set-ExcelAutomationSecurity $first\n"
+            "$Unattended = $true\n$u = Set-ExcelAutomationSecurity $second\n"
+            "@{ attended = $first.AutomationSecurity; attendedLabel = $a; "
+            "unattended = $second.AutomationSecurity; unattendedLabel = $u; "
+            "values = @($MsoAutomationSecurityByUI, $MsoAutomationSecurityLow) }" + WRITE)
+        self.assertEqual(result["values"], [2, 1])
+        self.assertEqual((result["attended"], result["attendedLabel"]), (2, "msoAutomationSecurityByUI"))
+        self.assertEqual((result["unattended"], result["unattendedLabel"]),
+                         (1, "msoAutomationSecurityLow (-Unattended)"))
+
+    def test_an_unattended_macros_wait_polls_then_fails_with_the_reason_and_never_prompts(self) -> None:
+        # pwsh runs with -NonInteractive here, so a Read-Host would raise
+        # instead; the messages below show which path ran.
+        result = self.run_body(
+            self.HELPERS_LOAD +
+            "$Unattended = $true\n"
+            "$late = New-FakeExcel 3\n"
+            "Wait-ExcelMacros -Excel $late -Qualified \"'W.xlsm'!\" -WorkbookName 'W.xlsm' -TimeoutSeconds 30 "
+            "-PollSeconds 0.05\n"
+            "$never = New-FakeExcel 1000000\n$clock = [Diagnostics.Stopwatch]::StartNew()\n$m = ''\n"
+            "try { Wait-ExcelMacros -Excel $never -Qualified \"'W.xlsm'!\" -WorkbookName 'W.xlsm' "
+            "-TimeoutSeconds 1 -PollSeconds 0.1 } catch { $m = $_.Exception.Message }\n"
+            "@{ lateCalls = $late.Calls; neverCalls = $never.Calls; seconds = $clock.Elapsed.TotalSeconds; "
+            "error = $m }" + WRITE)
+        self.assertEqual(result["lateCalls"], 4)
+        self.assertGreater(result["neverCalls"], 2)
+        self.assertLess(result["seconds"], 30)
+        self.assertIn("The macros of W.xlsm did not run within 1 seconds although -Unattended set "
+                      "AutomationSecurity to msoAutomationSecurityLow; the last error was: Cannot run the macro.",
+                      result["error"])
+        self.assertIn("run without -Unattended to look", result["error"])
+
+    def test_an_unattended_compile_that_cannot_be_confirmed_fails_instead_of_asking(self) -> None:
+        result = self.run_body(
+            self.HELPERS_LOAD +
+            "$Unattended = $true\n$CompileWaitSeconds = 1\n"
+            "$stuck = New-FakeVbe $true\n$done = New-FakeVbe $false\n"
+            "$clock = [Diagnostics.Stopwatch]::StartNew()\n"
+            "$stuckResult = Wait-CompileCommand $stuck\n$seconds = $clock.Elapsed.TotalSeconds\n"
+            "$doneResult = Wait-CompileCommand $done\n"
+            "$m = ''\ntry { $null = Resolve-CompileFallback } catch { $m = $_.Exception.Message }\n"
+            "$p = ''\ntry { $null = Read-OperatorAnswer 'Question' } catch { $p = $_.Exception.Message }\n"
+            "@{ stuck = $stuckResult; done = $doneResult; looks = $stuck.CommandBars.Looks; seconds = $seconds; "
+            "error = $m; prompt = $p }" + WRITE)
+        self.assertFalse(result["stuck"])
+        self.assertTrue(result["done"])
+        self.assertEqual(result["looks"], 2)
+        self.assertLess(result["seconds"], 30)
+        self.assertEqual(result["error"],
+                         "Debug > Compile VBAProject was still enabled after 1 seconds, so the compile could not "
+                         "be confirmed and -Unattended never asks. Run without -Unattended and compile in the VBE "
+                         "to see why.")
+        self.assertIn("An unattended run reached a prompt (Question)", result["prompt"])
+
+    def test_an_attended_run_still_looks_for_five_seconds_and_asks(self) -> None:
+        result = self.run_body(
+            self.HELPERS_LOAD +
+            "$Unattended = $false\n$vbe = New-FakeVbe $false\n$ok = Wait-CompileCommand $vbe\n"
+            "$m = ''\ntry { $null = Read-OperatorAnswer 'Question' } catch { $m = $_.Exception.Message }\n"
+            "@{ ok = $ok; looks = $vbe.CommandBars.Looks; error = $m }" + WRITE)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["looks"], 1)
+        # Attended, the prompt is a real Read-Host, which a -NonInteractive host refuses.
+        self.assertIn("NonInteractive", result["error"])
 
     def test_the_runner_list_is_resolved_and_checked(self) -> None:
         default = script_list("DefaultRunners")
@@ -398,6 +597,16 @@ class ScriptRunTests(unittest.TestCase):
         self.assertEqual(len(session["steps"]), len(steps))
         self.assertTrue((self.bundle / "session.log").exists())
         self.assertFalse((self.bundle / "certification").exists())
+
+    def test_the_session_records_how_the_macros_are_enabled(self) -> None:
+        for extra, expected in (((), "msoAutomationSecurityByUI"),
+                                (("-Unattended",), "msoAutomationSecurityLow (-Unattended)")):
+            with self.subTest(extra=extra):
+                bundle = self.bundle.with_name("bundle-" + str(len(extra)))
+                completed = self.run_script(*extra, bundle=bundle)
+                self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+                session = json.loads((bundle / "session.json").read_text(encoding="utf-8-sig"))
+                self.assertEqual(session["host"]["trust_center"]["automation_security"], expected)
 
     def test_the_script_stops_before_the_bundle_on_a_bad_start(self) -> None:
         with self.subTest("unknown runner"):

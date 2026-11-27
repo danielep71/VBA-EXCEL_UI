@@ -504,6 +504,35 @@ class NegativeTests(Fixture):
         self.bundle_with(lambda docs: docs["host.json"]["excel"].update(bitness="x86"))
         self.assert_fails("host", "bitness 'x86' differs")
 
+    @staticmethod
+    def set_automation_security(value: object) -> Callable[[dict[str, Any]], None]:
+        def change(docs: dict[str, Any]) -> None:
+            docs["host.json"]["trust_center"]["automation_security"] = value
+        return change
+
+    def test_both_known_ways_of_enabling_the_macros_pass(self) -> None:
+        self.assertEqual(evidence.AUTOMATION_SECURITY,
+                         ("msoAutomationSecurityByUI", "msoAutomationSecurityLow (-Unattended)"))
+        for value in evidence.AUTOMATION_SECURITY:
+            with self.subTest(value):
+                self.bundle_with(self.set_automation_security(value))
+                self.assertEqual(self.failed(), {})
+
+    def test_any_other_way_of_enabling_the_macros_fails(self) -> None:
+        for value in ("msoAutomationSecurityLow", "msoAutomationSecurityForceDisable", "MSOAUTOMATIONSECURITYBYUI",
+                      "msoAutomationSecurityLow (-Unattended) ", "", None, 1, ["msoAutomationSecurityByUI"]):
+            with self.subTest(value=value):
+                self.bundle_with(self.set_automation_security(value))
+                self.assert_fails("host", "automation_security")
+
+    def test_a_host_record_that_does_not_say_how_the_macros_were_enabled_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["host.json"]["trust_center"].pop("automation_security"))
+        self.assert_fails("host", "automation_security None must be one of")
+        self.bundle_with(lambda docs: docs["host.json"].pop("trust_center"))
+        self.assert_fails("host", "has no 'trust_center'")
+        self.bundle_with(lambda docs: docs["host.json"].update(trust_center="msoAutomationSecurityByUI"))
+        self.assert_fails("host", "trust_center must be an object")
+
     def test_a_host_record_without_a_windows_build_fails(self) -> None:
         self.bundle_with(lambda docs: docs["host.json"]["windows"].update(build=""))
         self.assert_fails("host", "'build' must be non-empty")
