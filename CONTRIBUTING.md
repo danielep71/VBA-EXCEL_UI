@@ -209,11 +209,12 @@ the ignored scratch folder.
    py -3 tools\make_titlebar_mutant.py
    ```
 
-   It writes `.mutation-scratch\titlebar-6\M_EXCEL_UI_TITLEBAR.bas`, which
+   This is the default `v112` variant; `--variant` selects the controls of the
+   next section. It writes `.mutation-scratch\titlebar-6\M_EXCEL_UI_TITLEBAR.bas`, which
    differs from `src\M_EXCEL_UI_TITLEBAR.bas` only in the fallback condition of
    `UI_TrySetTitleBarVisibleForHwndWorker`: the two lines
    `If Not m_FrameStates(Slot).HasBaseline _` and
-   `Or (RestoreBits And WS_CAPTION) = 0 Then` become
+   `Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then` become
    `If RestoreBits = 0 Then`. It keeps the module's `Attribute VB_Name` and
    CRLF line endings, prints the line it changed and the SHA-256 of the source
    and of the control, and fails without writing anything when the condition
@@ -279,6 +280,33 @@ API under test:
 
 Ending the process recovers the machine; it is not the bounded,
 host-restoring result #66 asks for.
+
+#### Complete-mask controls (#6)
+
+`WS_CAPTION` is the composite `WS_BORDER Or WS_DLGFRAME`, and the title-bar
+module tests the complete mask, `(style And WS_CAPTION) = WS_CAPTION`, in four
+places: the visibility reader, the show fallback condition and the two show
+readbacks. Four further controls put the any-bit test,
+`(style And WS_CAPTION) <> 0`, back. They are built and run exactly like the
+control above, with `--variant` naming the one to write, one at a time, each in
+a new workbook. None has been run on Excel yet; the table records what the
+source predicts and a Python model of the decisions confirms the prediction
+(`tests/test_make_titlebar_mutant.py`).
+
+| `--variant` | What it restores | First failing assertion on Excel |
+| --- | --- | --- |
+| `fallback` | `Or (RestoreBits And WS_CAPTION) = 0 Then` | `TST_Case_TitleBarShowRejectsPartialCaptionBaseline`: `BorderOnly.FireAndForget.CaptionVisible expected=True actual=False`. The no-op readback still sees the partial caption and the show reports `title-bar show completed without a visible caption`, so the frame stays partial. |
+| `reader` | `IsVisible = ((StyleValue And WS_CAPTION) <> 0)` | `TST_Case_TitleBarVisibilityRequiresCompleteCaption`: `BorderOnly.ProductionReader expected=False actual=True` |
+| `anybit` | all four any-bit tests | `TST_Case_TitleBarVisibilityRequiresCompleteCaption` at `BorderOnly.ProductionReader` (it runs first). With the reader repaired, the show case would fail at `BorderOnly.FireAndForget.CaptionVisible expected=True actual=False`, because the show reports success over the partial caption. |
+| `readbacks` | the no-op and post-write readbacks only | None expected. With the fallback condition intact a show merges the full owned frame, so neither readback can see a partial caption. They are defence in depth, and the `fallback` row shows the no-op one working. |
+
+`tools/make_titlebar_mutant.py` prints the SHA-256 of the source and of the
+control; record it with the output of the pack. The assertion names above come
+from `TST_RunCompleteCaptionShow`, which restores the entry style through the
+harness on every exit, so each control that fails must fail with the title bar
+visible and Excel usable. A first failure at `.Precondition` means Windows did
+not keep the fixture on that host, so the case cannot detect the defect there;
+at `.EntryPrecondition`, that the entry frame did not show a title bar.
 
 ---
 

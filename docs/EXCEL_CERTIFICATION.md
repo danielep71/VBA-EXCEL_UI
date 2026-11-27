@@ -154,8 +154,8 @@ Keep a failed bundle as it is: it records what happened.
 | `session.json` | the script | Commit SHA, whether the working tree had changes, start and end times in UTC and local time, each step with its status and detail, the workbook's VBA components, the SHA-256 of each collected evidence file, the result and the exit code of the run. |
 | `host.json` | the script | Windows caption, version, build and architecture; Excel version, build, `Application.OperatingSystem` and bitness (read from the Excel process); the Click-to-Run version; the macro setting and VBA project access as found; and how the macros were enabled, `msoAutomationSecurityByUI` or `msoAutomationSecurityLow (-Unattended)`. |
 | `source-digests.json` | the script | For each module of the `development` configuration at the commit: its path, module name, SHA-256 of the commit's content with CRLF line endings as a checkout writes it, and SHA-256 of the file the build imported. |
-| `certification.json` | the workbook | The certification document: Excel version and build, bitness, unit counts and results, skips, cleanup, whether every unit and skip was recorded, and the verdict. |
-| `certification.txt` | the workbook | The text report with its `RESULT:` line, and a `RECORDING` line when a unit or skip could not be recorded. |
+| `certification.json` | the workbook | The certification document: Excel version and build, bitness, unit counts and results, skips, cleanup with every finding, every unverified surface and the number of comparisons made, whether every unit and skip was recorded, and the verdict. |
+| `certification.txt` | the workbook | The text report with its `RESULT:` line, a `CLEANUP` line per cleanup finding, an `UNVERIFIED` line per surface cleanup could not compare, and a `RECORDING` line when a unit, skip or finding could not be recorded. |
 | `session.log` | the script | Everything the script printed, including the synchronizer's output. |
 | `EXCEL_UI-development.xlsm` | the synchronizer | The workbook that ran. It is not part of the validation. |
 
@@ -221,8 +221,14 @@ unknown commit, no bundle folder or an unusable policy). It checks that:
   unit, cleanup `OK`, recording `OK`, and the units that the commit's
   `Test_EXCEL_UI_RunReleaseCertification` runs. A document without a
   `recording` field comes from a runner that did not report it, and is read
-  as recording `OK`;
-- the `RESULT:` line, the unit lines and any `RECORDING` line of
+  as recording `OK`. A document that itemizes cleanup (`cleanupFindings`,
+  `cleanupUnverified` and `cleanupChecked`, which come together) must hold no
+  finding and have made at least one comparison when cleanup is `OK`, and must
+  number its findings and unverified surfaces from 1, each with a code and a
+  detail. A document without those fields comes from a runner that did not
+  itemize cleanup, and is read as it was;
+- the `RESULT:` line, the unit lines, any `RECORDING` line and, for a document
+  that itemizes cleanup, the `CLEANUP` and `UNVERIFIED` lines of
   `certification.txt` agree with `certification.json`;
 - `host.json` names Windows and the Excel version, build and bitness, agrees
   with the Excel version, build, operating system and bitness that
