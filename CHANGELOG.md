@@ -207,10 +207,15 @@ measured against that baseline.
   open. Both stay runnable alone, and the public interactive runners
   (`Test_EXCEL_UI_RunAll`, `Test_EXCEL_UI_RunCore`,
   `Test_EXCEL_UI_RunTitleBarOnly`) remain usable, record no inventory and are
-  documented as not release certification. Two new run faults and two new cases
-  of the ownership checks prove that a forced failed unit, and a forced gap in
-  the inventory, each make the outer certification call raise with the failed
-  unit or the finding in its error text. A new case in the RegressionPack unit
+  documented as not release certification. The cleanup baseline is captured
+  before the isolated units run, so a change one of them leaves (for example its
+  own workbook left active when another was active on entry) is a cleanup
+  finding named `isolated.<code>`, and the entry window is made active again
+  before the live units start. Three new run faults and three new cases of the
+  ownership checks prove that a forced failed unit, a forced gap in the
+  inventory and a change left by an isolated unit each make the outer
+  certification call raise with the failed unit or the finding in its error
+  text. A new case in the RegressionPack unit
   injects each kind of difference into a local record. The manifest names the
   five cases of #42; #32 replaced `TST_Case_TitleBarSameStyleHandleReuse`, so it
   lists `TST_Case_TitleBarSameHwndGenerationReuse` in its place and says so. The

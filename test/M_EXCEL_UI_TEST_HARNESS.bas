@@ -78,6 +78,9 @@ Option Private Module
 '   - Assumes the EXCEL_UI modules are present in the same VBA project
 '
 ' UPDATED
+'   2026-11-28 - Entries can be carried from one record to another, so the
+'                entry baseline survives the isolated units and what they
+'                leave behind is judged against it (#42).
 '   2026-11-27 - Certification records each case it runs under its stable
 '                identifier, compares the observed case inventory with the
 '                expected one, and reports both in the evidence. The record
@@ -185,6 +188,7 @@ Option Private Module
     Public Const TEST_CERT_RUN_FAULT_CLEANUP As Long = 1  'Run no unit; alter the host before cleanup is verified
     Public Const TEST_CERT_RUN_FAULT_UNIT As Long = 2  'Run one synthetic mandatory unit that fails; the inventory is exact
     Public Const TEST_CERT_RUN_FAULT_INVENTORY As Long = 3  'Run one synthetic unit that passes while an expected case never starts
+    Public Const TEST_CERT_RUN_FAULT_ISOLATED As Long = 4  'Run one synthetic isolated unit that alters the host and runs no live unit
     Private Const TST_SECONDS_PER_DAY As Double = 86400#              'Timer rollover interval in seconds
 
 '------------------------------------------------------------------------------
@@ -1683,6 +1687,161 @@ Public Sub TST_CertCaseEnd( _
         End If
 
 End Sub
+
+
+Public Function TST_CertCarryEntries( _
+    ByRef Source As tCertRecord, _
+    ByRef Target As tCertRecord, _
+    ByVal CodePrefix As String, _
+    ByVal IncludeUnverified As Boolean) _
+    As Boolean
+
+'
+'==============================================================================
+' TST_CertCarryEntries
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Copy the cleanup findings, and optionally the unverified surfaces and the
+'   comparison count, of one record into another.
+'
+' WHY THIS EXISTS
+'   The entry baseline is captured before the isolated units run, because they
+'   change the host and the exit state must be judged against what the caller
+'   had. Those units call certification, which clears the live record, so what
+'   the capture recorded is held in a record of its own and carried into the
+'   live record once it is open. What the isolated units left behind is judged
+'   in a second record and carried with a prefix, so that it is reported as
+'   theirs (#42).
+'
+' INPUTS
+'   Source
+'     ByRef. The record to read. It is not changed.
+'
+'   Target
+'     ByRef. The record that receives the entries.
+'
+'   CodePrefix
+'     Text put before the code of each finding that is carried; empty for none.
+'
+'   IncludeUnverified
+'     TRUE to carry the unverified surfaces and the comparison count too.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => every entry was stored in Target.
+'     FALSE => Target is flagged as a recording failure.
+'
+' ERROR POLICY
+'   - Does not raise. A Source that cannot be read, or that was itself flagged,
+'     flags Target.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'   - TST_CertAddFinding
+'   - TST_CertAddUnverified
+'   - TST_CertMarkRecordFailure
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'   - TST_Case_CertInventoryDetectsDrift
+'
+' UPDATED
+'   2026-11-28 - Added (#42).
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ScanIdx             As Long            'Cursor over the entries
+    Dim Carried             As Boolean         'TRUE while every entry was stored
+    Dim FailNumber          As Long            'Error number of a failure
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Err_Handler
+
+        TST_CertCarryEntries = False
+
+    'A record that cannot be read proves nothing, and one that lost an entry
+    'must not be carried as if it were whole
+        If Not TST_CertRecordIsConsistent(Source) Then
+            TST_CertMarkRecordFailure Target, TEST_CERT_RECFAIL_INVARIANT, 0
+            GoTo Safe_Exit
+        End If
+
+        Carried = True
+
+        If Source.RecordFailed Then
+            TST_CertMarkRecordFailure Target, Source.RecordFailStage, Source.RecordFailError
+            Carried = False
+        End If
+
+'------------------------------------------------------------------------------
+' CARRY ENTRIES
+'------------------------------------------------------------------------------
+        For ScanIdx = 1 To Source.EntryCount
+
+            Select Case Source.EntryKind(ScanIdx)
+
+                Case TEST_CERT_ENTRY_FINDING
+                    If Not TST_CertAddFinding(Target, _
+                        CodePrefix & Source.EntryName(ScanIdx), _
+                        Source.EntryDetail(ScanIdx)) Then
+
+                        Carried = False
+
+                    End If
+
+                Case TEST_CERT_ENTRY_UNVERIFIED
+                    If IncludeUnverified Then
+
+                        If Not TST_CertAddUnverified(Target, _
+                            Source.EntryName(ScanIdx), _
+                            Source.EntryDetail(ScanIdx)) Then
+
+                            Carried = False
+
+                        End If
+
+                    End If
+
+            End Select
+
+        Next ScanIdx
+
+        If IncludeUnverified Then
+
+            If Source.CheckCount <= 2147483647 - Target.CheckCount Then
+                Target.CheckCount = Target.CheckCount + Source.CheckCount
+            End If
+
+        End If
+
+        TST_CertCarryEntries = Carried
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+Safe_Exit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+Err_Handler:
+    'Flag the target before anything else can allocate
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Target, TEST_CERT_RECFAIL_WRITE, FailNumber
+
+        TST_CertCarryEntries = False
+
+        Resume Safe_Exit
+
+End Function
 
 
 Public Function TST_CertAddExpected( _

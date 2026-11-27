@@ -332,11 +332,25 @@ them once the live record is open. Each appears exactly once in the expected and
 the observed cases. Both remain public runners that can be run alone, and
 `tools\Check-EXCEL_UI.cmd` still runs them that way.
 
+The entry baseline of the cleanup comparison is captured before either of them
+runs, so that what they change is judged against the state the caller had. For
+example, `Test_EXCEL_UI_RunSnapshotIdentity` leaves its own workbook active; with
+another workbook active on entry, a baseline taken afterwards would call that
+the entry state. What the capture records is held in a record of its own and
+carried into the live record after it is cleared. What the isolated units leave
+behind is compared with the baseline as soon as they return, before the live
+units can change it again, and is reported as a cleanup finding whose code
+begins with `isolated.`. The entry window is then made active again, so the live
+units start where the caller was, and the comparison at the end of the run
+reports anything the run itself leaves.
+
 **Failures reach the caller.** `Test_EXCEL_UI_RunOwnershipCleanupChecks` forces
-three runs of the real certification call, each under a one-shot run fault, and
+four runs of the real certification call, each under a one-shot run fault, and
 asserts what the call raises and what it records: a cleanup failure (case E), a
-failed mandatory unit with an exact inventory (case F) and an inventory with one
-missing case while every unit passes (case G). The error carries the number, the
+failed mandatory unit with an exact inventory (case F), an inventory with one
+missing case while every unit passes (case G) and a change left by an isolated
+unit, reported as `isolated.app.DisplayStatusBar` although the run puts the host
+back (case H). The error carries the number, the
 source, the verdict, the failed units and the inventory findings, and no
 evidence file is written for these runs.
 

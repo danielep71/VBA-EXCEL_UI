@@ -680,7 +680,9 @@ mandatory cases of each, named by the procedure that runs them. Version 1 lists
 `OwnershipCleanupChecks`, are isolated units: each calls certification itself,
 so each runs once before the live record opens, with no certification active,
 and is recorded afterwards. Their nested runs cannot reach the accounting of the
-run that executes them.
+run that executes them. The cleanup baseline is captured before they run, so
+anything they leave changed is a cleanup finding named `isolated.<code>`, and the
+entry window is made active again before the live units start.
 
 Every other case runs through `TST_CertRunCase`, which records its start and
 exactly one terminal status under its identifier. At the end of the run

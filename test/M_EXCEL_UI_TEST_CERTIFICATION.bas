@@ -90,6 +90,10 @@ Option Private Module
 '   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' UPDATED
+'   2026-11-28 - The entry baseline is captured before the isolated units, so
+'                what they leave behind is judged against it and reported as
+'                an isolated finding, and the entry window is restored before
+'                the live units run (#42).
 '   2026-11-27 - Certification runs every mandatory case through one wrapper
 '                that records its start and terminal status, compares the
 '                expected and observed cases, runs the self-test and the
@@ -553,6 +557,9 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim Baseline            As tCertBaseline   'Host state captured on entry
+    Dim EntryRec            As tCertRecord     'What the entry capture recorded, held across the isolated units
+    Dim IsolatedRec         As tCertRecord     'What the isolated units left behind
+    Dim RunIsolated         As Boolean         'TRUE when the isolated units run
     Dim FaultKind           As Long            'Run fault taken for this call
     Dim IsolatedSelfTest    As tCertIsolated   'Outcome of the self-test unit, held outside the record
     Dim IsolatedOwnership   As tCertIsolated   'Outcome of the ownership unit, held outside the record
@@ -636,42 +643,79 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
         End If
 
 '------------------------------------------------------------------------------
+' CAPTURE THE ENTRY BASELINE
+'------------------------------------------------------------------------------
+    'What cleanup is judged against, held here and read by nothing else. It is
+    'captured before anything else runs, the isolated units included, because
+    'they change the host: with another workbook active on entry, they leave
+    'their own workbook active, and a baseline taken afterwards would call that
+    'the entry state. What the capture records goes to a record of its own, as
+    'the isolated units clear the live one, and is carried into it below. A
+    'stage that could not capture is a finding in the record, which fails
+    'cleanup, so the run goes on and says so rather than stopping on an
+    'unproved baseline.
+        If Not TST_CertCaptureBaseline(Baseline, EntryRec) Then
+            TST_Log PROC, "BASELINE", _
+                "The entry baseline was not captured completely; cleanup will " & _
+                "be reported as FAILED"
+        End If
+
+'------------------------------------------------------------------------------
 ' RUN THE ISOLATED UNITS
 '------------------------------------------------------------------------------
     'The self-test and the ownership checks call certification, and each call
     'clears the record. They therefore run while no certification is active,
     'with their outcomes held in locals, and are recorded once the record has
-    'been cleared for the live run. A faulted run runs neither: it is itself
-    'the nested call those units make.
-        If FaultKind = TEST_CERT_RUN_FAULT_NONE Then
+    'been cleared for the live run. A faulted run does not run them: it is
+    'itself the nested call those units make. The one exception is the fault
+    'that proves the isolated phase is judged, which runs one synthetic unit
+    'that alters the host in their place.
+        RunIsolated = (FaultKind = TEST_CERT_RUN_FAULT_NONE) Or _
+            (FaultKind = TEST_CERT_RUN_FAULT_ISOLATED)
+
+        If RunIsolated Then
 
             m_CertActive = False
 
-            TST_CertRunIsolatedUnit "CertificationSelfTest", IsolatedSelfTest
-            TST_CertRunIsolatedUnit "OwnershipCleanupChecks", IsolatedOwnership
+            If FaultKind = TEST_CERT_RUN_FAULT_NONE Then
+                TST_CertRunIsolatedUnit "CertificationSelfTest", IsolatedSelfTest
+                TST_CertRunIsolatedUnit "OwnershipCleanupChecks", IsolatedOwnership
+            Else
+                TST_CertRunIsolatedUnit "SelfTest.IsolatedChange", IsolatedSelfTest
+            End If
 
             TST_CertResetCounters
 
             m_CertActive = True
 
-            TST_CertRecordIsolatedUnit "CertificationSelfTest", _
-                "Test_EXCEL_UI_RunCertificationSelfTest", IsolatedSelfTest
-
-            TST_CertRecordIsolatedUnit "OwnershipCleanupChecks", _
-                "Test_EXCEL_UI_RunOwnershipCleanupChecks", IsolatedOwnership
-
         End If
 
-'------------------------------------------------------------------------------
-' CAPTURE THE ENTRY BASELINE
-'------------------------------------------------------------------------------
-    'What cleanup is judged against, held here and read by nothing else. A stage
-    'that could not capture is a finding in the record, which fails cleanup, so
-    'the run goes on and says so rather than stopping on an unproved baseline.
-        If Not TST_CertCaptureBaseline(Baseline, m_CertRecord) Then
-            TST_Log PROC, "BASELINE", _
-                "The entry baseline was not captured completely; cleanup will " & _
-                "be reported as FAILED"
+    'The capture's findings and unverified surfaces survive the reset above
+        TST_CertCarryEntries EntryRec, m_CertRecord, vbNullString, True
+
+        If RunIsolated Then
+
+            If FaultKind = TEST_CERT_RUN_FAULT_NONE Then
+                TST_CertRecordIsolatedUnit "CertificationSelfTest", _
+                    "Test_EXCEL_UI_RunCertificationSelfTest", IsolatedSelfTest
+
+                TST_CertRecordIsolatedUnit "OwnershipCleanupChecks", _
+                    "Test_EXCEL_UI_RunOwnershipCleanupChecks", IsolatedOwnership
+            Else
+                TST_CertRecordIsolatedUnit "SelfTest.IsolatedChange", _
+                    "SelfTest.IsolatedCase", IsolatedSelfTest
+            End If
+
+        'Whatever those units left behind is compared with the entry state now,
+        'before the live units can change it again, and reported as theirs.
+        'Then the entry window is made active again, so the live units start
+        'where the caller was.
+            TST_CertEvaluateCleanup Baseline, IsolatedRec
+
+            TST_CertCarryEntries IsolatedRec, m_CertRecord, "isolated.", False
+
+            TST_CertRestoreActiveWindow Baseline, m_CertRecord
+
         End If
 
 '------------------------------------------------------------------------------
@@ -690,6 +734,11 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 
             Case TEST_CERT_RUN_FAULT_INVENTORY
                 TST_CertRunUnit "SelfTest.InventoryGap"
+
+            Case TEST_CERT_RUN_FAULT_ISOLATED
+                'The synthetic isolated unit inverted the status bar. Putting it
+                'back here leaves the isolated phase as the only difference
+                Application.DisplayStatusBar = Not Application.DisplayStatusBar
 
             Case Else
                 TST_CertRunUnit "RegressionPack"
@@ -1182,6 +1231,7 @@ Private Sub TST_CertExecuteUnit( _
 '   - TST_CertSelfTestFollowingUnit
 '   - TST_CertSelfTestForcedFailureUnit
 '   - TST_CertSelfTestInventoryGapUnit
+'   - TST_CertSelfTestIsolatedChangeUnit
 '   - TST_CertAppendDetail
 '
 ' CALLED FROM
@@ -1196,8 +1246,8 @@ Private Sub TST_CertExecuteUnit( _
 '
 '   The SelfTest.CaptureFailure and SelfTest.FollowingUnit units are
 '   dispatched only by TST_Case_CertUnitIsolatesCaptureFailure. The
-'   SelfTest.ForcedFailure and SelfTest.InventoryGap units are dispatched only
-'   by a certification run under a run fault. Certification never runs any of
+'   SelfTest.ForcedFailure, SelfTest.InventoryGap and SelfTest.IsolatedChange
+'   units are dispatched only by a certification run under a run fault. Certification never runs any of
 '   them otherwise.
 '
 '   A unit with one case runs it through TST_CertRunCase, so the case records
@@ -1265,6 +1315,9 @@ Private Sub TST_CertExecuteUnit( _
 
             Case "SelfTest.InventoryGap"
                 TST_CertSelfTestInventoryGapUnit
+
+            Case "SelfTest.IsolatedChange"
+                TST_CertSelfTestIsolatedChangeUnit
 
             Case Else
                 Err.Raise _
@@ -1523,6 +1576,41 @@ Private Sub TST_CertSelfTestInventoryGapUnit()
         TST_CertCaseStart "SelfTest.PresentCase"
 
         TST_CertCaseEnd "SelfTest.PresentCase", True, vbNullString
+
+End Sub
+
+
+Private Sub TST_CertSelfTestIsolatedChangeUnit()
+
+'
+'==============================================================================
+' TST_CertSelfTestIsolatedChangeUnit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Alter the host the way an isolated unit may, and leave it altered.
+'
+' WHY THIS EXISTS
+'   What an isolated unit leaves behind must be judged against the entry state
+'   of the run, not against a state taken after the unit ran (#42). Inverting
+'   Application.DisplayStatusBar stands in for the change a real isolated unit
+'   can make, such as leaving another workbook active. The run fault
+'   TEST_CERT_RUN_FAULT_ISOLATED runs this unit in place of the isolated units.
+'
+' RETURNS
+'   None.
+'
+' ERROR POLICY
+'   - Raises what the write raises.
+'
+' CALLED FROM
+'   - TST_CertExecuteUnit
+'
+' UPDATED
+'   2026-11-28 - Added (#42).
+'==============================================================================
+'
+
+        Application.DisplayStatusBar = Not Application.DisplayStatusBar
 
 End Sub
 
@@ -1838,8 +1926,9 @@ Private Sub TST_CertLoadExpected( _
 '   FaultKind
 '     The run fault taken for this call. A run without one expects every case
 '     of the manifest. A faulted run expects a synthetic inventory instead:
-'     none for a forced cleanup failure, one case for a forced failed unit, and
-'     two cases for a forced gap, of which the run starts one.
+'     none for a forced cleanup failure, one case for a forced failed unit, one
+'     for a forced isolated change, and two cases for a forced gap, of which
+'     the run starts one.
 '
 ' RETURNS
 '   None.
@@ -1881,6 +1970,10 @@ Private Sub TST_CertLoadExpected( _
             Case TEST_CERT_RUN_FAULT_UNIT
                 TST_CertAddExpected m_CertRecord, _
                     "SelfTest.ForcedFailure", "SelfTest.ForcedCase"
+
+            Case TEST_CERT_RUN_FAULT_ISOLATED
+                TST_CertAddExpected m_CertRecord, _
+                    "SelfTest.IsolatedChange", "SelfTest.IsolatedCase"
 
             Case TEST_CERT_RUN_FAULT_INVENTORY
                 TST_CertAddExpected m_CertRecord, _
@@ -4538,6 +4631,10 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '                                case inventory is exact
 '   G  forced inventory gap    - the outer call fails as INCOMPLETE and names
 '                                the missing case, while every unit passed
+'   H  isolated change         - what an isolated unit leaves behind is a
+'                                cleanup finding of the outer call, named as
+'                                isolated, although the live units put the
+'                                host back
 '
 ' ERROR POLICY
 '   - Raises on assertion failure
@@ -4568,11 +4665,12 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '
 '   Run it with no explicit snapshot held.
 '
-'   Cases E, F and G run the real certification call under a run fault, write no
-'   evidence file, and check what the call raises and records. Case E inverts
-'   the status bar and restores it itself.
+'   Cases E, F, G and H run the real certification call under a run fault, write
+'   no evidence file, and check what the call raises and records. Cases E and H
+'   invert the status bar and restore it themselves.
 '
 ' UPDATED
+'   2026-11-28 - Added case H, an isolated unit that alters the host (#42).
 '   2026-11-27 - Added cases F and G, the forced failed unit and the forced
 '                inventory gap, and its role as an isolated unit (#42).
 '   2026-11-18 - Added case E, the forced cleanup failure (#35).
@@ -5041,13 +5139,106 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             PROC & ".ForcedGap.Evidence.ReportListsTheFinding"
 
 '------------------------------------------------------------------------------
+' CASE H - WHAT AN ISOLATED UNIT LEAVES BEHIND IS REPORTED
+'------------------------------------------------------------------------------
+    'The run fault runs one synthetic isolated unit that inverts the status bar,
+    'then puts it back in the live phase. The entry baseline was taken before
+    'that unit, so the difference is a cleanup finding named as the isolated
+    'phase's, and not a state the run took for its entry state. The end of the
+    'run finds nothing, so the isolated finding is the only one.
+        EntryStatusBar = Application.DisplayStatusBar
+        StatusBarAtRisk = True
+
+        TST_CertInjectRunFault TEST_CERT_RUN_FAULT_ISOLATED
+
+        On Error Resume Next
+
+            Test_EXCEL_UI_RunReleaseCertification
+
+            RaisedNumber = Err.Number
+            RaisedSource = Err.Source
+            RaisedDescription = Err.Description
+
+            Err.Clear
+
+        On Error GoTo Err_Handler
+
+        TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
+
+    'The run put the host back, and this case does not do it for the run
+        TST_AssertBooleanEquals EntryStatusBar, Application.DisplayStatusBar, _
+            PROC & ".IsolatedChange.HostPutBack"
+
+        StatusBarAtRisk = False
+
+        TST_AssertTrue _
+            (RaisedNumber = TEST_CERT_ERR_BASE + 3), _
+            PROC & ".IsolatedChange.ErrorNumberPreserved"
+
+        TST_AssertTrue _
+            (RaisedSource = "Test_EXCEL_UI_RunReleaseCertification"), _
+            PROC & ".IsolatedChange.ErrorSourcePreserved"
+
+        TST_AssertTrue _
+            (InStr(1, RaisedDescription, _
+                "RESULT: FAIL | COMPLETE | units=1 failed=0 skipped=0 cleanup=FAILED", _
+                vbBinaryCompare) > 0) And _
+            (InStr(1, RaisedDescription, "DisplayStatusBar changed from", _
+                vbBinaryCompare) > 0), _
+            PROC & ".IsolatedChange.DescriptionCarriesTheFinding"
+
+        TST_AssertBooleanEquals False, m_CertActive, _
+            PROC & ".IsolatedChange.RunClosed"
+
+        TST_AssertTrue _
+            (InStr(1, TST_CertEntryCodes(m_CertRecord, TEST_CERT_ENTRY_FINDING), _
+                "|isolated.app.DisplayStatusBar|", vbBinaryCompare) > 0) And _
+            (InStr(1, TST_CertEntryCodes(m_CertRecord, TEST_CERT_ENTRY_FINDING), _
+                "|app.DisplayStatusBar|", vbBinaryCompare) = 0) And _
+            (m_CertRecord.InventoryCount = 0) And _
+            Not m_CertRecord.RecordFailed, _
+            PROC & ".IsolatedChange.OnlyTheIsolatedPhaseIsNamed"
+
+        TST_AssertTrue _
+            (TST_CertTakeRunFault() = TEST_CERT_RUN_FAULT_NONE), _
+            PROC & ".IsolatedChange.FaultConsumed"
+
+        ForcedDetail = vbNullString
+
+        TST_CertComposeEvidence _
+            Rec:=m_CertRecord, _
+            CleanupOK:=True, _
+            CleanupDetail:=ForcedDetail, _
+            UnitsFailed:=ForcedUnitsFailed, _
+            Complete:=ForcedComplete, _
+            Passed:=ForcedPassed, _
+            Verdict:=ForcedVerdict, _
+            RecordingDetail:=ForcedRecordingDetail, _
+            JsonText:=ForcedJson, _
+            ReportText:=ForcedReport
+
+        TST_AssertBooleanEquals False, ForcedPassed, _
+            PROC & ".IsolatedChange.Evidence.NotPassed"
+
+        TST_AssertTrue _
+            (InStr(1, ForcedJson, """cleanup"":""FAILED""", vbBinaryCompare) > 0) And _
+            (InStr(1, ForcedJson, """code"":""isolated.app.DisplayStatusBar""", _
+                vbBinaryCompare) > 0), _
+            PROC & ".IsolatedChange.Evidence.JsonListsTheFinding"
+
+        TST_AssertTrue _
+            (InStr(1, ForcedReport, vbNewLine & _
+                "  CLEANUP  isolated.app.DisplayStatusBar | ", vbBinaryCompare) > 0), _
+            PROC & ".IsolatedChange.Evidence.ReportListsTheFinding"
+
+'------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
         TST_Log PROC, "PASS", _
             "Runner-owned snapshots were released on every exit, every " & _
             "failure survived cleanup, and a forced cleanup failure, a forced " & _
-            "failed unit and a forced inventory gap each failed the " & _
-            "certification call"
+            "failed unit, a forced inventory gap and a change left by an " & _
+            "isolated unit each failed the certification call"
 
 Safe_Exit:
     'Disarm whatever this run armed. A fault left armed would fire inside an
@@ -7964,7 +8155,9 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 '   noStart      a case recorded a status and never started
 '   not compared the same record, never compared
 '   And a record whose buffers disagree with its counts is not compared, and a
-'   reset clears the comparison.
+'   reset clears the comparison. Findings, unverified surfaces and the
+'   comparison count are carried from one record to another, with an optional
+'   prefix on the code, and a source that lost an entry flags its target.
 '
 ' ERROR POLICY
 '   - Raises on assertion failure.
@@ -7972,6 +8165,7 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 ' DEPENDENCIES
 '   - TST_CertCheckInventoryScenario
 '   - TST_CertEvaluateInventory
+'   - TST_CertCarryEntries
 '   - TST_CertResetRecord
 '
 ' CALLED FROM
@@ -7982,6 +8176,7 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 '   nothing from it; the case asserts that its own record is unchanged.
 '
 ' UPDATED
+'   2026-11-28 - Also checks that entries are carried between records (#42).
 '   2026-11-27 - Added (#42).
 '==============================================================================
 '
@@ -7990,6 +8185,8 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim Rec                 As tCertRecord     'Record for the invariant scenario
+    Dim SourceRec           As tCertRecord     'Record whose entries are carried
+    Dim TargetRec           As tCertRecord     'Record that receives them
 
     Dim RunEntries          As Long            'Run record: entries on entry
     Dim RunUnits            As Long            'Run record: units on entry
@@ -8091,6 +8288,73 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
             Rec.RecordFailed And _
             (Rec.RecordFailStage = TEST_CERT_RECFAIL_INVARIANT), _
             PROC & ".Overcount.Flagged"
+
+'------------------------------------------------------------------------------
+' CLEANUP ENTRIES ARE CARRIED BETWEEN RECORDS
+'------------------------------------------------------------------------------
+    'The entry capture is held in a record of its own across the isolated units
+    'and carried into the live one, and what those units left behind is carried
+    'with a prefix that names it
+        TST_AssertBooleanEquals True, TST_CertResetRecord(SourceRec), _
+            PROC & ".Carry.ResetSource"
+
+        TST_AssertBooleanEquals True, _
+            TST_CertAddFinding(SourceRec, "app.Example", "Example changed"), _
+            PROC & ".Carry.FindingStored"
+
+        TST_AssertBooleanEquals True, _
+            TST_CertAddUnverified(SourceRec, "ribbon.scope", "not compared"), _
+            PROC & ".Carry.UnverifiedStored"
+
+        SourceRec.CheckCount = 5
+
+        TST_AssertBooleanEquals True, TST_CertResetRecord(TargetRec), _
+            PROC & ".Carry.ResetTarget"
+
+        TST_AssertBooleanEquals True, _
+            TST_CertCarryEntries(SourceRec, TargetRec, "isolated.", False), _
+            PROC & ".Carry.Prefixed"
+
+        TST_AssertTrue _
+            (TST_CertEntryCodes(TargetRec, TEST_CERT_ENTRY_FINDING) = "|isolated.app.Example|") And _
+            (TST_CertEntryCodes(TargetRec, TEST_CERT_ENTRY_UNVERIFIED) = "|") And _
+            (TargetRec.CheckCount = 0), _
+            PROC & ".Carry.PrefixedFindingsOnly"
+
+        TST_AssertBooleanEquals True, TST_CertResetRecord(TargetRec), _
+            PROC & ".Carry.ResetTargetAgain"
+
+        TST_AssertBooleanEquals True, _
+            TST_CertCarryEntries(SourceRec, TargetRec, vbNullString, True), _
+            PROC & ".Carry.Whole"
+
+        TST_AssertTrue _
+            (TST_CertEntryCodes(TargetRec, TEST_CERT_ENTRY_FINDING) = "|app.Example|") And _
+            (TST_CertEntryCodes(TargetRec, TEST_CERT_ENTRY_UNVERIFIED) = "|ribbon.scope|") And _
+            (TargetRec.CheckCount = 5), _
+            PROC & ".Carry.WholeRecordCarried"
+
+    'A source that lost an entry is not carried as if it were whole
+        TST_AssertBooleanEquals True, TST_CertResetRecord(SourceRec), _
+            PROC & ".Carry.ResetSourceAgain"
+
+        TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_FIRST, TEST_CERT_BUFFER_ANY
+
+        TST_AssertBooleanEquals False, _
+            TST_CertAddFinding(SourceRec, "app.Lost", "no room"), _
+            PROC & ".Carry.FindingLost"
+
+        TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
+
+        TST_AssertBooleanEquals True, TST_CertResetRecord(TargetRec), _
+            PROC & ".Carry.ResetTargetThird"
+
+        TST_AssertBooleanEquals False, _
+            TST_CertCarryEntries(SourceRec, TargetRec, vbNullString, True), _
+            PROC & ".Carry.LostEntryRefused"
+
+        TST_AssertBooleanEquals True, TargetRec.RecordFailed, _
+            PROC & ".Carry.TargetFlagged"
 
 '------------------------------------------------------------------------------
 ' THE RUN'S OWN RECORD IS UNCHANGED
