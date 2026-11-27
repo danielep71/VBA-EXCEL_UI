@@ -22,7 +22,9 @@ For the commit checked out in this repository:
    tools\Sync-EXCEL_UI-VBA.ps1 -Mode Demo -NewWorkbook;
 7. demo-open and demo-compile: opens it in another Excel instance of its own,
    waits for Enable Content and runs Debug > Compile VBAProject;
-8. demo-cleanup-checks: runs Demo_Test_RunCleanupChecks;
+8. demo-cleanup-checks: runs Demo_Test_RunCleanupChecks. A scenario the host
+   could not arrange, because the default printer driver cannot lay out a
+   sheet, is skipped, not failed. The step is then SKIP, which is not a pass;
 9. demo-create-sheet-1 and demo-create-sheet-2: time two runs of
    Demo_CreateDemoSheet, and warn above -SlowBuildSeconds;
 10. default-printer: records the name and status of the Windows default
@@ -34,14 +36,18 @@ For the commit checked out in this repository:
 
 A step that fails does not stop the steps that do not depend on it. The
 script writes summary.txt, with one line per step and a final RESULT line,
-and session.json, and prints the summary at the end.
+and session.json, and prints the summary at the end. RESULT is PASS when every
+step passed, warned or was recorded as INFO; FAIL when a step failed; and
+INCOMPLETE when no step failed but a step is SKIP, so that part of what it
+checks did not run.
 
 Functions and settings it shares with tools\Certify-EXCEL_UI.ps1 are read
 from that script's syntax tree, without running its body, so both scripts
 open, run and close Excel the same way.
 
-Exit codes: 0 no step failed; 1 a step failed or the run stopped on an error;
-2 the operator cancelled it.
+Exit codes: 0 every step passed, warned or was recorded as INFO; 1 a step
+failed or the run stopped on an error; 2 the operator cancelled it; 3 no step
+failed but a step was SKIP (RESULT: INCOMPLETE).
 
 Unattended: with -Unattended the whole run needs no key press and no click,
 from the start to the final RESULT line. The switch goes to
@@ -292,8 +298,10 @@ function Register-StepError([string]$Name, $ErrorRecord) {
 
 function ConvertFrom-Verdict([string]$Text) {
     # Reads the line TST_RunRunnerWithLog and Demo_Test_RunLogged return:
-    # "RESULT: PASS" or "RESULT: FAIL | ...", and " | LOG WRITE FAILED: ..."
-    # when the log could not be written.
+    # "RESULT: PASS", "RESULT: FAIL | ..." or, from Demo_Test_RunLogged only,
+    # "RESULT: INCOMPLETE | ..." for a run that skipped scenarios and failed
+    # none, and " | LOG WRITE FAILED: ..." when the log could not be written.
+    # Only PASS is Passed; INCOMPLETE is not a pass.
     $marker = ' | LOG WRITE FAILED: '
     $line = [string]$Text
     $logFailure = ''
@@ -302,11 +310,13 @@ function ConvertFrom-Verdict([string]$Text) {
         $logFailure = $line.Substring($index + $marker.Length)
         $line = $line.Substring(0, $index)
     }
-    if ($line -match '^RESULT: (PASS|FAIL)( \| .*)?$') {
-        return [pscustomobject]@{ HasVerdict = $true; Passed = ($Matches[1] -eq 'PASS'); ResultLine = $line
+    if ($line -match '^RESULT: (PASS|FAIL|INCOMPLETE)( \| .*)?$') {
+        return [pscustomobject]@{ HasVerdict = $true; Passed = ($Matches[1] -eq 'PASS')
+                                  Incomplete = ($Matches[1] -eq 'INCOMPLETE'); ResultLine = $line
                                   LogFailure = $logFailure }
     }
-    return [pscustomobject]@{ HasVerdict = $false; Passed = $false; ResultLine = $line; LogFailure = $logFailure }
+    return [pscustomobject]@{ HasVerdict = $false; Passed = $false; Incomplete = $false; ResultLine = $line
+                              LogFailure = $logFailure }
 }
 
 function Get-LastLogLine([string]$Path) {
@@ -329,22 +339,36 @@ function Get-MacroOutcome {
         [string]$LogPath
     )
     if ($Raised) {
-        return [pscustomobject]@{ Passed = $false; Detail = 'Application.Run raised: ' + $Raised }
+        return [pscustomobject]@{ Passed = $false; Incomplete = $false; Detail = 'Application.Run raised: ' + $Raised }
     }
     $verdict = ConvertFrom-Verdict $Returned
     if (-not $verdict.HasVerdict) {
-        return [pscustomobject]@{ Passed = $false; Detail = "no verdict was returned: '$Returned'" }
+        return [pscustomobject]@{ Passed = $false; Incomplete = $false; Detail = "no verdict was returned: '$Returned'" }
     }
+    # A verdict that cannot be trusted is a failure, even an INCOMPLETE one.
     if ($verdict.LogFailure) {
-        return [pscustomobject]@{ Passed = $false
+        return [pscustomobject]@{ Passed = $false; Incomplete = $false
                                   Detail = $verdict.ResultLine + '; the log could not be written: ' + $verdict.LogFailure }
     }
     $last = Get-LastLogLine $LogPath
     if ($last -ne $verdict.ResultLine) {
-        return [pscustomobject]@{ Passed = $false
+        return [pscustomobject]@{ Passed = $false; Incomplete = $false
                                   Detail = $verdict.ResultLine + '; the log does not end with that verdict' }
     }
-    return [pscustomobject]@{ Passed = $verdict.Passed; Detail = $verdict.ResultLine }
+    return [pscustomobject]@{ Passed = $verdict.Passed; Incomplete = $verdict.Incomplete; Detail = $verdict.ResultLine }
+}
+
+function Get-OutcomeStatus {
+    # The step status of a macro outcome: PASS for a pass, SKIP for a run that
+    # skipped scenarios and failed none, otherwise FAIL. SKIP is not a pass.
+    param([Parameter(Mandatory = $true)]$Outcome)
+    if ($Outcome.Passed) {
+        return 'PASS'
+    }
+    if ($Outcome.Incomplete) {
+        return 'SKIP'
+    }
+    return 'FAIL'
 }
 
 function Get-TimingStatus([double]$Seconds, [double]$Threshold) {
@@ -360,7 +384,8 @@ function Format-Seconds([double]$Seconds) {
 
 function Get-RunResult {
     # PASS when every step passed, warned or was recorded as INFO. A step
-    # still NOT_RUN counts as a failure unless the run was cancelled.
+    # still NOT_RUN counts as a failure unless the run was cancelled. A step
+    # that is SKIP is not a pass: with no failure, the run is INCOMPLETE.
     param(
         [Parameter(Mandatory = $true)]$Steps,
         [bool]$Cancelled
@@ -368,9 +393,13 @@ function Get-RunResult {
     if ($Cancelled) {
         return [pscustomobject]@{ Result = 'FAIL'; ExitCode = 2 }
     }
-    $failed = @($Steps | Where-Object { @('PASS', 'WARN', 'INFO') -notcontains $_.status })
+    $failed = @($Steps | Where-Object { @('PASS', 'WARN', 'INFO', 'SKIP') -notcontains $_.status })
     if ($failed.Count -gt 0) {
         return [pscustomobject]@{ Result = 'FAIL'; ExitCode = 1 }
+    }
+    $skipped = @($Steps | Where-Object { $_.status -eq 'SKIP' })
+    if ($skipped.Count -gt 0) {
+        return [pscustomobject]@{ Result = 'INCOMPLETE'; ExitCode = 3 }
     }
     return [pscustomobject]@{ Result = 'PASS'; ExitCode = 0 }
 }
@@ -541,7 +570,7 @@ function Invoke-LoggedMacro {
     }
     $stopwatch.Stop()
     $outcome = Get-MacroOutcome -Returned $returned -Raised $raised -LogPath $LogPath
-    return [pscustomobject]@{ Passed = $outcome.Passed; Detail = $outcome.Detail
+    return [pscustomobject]@{ Passed = $outcome.Passed; Incomplete = $outcome.Incomplete; Detail = $outcome.Detail
                               Seconds = $stopwatch.Elapsed.TotalSeconds }
 }
 
@@ -975,8 +1004,7 @@ try {
             Set-CheckStep $step.name 'RUNNING' $DemoCleanupMacro
             $outcome = Invoke-LoggedMacro -State $demoState -EntryPoint $DemoLoggedMacro -Macro $DemoCleanupMacro `
                 -LogPath (Join-Path $script:BundleDir $step.log)
-            Set-CheckStep $step.name $(if ($outcome.Passed) { 'PASS' } else { 'FAIL' }) $outcome.Detail `
-                -Seconds $outcome.Seconds
+            Set-CheckStep $step.name (Get-OutcomeStatus $outcome) $outcome.Detail -Seconds $outcome.Seconds
 
             # --- demo-create-sheet-1 and -2 ---------------------------------
             foreach ($name in @('demo-create-sheet-1', 'demo-create-sheet-2')) {

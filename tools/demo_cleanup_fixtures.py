@@ -1,4 +1,4 @@
-"""#70/#71/#73/#74/#187 source contracts and negative fixtures, not Excel execution evidence."""
+"""#70/#71/#73/#74/#187/#199 source contracts and negative fixtures, not Excel execution evidence."""
 import re
 from pathlib import Path
 
@@ -263,6 +263,146 @@ def page_break_findings(source: str, demo: str) -> list[str]:
     return errors
 
 
+# The page-break scenarios of the harness (#199) and the number of arrange steps
+# of each that can be skipped. Only an arrange step may become a skip.
+SKIPPING_SCENARIOS = {'DEMO_CT_ResetManualBreaks': 1, 'DEMO_CT_ResetBreakIndicators': 1,
+                      'DEMO_CT_BuildKeepsPageBreaks': 2}
+ARRANGE_HELPERS = ('DEMO_CT_ArrangeManualBreaks', 'DEMO_CT_ArrangeIndicators')
+LAYOUT_WRITE = re.compile(r'ws\.(?:rows|columns)\(\w+\)\.pagebreak = |ws\.displaypagebreaks = ')
+# Statements of the harness, whitespace folded, that the skip report stands on.
+HARNESS_TEXT = (
+    ('If RaisedNumber = 0 And mFailures = 0 And mSkipped = 0 Then Summary = "DEMO CLEANUP CHECKS: PASS"',
+     'a run with a skipped scenario must not print PASS'),
+    ('ElseIf RaisedNumber = 0 And mFailures = 0 Then Summary = "DEMO CLEANUP CHECKS: INCOMPLETE"',
+     'a run with skips and no failure must print INCOMPLETE'),
+    ('", skipped " & CStr(mSkipped)', 'the summary line must count skipped scenarios'),
+    ('Summary = Summary & " | skipped " & mSkippedNames', 'the summary line must name the skipped scenarios'),
+    ('If mSkipped <> 0 Then Err.Raise ERR_RUN_INCOMPLETE, PROC_NAME,', 'a run with skips must raise after cleanup'),
+    ('If RaisedNumber = ERR_RUN_INCOMPLETE Then Verdict = "RESULT: INCOMPLETE | " & RaisedDescription',
+     'the scripted verdict of a run with skips must be INCOMPLETE'),
+    ('DEMO_CT_LayoutSkipPath WB, "S49_LayoutSkipPath"', 'S49 must run after S48'),
+    ('DEMO_CT_CheckLong Scenario & ".LayoutSkips", 1, SkipsAdded', 'S49 must expect one skip for error 1004'),
+    ('DEMO_CT_CheckLong Scenario & ".LayoutFailures", 0, FailuresAdded',
+     'S49 must expect no failure for error 1004'),
+    ('DEMO_CT_CheckLong Scenario & ".OtherSkips", 0, SkipsAdded', 'S49 must expect no skip for another error'),
+    ('DEMO_CT_CheckLong Scenario & ".OtherFailures", 1, FailuresAdded',
+     'S49 must expect one failure for another error'),
+    ('Err.Raise mLayoutFault, SRC_LAYOUT_FAULT, DESC_LAYOUT_FAULT',
+     'the injected error must be raised by the arrange helpers'),
+)
+
+
+def _helper_findings(source: str, handler: str, leave: str) -> list[str]:
+    """#199: an arrange helper skips error 1004 only, after releasing its handler."""
+    errors = []
+    if 'private const err_page_layout as long = 1004' not in _code(source):
+        errors.append('harness: ERR_PAGE_LAYOUT must be 1004')
+    for name in ARRANGE_HELPERS:
+        body = _procedure(source, 'Function', name)
+        if body is None:
+            errors.append(f'harness: {name} missing')
+            continue
+        if f'on error goto {handler}' not in body or f'{leave}:' not in body or f'{handler}:' not in body:
+            errors.append(f'harness: {name} needs its handler and exit labels')
+            continue
+        tail = body[body.index(f'{leave}:'):body.index(f'{handler}:')]
+        steps = ['on error goto 0', 'if raisednumber = err_page_layout then', 'elseif raisednumber <> 0 then',
+                 'err.raise raisednumber, raisedsource, raiseddescription']
+        at = [tail.index(step) if step in tail else -1 for step in steps]
+        if -1 in at or at != sorted(at):
+            errors.append(f'harness: {name} must release its handler, skip only error 1004 and raise any other again')
+        elif not tail[at[1] + 1].startswith('layouterror = demo_ct_errtext(raisednumber'):
+            errors.append(f'harness: {name} must report the page-layout error text')
+        captures = body[body.index(f'{handler}:') + 1:][:3]
+        if captures != [f'raised{field} = err.{field}' for field in ('number', 'source', 'description')]:
+            errors.append(f'harness: {name} must capture the error first')
+        if 'if mlayoutfault <> 0 then' not in body:
+            errors.append(f'harness: {name} must carry the S49 injection')
+    return errors
+
+
+def _scenario_findings(source: str, handler: str, leave: str) -> list[str]:
+    """#199: an arrange step may skip a scenario; the reset and the template stay failures."""
+    errors = []
+    for name, sites in SKIPPING_SCENARIOS.items():
+        body = _procedure(source, 'Sub', name)
+        if body is None:
+            errors.append(f'harness: {name} missing')
+            continue
+        if any(LAYOUT_WRITE.match(line) for line in body):
+            errors.append(f'harness: {name} must arrange page layout through DEMO_CT_Arrange*, which skips')
+        skips = [i for i, line in enumerate(body) if line == 'demo_ct_skipscenario layouterror']
+        guarded = all(body[i - 1].startswith('if not demo_ct_arrange') and body[i + 1] == f'goto {leave}'
+                      and body[i + 2] == 'end if' for i in skips)
+        if len(skips) != sites or not guarded:
+            errors.append(f'harness: {name} must skip and leave at each arrange step, and nowhere else')
+        calls = [i for i, line in enumerate(body) if line.startswith(('demo_ct_callreset ', 'demo_ct_callbuild '))]
+        if len(calls) != 1 or (skips and calls[0] < max(skips)):
+            errors.append(f'harness: {name} must call the reset or the template once, after the arrange steps')
+        if [line for line in body if line.startswith('on error ')] != [f'on error goto {handler}', 'on error goto 0']:
+            errors.append(f'harness: {name} must not guard the code under test')
+        if not any(line.startswith('demo_ct_checknoerror scenario &')
+                   and line.endswith('raisednumber, raisedsource, raiseddescription') for line in body):
+            errors.append(f'harness: {name} must record an error from the code under test as a failed check')
+    return errors
+
+
+def harness_findings(source: str) -> list[str]:
+    """#199: the page-break scenarios skip an arrange-time page-layout error and count it apart."""
+    names = house_style.labels()
+    handler, leave = names.handler.lower(), names.safe_exit.lower()
+    errors = _helper_findings(source, handler, leave) + _scenario_findings(source, handler, leave)
+    flat = ' '.join(source.split())
+    errors += [f'harness: {why}' for text, why in HARNESS_TEXT if text not in flat]
+    end = _procedure(source, 'Sub', 'DEMO_CT_EndScenario')
+    order = ['if mfailures <> failuresbefore then', 'elseif len(mskipreason) > 0 then', 'demo_ct_recordskip scenario']
+    if end is None or any(step not in end for step in order) or [end.index(step) for step in order] != sorted(
+            end.index(step) for step in order):
+        errors.append('harness: a failed check must win over a skip, and a skip must be counted, not passed')
+    injected = _procedure(source, 'Sub', 'DEMO_CT_RunInjected')
+    runner = _procedure(source, 'Sub', 'Demo_Test_RunCleanupChecks')
+    for state in ('mlayoutfault = 0', 'mprintmuted = false'):
+        if (injected is None or leave + ':' not in injected or state not in injected[injected.index(leave + ':'):]
+                or runner is None or state not in runner):
+            errors.append(f'harness: {state!r} must be restored on every exit of S49 and at the start of a run')
+    return errors
+
+
+def _harness_selftest(source: str) -> tuple[list[str], int]:
+    """#199 negative fixtures: each mutation must be reported."""
+    errors: list[str] = []
+    mutations = [
+        ('        If RaisedNumber = ERR_PAGE_LAYOUT Then\n', '        If RaisedNumber <> 0 Then\n'),
+        ("    'The handler is released before anything is raised again\n        On Error GoTo 0\n",
+         "    'The handler is released before anything is raised again\n"),
+        ('            DEMO_CT_SkipScenario LayoutError\n            GoTo SafeExit\n',
+         '            DEMO_CT_SkipScenario LayoutError\n'),
+        ('        If Not DEMO_CT_ArrangeManualBreaks(WS, True, RowKept, ColumnKept, LayoutError) Then\n',
+         '        WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual\n'
+         '        If Not DEMO_CT_ArrangeManualBreaks(WS, True, RowKept, ColumnKept, LayoutError) Then\n'),
+        ('        DEMO_CT_CheckNoError Scenario & ".NoError", RaisedNumber, RaisedSource, RaisedDescription\n', ''),
+        ('        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _\n',
+         '        On Error Resume Next\n'
+         '        DEMO_CT_CallBuild WB, Scenario, VALID_CONTENT, VALID_HIDE_ROWS, Application.DisplayFormulaBar, _\n'),
+        ('        ElseIf Len(mSkipReason) > 0 Then\n', '        ElseIf False Then\n'),
+        ('        If RaisedNumber = 0 And mFailures = 0 And mSkipped = 0 Then\n',
+         '        If RaisedNumber = 0 And mFailures = 0 Then\n'),
+        ('                  ", skipped " & CStr(mSkipped) & _\n', ''),
+        ('            Err.Raise ERR_RUN_INCOMPLETE, PROC_NAME, _\n', '            Err.Raise ERR_RUN_FAILED, PROC_NAME, _\n'),
+        ('            Verdict = "RESULT: INCOMPLETE | " & RaisedDescription\n', '            Verdict = "RESULT: PASS"\n'),
+        ('        DEMO_CT_LayoutSkipPath WB, "S49_LayoutSkipPath"\n', ''),
+        ('        DEMO_CT_CheckLong Scenario & ".OtherFailures", 1, FailuresAdded\n',
+         '        DEMO_CT_CheckLong Scenario & ".OtherFailures", 0, FailuresAdded\n'),
+        ('            Err.Raise mLayoutFault, SRC_LAYOUT_FAULT, DESC_LAYOUT_FAULT\n', '            Debug.Print 0\n'),
+        ('        mPrintMuted = False\n', ''),
+    ]
+    for old, new in mutations:
+        mutated = _mutate(source, old, new)
+        if mutated is None or not harness_findings(mutated):
+            errors.append(f'negative harness fixture not detected: {old.strip()}')
+    return errors, len(mutations)
+
+
 def _page_break_selftest(source: str, demo: str) -> tuple[list[str], int]:
     """#187 negative fixtures: each mutation must be reported."""
     errors: list[str] = []
@@ -386,4 +526,7 @@ End Sub'''
         if mutated is None or not template_findings(mutated):
             errors.append(f'negative template fixture not detected: {old.strip()}')
     found, extra = _page_break_selftest(source, demo)
-    return errors + found, count + extra
+    tests = (Path(root) / 'demo/M_DEMO_CLEANUP_TESTS.bas').read_text(encoding='ascii')
+    errors += harness_findings(tests)
+    harness, harness_count = _harness_selftest(tests)
+    return errors + found + harness, count + extra + harness_count

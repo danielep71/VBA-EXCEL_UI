@@ -12,7 +12,8 @@ Option Explicit
 '   scope of M_DEMO_BUILDER (#70), for its Forms and ActiveX check-box
 '   helpers (#73), for the layout validation and owned-sheet cleanup of
 '   DEMO_Sheet_BuildTemplate (#74), and for the page-break handling of both
-'   procedures (#187).
+'   procedures (#187). Its page-break scenarios report a host that cannot lay
+'   out a sheet as a skip, not as a failure (#199).
 '
 ' WHY THIS EXISTS
 '   The demo-cleanup source fixtures in tools/ check the shape of the cleanup
@@ -32,21 +33,26 @@ Option Explicit
 '
 ' BEHAVIOR
 '   - Demo_Test_RunCleanupChecks creates a temporary workbook and runs
-'     scenarios S01 to S48 in order, each in its own DEMO_CT_ procedure
+'     scenarios S01 to S49 in order, each in its own DEMO_CT_ procedure
 '   - A scenario arms the M_DEMO_BUILDER cleanup probe or fault seam it needs,
 '     makes one call and records its checks through DEMO_CT_Check
 '   - DEMO_CT_Print sends every line to the Immediate window and, while
 '     Demo_Test_RunLogged runs, to its log file
+'   - A page-break scenario whose arrange step meets a page-layout error (1004)
+'     stops there and is counted as skipped, with the error text in its SKIP
+'     line; the summary line names every skipped scenario
 '   - Demo_Test_RunLogged runs one demo macro and returns a one-line verdict;
 '     Demo_Test_TitleBarState returns the title-bar state as text
 '
 ' ERROR POLICY
 '   - Demo_Test_RunCleanupChecks raises vbObjectError + 2199 after cleanup when
-'     any check failed, and re-raises an error that stopped the run
+'     any check failed, vbObjectError + 2201 when none failed but a scenario was
+'     skipped, and re-raises an error that stopped the run. A skip is not a
+'     pass
 '   - A scenario records an unexpected error as a failed check and does not
 '     raise
 '   - Demo_Test_RunLogged and Demo_Test_TitleBarState return text instead of
-'     raising
+'     raising; a run with skips and no failure returns RESULT: INCOMPLETE
 '   - The log sink never raises; a failed write ends writing and is reported in
 '     the verdict
 '
@@ -65,7 +71,7 @@ Option Explicit
 '
 ' NOTES
 '   Needs a real Excel host; no static check replaces a run. The scenario
-'   numbers S01-S48 in SCENARIOS are the order in which
+'   numbers S01-S49 in SCENARIOS are the order in which
 '   Demo_Test_RunCleanupChecks calls the scenario procedures.
 '
 ' PUBLIC SURFACE
@@ -122,6 +128,8 @@ Option Explicit
 '   S46  Reset leaves hidden page-break indicators unwritten
 '   S47  Reset hides shown page-break indicators with one write
 '   S48  BuildTemplate keeps a manual break and writes no page-break setting
+'   S49  A page-layout error injected while S45 arranges is a skip; an error of
+'        any other number is a failure
 '
 ' EVIDENCE
 '   Each scenario checks the error that reaches the caller (number, source
@@ -173,11 +181,17 @@ Option Explicit
 '     the default printer driver; on a slow or offline printer they wait for
 '     it. The probe counts the page-break calls the demo code reaches; it
 '     cannot see whether Excel queried the printer
+'   - A driver that cannot lay a sheet out makes Excel raise error 1004 in that
+'     arrange step. S45-S48 report only that error as a skip (#199); the
+'     reset, the template and every other error stay failures. S49 injects the
+'     error, so the skip path runs on a host whose printer lays sheets out
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' HISTORY
+'   2026-11-27 - A page-layout error while S45-S48 arrange is a skip, counted
+'                apart from passes and failures; S49; RESULT: INCOMPLETE (#199).
 '   2026-11-16 - Log sink, Demo_Test_RunLogged and Demo_Test_TitleBarState
 '                for the scripted Excel checks (#197).
 '   2026-11-15 - Page-break scenarios S45-S48 (#187).
@@ -188,7 +202,7 @@ Option Explicit
 '   2026-11-06 - Added for #71.
 '
 ' UPDATED
-'   2026-11-16
+'   2026-11-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -290,6 +304,14 @@ Option Explicit
     Private Const BREAK_ROW     As Long = 20
     Private Const BREAK_COLUMN  As Long = 6
 
+    'Page-layout errors while a scenario arranges its sheet (#199). Excel raises
+    '1004 when the default printer driver cannot lay the sheet out
+    Private Const ERR_PAGE_LAYOUT   As Long = 1004
+    Private Const MSG_LAYOUT_SKIP   As String = "the default printer driver could not lay out the sheet"
+    Private Const ERR_LAYOUT_OTHER  As Long = 5
+    Private Const SRC_LAYOUT_FAULT  As String = "M_DEMO_CLEANUP_TESTS.InjectedLayoutFault"
+    Private Const DESC_LAYOUT_FAULT As String = "Injected page-layout fault."
+
     'Layout and naming errors and seams; mirror M_DEMO_BUILDER
     Private Const BUILD_TITLE           As String = "CT Title"
     Private Const ERR_CONTENT_SHAPE     As Long = vbObjectError + 2022
@@ -334,16 +356,25 @@ Option Explicit
     'Raised by the runner when any check failed
     Private Const ERR_RUN_FAILED    As Long = vbObjectError + 2199
 
+    'Raised by the runner when no check failed but a scenario was skipped
+    Private Const ERR_RUN_INCOMPLETE    As Long = vbObjectError + 2201
+
     'Raised inside Demo_Test_RunLogged for a macro it does not run
     Private Const ERR_UNKNOWN_MACRO As Long = vbObjectError + 2200
 
 '------------------------------------------------------------------------------
 ' PRIVATE MODULE STATE
 '------------------------------------------------------------------------------
-    Private mChecks             As Long 'Checks evaluated in this run
-    Private mFailures           As Long 'Checks failed in this run
-    Private mScenarios          As Long 'Scenarios started in this run
-    Private mScenarioFailures   As Long 'Scenarios with at least one failure
+    Private mChecks             As Long     'Checks evaluated in this run
+    Private mFailures           As Long     'Checks failed in this run
+    Private mScenarios          As Long     'Scenarios started in this run
+    Private mScenarioFailures   As Long     'Scenarios with at least one failure
+    Private mSkipped            As Long     'Scenarios skipped in this run
+    Private mSkippedNames       As String   'Names of the skipped scenarios, comma separated
+    Private mSkipReason         As String   'Why the running scenario is skipped; empty = not skipped
+    Private mLastSkipReason     As String   'Reason of the scenario skipped last
+    Private mLayoutFault        As Long     'Error the arrange helpers raise; 0 = none (S49 only)
+    Private mPrintMuted         As Boolean  'DEMO_CT_Print writes nothing (S49 only)
 
     Private mSessionCaptured        As Boolean  'Session settings below are valid
     Private mSessionScreenUpdating  As Boolean  'Session Application.ScreenUpdating
@@ -368,7 +399,7 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   Runs every #71 cleanup scenario, every #70 fast-mode scenario, every #73
 '   check-box scenario, every #74 layout scenario and every #187 page-break
 '   scenario in a temporary workbook and prints one line per scenario and a
-'   PASS/FAIL summary to the Immediate window.
+'   PASS, INCOMPLETE or FAIL summary to the Immediate window.
 '
 ' WHY THIS EXISTS
 '   The source fixtures in tools/ check the shape of the cleanup code, not what
@@ -385,14 +416,17 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   - Creates one temporary workbook; each scenario adds its own sheet to it
 '   - A scenario that fails or raises unexpectedly is reported and the run
 '     continues with the next one
+'   - A scenario the host could not arrange is reported as skipped and counted
+'     apart; the summary is INCOMPLETE when only skips kept it from PASS
 '   - Disarms the cleanup probe, closes the temporary workbook without
 '     saving and writes back the session's Application settings on every
 '     exit; a failed write-back is a failed check
 '
 ' ERROR POLICY
-'   Raises vbObjectError + 2199 after cleanup when any check failed, and
-'   re-raises an error that stopped the run itself, so a failed run cannot be
-'   mistaken for a passing one
+'   Raises vbObjectError + 2199 after cleanup when any check failed,
+'   vbObjectError + 2201 when none failed but a scenario was skipped, and
+'   re-raises an error that stopped the run itself, so a failed or incomplete
+'   run cannot be mistaken for a passing one
 '
 ' DEPENDENCIES
 '   - M_DEMO_BUILDER (DEMO_Sheet_Reset, DEMO_Sheet_BuildTemplate, the
@@ -408,6 +442,7 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   - Invoked directly, from the Immediate window or the Macros dialog
 '
 ' HISTORY
+'   2026-11-27 - S49; skipped scenarios counted apart; INCOMPLETE summary (#199).
 '   2026-11-15 - S45-S48 (#187).
 '   2026-11-14 - S35-S44 (#74).
 '   2026-11-14 - S31-S34 (#73).
@@ -415,7 +450,7 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   2026-11-06
 '
 ' UPDATED
-'   2026-11-15
+'   2026-11-27
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -439,6 +474,12 @@ Public Sub Demo_Test_RunCleanupChecks()
         mFailures = 0
         mScenarios = 0
         mScenarioFailures = 0
+        mSkipped = 0
+        mSkippedNames = vbNullString
+        mSkipReason = vbNullString
+        mLastSkipReason = vbNullString
+        mLayoutFault = 0
+        mPrintMuted = False
 
         On Error GoTo ErrorHandler
 
@@ -529,6 +570,9 @@ Public Sub Demo_Test_RunCleanupChecks()
         DEMO_CT_ResetBreakIndicators WB, "S47_BreaksShown", True
         DEMO_CT_BuildKeepsPageBreaks WB, "S48_BuildKeepsBreaks"
 
+    'The skip path of S45-S48, run on any host through an injected error (#199)
+        DEMO_CT_LayoutSkipPath WB, "S49_LayoutSkipPath"
+
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -549,15 +593,21 @@ SafeExit:
         End If
 
     'Print the summary line
-        If RaisedNumber = 0 And mFailures = 0 Then
+        If RaisedNumber = 0 And mFailures = 0 And mSkipped = 0 Then
             Summary = "DEMO CLEANUP CHECKS: PASS"
+        ElseIf RaisedNumber = 0 And mFailures = 0 Then
+            Summary = "DEMO CLEANUP CHECKS: INCOMPLETE"
         Else
             Summary = "DEMO CLEANUP CHECKS: FAIL"
         End If
         Summary = Summary & " | scenarios " & CStr(mScenarios) & _
                   ", failed " & CStr(mScenarioFailures) & _
+                  ", skipped " & CStr(mSkipped) & _
                   " | checks " & CStr(mChecks) & _
                   ", failed " & CStr(mFailures)
+        If mSkipped > 0 Then
+            Summary = Summary & " | skipped " & mSkippedNames
+        End If
         If RaisedNumber <> 0 Then
             Summary = Summary & " | run stopped: " & CStr(RaisedNumber) & _
                       " | " & RaisedSource & " | " & RaisedDescription
@@ -570,6 +620,11 @@ SafeExit:
         End If
         If mFailures <> 0 Then
             Err.Raise ERR_RUN_FAILED, PROC_NAME, Summary
+        End If
+        If mSkipped <> 0 Then
+            Err.Raise ERR_RUN_INCOMPLETE, PROC_NAME, _
+                "skipped " & CStr(mSkipped) & " of " & CStr(mScenarios) & _
+                " scenarios: " & mSkippedNames
         End If
 
         Exit Sub
@@ -616,7 +671,9 @@ Public Function Demo_Test_RunLogged( _
 '     The log file to append to. Empty runs the macro with no sink
 '
 ' RETURNS
-'   One line: "RESULT: PASS" when the macro returned, or
+'   One line: "RESULT: PASS" when the macro returned,
+'   "RESULT: INCOMPLETE | <skipped scenarios>" when Demo_Test_RunCleanupChecks
+'   skipped scenarios and nothing failed, or
 '   "RESULT: FAIL | Error <n> | Source: <source> | <description>" when it
 '   raised. When a line could not be written to LogPath,
 '   " | LOG WRITE FAILED: <reason>" follows
@@ -643,10 +700,11 @@ Public Function Demo_Test_RunLogged( _
 '   Immediate window
 '
 ' HISTORY
+'   2026-11-27 - RESULT: INCOMPLETE for a run that only skipped (#199).
 '   2026-11-16 - Added for the scripted Excel checks (#197).
 '
 ' UPDATED
-'   2026-11-16
+'   2026-11-27
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -736,9 +794,14 @@ ErrorHandler:
         RaisedSource = Err.Source
         RaisedDescription = Err.Description
 
-        Verdict = "RESULT: FAIL | Error " & CStr(RaisedNumber) & _
-                  " | Source: " & RaisedSource & _
-                  " | " & RaisedDescription
+    'A run that only skipped is incomplete, not failed; its description names the skips
+        If RaisedNumber = ERR_RUN_INCOMPLETE Then
+            Verdict = "RESULT: INCOMPLETE | " & RaisedDescription
+        Else
+            Verdict = "RESULT: FAIL | Error " & CStr(RaisedNumber) & _
+                      " | Source: " & RaisedSource & _
+                      " | " & RaisedDescription
+        End If
 
         Resume SafeExit
 
@@ -4349,8 +4412,10 @@ Private Sub DEMO_CT_ResetManualBreaks( _
 '   Nothing
 '
 ' BEHAVIOR
-'   - Adds the sheet, sets a manual row break at BREAK_ROW and a manual column
-'     break at BREAK_COLUMN, and checks the host kept them
+'   - Adds the sheet and arranges a manual row break at BREAK_ROW and a manual
+'     column break at BREAK_COLUMN through DEMO_CT_ArrangeManualBreaks; a
+'     page-layout error there skips the scenario
+'   - Checks the host kept both breaks
 '   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with no password and
 '     ReProtectAtEnd=False
 '   - Checks no error, one cleanup pass and exactly one ResetAllPageBreaks call
@@ -4358,16 +4423,20 @@ Private Sub DEMO_CT_ResetManualBreaks( _
 '     are gone
 '
 ' ERROR POLICY
-'   Does not raise. An unexpected error is recorded as the failed check
+'   Does not raise. A page-layout error (1004) while arranging is recorded as a
+'   skip, not a failure. Any other error is recorded as the failed check
 '   "<Scenario>.Unexpected", and the scenario still ends through
-'   DEMO_CT_EndScenario
+'   DEMO_CT_EndScenario. An error from DEMO_Sheet_Reset,
+'   which is captured and checked, is still the failed check
+'   "<Scenario>.NoError"
 '
 ' DEPENDENCIES
 '   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
 '   - DEMO_InternalCleanupProbeCount
 '   - Range.PageBreak, Worksheet.DisplayPageBreaks
-'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_Check, DEMO_CT_CheckLong,
-'     DEMO_CT_CheckNoError, DEMO_CT_CheckProbe, DEMO_CT_NewSheet
+'   - Harness helpers: DEMO_CT_ArrangeManualBreaks, DEMO_CT_CallReset,
+'     DEMO_CT_Check, DEMO_CT_CheckLong, DEMO_CT_CheckNoError,
+'     DEMO_CT_CheckProbe, DEMO_CT_NewSheet, DEMO_CT_SkipScenario
 '   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
 '     DEMO_CT_Fail and DEMO_CT_ErrText
 '
@@ -4378,11 +4447,12 @@ Private Sub DEMO_CT_ResetManualBreaks( _
 '   and shows the indicators, so they are checked before the breaks are read.
 '
 ' HISTORY
+'   2026-11-27 - Reports a page-layout error while arranging as a skip (#199).
 '   2026-11-15 - Added for #187.
 '   2026-11-17 - Checks the indicators before reading the breaks.
 '
 ' UPDATED
-'   2026-11-17
+'   2026-11-27
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -4391,6 +4461,9 @@ Private Sub DEMO_CT_ResetManualBreaks( _
     Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetManualBreaks"
 
     Dim WS                  As Worksheet    'Scenario sheet
+    Dim RowKept             As Boolean      'The host kept the manual row break
+    Dim ColumnKept          As Boolean      'The host kept the manual column break
+    Dim LayoutError         As String       'Page-layout error met while arranging
     Dim FailuresBefore      As Long         'Failure count at scenario start
     Dim RaisedNumber        As Long         'Error reaching the caller
     Dim RaisedSource        As String       'Its source
@@ -4407,11 +4480,14 @@ Private Sub DEMO_CT_ResetManualBreaks( _
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
-        WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual
-        WS.Columns(BREAK_COLUMN).PageBreak = xlPageBreakManual
-        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".ArrangeRow", _
+    'A page-layout error while arranging is the host's limit, so skip the scenario
+        If Not DEMO_CT_ArrangeManualBreaks(WS, True, RowKept, ColumnKept, LayoutError) Then
+            DEMO_CT_SkipScenario LayoutError
+            GoTo SafeExit
+        End If
+        DEMO_CT_Check RowKept, Scenario & ".ArrangeRow", _
                       "the host did not keep the manual row break"
-        DEMO_CT_Check WS.Columns(BREAK_COLUMN).PageBreak = xlPageBreakManual, Scenario & ".ArrangeColumn", _
+        DEMO_CT_Check ColumnKept, Scenario & ".ArrangeColumn", _
                       "the host did not keep the manual column break"
 
 '------------------------------------------------------------------------------
@@ -4489,8 +4565,10 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
 '   Nothing
 '
 ' BEHAVIOR
-'   - Adds the sheet; when Shown, sets DisplayPageBreaks to True and expects
-'     one write; checks the host kept the setting
+'   - Adds the sheet; when Shown, sets DisplayPageBreaks to True through
+'     DEMO_CT_ArrangeIndicators and expects one write; a page-layout error
+'     there skips the scenario
+'   - Checks the host kept the setting
 '   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with no password and
 '     ReProtectAtEnd=False
 '   - Checks no error, one cleanup pass and the number of DisplayPageBreaks
@@ -4498,16 +4576,20 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
 '   - Checks the indicators are hidden afterwards
 '
 ' ERROR POLICY
-'   Does not raise. An unexpected error is recorded as the failed check
+'   Does not raise. A page-layout error (1004) while arranging is recorded as a
+'   skip, not a failure. Any other error is recorded as the failed check
 '   "<Scenario>.Unexpected", and the scenario still ends through
-'   DEMO_CT_EndScenario
+'   DEMO_CT_EndScenario. An error from DEMO_Sheet_Reset,
+'   which is captured and checked, is still the failed check
+'   "<Scenario>.NoError"
 '
 ' DEPENDENCIES
 '   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
 '   - DEMO_InternalCleanupProbeCount
 '   - Worksheet.DisplayPageBreaks
-'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_Check, DEMO_CT_CheckLong,
-'     DEMO_CT_CheckNoError, DEMO_CT_CheckProbe, DEMO_CT_NewSheet
+'   - Harness helpers: DEMO_CT_ArrangeIndicators, DEMO_CT_CallReset,
+'     DEMO_CT_Check, DEMO_CT_CheckLong, DEMO_CT_CheckNoError,
+'     DEMO_CT_CheckProbe, DEMO_CT_NewSheet, DEMO_CT_SkipScenario
 '   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
 '     DEMO_CT_Fail and DEMO_CT_ErrText
 '
@@ -4515,11 +4597,12 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
 '   None
 '
 ' HISTORY
+'   2026-11-27 - Reports a page-layout error while arranging as a skip (#199).
 '   2026-11-15 - Added for #187.
 '   2026-11-17 - Allows the write that ResetAllPageBreaks makes necessary.
 '
 ' UPDATED
-'   2026-11-17
+'   2026-11-27
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -4529,6 +4612,8 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
 
     Dim WS                  As Worksheet    'Scenario sheet
     Dim Writes              As Long         'DisplayPageBreaks writes expected
+    Dim Kept                As Boolean      'The host kept DisplayPageBreaks
+    Dim LayoutError         As String       'Page-layout error met while arranging
     Dim FailuresBefore      As Long         'Failure count at scenario start
     Dim RaisedNumber        As Long         'Error reaching the caller
     Dim RaisedSource        As String       'Its source
@@ -4545,11 +4630,15 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
+    'A page-layout error while arranging is the host's limit, so skip the scenario
+        If Not DEMO_CT_ArrangeIndicators(WS, Shown, Shown, Kept, LayoutError) Then
+            DEMO_CT_SkipScenario LayoutError
+            GoTo SafeExit
+        End If
         If Shown Then
-            WS.DisplayPageBreaks = True
             Writes = 1
         End If
-        DEMO_CT_Check WS.DisplayPageBreaks = Shown, Scenario & ".Arrange", _
+        DEMO_CT_Check Kept, Scenario & ".Arrange", _
                       "the host did not keep DisplayPageBreaks=" & CStr(Shown)
 
 '------------------------------------------------------------------------------
@@ -4620,8 +4709,10 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
 '   Nothing
 '
 ' BEHAVIOR
-'   - Adds the sheet, sets a manual row break at BREAK_ROW, checks the host
-'     kept it, hides the page-break indicators and checks that too
+'   - Adds the sheet and arranges a manual row break at BREAK_ROW and hidden
+'     page-break indicators through DEMO_CT_ArrangeManualBreaks and
+'     DEMO_CT_ArrangeIndicators, and checks the host kept both; a page-layout
+'     error there skips the scenario
 '   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with a valid
 '     layout and no fault armed
 '   - Checks no error, one cleanup pass in the reset and in the template and no
@@ -4630,17 +4721,21 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
 '     is still there
 '
 ' ERROR POLICY
-'   Does not raise. An unexpected error is recorded as the failed check
+'   Does not raise. A page-layout error (1004) while arranging is recorded as a
+'   skip, not a failure. Any other error is recorded as the failed check
 '   "<Scenario>.Unexpected", and the scenario still ends through
-'   DEMO_CT_EndScenario
+'   DEMO_CT_EndScenario. An error from DEMO_Sheet_BuildTemplate,
+'   which is captured and checked, is still the failed check
+'   "<Scenario>.NoError"
 '
 ' DEPENDENCIES
 '   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
 '   - DEMO_InternalCleanupProbeCount
 '   - Range.PageBreak, Worksheet.DisplayPageBreaks
-'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallBuild, DEMO_CT_Check,
-'     DEMO_CT_CheckLong, DEMO_CT_CheckNoError, DEMO_CT_CheckProbe,
-'     DEMO_CT_NewSheet
+'   - Harness helpers: DEMO_CT_ArrangeIndicators, DEMO_CT_ArrangeManualBreaks,
+'     DEMO_CT_BodyRan, DEMO_CT_CallBuild, DEMO_CT_Check, DEMO_CT_CheckLong,
+'     DEMO_CT_CheckNoError, DEMO_CT_CheckProbe, DEMO_CT_NewSheet,
+'     DEMO_CT_SkipScenario
 '   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
 '     DEMO_CT_Fail and DEMO_CT_ErrText
 '
@@ -4650,12 +4745,13 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
 '   is requested at its current value, as in S44.
 '
 ' HISTORY
+'   2026-11-27 - Reports a page-layout error while arranging as a skip (#199).
 '   2026-11-15 - Added for #187.
 '   2026-11-17 - Reads the break before hiding the indicators and checks them
 '                before reading the break again, as S45 does.
 '
 ' UPDATED
-'   2026-11-17
+'   2026-11-27
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -4664,6 +4760,10 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
     Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildKeepsPageBreaks"
 
     Dim WS                  As Worksheet    'Existing sheet
+    Dim RowKept             As Boolean      'The host kept the manual row break
+    Dim ColumnKept          As Boolean      'Not set here; DEMO_CT_ArrangeManualBreaks needs it
+    Dim Kept                As Boolean      'The host kept DisplayPageBreaks=False
+    Dim LayoutError         As String       'Page-layout error met while arranging
     Dim FailuresBefore      As Long         'Failure count at scenario start
     Dim RaisedNumber        As Long         'Error reaching the caller
     Dim RaisedSource        As String       'Its source
@@ -4680,11 +4780,18 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
-        WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual
-        DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".ArrangeRow", _
+    'A page-layout error while arranging is the host's limit, so skip the scenario
+        If Not DEMO_CT_ArrangeManualBreaks(WS, False, RowKept, ColumnKept, LayoutError) Then
+            DEMO_CT_SkipScenario LayoutError
+            GoTo SafeExit
+        End If
+        DEMO_CT_Check RowKept, Scenario & ".ArrangeRow", _
                       "the host did not keep the manual row break"
-        WS.DisplayPageBreaks = False
-        DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".ArrangeHidden", _
+        If Not DEMO_CT_ArrangeIndicators(WS, False, True, Kept, LayoutError) Then
+            DEMO_CT_SkipScenario LayoutError
+            GoTo SafeExit
+        End If
+        DEMO_CT_Check Kept, Scenario & ".ArrangeHidden", _
                       "the host did not keep DisplayPageBreaks=False"
 
 '------------------------------------------------------------------------------
@@ -4724,6 +4831,552 @@ ErrorHandler:
         Resume SafeExit
 
 End Sub
+
+Private Sub DEMO_CT_LayoutSkipPath( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String)
+'
+'------------------------------------------------------------------------------
+'                       CHECK THE PAGE-LAYOUT SKIP PATH
+'------------------------------------------------------------------------------
+' PURPOSE
+'   S49: with a page-layout error (1004) injected where S45 arranges its
+'   sheet, S45 is reported as one skip and no failure; with an error of any
+'   other number injected there, it is reported as one failure and no skip.
+'
+' WHY THIS EXISTS
+'   A host whose default printer lays sheets out never meets error 1004 in
+'   S45-S48, so the skip path would never run there. This scenario runs it on
+'   any host, so the report of a host that cannot lay a sheet out can be
+'   checked without one (#199).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the injected
+'     runs add their sheets to it
+'
+'   Scenario
+'     Scenario name (S49_LayoutSkipPath); it prefixes every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Runs S45 under DEMO_CT_RunInjected with error 1004 and checks one skip,
+'     no failure, and a reason that names the printer driver and the error
+'   - Runs S45 under DEMO_CT_RunInjected with error 5 and checks no skip, one
+'     failure and no reason
+'   - The injected runs print nothing and leave the run's totals as they were
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_CT_ResetManualBreaks, through DEMO_CT_RunInjected
+'   - Harness helpers: DEMO_CT_Check, DEMO_CT_CheckLong, DEMO_CT_CheckText,
+'     DEMO_CT_RunInjected
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   Touches no printer: the error is raised by the arrange helper itself.
+'
+' HISTORY
+'   2026-11-27 - Added for #199.
+'
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_LayoutSkipPath"
+
+    Dim FailuresBefore  As Long     'Failure count at scenario start
+    Dim SkipsAdded      As Long     'Skips the injected run added
+    Dim FailuresAdded   As Long     'Failures the injected run added
+    Dim SkipReason      As String   'Reason the injected run gave for its skip
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' ARRANGE
+'------------------------------------------------------------------------------
+        FailuresBefore = DEMO_CT_BeginScenario()
+
+'------------------------------------------------------------------------------
+' ACT AND ASSERT: PAGE-LAYOUT ERROR
+'------------------------------------------------------------------------------
+        DEMO_CT_RunInjected WB, "S49_InjectedLayout", ERR_PAGE_LAYOUT, _
+                            SkipsAdded, FailuresAdded, SkipReason
+        DEMO_CT_CheckLong Scenario & ".LayoutSkips", 1, SkipsAdded
+        DEMO_CT_CheckLong Scenario & ".LayoutFailures", 0, FailuresAdded
+        DEMO_CT_Check InStr(1, SkipReason, MSG_LAYOUT_SKIP, vbBinaryCompare) = 1, _
+                      Scenario & ".LayoutReason", "the skip reason is [" & SkipReason & "]"
+        DEMO_CT_Check InStr(1, SkipReason, CStr(ERR_PAGE_LAYOUT), vbBinaryCompare) > 0, _
+                      Scenario & ".LayoutNumber", "the skip reason does not name error " & _
+                      CStr(ERR_PAGE_LAYOUT) & ": [" & SkipReason & "]"
+
+'------------------------------------------------------------------------------
+' ACT AND ASSERT: ANY OTHER ERROR
+'------------------------------------------------------------------------------
+        DEMO_CT_RunInjected WB, "S49_InjectedOther", ERR_LAYOUT_OTHER, _
+                            SkipsAdded, FailuresAdded, SkipReason
+        DEMO_CT_CheckLong Scenario & ".OtherSkips", 0, SkipsAdded
+        DEMO_CT_CheckLong Scenario & ".OtherFailures", 1, FailuresAdded
+        DEMO_CT_CheckText Scenario & ".OtherReason", vbNullString, SkipReason
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
+        On Error GoTo 0
+        DEMO_CT_EndScenario Scenario, FailuresBefore
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+        DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
+        Resume SafeExit
+
+End Sub
+
+Private Sub DEMO_CT_RunInjected( _
+    ByVal WB As Workbook, _
+    ByVal Scenario As String, _
+    ByVal FaultNumber As Long, _
+    ByRef SkipsAdded As Long, _
+    ByRef FailuresAdded As Long, _
+    ByRef SkipReason As String)
+'
+'------------------------------------------------------------------------------
+'                    RUN S45 WITH AN INJECTED ARRANGE ERROR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Runs S45 once with an error injected where it arranges its sheet, reports
+'   what that run added to the totals and gives the totals back as they were.
+'
+' WHY THIS EXISTS
+'   S49 must see how a run counts a skip and a failure without those counts,
+'   or the lines S45 prints, reaching the report of the real run (#199).
+'
+' INPUTS
+'   WB
+'     The temporary workbook; S45 adds its sheet to it
+'
+'   Scenario
+'     Name of the injected run; it names the sheet
+'
+'   FaultNumber
+'     The error number the arrange helpers raise
+'
+'   SkipsAdded
+'     Receives the number of skips the run counted
+'
+'   FailuresAdded
+'     Receives the number of failed checks the run recorded
+'
+'   SkipReason
+'     Receives the reason the run gave for its skip; empty when it did not skip
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Saves the check, failure, scenario and skip totals and the skipped names
+'   - Sets the injected error and silences DEMO_CT_Print, runs S45 and clears
+'     both on every exit
+'   - Reads what the run added, then writes the saved totals back
+'
+' ERROR POLICY
+'   Raises again, after the totals are back, an error that stopped the run;
+'   S45 itself does not raise
+'
+' DEPENDENCIES
+'   - DEMO_CT_ResetManualBreaks
+'   - The mChecks, mFailures, mScenarios, mScenarioFailures, mSkipped,
+'     mSkippedNames, mLastSkipReason, mLayoutFault and mPrintMuted state
+'
+' NOTES
+'   The injected run is a real S45 run on a sheet of its own, with a fault
+'   instead of a printer driver; no printer is queried.
+'
+' HISTORY
+'   2026-11-27 - Added for #199.
+'
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_RunInjected"
+
+    Dim SavedChecks             As Long     'Saved mChecks
+    Dim SavedFailures           As Long     'Saved mFailures
+    Dim SavedScenarios          As Long     'Saved mScenarios
+    Dim SavedScenarioFailures   As Long     'Saved mScenarioFailures
+    Dim SavedSkipped            As Long     'Saved mSkipped
+    Dim SavedSkippedNames       As String   'Saved mSkippedNames
+    Dim RaisedNumber            As Long     'Error that stopped the run
+    Dim RaisedSource            As String   'Its source
+    Dim RaisedDescription       As String   'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        SkipsAdded = 0
+        FailuresAdded = 0
+        SkipReason = vbNullString
+
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' SAVE THE TOTALS
+'------------------------------------------------------------------------------
+        SavedChecks = mChecks
+        SavedFailures = mFailures
+        SavedScenarios = mScenarios
+        SavedScenarioFailures = mScenarioFailures
+        SavedSkipped = mSkipped
+        SavedSkippedNames = mSkippedNames
+        mLastSkipReason = vbNullString
+
+'------------------------------------------------------------------------------
+' RUN WITH THE ERROR INJECTED
+'------------------------------------------------------------------------------
+        mLayoutFault = FaultNumber
+        mPrintMuted = True
+        DEMO_CT_ResetManualBreaks WB, Scenario
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
+        On Error GoTo 0
+
+    'Disarm the injection and the silence whatever happened
+        mLayoutFault = 0
+        mPrintMuted = False
+
+    'Read what the run added, then give the totals back
+        SkipsAdded = mSkipped - SavedSkipped
+        FailuresAdded = mFailures - SavedFailures
+        SkipReason = mLastSkipReason
+        mChecks = SavedChecks
+        mFailures = SavedFailures
+        mScenarios = SavedScenarios
+        mScenarioFailures = SavedScenarioFailures
+        mSkipped = SavedSkipped
+        mSkippedNames = SavedSkippedNames
+        mSkipReason = vbNullString
+        mLastSkipReason = vbNullString
+
+    'Report an error that stopped the run itself
+        If RaisedNumber <> 0 Then
+            Err.Raise RaisedNumber, RaisedSource, RaisedDescription
+        End If
+
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error before anything else touches Err
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+
+        Resume SafeExit
+
+End Sub
+
+Private Function DEMO_CT_ArrangeManualBreaks( _
+    ByVal WS As Worksheet, _
+    ByVal WithColumn As Boolean, _
+    ByRef RowKept As Boolean, _
+    ByRef ColumnKept As Boolean, _
+    ByRef LayoutError As String) _
+    As Boolean
+'
+'------------------------------------------------------------------------------
+'                          ARRANGE MANUAL PAGE BREAKS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Sets the manual row break at BREAK_ROW and, when asked, the manual column
+'   break at BREAK_COLUMN on a scenario sheet, and reads each back. Returns
+'   False, with the error text in LayoutError, when Excel could not lay the
+'   sheet out for them.
+'
+' WHY THIS EXISTS
+'   Setting and reading a page break makes Excel lay the sheet out through the
+'   default printer driver. A driver that cannot do that makes the host raise
+'   error 1004. That is a limit of the host, not a defect of the code under
+'   test, so S45 and S48 report it as a skip (#199). Only these statements are
+'   guarded: an error from the reset or the template stays a failure.
+'
+' INPUTS
+'   WS
+'     The scenario sheet
+'
+'   WithColumn
+'     True to set the manual column break as well
+'
+'   RowKept
+'     Receives True when the host read the manual row break back
+'
+'   ColumnKept
+'     Receives True when the host read the manual column break back; it stays
+'     False when WithColumn is False
+'
+'   LayoutError
+'     Receives "number | source | description" of the page-layout error, and
+'     is empty otherwise
+'
+' RETURNS
+'   Boolean: True when the breaks were set and read, whether or not the host
+'   kept them; False when error 1004 stopped the arrangement
+'
+' BEHAVIOR
+'   - Raises the injected error first when mLayoutFault is set (S49)
+'   - Sets the manual row break, and the manual column break when WithColumn
+'   - Reads each break back into RowKept and ColumnKept
+'   - Maps error 1004 to a False result and its text in LayoutError
+'
+' ERROR POLICY
+'   Raises an error of any other number again, after the handler is released,
+'   so that the caller records it as an unexpected error
+'
+' DEPENDENCIES
+'   - Range.PageBreak
+'   - DEMO_CT_ErrText and the mLayoutFault state
+'
+' NOTES
+'   None
+'
+' HISTORY
+'   2026-11-27 - Added for #199.
+'
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ArrangeManualBreaks"
+
+    Dim RaisedNumber        As Long     'Error that stopped the arrangement
+    Dim RaisedSource        As String   'Its source
+    Dim RaisedDescription   As String   'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start from the answer for a sheet the host could not arrange
+        DEMO_CT_ArrangeManualBreaks = False
+        RowKept = False
+        ColumnKept = False
+        LayoutError = vbNullString
+
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' SET THE BREAKS
+'------------------------------------------------------------------------------
+    'Fail as the host does when S49 injects an error
+        If mLayoutFault <> 0 Then
+            Err.Raise mLayoutFault, SRC_LAYOUT_FAULT, DESC_LAYOUT_FAULT
+        End If
+
+    'Set the manual breaks; each write lays the sheet out through the printer driver
+        WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual
+        If WithColumn Then
+            WS.Columns(BREAK_COLUMN).PageBreak = xlPageBreakManual
+        End If
+
+'------------------------------------------------------------------------------
+' READ THE BREAKS BACK
+'------------------------------------------------------------------------------
+    'Read each break back
+        RowKept = (WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual)
+        If WithColumn Then
+            ColumnKept = (WS.Columns(BREAK_COLUMN).PageBreak = xlPageBreakManual)
+        End If
+
+    'Report a completed arrangement
+        DEMO_CT_ArrangeManualBreaks = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
+    'The handler is released before anything is raised again
+        On Error GoTo 0
+
+    'A page-layout error is the host's limit; any other error is raised again
+        If RaisedNumber = ERR_PAGE_LAYOUT Then
+            LayoutError = DEMO_CT_ErrText(RaisedNumber, RaisedSource, RaisedDescription)
+        ElseIf RaisedNumber <> 0 Then
+            Err.Raise RaisedNumber, RaisedSource, RaisedDescription
+        End If
+
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error before anything else touches Err
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+
+        Resume SafeExit
+
+End Function
+
+Private Function DEMO_CT_ArrangeIndicators( _
+    ByVal WS As Worksheet, _
+    ByVal Shown As Boolean, _
+    ByVal WriteIt As Boolean, _
+    ByRef Kept As Boolean, _
+    ByRef LayoutError As String) _
+    As Boolean
+'
+'------------------------------------------------------------------------------
+'                        ARRANGE PAGE-BREAK INDICATORS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Sets DisplayPageBreaks on a scenario sheet to Shown when asked, and reads
+'   it back. Returns False, with the error text in LayoutError, when Excel
+'   could not lay the sheet out for it.
+'
+' WHY THIS EXISTS
+'   Writing DisplayPageBreaks makes Excel lay the sheet out through the
+'   default printer driver, and a driver that cannot do that makes the host
+'   raise error 1004. That is a limit of the host, not a defect of the code
+'   under test, so S46-S48 report it as a skip (#199). Only these statements
+'   are guarded: an error from the reset or the template stays a failure.
+'
+' INPUTS
+'   WS
+'     The scenario sheet
+'
+'   Shown
+'     The value the indicators are expected to hold
+'
+'   WriteIt
+'     True to write Shown first; False to read the sheet as it is
+'
+'   Kept
+'     Receives True when DisplayPageBreaks reads Shown
+'
+'   LayoutError
+'     Receives "number | source | description" of the page-layout error, and
+'     is empty otherwise
+'
+' RETURNS
+'   Boolean: True when the setting was written (when asked) and read, whether
+'   or not the host kept it; False when error 1004 stopped the arrangement
+'
+' BEHAVIOR
+'   - Raises the injected error first when mLayoutFault is set (S49)
+'   - Writes DisplayPageBreaks when WriteIt, then reads it back into Kept
+'   - Maps error 1004 to a False result and its text in LayoutError
+'
+' ERROR POLICY
+'   Raises an error of any other number again, after the handler is released,
+'   so that the caller records it as an unexpected error
+'
+' DEPENDENCIES
+'   - Worksheet.DisplayPageBreaks
+'   - DEMO_CT_ErrText and the mLayoutFault state
+'
+' NOTES
+'   None
+'
+' HISTORY
+'   2026-11-27 - Added for #199.
+'
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ArrangeIndicators"
+
+    Dim RaisedNumber        As Long     'Error that stopped the arrangement
+    Dim RaisedSource        As String   'Its source
+    Dim RaisedDescription   As String   'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start from the answer for a sheet the host could not arrange
+        DEMO_CT_ArrangeIndicators = False
+        Kept = False
+        LayoutError = vbNullString
+
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' SET AND READ THE INDICATORS
+'------------------------------------------------------------------------------
+    'Fail as the host does when S49 injects an error
+        If mLayoutFault <> 0 Then
+            Err.Raise mLayoutFault, SRC_LAYOUT_FAULT, DESC_LAYOUT_FAULT
+        End If
+
+    'Write the setting when asked, then read it back
+        If WriteIt Then
+            WS.DisplayPageBreaks = Shown
+        End If
+        Kept = (WS.DisplayPageBreaks = Shown)
+
+    'Report a completed arrangement
+        DEMO_CT_ArrangeIndicators = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
+    'The handler is released before anything is raised again
+        On Error GoTo 0
+
+    'A page-layout error is the host's limit; any other error is raised again
+        If RaisedNumber = ERR_PAGE_LAYOUT Then
+            LayoutError = DEMO_CT_ErrText(RaisedNumber, RaisedSource, RaisedDescription)
+        ElseIf RaisedNumber <> 0 Then
+            Err.Raise RaisedNumber, RaisedSource, RaisedDescription
+        End If
+
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error before anything else touches Err
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+
+        Resume SafeExit
+
+End Function
 
 Private Sub DEMO_CT_CallReset( _
     ByVal Target As Variant, _
@@ -6015,13 +6668,15 @@ Private Function DEMO_CT_BeginScenario() As Long
 '                               START A SCENARIO
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Counts a scenario and returns the failure count at its start.
+'   Counts a scenario, clears its skip reason and returns the failure count at
+'   its start.
 '
 ' UPDATED
-'   2026-11-06
+'   2026-11-27
 '------------------------------------------------------------------------------
 
         mScenarios = mScenarios + 1
+        mSkipReason = vbNullString
         DEMO_CT_BeginScenario = mFailures
 
 End Function
@@ -6034,25 +6689,73 @@ Private Sub DEMO_CT_EndScenario( _
 '                                END A SCENARIO
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Disarms the probe and prints the scenario result line.
+'   Disarms the probe and prints the scenario result line: FAIL when a check
+'   failed, SKIP when the scenario was skipped and nothing failed, otherwise
+'   PASS.
 '
 ' ERROR POLICY
 '   Does not raise, so it is safe at SafeExit
 '
+' HISTORY
+'   2026-11-27 - SKIP line (#199).
+'
 ' UPDATED
-'   2026-11-06
+'   2026-11-27
 '------------------------------------------------------------------------------
 
         On Error Resume Next
             DEMO_InternalCleanupProbeEnd
         On Error GoTo 0
 
-        If mFailures = FailuresBefore Then
-            DEMO_CT_Print "  PASS " & Scenario
-        Else
+        If mFailures <> FailuresBefore Then
             mScenarioFailures = mScenarioFailures + 1
             DEMO_CT_Print "  FAIL " & Scenario & " (" & CStr(mFailures - FailuresBefore) & " check(s) failed)"
+        ElseIf Len(mSkipReason) > 0 Then
+            DEMO_CT_RecordSkip Scenario
+        Else
+            DEMO_CT_Print "  PASS " & Scenario
         End If
+
+End Sub
+
+Private Sub DEMO_CT_SkipScenario(ByVal LayoutError As String)
+
+'
+'------------------------------------------------------------------------------
+'                         MARK THE SCENARIO AS SKIPPED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records that the running scenario could not arrange its sheet because of a
+'   page-layout error, so that DEMO_CT_EndScenario reports it as a skip and
+'   not as a pass (#199).
+'
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
+        mSkipReason = MSG_LAYOUT_SKIP & " (" & LayoutError & ")"
+
+End Sub
+
+Private Sub DEMO_CT_RecordSkip(ByVal Scenario As String)
+
+'
+'------------------------------------------------------------------------------
+'                            COUNT AND PRINT A SKIP
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Counts a skipped scenario, keeps its name for the summary and prints its
+'   SKIP line with the reason (#199).
+'
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
+        mSkipped = mSkipped + 1
+        If Len(mSkippedNames) > 0 Then mSkippedNames = mSkippedNames & ", "
+        mSkippedNames = mSkippedNames & Scenario
+        mLastSkipReason = mSkipReason
+        DEMO_CT_Print "  SKIP " & Scenario & ": " & mSkipReason
 
 End Sub
 
@@ -6116,11 +6819,14 @@ Private Sub DEMO_CT_Print(ByVal LineText As String)
 '   Debug.Print this replaces showed.
 '
 ' HISTORY
+'   2026-11-27 - Silent while an injected S49 run is counted apart (#199).
 '   2026-11-16 - Added for the scripted Excel checks (#197).
 '
 ' UPDATED
-'   2026-11-16
+'   2026-11-27
 '------------------------------------------------------------------------------
+
+        If mPrintMuted Then Exit Sub
 
         Debug.Print LineText
         DEMO_CT_LogSinkWrite LineText
