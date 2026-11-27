@@ -301,9 +301,8 @@ def findings(text: str, module: str) -> list[Finding]:
         required = hs.COMPACT_FIELDS if compact else hs.FIELDS
         out.extend(header_findings(lines, view.header, view.name, required, view.kind == "Sub", view.sig))
         out.extend(statement_findings(lines, view))
-        if not compact and view.code_lines > 1:
-            out.extend(section_findings(lines, view))
-            out.extend(proc_name_findings(lines, view, module))
+        out.extend(section_findings(lines, view))
+        out.extend(proc_name_findings(lines, view, module))
     return sorted(out, key=lambda f: (f.line, f.rule, f.message))
 
 

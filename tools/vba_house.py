@@ -176,9 +176,11 @@ def standalone(code: str, word: str) -> list[re.Match[str]]:
     """The places where ``word`` stands as a name of its own in masked code, in any letter case.
 
     VBA reads names without regard to case, so ``proc_name`` is ``PROC_NAME``.
-    A name after a dot or a bang is a member (``obj.PROC``, ``row!PROC``, a
-    ``With`` line's ``.PROC``) and a name before ``:=`` is an argument label;
-    neither refers to a variable, so neither counts.
+    A name after a dot or a bang (``obj.PROC``, ``row!PROC``, a ``With`` line's
+    ``.PROC``) is a member and a name before ``:=`` is an argument label;
+    neither refers to a variable, so neither counts. ``code`` should be a whole
+    logical statement, so that the dot at the end of one physical line is seen
+    by the name that starts the next.
     """
     found = []
     for m in re.finditer(r"(?<!\w)" + re.escape(word) + r"(?!\w)", code, re.I):
@@ -189,14 +191,41 @@ def standalone(code: str, word: str) -> list[re.Match[str]]:
     return found
 
 
-def replace_standalone(part: str, word: str, new: str) -> str:
-    out, last = [], 0
-    for m in standalone(part, word):
-        out.append(part[last:m.start()])
-        out.append(new)
-        last = m.end()
-    out.append(part[last:])
-    return "".join(out)
+class Logical(NamedTuple):
+    """One logical statement, masked: continuation lines joined, same offsets as the lines."""
+    text: str
+    starts: list[tuple[int, int]]       # (physical line, offset of that line in text)
+
+    def where(self, offset: int) -> tuple[int, int]:
+        """The physical line and column of an offset of ``text``."""
+        line, start = [s for s in self.starts if s[1] <= offset][-1]
+        return line, offset - start
+
+
+def logical_masked(raw: list[str]) -> list[Logical]:
+    """Every logical statement of the module with literals and comments masked."""
+    out: list[Logical] = []
+    n = 0
+    while n < len(raw):
+        text, starts = "", []
+        while True:
+            piece = code_only(raw[n])
+            tail = piece.rstrip()
+            wraps = (tail.endswith("_") and (len(tail) == 1 or tail[-2].isspace())) and n + 1 < len(raw)
+            if wraps:
+                piece = piece[:len(tail) - 1] + " " + piece[len(tail):]
+            starts.append((n, len(text)))
+            text += piece + " "
+            n += 1
+            if not wraps:
+                break
+        out.append(Logical(text, starts))
+    return out
+
+
+def standalone_at(logicals: list[Logical], word: str) -> list[tuple[int, int]]:
+    """(line, column) of every place ``word`` stands as a name of its own."""
+    return [lg.where(m.start()) for lg in logicals for m in standalone(lg.text, word)]
 
 
 def proc_constant_scopes(raw: list[str], conditional: set[int]) -> list[tuple[int, int]]:
@@ -226,27 +255,30 @@ def rename_proc_constant(raw: list[str], conditional: set[int], module_name: str
     thing; where one exists outside those procedures the module is refused,
     with its line, rather than renamed along with the constant. The same goes
     for PROC_NAME, in any letter case: the new name would be shadowed by, or
-    would shadow, whatever already carries it.
+    would shadow, whatever already carries it. What a name is, member, argument
+    label or variable, is decided on the whole logical statement.
     """
     scopes = proc_constant_scopes(raw, conditional)
     if not scopes:
         return raw
     inside = {n for sig, end in scopes for n in range(sig, end + 1)}
     migrated = migrated_lines(raw, conditional, inside)
-    out = list(raw)
-    for n, line in enumerate(raw):
-        code = code_only(line)
-        if n not in inside and standalone(code, hs.PROC_CONSTANT_OLD):
+    logicals = logical_masked(raw)
+    for line, _col in standalone_at(logicals, hs.PROC_CONSTANT_OLD):
+        if line not in inside:
             raise LexicalError(
-                f"{module_name} line {n + 1}: {hs.PROC_CONSTANT_OLD} names something other than the "
+                f"{module_name} line {line + 1}: {hs.PROC_CONSTANT_OLD} names something other than the "
                 f"constant of its own procedure; rename it before moving the constant to "
                 f"{hs.PROC_CONSTANT}")
-        if n not in migrated and standalone(code, hs.PROC_CONSTANT):
+    for line, _col in standalone_at(logicals, hs.PROC_CONSTANT):
+        if line not in migrated:
             raise LexicalError(
-                f"{module_name} line {n + 1}: {hs.PROC_CONSTANT} (in any letter case) already names "
+                f"{module_name} line {line + 1}: {hs.PROC_CONSTANT} (in any letter case) already names "
                 f"something that the constant of a procedure would shadow or be shadowed by")
-        if n in inside:
-            out[n] = transform_code(line, lambda part: replace_standalone(part, hs.PROC_CONSTANT_OLD, hs.PROC_CONSTANT))
+    out = list(raw)
+    for line, col in sorted(standalone_at(logicals, hs.PROC_CONSTANT_OLD), reverse=True):
+        width = len(hs.PROC_CONSTANT_OLD)
+        out[line] = out[line][:col] + hs.PROC_CONSTANT + out[line][col + width:]
     return out
 
 
@@ -266,15 +298,16 @@ def check_renames(lines: list[str], label_map: dict[str, str], protected: set[in
     a label spelled ``SAFEEXIT`` beside ``Safe_Exit`` is two spellings of one.
     """
     masked = [code_only(ln) for ln in lines]
+    logicals = logical_masked(lines)
     targets: dict[str, set[str]] = {}
     for old, new in label_map.items():
         targets.setdefault(new, {new}).add(old)
     for new, spellings in targets.items():
         found: dict[str, int] = {}
-        for n, code in enumerate(masked):
+        for lg in logicals:
             for spelling in spellings:
-                for m in standalone(code, spelling):
-                    found.setdefault(m.group(0), n)
+                for m in standalone(lg.text, spelling):
+                    found.setdefault(m.group(0), lg.where(m.start())[0])
         odd = sorted(s for s in found if s not in spellings)
         if odd:
             raise LexicalError(f"{module_name} line {found[odd[0]] + 1}: {odd[0]} is {new} in another letter case; "
@@ -283,11 +316,11 @@ def check_renames(lines: list[str], label_map: dict[str, str], protected: set[in
         if len(present) > 1 and any(s != new for s in present):
             raise LexicalError(f"{module_name} line {found[present[-1]] + 1}: ambiguous label mapping "
                                f"{'/'.join(present)}")
-        for n, code in enumerate(masked):
-            for m in standalone(code, new):
-                if not is_label_use(code, m):
-                    raise LexicalError(f"{module_name} line {n + 1}: {new} already names something that is not "
-                                       f"a label; the label would collide with it")
+        for lg in logicals:
+            for m in standalone(lg.text, new):
+                if not is_label_use(lg.text, m):
+                    raise LexicalError(f"{module_name} line {lg.where(m.start())[0] + 1}: {new} already names "
+                                       f"something that is not a label; the label would collide with it")
     for old in label_map:
         for i in protected:
             if standalone(masked[i], old):

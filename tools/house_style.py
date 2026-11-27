@@ -86,9 +86,6 @@ LABEL_RENAMES = {
     "Fail_Num": HOUSE_LABELS.fail_num,
 }
 
-# Identifier renames the house-style formatter declares, besides the labels.
-IDENTIFIER_RENAMES = {PROC_CONSTANT_OLD: PROC_CONSTANT}
-
 
 def active(force: bool | None = None) -> bool:
     """Whether the style is on; ``force`` lets a fixture exercise either state."""

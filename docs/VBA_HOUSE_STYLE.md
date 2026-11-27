@@ -135,6 +135,10 @@ Write `None` rather than omit a field. A `Private` procedure whose body has at
 most 15 code lines (comments and blank lines do not count) may use a compact
 header: `PURPOSE` and `UPDATED`, plus any other field that says something useful,
 in the order above. A `Public`, `Friend` or event procedure always uses all nine.
+The compact header relaxes the header fields and nothing else: the body rules
+below apply to every procedure, so a compact procedure that has a variable or a
+handler has a `DECLARE` section with its `PROC_NAME`, and arms its handler in
+`INITIALIZE`.
 
 A header may add sections of its own after the standard fields, in UPPERCASE.
 Two have a fixed place in this repository. `CALLED FROM` follows `NOTES`. The

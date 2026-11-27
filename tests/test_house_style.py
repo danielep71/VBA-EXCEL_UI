@@ -110,8 +110,13 @@ class Comparison(unittest.TestCase):
         after = vba_house.renamed_source(before, "M")
         for kept in ("y = Row!PROC", "z = Obj.PROC", "F PROC:=1"):
             self.assertIn(kept, after)
-        self.assertEqual(executable_signature(before, None, house_style.IDENTIFIER_RENAMES),
-                         executable_signature(before.replace("Const PROC ", "Const PROC_NAME ")))
+
+    def test_a_member_split_over_two_lines_is_not_renamed(self) -> None:
+        before = ('Private Sub A()\nConst PROC As String = "x"\nDebug.Print Obj. _\n    PROC\n'
+                  "Err.Raise 5, _\n    PROC, _\n    Msg\nEnd Sub\n")
+        after = vba_house.renamed_source(before, "M")
+        self.assertIn("Obj. _\n    PROC\n", after)
+        self.assertIn("    PROC_NAME, _\n", after)
 
     def test_a_name_that_differs_only_in_letter_case_collides(self) -> None:
         text = ('Private proc_name As String\nPrivate Sub A()\nConst PROC As String = "x"\n'

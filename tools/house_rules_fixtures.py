@@ -12,6 +12,12 @@ DASHES = "'" + "-" * 78
 EQUALS = "'" + "=" * 78
 
 BODY_END = "        Probe_Describe = Text\r\n"
+COMPACT_DECLARED = (
+    "\r\n" + DASHES + "\r\n' DECLARE\r\n" + DASHES + "\r\n"
+    '    Const PROC_NAME As String = "M_PROBE.Probe_Reset"\r\n\r\n'
+    "    Dim Count As Long 'Counter\r\n\r\n"
+    + DASHES + "\r\n' RESET\r\n" + DASHES + "\r\n        mState = 0\r\n"
+)
 
 # (name, text before, text after, rule that must report, part of its message)
 FAILING: list[tuple[str, str, str, str, str]] = [
@@ -39,6 +45,13 @@ FAILING: list[tuple[str, str, str, str, str]] = [
      "proc-name", "does not start with Const PROC_NAME"),
     ("the constant keeps its previous name", "PROC_NAME", "PROC", "proc-name", "does not start with Const PROC_NAME"),
     ("a procedure with variables has no DECLARE", "' DECLARE\r\n", "' SET UP\r\n", "proc-name", "no DECLARE section"),
+    ("a compact procedure whose PROC_NAME names another procedure", "        mState = 0\r\n", COMPACT_DECLARED.replace(
+        "M_PROBE.Probe_Reset", "M_PROBE.WrongProcedure"), "proc-name", "expected"),
+    ("a compact procedure with variables and no DECLARE", "        mState = 0\r\n",
+     "    Dim Count As Long\r\n        mState = 0\r\n", "proc-name", "no DECLARE section"),
+    ("a compact procedure that arms its handler outside INITIALIZE", "        mState = 0\r\n",
+     DASHES + "\r\n' RESET\r\n" + DASHES + "\r\n        On Error GoTo ErrorHandler\r\n        mState = 0\r\n",
+     "sections", "not in INITIALIZE"),
     ("a Select Case without Case Else", '                Case Else\r\n                    Text = "other"\r\n', "",
      "select-case", "without Case Else"),
     ("InStr with two arguments", BODY_END, BODY_END + '        Index = InStr(Text, "a")\r\n', "compare-mode", "InStr"),
@@ -61,6 +74,8 @@ FAILING: list[tuple[str, str, str, str, str]] = [
 
 # Text that looks like a deviation and is not one.
 PASSING: list[tuple[str, str, str]] = [
+    ("a compact procedure with a DECLARE that names itself", "        mState = 0\r\n",
+     COMPACT_DECLARED.lstrip("\r\n")),
     ("the style fixture as it stands", "", ""),
     ("InStr with a start and a compare mode",
      BODY_END, BODY_END + '        Index = InStr(1, Text, "a", vbTextCompare)\r\n'),

@@ -769,6 +769,41 @@ def member_failures() -> list[str]:
     return failures
 
 
+CONTINUED = (
+    "Private Sub First()\r\n"
+    '    Const PROC As String = "M_PROBE.First"\r\n'
+    "    Debug.Print Obj. _\r\n"
+    "        PROC\r\n"
+    "    Debug.Print Row! _\r\n"
+    "        PROC\r\n"
+    "    Other _\r\n"
+    "        PROC:=1\r\n"
+    "    Other PROC _\r\n"
+    "        :=2\r\n"
+    "    With Obj\r\n"
+    "        . _\r\n"
+    "            PROC = 1\r\n"
+    "    End With\r\n"
+    "    Err.Raise 5, _\r\n"
+    "        PROC, _\r\n"
+    "        Msg\r\n"
+    "End Sub\r\n"
+)
+
+
+def continued_failures() -> list[str]:
+    """What a name is, member, argument label or constant, is decided on the whole logical statement."""
+    head = 'Attribute VB_Name = "M_PROBE"\r\nOption Explicit\r\n\r\n'
+    text, _ = vba_house.format_module(head + CONTINUED, "M_PROBE")
+    lines = [line.strip() for line in text.split("\r\n")]
+    failures: list[str] = []
+    if lines.count("PROC") != 2 or "PROC:=1" not in lines or "Other PROC _" not in lines or "PROC = 1" not in lines:
+        failures.append("continued: a member, a bang field or an argument label on a continuation line is not renamed")
+    if lines.count("PROC_NAME, _") != 1:
+        failures.append("continued: the constant on its own continuation line is renamed")
+    return failures
+
+
 def collision_failures() -> list[str]:
     """A new name that another name already carries, in any letter case, is refused with its line."""
     failures: list[str] = []
@@ -873,4 +908,4 @@ def house_selftest() -> list[str]:
     """Failure descriptions of the house-style formatter; empty means every rule holds."""
     return (case_failures() + header_failures() + refusal_failures() + module_failures()
             + cli_failures() + default_failures() + proc_scope_failures() + member_failures()
-            + collision_failures())
+            + collision_failures() + continued_failures())
