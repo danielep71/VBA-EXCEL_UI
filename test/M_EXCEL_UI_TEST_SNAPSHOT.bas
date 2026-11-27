@@ -17,8 +17,34 @@ Option Private Module
 '   structured results of capture and restore, partial capture, the lifecycle
 '   itself and Ribbon restoration across windows
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - The cases apply a known UI state, capture or restore a snapshot through
+'     the public API, and assert the host state or the structured result.
+'   - The snapshot-identity runner closes a captured window, opens a
+'     replacement, restores, and asserts the one ordered WindowIdentity failure.
+'   - The Ribbon SDI probe records Ribbon visibility through three mechanisms in
+'     five scenarios, and writes the observations as text and JSON.
+'
+' ERROR POLICY
+'   - A failed assertion raises; no case returns a verdict.
+'   - The runners, and the cases that open windows or workbooks, clean up first
+'     and then raise the failure they kept.
+'   - The probe asserts nothing: it raises only on a precondition failure or an
+'     unexpected host error.
+'   - Recording a pass or a failure is left to the pack that runs the case.
+'
 ' DEPENDENCIES
 '   - M_EXCEL_UI_TEST_HARNESS
+'
+' NOTES
+'   TST_RibbonProbeReset, TST_RibbonProbeRecord and TST_RibbonProbeBuildJson are
+'   Private; only the probe calls them.
 '
 ' PUBLIC SURFACE
 '   - Test_EXCEL_UI_RunSnapshotIdentity
@@ -99,7 +125,7 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
 
 '
 '------------------------------------------------------------------------------
-'                      TEST EXCEL UI RUN RIBBON SDI PROBE
+'                        RECORD RIBBON SDI OBSERVATIONS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Characterize how Ribbon visibility behaves across multiple workbook windows,
@@ -117,6 +143,9 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
 '   there is no agreed correct answer yet: the point is to discover what the
 '   host does so that a contract can be written, and only then to assert it.
 '   Writing assertions first would encode the guess this issue exists to remove.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -176,7 +205,7 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
     Dim CreatedSnapshot As Boolean  'TRUE once this run owns one
 
 '------------------------------------------------------------------------------
-' VALIDATE PRECONDITIONS
+' INITIALIZE
 '------------------------------------------------------------------------------
     'The probe captures and restores a snapshot, so it cannot share the slot.
     '
@@ -191,9 +220,6 @@ Public Sub Test_EXCEL_UI_RunRibbonSdiProbe()
                 "restore it before probing"
         End If
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
         CreatedSnapshot = False
 
         On Error GoTo ErrorHandler
@@ -384,7 +410,7 @@ Private Sub TST_RibbonProbeReset()
 
 '
 '------------------------------------------------------------------------------
-'                            TST RIBBON PROBE RESET
+'                          CLEAR RIBBON PROBE BUFFERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clear the observation buffers before a probe run.
@@ -424,7 +450,7 @@ Private Sub TST_RibbonProbeRecord( _
     ByVal WindowLabel As String)
 '
 '------------------------------------------------------------------------------
-'                           TST RIBBON PROBE RECORD
+'                        RECORD ONE RIBBON OBSERVATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record one observation of Ribbon state through every mechanism available.
@@ -458,6 +484,16 @@ Private Sub TST_RibbonProbeRecord( _
 '
 ' ERROR POLICY
 '   - Does not raise. An unreadable mechanism is an observation, not a failure.
+'
+' DEPENDENCIES
+'   - Application.CommandBars("Ribbon"), Visible and Height
+'   - Application.ExecuteExcel4Macro, Get.ToolBar
+'   - TST_CertJsonEscape
+'
+' NOTES
+'   Appends to the module-level probe state m_RibbonRowCount,
+'   m_RibbonRowsText and m_RibbonRowsJson. Each mechanism is read under
+'   On Error Resume Next, so one that raises leaves "err" in its column.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunRibbonSdiProbe
@@ -541,7 +577,7 @@ Private Function TST_RibbonProbeBuildJson() _
     As String
 '
 '------------------------------------------------------------------------------
-'                         TST RIBBON PROBE BUILD JSON
+'                           BUILD RIBBON PROBE JSON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Wrap the accumulated observations in a document that names the host.
@@ -551,15 +587,31 @@ Private Function TST_RibbonProbeBuildJson() _
 '   observation that does not say which host produced it cannot be compared with
 '   another, and comparison is the entire purpose of gathering it.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   String
 '     A single-line JSON document.
+'
+' BEHAVIOR
+'   - Sets the bitness to "x64" or "x86" from the VBA7 and Win64
+'     compilation constants.
+'   - Builds one line holding the document name, schema 1, the local
+'     timestamp, the Excel version and build, the operating system, the
+'     bitness and the accumulated observation rows in "observations".
+'   - Passes the text values taken from Excel through TST_CertJsonEscape.
 '
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertJsonEscape
+'
+' NOTES
+'   The document is built in one statement under On Error Resume Next, so
+'   a field that cannot be read abandons that statement and the function
+'   returns an empty string.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunRibbonSdiProbe
@@ -608,11 +660,20 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
 
 '
 '------------------------------------------------------------------------------
-'                     TEST EXCEL UI RUN SNAPSHOT IDENTITY
+'                       VERIFY SNAPSHOT WINDOW IDENTITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify identity-safe restoration and structured reporting when a captured
 '   Excel Window is closed and replaced after snapshot capture.
+'
+' WHY THIS EXISTS
+'   A snapshot must restore only state that still belongs to the window it
+'   was captured from. When a captured window closes and another opens, the
+'   replacement has to be left alone and the loss reported as one ordered
+'   WindowIdentity failure. This runner is a certification unit.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -680,7 +741,7 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
     Dim CreatedSnapshot As Boolean  'TRUE once this run owns one
 
 '------------------------------------------------------------------------------
-' VALIDATE PRECONDITIONS
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Refused before the handler is armed. Armed first, this refusal travelled
     'Err_Handler, resumed at Safe_Exit, and the unconditional clear there
@@ -693,9 +754,6 @@ Public Sub Test_EXCEL_UI_RunSnapshotIdentity()
                 "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
         End If
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
         CreatedSnapshot = False
 
         On Error GoTo ErrorHandler
@@ -940,7 +998,7 @@ Public Sub TST_Case_SnapshotCaptureResultSuccess( _
     ByVal IncludeTitleBarTests As Boolean)
 '
 '------------------------------------------------------------------------------
-'                   TST CASE SNAPSHOT CAPTURE RESULT SUCCESS
+'                        VERIFY CAPTURE RESULT SUCCESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the clean-success contract and deterministic output clearing of
@@ -970,6 +1028,11 @@ Public Sub TST_Case_SnapshotCaptureResultSuccess( _
 '   - UI_CaptureExcelUIState_WithResult
 '   - TST_AssertResultSuccess
 '   - TST_AssertSnapshotAvailability
+'
+' NOTES
+'   Clears any explicit snapshot on entry, and clears the one it captured
+'   on the success path only: the case has no handler, so an assertion
+'   failure leaves that snapshot in place.
 '
 ' UPDATED
 '   2026-07-29
@@ -1034,7 +1097,7 @@ Public Sub TST_Case_SnapshotResetResultSuccess( _
     ByVal IncludeTitleBarTests As Boolean)
 '
 '------------------------------------------------------------------------------
-'                    TST CASE SNAPSHOT RESET RESULT SUCCESS
+'                         VERIFY RESET RESULT SUCCESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the clean-success contract and deterministic output clearing of
@@ -1067,6 +1130,12 @@ Public Sub TST_Case_SnapshotResetResultSuccess( _
 '   - UI_ResetExcelUIToSnapshot_WithResult
 '   - TST_AssertResultSuccess
 '   - managed-state assertion helpers
+'
+' NOTES
+'   Clears any explicit snapshot on entry, and clears the one it captured
+'   on the success path only: the case has no handler, so an assertion
+'   failure leaves that snapshot in place. It also sets ScreenUpdating to
+'   True around the restore and puts the saved value back afterwards.
 '
 ' UPDATED
 '   2026-07-29
@@ -1175,7 +1244,7 @@ Public Sub TST_Case_SnapshotResetResultNoSnapshot( _
     ByVal IncludeTitleBarTests As Boolean)
 '
 '------------------------------------------------------------------------------
-'                  TST CASE SNAPSHOT RESET RESULT NO SNAPSHOT
+'                     VERIFY RESET RESULT WITHOUT SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify deterministic structured failure reporting and no-op behavior when
@@ -1210,6 +1279,11 @@ Public Sub TST_Case_SnapshotResetResultNoSnapshot( _
 '   - TST_FrameStyleOrRaise
 '   - TST_AssertFrameUntouched
 '   - managed-state assertion helpers
+'
+' NOTES
+'   Clears any explicit snapshot on entry and captures none. It sets
+'   ScreenUpdating to True around the restore and puts the saved value
+'   back afterwards. The baseline it applies stays in place.
 '
 ' HISTORY
 '   2026-11-06 - Compared the active frame's complete style (#45).
@@ -1318,7 +1392,7 @@ Public Sub TST_Case_SnapshotCapturePartialApplicationRead()
 
 '
 '------------------------------------------------------------------------------
-'              TST CASE SNAPSHOT CAPTURE PARTIAL APPLICATION READ
+'                      VERIFY PARTIAL APPLICATION CAPTURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a snapshot capture which cannot read one application-level
@@ -1565,7 +1639,7 @@ Public Sub TST_Case_SnapshotLifecycle(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                         TST CASE SNAPSHOT LIFECYCLE
+'                          VERIFY SNAPSHOT LIFECYCLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the explicit snapshot and reset lifecycle exposed by the core module
@@ -1582,8 +1656,39 @@ Public Sub TST_Case_SnapshotLifecycle(ByVal IncludeTitleBarTests As Boolean)
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Clears any explicit snapshot and asserts none is available.
+'   - Establishes a mixed baseline: Ribbon, ScrollBars, Headings and
+'     Gridlines shown; StatusBar, FormulaBar and WorkbookTabs hidden;
+'     TitleBar shown when title-bar tests are included.
+'   - Captures it with UI_CaptureExcelUIState and asserts a snapshot is
+'     available.
+'   - Applies the opposite state, TitleBar hidden when title-bar tests are
+'     included, and calls UI_ResetExcelUIToSnapshot.
+'   - Asserts every element is back at its baseline and the snapshot is
+'     still available.
+'   - Clears the snapshot and asserts it is gone.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - UI_CaptureExcelUIState
+'   - UI_ResetExcelUIToSnapshot
+'   - UI_ClearExcelUIStateSnapshot
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_AssertSnapshotAvailability
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   Clears an explicit snapshot held by the caller. The certification pack
+'   skips this case when a snapshot existed before the run.
 '
 ' UPDATED
 '   2026-07-25
@@ -1707,7 +1812,7 @@ Public Sub TST_Case_ResetWithoutSnapshot_NoOp(ByVal IncludeTitleBarTests As Bool
 
 '
 '------------------------------------------------------------------------------
-'                    TST CASE RESET WITHOUT SNAPSHOT NO OP
+'                     VERIFY RESET WITHOUT SNAPSHOT NO-OP
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_ResetExcelUIToSnapshot behaves as a no-op when no explicit
@@ -1726,8 +1831,38 @@ Public Sub TST_Case_ResetWithoutSnapshot_NoOp(ByVal IncludeTitleBarTests As Bool
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Clears any explicit snapshot and asserts none is available.
+'   - Establishes a mixed baseline: Ribbon, ScrollBars, Headings and
+'     Gridlines shown; StatusBar, FormulaBar and WorkbookTabs hidden;
+'     TitleBar shown when title-bar tests are included.
+'   - With title-bar tests, reads the complete style of the active frame.
+'   - Calls UI_ResetExcelUIToSnapshot with no snapshot, and waits.
+'   - Asserts every element still has its baseline state and, with
+'     title-bar tests, that the frame style is unchanged.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - UI_ResetExcelUIToSnapshot
+'   - UI_ClearExcelUIStateSnapshot
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_FrameStyleOrRaise
+'   - TST_AssertFrameUntouched
+'   - TST_AssertSnapshotAvailability
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   Clears an explicit snapshot held by the caller. The certification pack
+'   skips this case when a snapshot existed before the run. The structured
+'   counterpart is TST_Case_SnapshotResetResultNoSnapshot.
 '
 ' HISTORY
 '   2026-11-06 - Compared the active frame's complete style (#45).
@@ -1842,7 +1977,7 @@ Public Sub TST_Case_RibbonRestoreRefusesOtherActiveWindow()
 
 '
 '------------------------------------------------------------------------------
-'             TST CASE RIBBON RESTORE REFUSES OTHER ACTIVE WINDOW
+'                    VERIFY RIBBON REFUSED ON OTHER WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that restoring a snapshot while a different window is active
@@ -1858,6 +1993,9 @@ Public Sub TST_Case_RibbonRestoreRefusesOtherActiveWindow()
 '   The second window is hidden before restore, so a wrongful write of A's
 '   captured visible state would be observable on it.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
@@ -1872,6 +2010,28 @@ Public Sub TST_Case_RibbonRestoreRefusesOtherActiveWindow()
 '
 ' ERROR POLICY
 '   - Raises after best-effort cleanup of the temporary workbook.
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - UI_CaptureExcelUIState_WithResult
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - UI_ClearExcelUIStateSnapshot
+'   - TST_AssertResultSuccess
+'   - TST_AssertSingleFailurePrefix
+'   - TST_AssertTrue
+'   - TST_AssertBooleanEquals
+'   - TST_AssertRibbonVisible
+'   - TST_TryGetRibbonVisible
+'   - TST_FrameStyleOrRaise
+'   - TST_AssertFrameUntouched
+'   - TST_SafeCloseWorkbook
+'   - TST_WaitUI
+'   - TST_Log
+'
+' NOTES
+'   Raises TEST_TITLEBAR_SDI_ERR_BASE + 110 when no window is active, and
+'   + 111 when the second window's Ribbon cannot be read. The cleanup
+'   releases the snapshot and leaves the anchor's Ribbon visible.
 '
 ' HISTORY
 '   2026-11-06 - Compared the active frame's complete style (#45).
@@ -2066,7 +2226,7 @@ Public Sub TST_Case_RibbonRestoreRefusesClosedWindow()
 
 '
 '------------------------------------------------------------------------------
-'                TST CASE RIBBON RESTORE REFUSES CLOSED WINDOW
+'                    VERIFY RIBBON REFUSED ON CLOSED WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that restoring a snapshot whose Ribbon window has closed reports a
@@ -2076,6 +2236,9 @@ Public Sub TST_Case_RibbonRestoreRefusesClosedWindow()
 ' WHY THIS EXISTS
 '   A closed captured window is the second route to the same misdirection: the
 '   only window left to write to is one the value was never read from.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -2089,6 +2252,20 @@ Public Sub TST_Case_RibbonRestoreRefusesClosedWindow()
 '
 ' ERROR POLICY
 '   - Raises after best-effort cleanup of the temporary workbook.
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - UI_CaptureExcelUIState_WithResult
+'   - UI_ResetExcelUIToSnapshot_WithResult
+'   - UI_ClearExcelUIStateSnapshot
+'   - TST_AssertResultSuccess
+'   - TST_AssertFailureListContainsPrefix
+'   - TST_AssertRibbonVisible
+'   - TST_FrameStyleOrRaise
+'   - TST_AssertFrameUntouched
+'   - TST_SafeCloseWorkbook
+'   - TST_WaitUI
+'   - TST_Log
 '
 ' NOTES
 '   Closing the captured window also invalidates its title-bar frame and its
