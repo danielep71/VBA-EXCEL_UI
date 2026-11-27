@@ -24,6 +24,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import house_style
 from vba_analyze import CONFIGS, DECLARE, PROC, VAR, active_lines, names, statements
 from vba_lex import LexicalError, code_only
 
@@ -239,6 +240,10 @@ Err_Handler:
     FailMsg = "unexpected"
 End Function
 '''
+
+# The rules do not read label names; the fixture follows the spelling the tree uses.
+BASE = (BASE.replace('Err_Handler', house_style.labels().handler)
+        .replace('Safe_Exit', house_style.labels().safe_exit))
 
 CAPTURE_LINE = '    DllError = Err.LastDllError\n    If ApiResult'
 X64_CALL = '    ApiResult = GetWindowLongPtr(hWnd, -16)\n'

@@ -20,6 +20,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
 
+import layout_edit  # noqa: E402
 import make_titlebar_mutant as mutant  # noqa: E402
 from gate_fixture import GIT_ENV  # noqa: E402
 
@@ -28,6 +29,18 @@ SOURCE = REPO / "src" / "M_EXCEL_UI_TITLEBAR.bas"
 
 def lines(data: bytes) -> list[str]:
     return data.decode("ascii").split("\r\n")
+
+
+def words(found: list[str]) -> list[str]:
+    """Lines without their indentation: the controls hold in any layout of the module."""
+    return [layout_edit.words(line) for line in found]
+
+
+def changed(data: bytes, old: bytes, new: bytes) -> bytes:
+    """``data`` with the lines of ``old`` replaced, wherever and however they are indented."""
+    out = layout_edit.replace(data.decode("ascii"), old.decode("ascii"), new.decode("ascii"))
+    assert out is not None
+    return out.encode("ascii")
 
 
 class MutantContent(unittest.TestCase):
@@ -41,17 +54,17 @@ class MutantContent(unittest.TestCase):
         self.assertEqual(len(changes), 1, changes)
         tag, a0, a1, b0, b1 = changes[0]
         self.assertEqual(tag, "replace")
-        self.assertEqual(lines(self.source)[a0:a1], [
-            "                If Not m_FrameStates(Slot).HasBaseline _",
-            "                   Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then",
+        self.assertEqual(words(lines(self.source)[a0:a1]), [
+            "If Not m_FrameStates(Slot).HasBaseline _",
+            "Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then",
         ])
-        self.assertEqual(lines(self.control)[b0:b1], ["                If RestoreBits = 0 Then"])
+        self.assertEqual(words(lines(self.control)[b0:b1]), ["If RestoreBits = 0 Then"])
 
     def test_the_condition_is_the_one_in_the_show_worker(self) -> None:
         text = self.source.decode("ascii")
         worker = text.index("Private Function UI_TrySetTitleBarVisibleForHwndWorker(")
         end = text.index("End Function", worker)
-        self.assertIn(mutant.CURRENT.decode("ascii"), text[worker:end])
+        self.assertEqual(len(layout_edit.locate(text[worker:end], mutant.CURRENT.decode("ascii"))), 1)
 
     def test_module_identity_and_line_endings_are_kept(self) -> None:
         self.assertTrue(self.control.startswith(b'Attribute VB_Name = "M_EXCEL_UI_TITLEBAR"\r\n'))
@@ -59,23 +72,21 @@ class MutantContent(unittest.TestCase):
         self.control.decode("ascii")
 
     def test_a_missing_condition_is_refused(self) -> None:
-        changed = self.source.replace(mutant.CURRENT, b"")
         with self.assertRaisesRegex(mutant.MutantError, "found 0"):
-            mutant.mutate(changed)
+            mutant.mutate(changed(self.source, mutant.CURRENT, b""))
 
     def test_a_duplicated_condition_is_refused(self) -> None:
-        changed = self.source.replace(mutant.CURRENT, mutant.CURRENT + mutant.CURRENT)
         with self.assertRaisesRegex(mutant.MutantError, "found 2"):
-            mutant.mutate(changed)
+            mutant.mutate(changed(self.source, mutant.CURRENT, mutant.CURRENT + mutant.CURRENT))
 
     def test_lf_line_endings_are_refused(self) -> None:
         with self.assertRaisesRegex(mutant.MutantError, "bare LF"):
             mutant.mutate(self.source.replace(b"\r\n", b"\n"))
 
     def test_another_module_is_refused(self) -> None:
-        changed = self.source.replace(b'"M_EXCEL_UI_TITLEBAR"', b'"M_EXCEL_UI"', 1)
+        other = self.source.replace(b'"M_EXCEL_UI_TITLEBAR"', b'"M_EXCEL_UI"', 1)
         with self.assertRaisesRegex(mutant.MutantError, "VB_Name"):
-            mutant.mutate(changed)
+            mutant.mutate(other)
 
 
 class MutantFile(unittest.TestCase):
@@ -117,7 +128,7 @@ class MutantFile(unittest.TestCase):
 
     def test_a_source_without_the_condition_writes_nothing(self) -> None:
         path = self.repo / "src" / "M_EXCEL_UI_TITLEBAR.bas"
-        path.write_bytes(path.read_bytes().replace(mutant.CURRENT, b""))
+        path.write_bytes(changed(path.read_bytes(), mutant.CURRENT, b""))
         code, _, err = self.run_tool()
         self.assertEqual(code, 1)
         self.assertIn("exactly once", err)
@@ -129,14 +140,14 @@ class VariantContent(unittest.TestCase):
 
     EXPECTED = {
         "v112": [
-            ["                If Not m_FrameStates(Slot).HasBaseline _",
-             "                   Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then"],
+            ["If Not m_FrameStates(Slot).HasBaseline _",
+             "Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then"],
         ],
-        "fallback": [["                   Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then"]],
-        "reader": [["        IsVisible = ((StyleValue And WS_CAPTION) = WS_CAPTION)"]],
+        "fallback": [["Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then"]],
+        "reader": [["IsVisible = ((StyleValue And WS_CAPTION) = WS_CAPTION)"]],
         "readbacks": [
-            ["                    If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then"],
-            ["            If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then"],
+            ["If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then"],
+            ["If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then"],
         ],
     }
 
@@ -152,7 +163,7 @@ class VariantContent(unittest.TestCase):
     def test_each_variant_changes_only_its_conditions(self) -> None:
         for variant, expected in self.EXPECTED.items():
             with self.subTest(variant=variant):
-                self.assertEqual([old for old, _ in self.changes(variant)], expected)
+                self.assertEqual([words(old) for old, _ in self.changes(variant)], expected)
 
     def test_the_any_bit_controls_put_the_any_bit_test_back(self) -> None:
         for variant in ("fallback", "reader", "readbacks"):
@@ -180,9 +191,9 @@ class VariantContent(unittest.TestCase):
         reader = reader[:reader.index("End Function")]
         worker = text[text.index("Private Function UI_TrySetTitleBarVisibleForHwndWorker("):]
         worker = worker[:worker.index("End Function")]
-        self.assertIn(mutant.READER_CURRENT.decode("ascii"), reader)
+        self.assertEqual(len(layout_edit.locate(reader, mutant.READER_CURRENT.decode("ascii"))), 1)
         for current in (mutant.FALLBACK_CURRENT, mutant.NOOP_CURRENT, mutant.WRITE_CURRENT):
-            self.assertIn(current.decode("ascii"), worker)
+            self.assertEqual(len(layout_edit.locate(worker, current.decode("ascii"))), 1)
 
     def test_an_unknown_variant_is_refused(self) -> None:
         with self.assertRaisesRegex(mutant.MutantError, "unknown variant"):
@@ -196,9 +207,8 @@ class VariantContent(unittest.TestCase):
                 self.assertTrue(all(line > 0 for _label, line in found))
 
     def test_a_partly_missing_variant_is_refused(self) -> None:
-        changed = self.source.replace(mutant.WRITE_CURRENT, b"")
         with self.assertRaisesRegex(mutant.MutantError, "post-write readback exactly once"):
-            mutant.mutate(changed, "readbacks")
+            mutant.mutate(changed(self.source, mutant.WRITE_CURRENT, b""), "readbacks")
 
 
 class ShowDecisionModel(unittest.TestCase):

@@ -10,12 +10,13 @@ import json
 import unittest
 from collections.abc import Callable
 
-from gate_fixture import Fixture, check_repo, fixture
+from gate_fixture import Fixture, check_repo, fixture, reformat
 
 EXTRA = "src/M_EXCEL_UI_EXTRA.bas"
 
-# A minimal standard module in house-style normal form.
-CLEAN = (
+# A minimal standard module, written in the normal form of the style the tree is
+# held to now, so that it passes the formatter check whichever state the switch is in.
+CLEAN = reformat.reformat_text(
     'Attribute VB_Name = "M_EXCEL_UI_EXTRA"\r\n'
     "Option Explicit\r\n"
     "Option Private Module\r\n"
@@ -23,8 +24,15 @@ CLEAN = (
     "Private Sub Extra_Probe()\r\n"
     "    Dim Count               As Long\r\n"
     "    Count = 1\r\n"
-    "End Sub\r\n"
+    "End Sub\r\n",
+    "M_EXCEL_UI_EXTRA",
 )
+
+
+def at(line: str) -> int:
+    """The 1-based line number of a line of CLEAN."""
+    return CLEAN.split("\r\n").index(line) + 1
+
 
 # For each module check: the defect to plant in the extra module, and the
 # finding that proves the check read it.
@@ -40,16 +48,16 @@ DEFECTS: list[tuple[str, Callable[[str], str], str]] = [
      f"{EXTRA}: 1 bare LF"),
     ("banner rule widths",
      lambda text: text.replace("\r\nPrivate Sub", "\r\n'=====\r\nPrivate Sub"),
-     f"{EXTRA}:5: rule is 6 cols"),
+     f"{EXTRA}:{at('Private Sub Extra_Probe()')}: rule is 6 cols"),
     ("house labels",
      lambda text: text.replace("End Sub", "Odd_Label:\r\nEnd Sub"),
-     f"{EXTRA}:8: non-house label 'Odd_Label'"),
+     f"{EXTRA}:{at('End Sub')}: non-house label 'Odd_Label'"),
     ("VBA analyzer",
      lambda text: text.replace("End Sub", "    UI_Nowhere\r\nEnd Sub"),
-     f"{EXTRA}:8: unresolved: "),
+     f"{EXTRA}:{at('End Sub')}: unresolved: "),
     ("VBA syntax",
      lambda text: text.replace("    Count = 1\r\n", "    Count = (1\r\n"),
-     f"{EXTRA}:7: all compilations: Extra_Probe: parentheses: 1 opening parenthesis never closed"),
+     f"{EXTRA}:{at('    Count = 1')}: all compilations: Extra_Probe: parentheses: 1 opening parenthesis never closed"),
     ("house-style formatter",
      lambda text: text + "\r\n",
      f"{EXTRA}: not in house-style normal form"),

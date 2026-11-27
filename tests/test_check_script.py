@@ -19,6 +19,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from gate_fixture import house_style
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "Check-EXCEL_UI.ps1"
 LAUNCHER = ROOT / "tools" / "Check-EXCEL_UI.cmd"
@@ -298,7 +300,7 @@ class LogSinkSourceTests(unittest.TestCase):
                 self.assertRegex(body, rf"If Len\({state}\) = 0 Or Len\({state[:-4]}Failure\) > 0 Then\n"
                                        r"\s+Exit Sub")
                 self.assertNotIn("Err.Raise", body)
-                self.assertIn("Resume Safe_Exit", body)
+                self.assertIn(f"Resume {house_style.labels().safe_exit}", body)
 
     def test_every_demo_harness_line_goes_through_the_sink(self) -> None:
         text = read(DEMO_TESTS)
@@ -309,9 +311,9 @@ class LogSinkSourceTests(unittest.TestCase):
         for path, name in ((TEST_CERTIFICATION, "TST_RunRunnerWithLog"), (DEMO_TESTS, "Demo_Test_RunLogged")):
             with self.subTest(name):
                 body = vba_procedure(path, name)
-                handler = body.split("Err_Handler:", 1)[1]
+                handler = body.split(f"{house_style.labels().handler}:", 1)[1]
                 self.assertNotIn("Err.Raise", handler)
-                self.assertIn("Resume Safe_Exit", handler)
+                self.assertIn(f"Resume {house_style.labels().safe_exit}", handler)
                 self.assertIn('Verdict = "RESULT: PASS"', body)
                 self.assertIn('Verdict = "RESULT: FAIL | Error " & CStr(RaisedNumber)', body)
                 self.assertIn('" | LOG WRITE FAILED: "', body)
