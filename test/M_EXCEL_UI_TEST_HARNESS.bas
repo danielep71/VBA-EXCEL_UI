@@ -7204,7 +7204,7 @@ Public Sub TST_AssertSnapshotAvailability( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT SNAPSHOT AVAILABILITY
+'                         ASSERT SNAPSHOT AVAILABILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the availability flag returned by UI_HasExcelUIStateSnapshot
@@ -7224,8 +7224,19 @@ Public Sub TST_AssertSnapshotAvailability( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Compares Expected with the value of UI_HasExcelUIStateSnapshot through
+'     TST_AssertBooleanEquals.
+'
 ' ERROR POLICY
 '   - Raises on mismatch
+'
+' DEPENDENCIES
+'   - UI_HasExcelUIStateSnapshot
+'   - TST_AssertBooleanEquals
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -7249,7 +7260,7 @@ Public Sub TST_AssertRefusal( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                              TST ASSERT REFUSAL
+'                             ASSERT REFUSAL ERROR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that a destructive runner refused with the exact error it promises.
@@ -7284,8 +7295,20 @@ Public Sub TST_AssertRefusal( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Logs the observed number, source and description through TST_Log under
+'     the tag OBSERVED.
+'   - Asserts through TST_AssertTrue that the number, the source and the
+'     description each equal the expected value, under the names
+'     AssertionName & ".Number", ".Source" and ".Description". The description
+'     is compared exactly.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - TST_Log
+'   - TST_AssertTrue
 '
 ' NOTES
 '   The actuals are logged before being asserted, because a failing assertion
@@ -7333,10 +7356,14 @@ Public Sub TST_AssertTrue( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                               TST ASSERT TRUE
+'                           ASSERT CONDITION IS TRUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raise when a Boolean assertion is FALSE
+'
+' WHY THIS EXISTS
+'   Cases assert plain Boolean conditions, and a failure has to name the
+'   assertion. One helper raises the same error for all of them.
 '
 ' INPUTS
 '   ActualValue
@@ -7348,8 +7375,19 @@ Public Sub TST_AssertTrue( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Does nothing when ActualValue is TRUE.
+'   - Otherwise raises TEST_SNAPSHOT_ID_ERR_BASE + 20, with AssertionName as
+'     the source and "expected TRUE but received FALSE" as the description.
+'
 ' ERROR POLICY
 '   - Raises when ActualValue is FALSE
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -7379,7 +7417,7 @@ Public Function TST_TryGetBooleanProperty( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST TRY GET BOOLEAN PROPERTY
+'                            READ BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read a Boolean property from an object using CallByName
@@ -7405,8 +7443,23 @@ Public Function TST_TryGetBooleanProperty( _
 '   TRUE  => property read succeeded
 '   FALSE => property read failed
 '
+' BEHAVIOR
+'   - Clears ValueOut and FailMsg.
+'   - Fails with a message when Target is Nothing or PropertyName is empty.
+'   - Reads the property with CallByName and VbGet, converts it with CBool and
+'     returns TRUE.
+'   - An error is captured into FailMsg through TST_BuildRuntimeErrorText and
+'     the result is FALSE.
+'
 ' ERROR POLICY
 '   - Does NOT raise to callers
+'
+' DEPENDENCIES
+'   - CallByName
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RestoreBoolean
@@ -7484,7 +7537,7 @@ Private Function TST_TrySetBooleanProperty( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST TRY SET BOOLEAN PROPERTY
+'                            WRITE BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to assign a Boolean property on an object using a common,
@@ -7518,6 +7571,10 @@ Private Function TST_TrySetBooleanProperty( _
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
 '
+' DEPENDENCIES
+'   - CallByName
+'   - TST_BuildRuntimeErrorText
+'
 ' NOTES
 '   - Intended for Application and Window Boolean property writes in this
 '     module
@@ -7525,6 +7582,11 @@ Private Function TST_TrySetBooleanProperty( _
 ' UPDATED
 '   2026-07-25
 '------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_HARNESS.TST_TrySetBooleanProperty"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -7577,7 +7639,7 @@ Public Function TST_TryGetRibbonVisible( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST TRY GET RIBBON VISIBLE
+'                            READ RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current Ribbon visibility
@@ -7596,6 +7658,29 @@ Public Function TST_TryGetRibbonVisible( _
 ' RETURNS
 '   TRUE  => Ribbon visibility was read successfully
 '   FALSE => read failed
+'
+' BEHAVIOR
+'   - Clears IsVisible and FailMsg.
+'   - Reads Application.CommandBars("Ribbon").Visible. When that read does not
+'     raise, returns TRUE.
+'   - Otherwise falls back to Application.ExecuteExcel4Macro with
+'     Get.ToolBar(7,"Ribbon"), converts the result with CBool and returns TRUE.
+'   - When the fallback also raises, FailMsg holds its error number and
+'     description and the result is FALSE.
+'
+' ERROR POLICY
+'   - Does not raise. Both reads run under On Error Resume Next, with the
+'     handler armed again after each.
+'   - Any other error is captured into FailMsg through
+'     TST_BuildRuntimeErrorText and the result is FALSE.
+'
+' DEPENDENCIES
+'   - Application.CommandBars
+'   - Application.ExecuteExcel4Macro
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -7667,7 +7752,7 @@ Private Function TST_TrySetRibbonVisible( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST TRY SET RIBBON VISIBLE
+'                           WRITE RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to set Ribbon visibility from the regression harness
@@ -7686,6 +7771,23 @@ Private Function TST_TrySetRibbonVisible( _
 ' RETURNS
 '   TRUE  => Ribbon update succeeded
 '   FALSE => Ribbon update failed
+'
+' BEHAVIOR
+'   - Clears FailMsg.
+'   - Builds the macro text Show.TOOLBAR("Ribbon",True) or
+'     Show.TOOLBAR("Ribbon",False) from IsVisible.
+'   - Runs it through Application.ExecuteExcel4Macro and returns TRUE.
+'
+' ERROR POLICY
+'   - Does not raise. An error is captured into FailMsg through
+'     TST_BuildRuntimeErrorText and the result is FALSE.
+'
+' DEPENDENCIES
+'   - Application.ExecuteExcel4Macro
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
