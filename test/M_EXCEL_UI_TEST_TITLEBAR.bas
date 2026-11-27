@@ -16,10 +16,36 @@ Option Private Module
 '   bits EXCEL_UI owns, write only the frame a snapshot was captured from, and
 '   report a WinAPI failure with the error that call left
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Test_EXCEL_UI_RunTitleBarOnly runs the title-bar pack, which
+'     executes the twelve title-bar cases and restores the host
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity runs the SDI identity cases:
+'     four title-bar cases of this module and two Ribbon cases of
+'     M_EXCEL_UI_TEST_SNAPSHOT
+'   - A case that changes a frame reads the frame's entry style first,
+'     drives the title-bar API under test, asserts, and puts the entry
+'     style back through the harness on every exit
+'   - The certification dispatcher runs the Public cases by case
+'     identifier
+'
+' ERROR POLICY
+'   - A case or runner raises its first failure after its cleanup
+'   - A frame that cannot be put back fails the case after any earlier
+'     failure
+'
 ' DEPENDENCIES
 '   - M_EXCEL_UI_TEST_HARNESS
 '   - M_EXCEL_UI_TEST_SNAPSHOT, for the Ribbon cases of the SDI identity
 '     runner
+'
+' NOTES
+'   None
 '
 ' PUBLIC SURFACE
 '   - Test_EXCEL_UI_RunTitleBarOnly
@@ -144,7 +170,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 
 '
 '------------------------------------------------------------------------------
-'                       TEST EXCEL UI RUN TITLE BAR ONLY
+'                              RUN TITLE BAR PACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the dedicated title-bar regression cases
@@ -153,13 +179,17 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '   Title-bar behavior is the most WinAPI-sensitive area and benefits from a
 '   focused runner that can be executed independently
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   - Snapshots current state
-'   - Runs the title-bar round-trip and owned-style-bit preservation cases
-'   - Attempts to restore the original state
+'   - Calls TST_RunTitleBarOnlyPack with its own name as the caller
+'     used in log lines and failures
+'   - The pack snapshots the UI state, runs the title-bar cases in
+'     order and restores the UI state and the entry frame style
 '
 ' ERROR POLICY
 '   - Raises on assertion failure after attempting restoration
@@ -193,7 +223,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 
 '
 '------------------------------------------------------------------------------
-'                   TEST EXCEL UI RUN TITLE BAR SDI IDENTITY
+'                       RUN SDI TITLE BAR IDENTITY CASES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that title-bar snapshot restoration targets the window the state was
@@ -209,6 +239,9 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '
 '   The two cases below are the ones that would have caught ICR-UI-P1-01 before
 '   release.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -416,7 +449,7 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 
 '
 '------------------------------------------------------------------------------
-'                         TST RUN TITLE BAR ONLY PACK
+'                      RUN TITLE BAR CASES AND RESTORE UI
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute the dedicated title-bar regression cases and restore the
@@ -432,6 +465,18 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Arms the handler, caches Application.ScreenUpdating and turns it
+'     off
+'   - Logs START under CallerProc
+'   - Snapshots the UI state through TST_SnapshotState and records the
+'     active frame's style through TST_TryGetWindowStyle; a style that
+'     cannot be read is logged, not raised
+'   - Runs the twelve title-bar cases in order and logs PASS
+'   - On every exit restores the UI state and the frame style,
+'     restores ScreenUpdating, records any restoration failure and
+'     raises the captured failure
 '
 ' ERROR POLICY
 '   - Raises after restoration on assertion failure, unexpected error or an
@@ -454,6 +499,11 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_Case_TitleBarApiErrorCapture
 '   - TST_RestoreTitleBarStyle
 '   - TST_RecordCleanupFailure
+'
+' NOTES
+'   The UI state restore goes through the API under test, so the entry
+'   frame style is put back separately through the harness: a defect in
+'   that restore cannot then leave the host with a hidden title bar.
 '
 ' HISTORY
 '   2026-11-18 - Registered the complete-caption cases after the captionless
