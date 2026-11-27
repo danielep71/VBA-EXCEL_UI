@@ -23,9 +23,9 @@ logs are a record of what the other checks printed, bound to the commit by
 The [requirements of certification](EXCEL_CERTIFICATION.md#-requirements)
 apply: 64-bit desktop Excel for Windows, **Trust access to the VBA project
 object model** turned on, a macro setting that lets you enable a workbook's
-macros, Git, a clean checkout, and Python 3.11 or later to validate the
-certification bundle. The script reads the Trust Center settings and never
-changes them.
+macros (not needed with `-Unattended`, which sets the started instance itself),
+Git, a clean checkout, and Python 3.11 or later to validate the certification
+bundle. The script reads the Trust Center settings and never changes them.
 
 Save your work in any open Excel window first. The script starts Excel
 instances of its own, one at a time, and closes only those.
@@ -38,8 +38,12 @@ git status
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Check-EXCEL_UI.ps1
 ```
 
-or double-click `tools\Check-EXCEL_UI.cmd`, which runs the same script and
-keeps the window open at the end.
+or double-click `tools\Check-EXCEL_UI.cmd`. The launcher runs the same script
+with `-Unattended`, so the run needs no key press and no click, and its window
+closes when the run ends; read `summary.txt` in the bundle, or the console if
+you started it from a prompt. To run attended, start the script from a
+PowerShell prompt as above, without `-Unattended`. See [Running
+unattended](#-running-unattended).
 
 | Parameter | Effect |
 | --- | --- |
@@ -48,6 +52,7 @@ keeps the window open at the end.
 | `-IncludeRibbonProbe` | Also runs `Test_EXCEL_UI_RunRibbonSdiProbe`, after the other runners. |
 | `-SlowBuildSeconds <seconds>` | A demo build that takes longer than this is a `WARN`. The default is `10`. |
 | `-Python <exe>` | The Python 3.11+ executable that the certification script validates its bundle with. |
+| `-Unattended` | Runs without any prompt. Passed on to `tools\Certify-EXCEL_UI.ps1`. See [Running unattended](#-running-unattended). |
 | `-RepoRoot <folder>` | The repository. By default, the parent of the `tools` folder. |
 
 The default runners are `Test_EXCEL_UI_RunAll`, `Test_EXCEL_UI_RunCore`,
@@ -63,7 +68,10 @@ ask for it and its step is `INFO` whatever it reports. For example:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Check-EXCEL_UI.ps1 -Runners Test_EXCEL_UI_RunCore,Test_EXCEL_UI_RunTitleBarOnly -IncludeRibbonProbe
 ```
 
-## 🖱️ What you do during the run
+## 🖱️ What you do during an attended run
+
+Without `-Unattended` the script asks as follows; with it, you do nothing, as
+[Running unattended](#-running-unattended) describes.
 
 - **Certification** asks you to click **Enable Content** for the development
   workbook it builds, and to press Enter in the script window. It may also ask
@@ -83,6 +91,8 @@ windows.
 
 ### Avoiding the click
 
+`-Unattended` avoids every click and key press. A trusted location is the
+other way, and it keeps the Trust Center in charge of the macro setting.
 Excel enables the macros of a workbook in a trusted location without asking. To run without any **Enable Content** click, create a folder
 for bundles only, such as `D:\EXCEL_UI-checks`, add it in **File → Options →
 Trust Center → Trust Center Settings → Trusted Locations** with **Subfolders of
@@ -90,6 +100,59 @@ this location are also trusted**, and pass a new subfolder of it as
 `-BundleDir`. The script never configures a trusted location: decide it
 yourself, because every workbook in that folder then runs its macros without
 asking. Do not trust the folder that holds your checkout or your downloads.
+
+## 🤖 Running unattended
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Check-EXCEL_UI.ps1 -Unattended
+```
+
+`tools\Check-EXCEL_UI.cmd` with no arguments does the same. With `-Unattended`
+a run needs no key press and no click from the start to the final `RESULT:`
+line, so you can leave it alone, start it from a scheduled task or run it in a
+remote session. `-Unattended` is also passed to
+`tools\Certify-EXCEL_UI.ps1`, so the certification step does not prompt either.
+
+**What it does.**
+
+- It sets `Application.AutomationSecurity` to `msoAutomationSecurityLow` on
+  each Excel instance the script, or the certification script it runs, starts,
+  before that instance opens its workbook. The macros of the workbook the tool
+  built from the checked-out commit then run without the **Enable Content**
+  message.
+- It records `automation_security` in `session.json` (`host.trust_center`), and
+  in `host.json` of the certification bundle, as `msoAutomationSecurityLow
+  (-Unattended)`. An attended run records `msoAutomationSecurityByUI`.
+  `tools/check_excel_evidence.py` accepts those two values and no other.
+- It never prompts. A wait that runs out fails its step with a message that
+  says why, and the other steps carry on as they do for any failed step.
+
+**What it does not do.**
+
+- It does not change the Trust Center macro setting, **Trust access to the VBA
+  project object model**, the registry or a Trusted Location, and it does not
+  touch an Excel instance it did not start. The setting belongs to the started
+  instance and ends when that instance quits.
+- It does not lower the security of any other workbook: the instance opens only
+  the workbooks the tool built.
+
+**The waits.** Each is bounded:
+
+| Wait | Limit | When it runs out |
+| --- | --- | --- |
+| The workbook macros to answer the readiness call, tried every 2 seconds | 60 seconds | The step fails: the macros did not run although `-Unattended` set `msoAutomationSecurityLow`. A compile error or a blocked file can cause it. |
+| **Debug → Compile VBAProject** to grey out after it ran | 30 seconds | The step fails: the compile could not be confirmed and `-Unattended` never asks you to confirm it in the VBE. |
+
+Excel itself retries a call it rejects as busy for up to 60 seconds, as in an
+attended run. A modal message that Excel shows, such as a compile error
+message, can still hold a call until someone closes it; the script does not
+dismiss dialogs.
+
+**Attended runs.** Without `-Unattended` nothing changes: the instances follow
+the Trust Center macro setting, and the script asks as the section on
+attended runs above describes. I keep certification
+attended unless you give the switch: `tools\Certify-EXCEL_UI.cmd` and both
+scripts ask unless you pass `-Unattended`.
 
 ## 🔁 What it does
 
@@ -108,8 +171,8 @@ cannot run because one it depends on failed is a `FAIL` that says which.
    and the `RESULT:` line of `certification.txt`.
 3. **open-development.** Opens the development workbook of the certification
    bundle, as its `session.json` names it, in an Excel instance of its own
-   that follows the Trust Center macro setting, and waits until its macros
-   run.
+   that follows the Trust Center macro setting (with `-Unattended`, that runs
+   the macros of the workbook), and waits until its macros run.
 4. **One step per runner.** First brings the instance to the foreground,
    activates the workbook and waits up to 10 seconds until
    `Application.ActiveWindow.Hwnd` and `Application.Hwnd` name the same frame.
@@ -128,7 +191,8 @@ cannot run because one it depends on failed is a `FAIL` that says which.
    `tools\Sync-EXCEL_UI-VBA.ps1 -Mode Demo -NewWorkbook` and writes its output
    to `demo-build.log`.
 7. **demo-open** and **demo-compile.** Opens the demo workbook in another
-   Excel instance of its own, waits for **Enable Content**, and runs
+   Excel instance of its own, waits for **Enable Content** (with
+   `-Unattended`, for the macros to answer, for at most 60 seconds), and runs
    **Debug → Compile VBAProject**.
 8. **demo-cleanup-checks.** Runs `Demo_Test_RunCleanupChecks` through
    `Demo_Test_RunLogged`, which writes its scenario lines and its
@@ -159,7 +223,7 @@ Excel instances it started, without saving, and writes the summary.
 | File | Content |
 | --- | --- |
 | `summary.txt` | The commit, the Excel and Windows versions, one line per step and the `RESULT:` line. |
-| `session.json` | The commit; start and end times in UTC and local time, and the duration; the runners and the `-SlowBuildSeconds` threshold; Windows, the Excel version, build and bitness, and the Trust Center settings as found; the certification exit code and `RESULT:` line; the default printer; each step with its status, detail, log, duration and time; the result and the exit code. |
+| `session.json` | The commit; start and end times in UTC and local time, and the duration; the runners and the `-SlowBuildSeconds` threshold; Windows, the Excel version, build and bitness, the Trust Center settings as found, and how the macros were enabled (`automation_security`); the certification exit code and `RESULT:` line; the default printer; each step with its status, detail, log, duration and time; the result and the exit code. |
 | `session.log` | Everything the script printed, apart from the certification script's own output, which is in `certification/session.log`. |
 | `certification/` | The certification bundle, which `tools/check_excel_evidence.py` validates. |
 | `runner-<name>.log` | What the runner printed, then its verdict line. |
