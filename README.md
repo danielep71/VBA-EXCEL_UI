@@ -873,7 +873,7 @@ to tagged GitHub Releases.
 | [SECURITY.md](SECURITY.md) | Security reporting and safe-use boundaries |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Expected conduct and how it is enforced |
 | [AGENTS.md](AGENTS.md) | Instructions for automated coding assistants working in this repository |
-| [docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md) | Rules for the VBA source: exported-source rules, formatter, analyzer, WinAPI error capture, public contracts and Excel state ownership |
+| [docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md) | Rules for the VBA source: exported-source rules, formatter, analyzer, WinAPI error capture, syntax rules, public contracts and Excel state ownership |
 | [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | Base branch, rulesets, pull requests and review threads, repository settings, pinned Actions and Dependabot |
 | [docs/REPOSITORY_STRUCTURE.md](docs/REPOSITORY_STRUCTURE.md) | The file tree and what each directory holds |
 | [docs/ISSUE_LABELS.md](docs/ISSUE_LABELS.md) | Issue labels, priorities, milestones, target dates and the issue workflows |

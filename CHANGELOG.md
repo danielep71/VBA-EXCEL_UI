@@ -175,7 +175,7 @@ measured against that baseline.
 | Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); fast-mode state (#70), ActiveX check boxes (#73) and template validation (#74) corrected and checked on Excel with harness scenarios S15-S44 (2026-11-14); title-bar error capture (#144) and printer-free demo build (#187) checked on Excel with scenarios S45-S48 (2026-11-17) |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | `python3 tools/verify.py --ci` runs every static check, including the 39 checks of `tools/check_repo.py`; the release branch passes |
+| Static validation | `python3 tools/verify.py --ci` runs every static check, including the 40 checks of `tools/check_repo.py`; the release branch passes |
 | Wiki | Last recorded track is v1.1.2; the badge workflow runs from the default branch, with final evidence still pending under #53 |
 | Excel runtime certification | Candidate heads certified on Excel 16.0 build 20430, 64-bit (2026-11-06, 2026-11-14 and 2026-11-17); the final v1.1.3 head is not yet certified |
 | Release status | Not releasable while P1/P2 blockers remain open |
@@ -223,6 +223,28 @@ measured against that baseline.
   `case_manifest` switches this on, and a policy without it still reads the
   earlier contract. No production module changed and the `[supported]` facade is
   unchanged. This was checked by the static gate only; it needs an Excel run.
+- Added the **VBA syntax** check to `tools/check_repo.py`, in `tools/vba_syntax.py`
+  with its fixtures in `tools/vba_syntax_fixtures.py`
+  ([#203](https://github.com/danielep71/VBA-EXCEL_UI/issues/203)). The gate
+  used to read no statement syntax, so a statement Excel cannot compile
+  reached me only when Excel compiled the project on a Windows host. The check
+  reads every module of every configuration of `tools/vba-projects.json`, in
+  VBA7 x64, VBA7 x86 and legacy x86 separately, and fails on an unbalanced
+  parenthesis in a logical statement (continuations joined, strings and
+  comments masked), an `If`, `Select Case`, `With`, `For`, `Do` or `While`
+  block that does not pair up, a statement of more than 24 line continuations,
+  a procedure whose active code reaches 64 KB (comments, blank lines and
+  inactive conditional branches are not counted, so the measure is a
+  conservative proxy of the compiled size, not the compiled size itself),
+  under VBA7 x64 a `LongPtr` expression assigned to a `Long` variable, and a bare variable passed `ByRef` to a
+  parameter of another declared type. A finding names the file, the first
+  physical line, the compilations, the procedure, the rule and the statement.
+  Each rule stays silent where the text does not settle the question, and
+  each has a failing and a passing fixture; the two compile errors of
+  2026-11-18 (`FindingSummary)` closing an argument list nothing opened, and
+  `FixtureOwned = EntryStyle And TST_TITLEBAR_OWNED_MASK`) are fixtures. The
+  check passes on the current modules without suppressions. No VBA module
+  changed. It does not replace `Debug -> Compile VBAProject` on Excel.
 - **Not yet certified.** Release certification now judges cleanup against a
   baseline of the Excel host that it owns, not against four conditions
   ([#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35),

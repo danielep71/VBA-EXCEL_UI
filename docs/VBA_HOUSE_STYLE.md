@@ -148,6 +148,60 @@ cannot observe the error a call leaves, so
 demo's title-bar read follows the same sequence (#144); its gate fixtures also
 prove that a defect in a `src/`, `test/` or `demo/` module is reported.
 
+## VBA syntax rules (#203)
+
+Excel compiles a project only on the Windows host, so a statement that cannot
+compile used to reach me there. The gate's `VBA syntax` check
+(`tools/vba_syntax.py`, with its fixtures in `tools/vba_syntax_fixtures.py`)
+reads every module of every configuration of `tools/vba-projects.json` and
+fails on these six mistakes:
+
+- **Parentheses.** After the continuation lines of a logical statement are
+  joined and its strings and comments are masked, the statement opens or closes
+  more parentheses than it matches. A string or bracketed identifier that never
+  closes is reported as `lexical`.
+- **Blocks.** Inside one procedure, an `If`/`End If`, `Select Case`/`End Select`,
+  `With`/`End With`, `For`/`Next` (including `Next i, j`), `Do`/`Loop` or
+  `While`/`Wend` that does not pair up, or an `Else`, `ElseIf` or `Case` outside
+  its block. Only the first mismatch of a procedure is reported.
+- **Continuations.** A logical statement with more than 24 line continuations.
+- **Procedure size.** A procedure whose active code reaches 64 KB (65,536
+  bytes), from its header to its `End`. Only the code of the compilation being
+  read counts: comment-only lines, trailing comments, blank lines and the text
+  of inactive conditional branches are dropped, and each statement counts its
+  text plus two bytes of line ending. VBA limits the compiled code, which this
+  check cannot see, so the measure is a conservative proxy that stays below the
+  source size, not the compiled size itself.
+- **LongPtr assignment.** Under VBA7 x64, an assignment to a variable declared
+  `Long` of an expression that reads a `LongPtr` variable, such as
+  `FixtureOwned = EntryStyle And TST_TITLEBAR_OWNED_MASK`. The expression must
+  be integer arithmetic over declared variables and constants; wrap it in
+  `CLng(...)`, or declare the target `LongPtr`, so that the rule is silent.
+- **ByRef type.** A bare variable passed to a `ByRef` parameter of another
+  declared scalar type, such as a `Long` passed to a `LongPtr`, in `Call Foo(x)`,
+  `Foo x`, `Foo x:=y` and function calls inside expressions. `Foo(x)` as a whole
+  statement and `Foo (x)` pass by value and are not read.
+
+Each compilation (VBA7 x64, VBA7 x86 and legacy x86) is read separately with the
+same conditional-compilation reader as the analyzer, so an `#If` arm that opens
+a block the other arm does not is judged per arm. A finding names the file, the
+first physical line, the compilations it holds in, the procedure, the rule and
+the statement. `LongPtr` is wider than `Long` only on x64, so the `LongPtr`
+rule reads that compilation alone, and a `Long` passed to a `LongPtr` is
+reported there only.
+
+Every rule stays silent when the text does not settle the question: a call or
+an array element in the expression, a `Variant` or undeclared name, an
+argument that is not a bare variable, a procedure name that two modules
+declare, an inline `If` that ends the line. A rule that stays silent can miss
+a defect; it never reports a statement that compiles. The check passes on the
+current modules without suppressions. A conditional directive it cannot read is
+reported as `unreadable`, never skipped.
+
+`python3 tools/vba_syntax.py` prints the findings and what each compilation
+read. The check is bounded source evidence and does not replace
+`Debug -> Compile VBAProject` on a real Excel host.
+
 ## Public contracts and compatibility
 
 Treat documented procedures, functions, classes, enums, parameters, defaults,
