@@ -23,6 +23,40 @@ Option Explicit
 '   This module bridges the demo sheet controls to the public EXCEL_UI API and
 '   builds the demo surface in a repeatable, presentation-ready way
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Demo_CreateDemoSheet builds the DEMO_UI sheet with its check boxes and
+'     buttons, each button running one of the public Demo_ macros below
+'   - Demo_ShowSelectedUI and Demo_HideSelectedUI read the check boxes and
+'     apply UI_Show or UI_Hide to the checked elements only, through
+'     UI_SetExcelUI
+'   - Demo_SelectAllUI, Demo_ClearAllUI and the three presets only write the
+'     check boxes
+'   - Demo_SyncCheckBoxesToUI reads the current Excel UI state back into the
+'     check boxes
+'   - Demo_CaptureUIState and Demo_ResetUIToCapturedState call the snapshot
+'     API
+'
+' ERROR POLICY
+'   - Demo_CreateDemoSheet raises: an original error keeps its number and
+'     source after the fast-mode cleanup
+'   - Every other public action does NOT raise to callers; failures are
+'     written to the Immediate Window through Demo_LogFailure
+'
+' DEPENDENCIES
+'   - EXCEL_UI public API: UIVisibility, UI_SetExcelUI,
+'     UI_CaptureExcelUIState, UI_ResetExcelUIToSnapshot and
+'     UI_HasExcelUIStateSnapshot
+'   - M_DEMO_BUILDER: the DEMO_ builder, button, check-box and fast-mode
+'     helpers
+'   - user32 GetWindowLong[Ptr] and kernel32 SetLastError, declared privately
+'     for the title-bar read
+'
 ' NOTES
 '   - Window-level sync reads the current ActiveWindow state
 '   - TitleBar SHOW / HIDE acts on the active window's frame: the handle is
@@ -177,7 +211,7 @@ Public Sub Demo_CreateDemoSheet()
 
 '
 '------------------------------------------------------------------------------
-'                            DEMO CREATE DEMO SHEET
+'                               BUILD DEMO SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build or rebuild the Excel UI demo sheet and its interactive control panel
@@ -192,6 +226,9 @@ Public Sub Demo_CreateDemoSheet()
 '
 '   Centralizing that logic keeps the demo easier to rebuild, maintain, and
 '   present
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -230,6 +267,12 @@ Public Sub Demo_CreateDemoSheet()
 '   - DEMO_Set_RangeBorder
 '   - DEMO_CB_AddForms
 '   - Demo_SyncCheckBoxesToUI
+'
+' NOTES
+'   - The RESET SHEET button it adds runs Demo_CreateDemoSheet again, so the
+'     sheet can rebuild itself
+'   - The check box names written here are the CB_ constants that the sync,
+'     apply and selection-profile procedures read back
 '
 ' HISTORY
 '   2026-11-14 - Fast-mode cleanup restores the entry cursor and reports a
@@ -451,7 +494,7 @@ Public Sub Demo_ShowSelectedUI()
 
 '
 '------------------------------------------------------------------------------
-'                            DEMO SHOW SELECTED UI
+'                          SHOW SELECTED UI ELEMENTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Show only the UI elements currently selected by the user on the demo sheet
@@ -459,6 +502,9 @@ Public Sub Demo_ShowSelectedUI()
 ' WHY THIS EXISTS
 '   The demo sheet uses check boxes as a user-friendly selector for which UI
 '   elements should be affected by the EXCEL_UI module
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -468,9 +514,19 @@ Public Sub Demo_ShowSelectedUI()
 '   - Applies UI_Show to selected elements
 '   - Leaves unchecked elements unchanged
 '
+' ERROR POLICY
+'   - Has no handler of its own and does NOT raise to callers: the button
+'     feedback is best effort, and Demo_ApplySelectedUI traps unexpected
+'     failures and writes them to the Immediate Window
+'
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_ApplySelectedUI
+'
+' NOTES
+'   Runs from the button that Demo_CreateDemoSheet adds as btn_UI_Show. The
+'   procedure name it passes to Demo_ApplySelectedUI is the one used in
+'   diagnostics
 '
 ' UPDATED
 '   2026-07-25
@@ -488,7 +544,7 @@ Public Sub Demo_HideSelectedUI()
 
 '
 '------------------------------------------------------------------------------
-'                            DEMO HIDE SELECTED UI
+'                          HIDE SELECTED UI ELEMENTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Hide only the UI elements currently selected by the user on the demo sheet
@@ -496,6 +552,9 @@ Public Sub Demo_HideSelectedUI()
 ' WHY THIS EXISTS
 '   The demo sheet uses check boxes as a user-friendly selector for which UI
 '   elements should be affected by the EXCEL_UI module
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -505,9 +564,19 @@ Public Sub Demo_HideSelectedUI()
 '   - Applies UI_Hide to selected elements
 '   - Leaves unchecked elements unchanged
 '
+' ERROR POLICY
+'   - Has no handler of its own and does NOT raise to callers: the button
+'     feedback is best effort, and Demo_ApplySelectedUI traps unexpected
+'     failures and writes them to the Immediate Window
+'
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_ApplySelectedUI
+'
+' NOTES
+'   Runs from the button that Demo_CreateDemoSheet adds as btn_UI_Hide. The
+'   procedure name it passes to Demo_ApplySelectedUI is the one used in
+'   diagnostics
 '
 ' UPDATED
 '   2026-07-25
@@ -525,7 +594,7 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
     True)
 '
 '------------------------------------------------------------------------------
-'                         DEMO SYNC CHECK BOXES TO UI
+'                         SYNC CHECK BOXES TO UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read the current Excel UI state and synchronize the demo check boxes so
@@ -534,6 +603,12 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 ' WHY THIS EXISTS
 '   A demo is more useful when users can see the current state before deciding
 '   what to show or hide next
+'
+' INPUTS
+'   PlayFeedback
+'     Optional ByVal. TRUE (the default) plays the button-click feedback
+'     first. Demo_CreateDemoSheet and Demo_ResetUIToCapturedState pass FALSE;
+'     the SYNC CHECKBOXES button passes nothing
 '
 ' RETURNS
 '   Nothing
@@ -670,7 +745,7 @@ Public Sub Demo_SelectAllUI()
 
 '
 '------------------------------------------------------------------------------
-'                              DEMO SELECT ALL UI
+'                            SELECT ALL CHECK BOXES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Check all demo check boxes so all managed UI elements are selected for the
@@ -679,12 +754,27 @@ Public Sub Demo_SelectAllUI()
 ' WHY THIS EXISTS
 '   Select All is a useful convenience action during demos and testing
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Calls Demo_SetSelectionProfile with every selection flag TRUE
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
+'
+' NOTES
+'   Only sets the check boxes; it does NOT apply SHOW or HIDE by itself
 '
 ' UPDATED
 '   2026-07-25
@@ -708,7 +798,7 @@ Public Sub Demo_ClearAllUI()
 
 '
 '------------------------------------------------------------------------------
-'                              DEMO CLEAR ALL UI
+'                            CLEAR ALL CHECK BOXES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clear all demo check boxes so no UI elements are selected for the next SHOW
@@ -717,12 +807,27 @@ Public Sub Demo_ClearAllUI()
 ' WHY THIS EXISTS
 '   Clear All is a useful convenience action during demos and testing
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Calls Demo_SetSelectionProfile with every selection flag FALSE
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
+'
+' NOTES
+'   Only clears the check boxes; it does NOT apply SHOW or HIDE by itself
 '
 ' UPDATED
 '   2026-07-25
@@ -745,7 +850,7 @@ Public Sub Demo_PresetKiosk()
 
 '
 '------------------------------------------------------------------------------
-'                              DEMO PRESET KIOSK
+'                             SELECT KIOSK PRESET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Pre-select a broad kiosk-style profile covering all managed UI elements
@@ -754,8 +859,22 @@ Public Sub Demo_PresetKiosk()
 '   A kiosk-like presentation typically considers all major Excel chrome and
 '   worksheet aids as candidate targets
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Calls Demo_SetSelectionProfile with every selection flag TRUE: Ribbon,
+'     StatusBar, ScrollBars, FormulaBar, Headings, WorkbookTabs, Gridlines
+'     and TitleBar
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
@@ -786,7 +905,7 @@ Public Sub Demo_PresetAnalyst()
 
 '
 '------------------------------------------------------------------------------
-'                             DEMO PRESET ANALYST
+'                            SELECT ANALYST PRESET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Pre-select a profile focused on worksheet navigation and analysis aids
@@ -795,8 +914,22 @@ Public Sub Demo_PresetAnalyst()
 '   Analytical use cases often care most about sheet aids such as headings,
 '   tabs, gridlines, formula bar, and related navigation cues
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Checks StatusBar, ScrollBars, FormulaBar, Headings, WorkbookTabs and
+'     Gridlines through Demo_SetSelectionProfile
+'   - Unchecks Ribbon and TitleBar
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
@@ -827,7 +960,7 @@ Public Sub Demo_PresetMinimal()
 
 '
 '------------------------------------------------------------------------------
-'                             DEMO PRESET MINIMAL
+'                            SELECT MINIMAL PRESET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Pre-select a profile focused on major application chrome rather than
@@ -837,8 +970,22 @@ Public Sub Demo_PresetMinimal()
 '   A minimal-shell scenario often focuses on the application frame, bars, and
 '   navigation chrome
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Checks Ribbon, StatusBar, ScrollBars, FormulaBar and TitleBar through
+'     Demo_SetSelectionProfile
+'   - Unchecks Headings, WorkbookTabs and Gridlines
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
@@ -869,7 +1016,7 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
     True)
 '
 '------------------------------------------------------------------------------
-'                            DEMO CAPTURE UI STATE
+'                               CAPTURE UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Capture the current managed Excel UI state through the core module snapshot
@@ -880,6 +1027,11 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
 '     - capture the current baseline
 '     - experiment with show / hide actions
 '     - restore the captured baseline later
+'
+' INPUTS
+'   ShowConfirmation
+'     Optional ByVal. TRUE (the default) shows a message box after the
+'     capture; FALSE captures without one
 '
 ' RETURNS
 '   Nothing
@@ -896,6 +1048,10 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
 '   - DEMO_Btn_PlayFeedback
 '   - UI_CaptureExcelUIState
 '   - Demo_LogFailure
+'
+' NOTES
+'   Runs from the CAPTURE STATE button (btn_UI_CaptureState), which passes no
+'   argument, so the confirmation is shown
 '
 ' UPDATED
 '   2026-07-25
@@ -946,7 +1102,7 @@ Public Sub Demo_ResetUIToCapturedState()
 
 '
 '------------------------------------------------------------------------------
-'                       DEMO RESET UI TO CAPTURED STATE
+'                          RESET UI TO CAPTURED STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restore the managed Excel UI to the most recently captured explicit
@@ -955,6 +1111,9 @@ Public Sub Demo_ResetUIToCapturedState()
 ' WHY THIS EXISTS
 '   The demo becomes more useful when users can experiment safely and then
 '   return to a captured baseline
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -974,6 +1133,12 @@ Public Sub Demo_ResetUIToCapturedState()
 '   - UI_ResetExcelUIToSnapshot
 '   - Demo_SyncCheckBoxesToUI
 '   - Demo_LogFailure
+'
+' NOTES
+'   - Runs from the RESET STATE button (btn_UI_ResetState)
+'   - With no captured state it shows a message box and changes nothing
+'   - Demo_SyncCheckBoxesToUI is called with PlayFeedback FALSE, so the
+'     button feedback plays once, on entry
 '
 ' UPDATED
 '   2026-07-25
@@ -1039,7 +1204,7 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
     CallerProc As String)
 '
 '------------------------------------------------------------------------------
-'                            DEMO APPLY SELECTED UI
+'                         APPLY SELECTED UI VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Shared worker for applying SHOW or HIDE to the UI elements selected on the
@@ -1076,6 +1241,13 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
 '   - Demo_HasAnySelectedChange
 '   - UI_SetExcelUI
 '   - Demo_LogFailure
+'
+' NOTES
+'   - A check box that cannot be read is logged by
+'     Demo_CheckBoxToUIVisibility and counts as unselected, so one missing
+'     control does not stop the others
+'   - With nothing selected it shows a message box and does not call
+'     UI_SetExcelUI
 '
 ' UPDATED
 '   2026-07-25
@@ -1174,7 +1346,7 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
     GridlinesSelected As Boolean, ByVal TitleBarSelected As Boolean)
 '
 '------------------------------------------------------------------------------
-'                          DEMO SET SELECTION PROFILE
+'                      WRITE CHECK BOX SELECTION PROFILE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Set all demo check boxes in one call according to the supplied Boolean
@@ -1192,11 +1364,40 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 '   CallerProc
 '     Public caller procedure name used for diagnostics
 '
-'   [Boolean selection flags]
-'     Requested checked state for each demo check box
+'   RibbonSelected
+'     Requested checked state of the Ribbon check box
+'
+'   StatusBarSelected
+'     Requested checked state of the StatusBar check box
+'
+'   ScrollBarsSelected
+'     Requested checked state of the ScrollBars check box
+'
+'   FormulaBarSelected
+'     Requested checked state of the FormulaBar check box
+'
+'   HeadingsSelected
+'     Requested checked state of the Headings check box
+'
+'   WorkbookTabsSelected
+'     Requested checked state of the WorkbookTabs check box
+'
+'   GridlinesSelected
+'     Requested checked state of the Gridlines check box
+'
+'   TitleBarSelected
+'     Requested checked state of the TitleBar check box
 '
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Resolves the demo worksheet
+'   - Writes each flag to its check box with DEMO_CB_TrySetState, in the
+'     order Ribbon, StatusBar, ScrollBars, FormulaBar, Headings,
+'     WorkbookTabs, Gridlines, TitleBar
+'   - A control that cannot be written is logged under CallerProc and the
+'     remaining controls are still written
 '
 ' ERROR POLICY
 '   - Does NOT raise to callers
@@ -1205,6 +1406,10 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 ' DEPENDENCIES
 '   - DEMO_CB_TrySetState
 '   - Demo_LogFailure
+'
+' NOTES
+'   CallerProc only names the caller in diagnostics; the check box names are
+'   the CB_ constants
 '
 ' UPDATED
 '   2026-07-25
@@ -1282,7 +1487,7 @@ Private Function Demo_HasAnySelectedChange(ByVal RibbonVis As UIVisibility, _
     TitleBarVis As UIVisibility) As Boolean
 '
 '------------------------------------------------------------------------------
-'                         DEMO HAS ANY SELECTED CHANGE
+'                          DETECT ANY SELECTED CHANGE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Determine whether at least one UI element has been selected for change
@@ -1323,7 +1528,7 @@ Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
     CallerProc As String) As UIVisibility
 '
 '------------------------------------------------------------------------------
-'                       DEMO CHECK BOX TO UI VISIBILITY
+'                         MAP CHECK BOX TO VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Convert the checked state of a demo worksheet check box into a tri-state
@@ -1414,7 +1619,7 @@ Private Function Demo_TryGetRibbonVisibility(ByRef IsVisible As Boolean, ByRef _
     FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                        DEMO TRY GET RIBBON VISIBILITY
+'                            READ RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current Ribbon visibility
@@ -1442,6 +1647,16 @@ Private Function Demo_TryGetRibbonVisibility(ByRef IsVisible As Boolean, ByRef _
 ' ERROR POLICY
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
+'
+' DEPENDENCIES
+'   - Application.CommandBars("Ribbon").Visible
+'   - Application.ExecuteExcel4Macro (Get.ToolBar)
+'   - Demo_GetRuntimeErrorText
+'
+' NOTES
+'   FailMsg carries the error of the Excel4 fallback, the last read tried, as
+'   "<number>: <description>"; an unexpected error is reported through
+'   Demo_GetRuntimeErrorText
 '
 ' UPDATED
 '   2026-07-25
@@ -1512,7 +1727,7 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
     FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                      DEMO TRY GET TITLE BAR VISIBILITY
+'                          READ TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current title-bar visibility for the Excel window
@@ -1534,9 +1749,30 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '   TRUE  => title-bar visibility was read successfully
 '   FALSE => read failed
 '
+' BEHAVIOR
+'   - Reads Application.Hwnd and fails when it is zero
+'   - Clears the thread last-error, reads GWL_STYLE with the API of the
+'     compilation branch and captures Err.LastDllError in the next statement
+'   - A zero style with a non-zero captured error is a failure; a zero style
+'     with a zero error is a valid style
+'   - Sets IsVisible when the complete WS_CAPTION mask is set
+'
 ' ERROR POLICY
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
+'
+' DEPENDENCIES
+'   - Application.Hwnd
+'   - Demo_SetLastError (kernel32 SetLastError)
+'   - Demo_GetWindowLongPtr or Demo_GetWindowLong (user32), by compilation
+'     branch
+'   - Err.LastDllError
+'   - Demo_GetRuntimeErrorText
+'
+' NOTES
+'   The read uses this module's own Declare statements and does not call
+'   M_EXCEL_UI_TITLEBAR. It describes the window Application.Hwnd names at the
+'   instant of the call; no handle is kept
 '
 ' WINAPI ERROR CAPTURE
 '   SetLastError 0, the style read into a local and the Err.LastDllError
@@ -1652,7 +1888,7 @@ Private Function Demo_GetRuntimeErrorText() As String
 
 '
 '------------------------------------------------------------------------------
-'                         DEMO GET RUNTIME ERROR TEXT
+'                           BUILD RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a consistent runtime diagnostic string from the active Err object
@@ -1705,7 +1941,7 @@ Private Function Demo_GetRuntimeErrorText() As String
         ErrLine = Erl
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' SUPPRESS FORMATTING ERRORS
 '------------------------------------------------------------------------------
     'Protect callers from any unexpected issue while formatting the diagnostic
         On Error Resume Next
@@ -1723,7 +1959,7 @@ Private Sub Demo_LogFailure(ByVal ProcName As String, ByVal Stage As String, _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                               DEMO LOG FAILURE
+'                       LOG FAILURE TO IMMEDIATE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write a consistent diagnostic line to the Immediate Window for the demo
