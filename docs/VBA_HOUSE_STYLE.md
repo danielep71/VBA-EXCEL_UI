@@ -381,7 +381,12 @@ conditional block and ambiguous renames fail before any file is written. A
 module in which `PROC` also names a procedure, variable, parameter, `Declare` or
 type member outside the procedures that declare `Const PROC` is refused with the
 module name and the line, because renaming it would change a name that other
-code, or an `Application.Run` string, uses. Line endings normalize to CRLF.
+code, or an `Application.Run` string, uses. A member (`Obj.PROC`, `Row!PROC`, a
+`With` line's `.PROC`), an argument label (`PROC:=`) and a bracketed `[PROC]` are
+never renamed. VBA reads names without regard to letter case, so every collision
+is read the same way: `proc_name`, `Proc_Name`, `errorhandler` or `SAFEEXIT`
+already naming something else (or spelled differently beside the label it
+replaces) is refused with the module and the line. Line endings normalize to CRLF.
 
 Before publication, the formatter compares ordered executable tokens and
 statement boundaries, preserving literal bytes and Option statements. Only

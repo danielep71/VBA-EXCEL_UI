@@ -105,6 +105,20 @@ class Comparison(unittest.TestCase):
         before = "Private Sub A()\nConst PROC As String = \"x\"\ny = Obj.PROC\nEnd Sub\n"
         self.assertIn("y = Obj.PROC\n", vba_house.renamed_source(before, "M") + "\n")
 
+    def test_a_field_or_member_named_like_the_constant_is_not_renamed(self) -> None:
+        before = 'Private Sub A()\nConst PROC As String = "x"\ny = Row!PROC\nz = Obj.PROC\nF PROC:=1\nEnd Sub\n'
+        after = vba_house.renamed_source(before, "M")
+        for kept in ("y = Row!PROC", "z = Obj.PROC", "F PROC:=1"):
+            self.assertIn(kept, after)
+        self.assertEqual(executable_signature(before, None, house_style.IDENTIFIER_RENAMES),
+                         executable_signature(before.replace("Const PROC ", "Const PROC_NAME ")))
+
+    def test_a_name_that_differs_only_in_letter_case_collides(self) -> None:
+        text = ('Private proc_name As String\nPrivate Sub A()\nConst PROC As String = "x"\n'
+                "Debug.Print proc_name\nEnd Sub\n")
+        with self.assertRaisesRegex(LexicalError, "M line 1"):
+            vba_house.renamed_source(text, "M")
+
     def test_the_rename_stops_at_the_procedure_that_declares_the_constant(self) -> None:
         text = (self.BEFORE + "Public Sub B()\nEnd Sub\n")
         self.assertIn("Const PROC_NAME", vba_house.renamed_source(text, "M"))

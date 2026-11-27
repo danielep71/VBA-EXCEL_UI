@@ -169,9 +169,34 @@ def rename_labels(lines: list[str], label_map: dict[str, str]) -> list[str]:
     return out
 
 
-PROC_TOKEN = re.compile(r"(?<![\w.])" + hs.PROC_CONSTANT_OLD + r"(?!\w)")
-PROC_NAME_TOKEN = re.compile(r"(?<![\w.])" + hs.PROC_CONSTANT + r"(?!\w)")
 CONST_PROC_RE = re.compile(r"\s*Const\s+" + hs.PROC_CONSTANT_OLD + r"\s+As\b", re.I)
+
+
+def standalone(code: str, word: str) -> list[re.Match[str]]:
+    """The places where ``word`` stands as a name of its own in masked code, in any letter case.
+
+    VBA reads names without regard to case, so ``proc_name`` is ``PROC_NAME``.
+    A name after a dot or a bang is a member (``obj.PROC``, ``row!PROC``, a
+    ``With`` line's ``.PROC``) and a name before ``:=`` is an argument label;
+    neither refers to a variable, so neither counts.
+    """
+    found = []
+    for m in re.finditer(r"(?<!\w)" + re.escape(word) + r"(?!\w)", code, re.I):
+        before = code[:m.start()].rstrip()
+        if before.endswith((".", "!")) or code[m.end():].lstrip().startswith(":="):
+            continue
+        found.append(m)
+    return found
+
+
+def replace_standalone(part: str, word: str, new: str) -> str:
+    out, last = [], 0
+    for m in standalone(part, word):
+        out.append(part[last:m.start()])
+        out.append(new)
+        last = m.end()
+    out.append(part[last:])
+    return "".join(out)
 
 
 def proc_constant_scopes(raw: list[str], conditional: set[int]) -> list[tuple[int, int]]:
@@ -181,33 +206,47 @@ def proc_constant_scopes(raw: list[str], conditional: set[int]) -> list[tuple[in
             if any(CONST_PROC_RE.match(code_only(raw[n])) for n in range(sig, end + 1))]
 
 
+def migrated_lines(raw: list[str], conditional: set[int], declaring: set[int]) -> set[int]:
+    """Lines of procedures that already declare ``Const PROC_NAME`` and not ``Const PROC``."""
+    lines = [Ln(t.rstrip(), n in conditional) for n, t in enumerate(raw)]
+    done: set[int] = set()
+    for sig, end in procedure_spans(lines):
+        span = range(sig, end + 1)
+        if not declaring.intersection(span) and any(
+                re.match(r"\s*Const\s+" + hs.PROC_CONSTANT + r"\s+As\b", code_only(raw[n]), re.I) for n in span):
+            done.update(span)
+    return done
+
+
 def rename_proc_constant(raw: list[str], conditional: set[int], module_name: str) -> list[str]:
     """Rename PROC to PROC_NAME inside the procedures that declare ``Const PROC``, and only there.
 
     A procedure's constant is local to it, so another procedure, variable,
     parameter, Declare or type member that is also called PROC is a different
-    thing. Where one exists outside those procedures the module is refused,
-    with its line, rather than renamed along with the constant.
+    thing; where one exists outside those procedures the module is refused,
+    with its line, rather than renamed along with the constant. The same goes
+    for PROC_NAME, in any letter case: the new name would be shadowed by, or
+    would shadow, whatever already carries it.
     """
     scopes = proc_constant_scopes(raw, conditional)
     if not scopes:
         return raw
     inside = {n for sig, end in scopes for n in range(sig, end + 1)}
+    migrated = migrated_lines(raw, conditional, inside)
     out = list(raw)
     for n, line in enumerate(raw):
         code = code_only(line)
-        if n not in inside:
-            if PROC_TOKEN.search(code):
-                raise LexicalError(
-                    f"{module_name} line {n + 1}: {hs.PROC_CONSTANT_OLD} names something other than the "
-                    f"constant of its own procedure; rename it before moving the constant to "
-                    f"{hs.PROC_CONSTANT}")
-        elif PROC_NAME_TOKEN.search(code):
+        if n not in inside and standalone(code, hs.PROC_CONSTANT_OLD):
             raise LexicalError(
-                f"{module_name} line {n + 1}: {hs.PROC_CONSTANT} already stands in a procedure that "
-                f"declares {hs.PROC_CONSTANT_OLD}; ambiguous identifier mapping")
-        else:
-            out[n] = transform_code(line, lambda part: PROC_TOKEN.sub(hs.PROC_CONSTANT, part))
+                f"{module_name} line {n + 1}: {hs.PROC_CONSTANT_OLD} names something other than the "
+                f"constant of its own procedure; rename it before moving the constant to "
+                f"{hs.PROC_CONSTANT}")
+        if n not in migrated and standalone(code, hs.PROC_CONSTANT):
+            raise LexicalError(
+                f"{module_name} line {n + 1}: {hs.PROC_CONSTANT} (in any letter case) already names "
+                f"something that the constant of a procedure would shadow or be shadowed by")
+        if n in inside:
+            out[n] = transform_code(line, lambda part: replace_standalone(part, hs.PROC_CONSTANT_OLD, hs.PROC_CONSTANT))
     return out
 
 
@@ -219,19 +258,48 @@ def renamed_source(text: str, module_name: str) -> str:
     return "\n".join(rename_proc_constant(raw, conditional, module_name))
 
 
-def check_renames(lines: list[str], label_map: dict[str, str], protected: set[int]) -> None:
-    """Refuse a rename that is ambiguous or crosses text the formatter does not edit."""
-    code = "\n".join(code_only(ln) for ln in lines)
+def check_renames(lines: list[str], label_map: dict[str, str], protected: set[int], module_name: str) -> None:
+    """Refuse a rename that is ambiguous, collides with a name or crosses text the formatter does not edit.
+
+    Collisions are read without regard to letter case, as VBA reads them: a
+    variable called ``errorhandler`` collides with the label ErrorHandler, and
+    a label spelled ``SAFEEXIT`` beside ``Safe_Exit`` is two spellings of one.
+    """
+    masked = [code_only(ln) for ln in lines]
     targets: dict[str, set[str]] = {}
     for old, new in label_map.items():
         targets.setdefault(new, {new}).add(old)
     for new, spellings in targets.items():
-        present = sorted(s for s in spellings if re.search(r"\b" + re.escape(s) + r"\b", code))
+        found: dict[str, int] = {}
+        for n, code in enumerate(masked):
+            for spelling in spellings:
+                for m in standalone(code, spelling):
+                    found.setdefault(m.group(0), n)
+        odd = sorted(s for s in found if s not in spellings)
+        if odd:
+            raise LexicalError(f"{module_name} line {found[odd[0]] + 1}: {odd[0]} is {new} in another letter case; "
+                               f"spell it as {new} or as its previous name before formatting")
+        present = sorted(found)
         if len(present) > 1 and any(s != new for s in present):
-            raise LexicalError(f"ambiguous label mapping {'/'.join(present)}")
+            raise LexicalError(f"{module_name} line {found[present[-1]] + 1}: ambiguous label mapping "
+                               f"{'/'.join(present)}")
+        for n, code in enumerate(masked):
+            for m in standalone(code, new):
+                if not is_label_use(code, m):
+                    raise LexicalError(f"{module_name} line {n + 1}: {new} already names something that is not "
+                                       f"a label; the label would collide with it")
     for old in label_map:
-        if any(re.search(r"\b" + re.escape(old) + r"\b", code_only(lines[i])) for i in protected):
-            raise LexicalError(f"unsupported label {old} in preserved region")
+        for i in protected:
+            if standalone(masked[i], old):
+                raise LexicalError(f"{module_name} line {i + 1}: unsupported label {old} in preserved region")
+
+
+def is_label_use(code: str, m: re.Match[str]) -> bool:
+    """Whether the name at ``m`` is a label definition or the target of GoTo or Resume."""
+    before = code[:m.start()].rstrip()
+    if re.search(r"(?:\bGoTo|\bResume)$", before, re.I):
+        return True
+    return before == "" and code[m.end():].lstrip().startswith(":") and not code[m.end():].lstrip().startswith(":=")
 
 
 # --------------------------------------------------------------------------
@@ -1076,7 +1144,7 @@ def format_module(text: str, module_name: str) -> tuple[str, list[Todo]]:
     protected, _ = protected_lines(raw)
     conditional = conditional_lines(raw)
     label_map = dict(hs.LABEL_RENAMES)
-    check_renames(raw, label_map, protected)
+    check_renames(raw, label_map, protected, module_name)
     raw = rename_labels(raw, label_map)
     raw = rename_proc_constant(raw, conditional, module_name)
     todos: list[Todo] = []

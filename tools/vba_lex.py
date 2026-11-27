@@ -135,7 +135,9 @@ def executable_signature(
         if not tokens:
             continue
         for i, (kind, value) in enumerate(tokens):
-            if kind == 'code' and value in identifier_map and not (i > 0 and tokens[i-1] == ('code', '.')):
+            member = i > 0 and tokens[i-1] in (('code', '.'), ('code', '!'))
+            labelled = tokens[i+1:i+3] == [('code', ':'), ('code', '=')]
+            if kind == 'code' and value in identifier_map and not member and not labelled:
                 tokens[i] = ('code', identifier_map[value])
                 continue
             if kind != 'code' or value not in label_map:

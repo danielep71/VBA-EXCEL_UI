@@ -727,6 +727,84 @@ def proc_scope_failures() -> list[str]:
     return failures
 
 
+MEMBERS = (
+    'Private Sub First()\r\n'
+    '    Const PROC As String = "M_PROBE.First"\r\n'
+    "    Dim Row As Object\r\n"
+    "    X = Row!PROC\r\n"
+    "    X = Row ! PROC\r\n"
+    "    X = Obj.PROC\r\n"
+    "    With Obj\r\n"
+    "        .PROC = 1\r\n"
+    "    End With\r\n"
+    "    Other PROC:=1\r\n"
+    "    X = [PROC]\r\n"
+    '    Msg = "PROC"\r\n'
+    "    Err.Raise 5, PROC, Msg\r\n"
+    "    Err.Raise 5, proc, Msg\r\n"
+    "End Sub\r\n"
+)
+
+LABELS_ONLY = (
+    "Private Sub A()\r\n"
+    "    On Error GoTo Err_Handler\r\n"
+    "    Exit Sub\r\n"
+    "Err_Handler:\r\n"
+    "End Sub\r\n"
+)
+
+
+def member_failures() -> list[str]:
+    """Only the constant is renamed: never a member, a field, a label or a bracketed name."""
+    failures: list[str] = []
+    head = 'Attribute VB_Name = "M_PROBE"\r\nOption Explicit\r\n\r\n'
+    text, _ = vba_house.format_module(head + MEMBERS, "M_PROBE")
+    lines = [line.strip() for line in text.split("\r\n")]
+    for kept in ("X = Row!PROC", "X = Row ! PROC", "X = Obj.PROC", ".PROC = 1", "Other PROC:=1", "X = [PROC]",
+                 'Msg = "PROC"'):
+        if kept not in lines:
+            failures.append(f"members: {kept!r} must not be renamed")
+    if lines.count("Err.Raise 5, PROC_NAME, Msg") != 2:
+        failures.append("members: the constant itself, in either letter case, becomes PROC_NAME")
+    return failures
+
+
+def collision_failures() -> list[str]:
+    """A new name that another name already carries, in any letter case, is refused with its line."""
+    failures: list[str] = []
+    head = 'Attribute VB_Name = "M_PROBE"\r\nOption Explicit\r\n\r\n'
+    const = 'Private Sub First()\r\n    Const PROC As String = "M_PROBE.First"\r\n{}End Sub\r\n'
+    cases = [
+        ("a module-level proc_name", "Private proc_name As String\r\n\r\n" + const.format("    Debug.Print proc_name\r\n")),
+        ("a procedure called Proc_Name", const.format("") + "\r\nPublic Sub Proc_Name()\r\nEnd Sub\r\n"),
+        ("a local Dim Proc_Name beside Const PROC", const.format("    Dim Proc_Name As Long\r\n")),
+        ("a variable errorhandler beside Err_Handler", "Private errorhandler As Long\r\n\r\n" + LABELS_ONLY),
+        ("a label errorhandler: beside Err_Handler:", LABELS_ONLY.replace("Err_Handler:", "errorhandler:\r\nErr_Handler:")),
+        ("a label SAFEEXIT: beside Safe_Exit:", LABELS_ONLY.replace("Err_Handler:", "Safe_Exit:\r\nSAFEEXIT:")),
+        ("a variable SafeExit that is not a label", "Private SafeExit As Long\r\n\r\n" + LABELS_ONLY),
+        ("a Type member called CleanFail", "Private Type T\r\n    CleanFail As Long\r\nEnd Type\r\n\r\n" + LABELS_ONLY),
+    ]
+    for label, body in cases:
+        try:
+            vba_house.format_module(head + body, "M_PROBE")
+            failures.append(f"collision: {label} must be refused")
+        except LexicalError as exc:
+            if "M_PROBE line " not in str(exc):
+                failures.append(f"collision: {label} is refused without module and line: {exc}")
+    for label, body in [
+        ("names that merely contain the new ones", "Private ErrorHandlerCount As Long\r\nPrivate Proc_Names As Long\r\n\r\n"
+         + const.format("    Debug.Print Proc_Names\r\n")),
+        ("a procedure that already carries Const PROC_NAME", const.format("") + "\r\n"
+         + const.format("").replace("Const PROC As", "Const PROC_NAME As").replace("First", "Second")),
+        ("labels that already have their house names", LABELS_ONLY.replace("Err_Handler", "ErrorHandler")),
+    ]:
+        try:
+            vba_house.format_module(head + body, "M_PROBE")
+        except LexicalError as exc:
+            failures.append(f"collision: {label} must pass: {exc}")
+    return failures
+
+
 def module_failures() -> list[str]:
     failures: list[str] = []
     text, todos = vba_house.format_module(LEGACY_MODULE, "M_PROBE")
@@ -794,4 +872,5 @@ def default_failures() -> list[str]:
 def house_selftest() -> list[str]:
     """Failure descriptions of the house-style formatter; empty means every rule holds."""
     return (case_failures() + header_failures() + refusal_failures() + module_failures()
-            + cli_failures() + default_failures() + proc_scope_failures())
+            + cli_failures() + default_failures() + proc_scope_failures() + member_failures()
+            + collision_failures())
