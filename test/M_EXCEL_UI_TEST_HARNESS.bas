@@ -19,6 +19,37 @@ Option Private Module
 '   configuration constants and error-number bases, and the module-level
 '   state that more than one suite reads or writes
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Declares the test configuration constants, the error-number bases and
+'     the WinAPI declarations of the title-bar style helpers.
+'   - Holds the module-level state: the certification record and its faults,
+'     the post-capture fault and the log sink.
+'   - Runs no code when the module loads; the suites call its Public members.
+'
+' ERROR POLICY
+'   - Assertion helpers raise errors in the TEST_ERR_BASE,
+'     TEST_SNAPSHOT_ID_ERR_BASE and TEST_TITLEBAR_SDI_ERR_BASE ranges, with the
+'     assertion name as the source.
+'   - The reading, writing, restoring and recording helpers do not raise. They
+'     report a failure through a Boolean result, a message, a structured
+'     finding or the record's RecordFailed flag.
+'
+' DEPENDENCIES
+'   - Excel object model: Application, Window and CommandBars
+'   - user32: GetWindowLongPtr / GetWindowLong, SetWindowLongPtr /
+'     SetWindowLong and SetWindowPos; kernel32: SetLastError
+'   - M_EXCEL_UI: UI_SetExcelUI_WithResult, UI_HasExcelUIStateSnapshot and the
+'     UIVisibility enumeration
+'
+' NOTES
+'   None
+'
 ' PUBLIC SURFACE
 '   None of its own. Members that a suite module calls are Public so that the
 '   other modules of the same VBA project can reach them; Option Private
@@ -8734,7 +8765,7 @@ Public Sub TST_AssertFailureListContainsPrefix( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                   TST ASSERT FAILURE LIST CONTAINS PREFIX
+'                        ASSERT FAILURE LIST HAS PREFIX
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert a structured result reported failure and that at least one ordered
@@ -8766,9 +8797,24 @@ Public Sub TST_AssertFailureListContainsPrefix( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_TITLEBAR_SDI_ERR_BASE + 50 when Succeeded is TRUE, + 51 when
+'     FailureCount is below 1 and + 52 when FailureList is not an array.
+'   - Scans every entry, converted with CStr, for one that begins with
+'     ExpectedPrefix.
+'   - Raises + 53 when none does.
+'   - Each error has AssertionName as its source and carries the text of
+'     TST_DescribeResultBuffers.
+'
 ' ERROR POLICY
 '   - Raises a descriptive assertion failure, with the failure count and list
 '     the call returned.
+'
+' DEPENDENCIES
+'   - TST_DescribeResultBuffers
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_Case_TitleBarCapturedFrameClosedIsReported
@@ -8852,7 +8898,7 @@ Public Sub TST_Log( _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                                   TST LOG
+'                            WRITE DIAGNOSTIC LINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write a consistent diagnostic line to the Immediate Window for the
@@ -8876,10 +8922,22 @@ Public Sub TST_Log( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Joins "<ProcName> @ <Stage> | <Detail>".
+'   - Prints the line with Debug.Print.
+'   - Passes the line to TST_LogSinkWriteLine, which writes nothing when no
+'     sink is set.
+'
 ' ERROR POLICY
 '   - Suppresses any unexpected logging failure locally
 '   - A failed sink write is kept by TST_LogSinkWriteLine for the caller's
 '     verdict; it never reaches the caller of TST_Log
+'
+' DEPENDENCIES
+'   - TST_LogSinkWriteLine
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' HISTORY
 '   2026-11-16 - Mirrors the line to the opt-in log sink (#197).
@@ -8917,7 +8975,7 @@ Public Sub TST_LogSinkStart(ByVal LogPath As String)
 
 '
 '------------------------------------------------------------------------------
-'                              TST LOG SINK START
+'                                START LOG SINK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name the file that TST_Log mirrors its lines to from now on
@@ -8942,6 +9000,12 @@ Public Sub TST_LogSinkStart(ByVal LogPath As String)
 ' ERROR POLICY
 '   - Does not raise
 '
+' DEPENDENCIES
+'   None beyond the module-level m_LogSinkPath and m_LogSinkFailure.
+'
+' NOTES
+'   None
+'
 ' CALLED FROM
 '   - TST_RunRunnerWithLog
 '
@@ -8964,7 +9028,7 @@ Public Function TST_LogSinkStop() As String
 
 '
 '------------------------------------------------------------------------------
-'                              TST LOG SINK STOP
+'                                STOP LOG SINK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Stop mirroring TST_Log lines and report whether every write succeeded
@@ -8972,6 +9036,9 @@ Public Function TST_LogSinkStop() As String
 ' WHY THIS EXISTS
 '   A failed write must not fail or interrupt the runner being logged, but it
 '   must not be lost either: the caller puts it in its verdict
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   String
@@ -8983,6 +9050,12 @@ Public Function TST_LogSinkStop() As String
 '
 ' ERROR POLICY
 '   - Does not raise
+'
+' DEPENDENCIES
+'   None beyond the module-level m_LogSinkPath and m_LogSinkFailure.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RunRunnerWithLog
@@ -9008,7 +9081,7 @@ Public Sub TST_LogSinkWriteLine(ByVal LineText As String)
 
 '
 '------------------------------------------------------------------------------
-'                           TST LOG SINK WRITE LINE
+'                           APPEND LINE TO LOG SINK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Append one line to the log sink as UTF-8, when a sink is set
@@ -9033,6 +9106,13 @@ Public Sub TST_LogSinkWriteLine(ByVal LineText As String)
 '   - Does not raise. The first failure is kept for TST_LogSinkStop and ends
 '     writing until the next TST_LogSinkStart, so an unwritable file costs
 '     one failed attempt, not one per line
+'
+' DEPENDENCIES
+'   - TST_LogSinkEncode
+'   - VBA FreeFile, Open, Put, LOF and Close
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_Log
@@ -9112,7 +9192,7 @@ Private Function TST_LogSinkEncode(ByVal LineText As String) As Byte()
 
 '
 '------------------------------------------------------------------------------
-'                             TST LOG SINK ENCODE
+'                           ENCODE LOG LINE AS UTF 8
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return one log line as UTF-8 bytes followed by CR LF
@@ -9131,9 +9211,22 @@ Private Function TST_LogSinkEncode(ByVal LineText As String) As Byte()
 '   The UTF-8 bytes of LineText, then CR LF. A UTF-16 surrogate that is not
 '   part of a pair is written as U+FFFD
 '
+' BEHAVIOR
+'   - Sizes the buffer at three bytes per UTF-16 code unit plus two.
+'   - Walks the code units. A high surrogate followed by a low surrogate
+'     becomes one scalar value; a lone surrogate becomes U+FFFD.
+'   - Writes each scalar value as one to four UTF-8 bytes.
+'   - Appends CR LF and trims the buffer to the bytes written.
+'
 ' ERROR POLICY
 '   - Raises only when memory runs out; TST_LogSinkWriteLine keeps that as a
 '     write failure
+'
+' DEPENDENCIES
+'   - VBA AscW
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-16 - Added for the scripted Excel checks (#197).
@@ -9227,7 +9320,7 @@ Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double
 
 '
 '------------------------------------------------------------------------------
-'                          TST TIMER ELAPSED SECONDS
+'                           COMPUTE ELAPSED SECONDS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return elapsed seconds since a Timer baseline, handling midnight rollover
@@ -9281,7 +9374,7 @@ Public Function TST_TitleBarMode( _
     ByVal RequestedMode As UIVisibility) As UIVisibility
 '
 '------------------------------------------------------------------------------
-'                              TST TITLE BAR MODE
+'                            CHOOSE TITLE BAR MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the effective TitleBar mode for a test case based on whether the
@@ -9303,8 +9396,18 @@ Public Function TST_TitleBarMode( _
 ' RETURNS
 '   Effective TitleBar mode for the test case
 '
+' BEHAVIOR
+'   - Returns RequestedMode when IncludeTitleBarTests is TRUE.
+'   - Otherwise returns UI_LeaveUnchanged.
+'
 ' ERROR POLICY
 '   - Does NOT raise
+'
+' DEPENDENCIES
+'   - UIVisibility and UI_LeaveUnchanged, from M_EXCEL_UI
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -9330,10 +9433,14 @@ Public Sub TST_AssertSnapshotWindowState( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT SNAPSHOT WINDOW STATE
+'                         ASSERT WINDOW MANAGED STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the three window-level Boolean properties managed by EXCEL_UI
+'
+' WHY THIS EXISTS
+'   Snapshot and restore cases check the three window-level properties that
+'   EXCEL_UI manages. One helper compares them and names the one that differs.
 '
 ' INPUTS
 '   TargetWindow
@@ -9354,8 +9461,22 @@ Public Sub TST_AssertSnapshotWindowState( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_SNAPSHOT_ID_ERR_BASE + 10 when TargetWindow is Nothing.
+'   - Compares DisplayHeadings, DisplayWorkbookTabs and DisplayGridlines with
+'     the expected values, in that order, and raises TEST_SNAPSHOT_ID_ERR_BASE
+'     + 11, + 12 or + 13 on the first one that differs. The description names
+'     the expected and the actual value.
+'   - Each error has AssertionName as its source.
+'
 ' ERROR POLICY
 '   - Raises on a missing target or property mismatch
+'
+' DEPENDENCIES
+'   - Window.DisplayHeadings, DisplayWorkbookTabs and DisplayGridlines
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -9418,7 +9539,7 @@ Public Function TST_BuildApiFailureText( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                          TST BUILD API FAILURE TEXT
+'                            BUILD API FAILURE TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build the failure text for a native call that reported an error, in the
@@ -9446,8 +9567,18 @@ Public Function TST_BuildApiFailureText( _
 ' RETURNS
 '   "<API> failed; operation=<operation>; LastDllError=<n>; hWnd=<h>"
 '
+' BEHAVIOR
+'   - Joins "<ApiName> failed; operation=<Operation>; LastDllError=<DllError>;
+'     hWnd=<TargetHwnd>".
+'
 ' ERROR POLICY
 '   - Does NOT raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-11-06
@@ -9473,7 +9604,7 @@ Public Function TST_BuildRuntimeErrorText() As String
 
 '
 '------------------------------------------------------------------------------
-'                         TST BUILD RUNTIME ERROR TEXT
+'                           BUILD RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a consistent runtime diagnostic string from the active Err object
@@ -9483,6 +9614,9 @@ Public Function TST_BuildRuntimeErrorText() As String
 '   Centralizing the formatting keeps the harness consistent and easier to
 '   maintain
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   A formatted diagnostic string including:
 '     - Err.Number
@@ -9490,9 +9624,23 @@ Public Function TST_BuildRuntimeErrorText() As String
 '     - Err.Source, when available
 '     - Erl, when available
 '
+' BEHAVIOR
+'   - Copies Err.Number, Err.Description, Err.Source and Erl to locals before
+'     any On Error statement.
+'   - Arms On Error Resume Next.
+'   - Returns "<number>: <description>", followed by " | Source: <source>"
+'     when the source is not empty and " | Line: <n>" when Erl is not 0.
+'
 ' ERROR POLICY
 '   - Does NOT raise
 '   - Returns best-effort text
+'
+' DEPENDENCIES
+'   None beyond the Err object and Erl.
+'
+' NOTES
+'   It reads Err before any On Error statement, because every On Error
+'   statement clears it.
 '
 ' UPDATED
 '   2026-07-25
@@ -9509,7 +9657,7 @@ Public Function TST_BuildRuntimeErrorText() As String
     Dim ErrLine         As Long     'Erl captured on entry
 
 '------------------------------------------------------------------------------
-' CAPTURE ERR STATE
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Read the Err object BEFORE any On Error statement. Any form of On Error
     'resets Err, so protecting this routine first would blank the very values
@@ -9520,7 +9668,7 @@ Public Function TST_BuildRuntimeErrorText() As String
         ErrLine = Erl
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' SUPPRESS FORMATTING ERRORS
 '------------------------------------------------------------------------------
     'Protect callers from any unexpected issue while formatting the diagnostic
         On Error Resume Next
