@@ -17,11 +17,44 @@ Option Private Module
 '   It and the combined pack are the only runners that span every suite, so
 '   they live above the suite modules rather than in any one of them
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Test_EXCEL_UI_RunReleaseCertification runs every mandatory unit and
+'     reports one verdict with its evidence. Test_EXCEL_UI_RunAll and
+'     Test_EXCEL_UI_RunCore run the regression pack on its own.
+'   - TST_RunRegressionPack snapshots the UI state, runs the cases through
+'     TST_CertRunCase and restores the state afterwards.
+'   - TST_CertRunCase and TST_CertDispatchCase run one case by its stable
+'     identifier, and record its start and one terminal status while
+'     certification is active.
+'   - The other TST_Cert* procedures capture the host baseline, compare the exit
+'     state with it, run and record the units, and hold the case manifest.
+'   - The TST_Case_* procedures and their TST_CertCheck* helpers check the
+'     certification machinery itself.
+'
+' ERROR POLICY
+'   - The runners raise after cleanup: release certification once, at the end,
+'     when the verdict is not PASS | COMPLETE, with the verdict and the findings
+'     in the error; the packs after restoration, on a failed assertion, an
+'     unexpected error or an incomplete restoration.
+'   - The capture, comparison and recording procedures do not raise: a failure
+'     is a finding, or flags the record, which forces FAIL | INCOMPLETE.
+'
 ' DEPENDENCIES
 '   - M_EXCEL_UI_TEST_HARNESS
 '   - M_EXCEL_UI_TEST_RUNTIME
 '   - M_EXCEL_UI_TEST_SNAPSHOT
 '   - M_EXCEL_UI_TEST_TITLEBAR
+'
+' NOTES
+'   The runners are destructive: they create and close temporary workbooks and
+'   toggle every managed UI element, so save unsaved work before running them.
+'   Run them with no explicit EXCEL_UI snapshot held.
 '
 ' PUBLIC SURFACE
 '   - Test_EXCEL_UI_RunAll
@@ -223,7 +256,7 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 
 '
 '------------------------------------------------------------------------------
-'                  TEST EXCEL UI RUN CERTIFICATION SELF TEST
+'                 VERIFY CERTIFICATION FAILURE REACHES CALLER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a failure inside release certification reaches the caller with
@@ -239,6 +272,9 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '   run without being noticed. Only the raise was missing, and nothing asserted
 '   the raise.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
@@ -251,6 +287,16 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '
 ' ERROR POLICY
 '   - Raises on assertion failure, after cleanup.
+'
+' DEPENDENCIES
+'   - Test_EXCEL_UI_RunReleaseCertification
+'   - UI_HasExcelUIStateSnapshot
+'   - UI_CaptureExcelUIState
+'   - UI_ClearExcelUIStateSnapshot
+'   - TST_TakePostCaptureFault
+'   - TST_AssertTrue
+'   - TST_WaitUI
+'   - TST_Log
 '
 ' NOTES
 '   Asserting a non-empty description matters as much as the number. The
@@ -304,7 +350,7 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
     Dim CreatedSnapshot As Boolean  'TRUE once this run owns one
 
 '------------------------------------------------------------------------------
-' VALIDATE PRECONDITIONS
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Refuse to destroy a snapshot the caller is relying on. Capturing below
     'replaces any existing snapshot outright, and the cleanup discards what it
@@ -324,9 +370,6 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
                 "restore it before running this destructive test"
         End If
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
         CreatedSnapshot = False
 
         On Error GoTo ErrorHandler
@@ -451,7 +494,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 
 '
 '------------------------------------------------------------------------------
-'                   TEST EXCEL UI RUN RELEASE CERTIFICATION
+'                          RUN RELEASE CERTIFICATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute every mandatory regression unit in one pass and emit an unambiguous
@@ -474,6 +517,9 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   mandatory unit is a failure rather than a quiet log line, the host state is
 '   verified after the run rather than assumed, and the environment the result
 '   was obtained on is recorded alongside it.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -600,7 +646,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
     Dim FailLine        As Long     'Error line captured on entry
 
 '------------------------------------------------------------------------------
-' GUARD RE-ENTRY
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Refuse a nested run BEFORE arming the handler or touching any counter. A
     'nested invocation would reset the outer run's unit records and clear
@@ -619,9 +665,6 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
     'it, however the call ends
         FaultKind = TST_CertTakeRunFault()
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
         On Error GoTo ErrorHandler
 
         TST_CertResetCounters
@@ -909,7 +952,7 @@ Private Sub TST_CertRunUnit( _
     ByVal UnitName As String)
 '
 '------------------------------------------------------------------------------
-'                              TST CERT RUN UNIT
+'                          RUN ONE CERTIFICATION UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute one mandatory certification unit and record its outcome without
@@ -989,7 +1032,7 @@ Private Sub TST_CertRecordOutcome( _
     ByVal LeftSnapshot As Boolean)
 '
 '------------------------------------------------------------------------------
-'                           TST CERT RECORD OUTCOME
+'                            RECORD A UNIT OUTCOME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record the outcome of one unit and, when it left a snapshot behind, record
@@ -1052,7 +1095,7 @@ Private Sub TST_CertRunIsolatedUnit( _
     ByRef Outcome As tCertIsolated)
 '
 '------------------------------------------------------------------------------
-'                          TST CERT RUN ISOLATED UNIT
+'                        RUN A UNIT OUTSIDE THE RECORD
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute one unit outside the live certification record and hold its
@@ -1120,7 +1163,7 @@ Private Sub TST_CertRecordIsolatedUnit( _
     ByRef Outcome As tCertIsolated)
 '
 '------------------------------------------------------------------------------
-'                        TST CERT RECORD ISOLATED UNIT
+'                           RECORD AN ISOLATED UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record an isolated unit and its one case in the live record, once that
@@ -1187,7 +1230,7 @@ Private Sub TST_CertExecuteUnit( _
     ByRef LeftSnapshot As Boolean)
 '
 '------------------------------------------------------------------------------
-'                            TST CERT EXECUTE UNIT
+'                   EXECUTE A UNIT AND RELEASE ITS SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one unit under its own error boundary and release any snapshot it left
@@ -1391,7 +1434,7 @@ Private Sub TST_CertSelfTestCaptureFailureUnit()
 
 '
 '------------------------------------------------------------------------------
-'                   TST CERT SELF TEST CAPTURE FAILURE UNIT
+'                             FAIL AFTER A CAPTURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Fail the way the first real-host certification run failed: an assertion
@@ -1465,7 +1508,7 @@ Private Sub TST_CertSelfTestFollowingUnit()
 
 '
 '------------------------------------------------------------------------------
-'                      TST CERT SELF TEST FOLLOWING UNIT
+'                       STAND IN FOR THE FOLLOWING UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Stand in for the unit that runs after a failed one.
@@ -1511,7 +1554,7 @@ Private Sub TST_CertSelfTestForcedFailureUnit()
 
 '
 '------------------------------------------------------------------------------
-'                    TST CERT SELF TEST FORCED FAILURE UNIT
+'                           FAIL AS A MANDATORY UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Fail as a mandatory unit does, so that the failure can be seen to fail the
@@ -1554,7 +1597,7 @@ Private Sub TST_CertSelfTestInventoryGapUnit()
 
 '
 '------------------------------------------------------------------------------
-'                    TST CERT SELF TEST INVENTORY GAP UNIT
+'                      PASS WITH ONE EXPECTED CASE ABSENT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Pass as a unit while one case that the run expects is never started, so
@@ -1597,7 +1640,7 @@ Private Sub TST_CertSelfTestIsolatedChangeUnit()
 
 '
 '------------------------------------------------------------------------------
-'                   TST CERT SELF TEST ISOLATED CHANGE UNIT
+'                      ALTER THE HOST AS AN ISOLATED UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Alter the host the way an isolated unit may, and leave it altered.
@@ -1644,7 +1687,7 @@ Private Function TST_CertManifestCase( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT MANIFEST CASE
+'                           LOOK UP A MANIFEST CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Register the mandatory cases of release certification, one per index, with
@@ -1668,8 +1711,19 @@ Private Function TST_CertManifestCase( _
 '   Boolean
 '     TRUE when Index names a case; FALSE after the last one.
 '
+' BEHAVIOR
+'   - Clears UnitName and CaseId and sets the result to FALSE.
+'   - Looks Index up in a Select Case. Cases 1 and 2 are the two isolated
+'     units, 3 to 47 belong to the RegressionPack unit, 48 to the
+'     SnapshotIdentity unit and 49 to 54 to the TitleBarSdiIdentity unit.
+'   - For a listed Index it sets UnitName and CaseId and returns TRUE. Any
+'     other Index leaves both empty and returns FALSE.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None
 '
 ' NOTES
 '   A case identifier is the name of the procedure that runs it. Version 1 of
@@ -1924,7 +1978,7 @@ Private Sub TST_CertLoadExpected( _
     ByVal FaultKind As Long)
 '
 '------------------------------------------------------------------------------
-'                            TST CERT LOAD EXPECTED
+'                           STORE THE EXPECTED CASES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store the cases the run expects in the certification record.
@@ -1945,6 +1999,17 @@ Private Sub TST_CertLoadExpected( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Suppresses errors, because a case that cannot be stored flags the record
+'     itself.
+'   - A forced cleanup failure stores nothing. A forced failed unit stores
+'     SelfTest.ForcedCase under SelfTest.ForcedFailure, and a forced isolated
+'     change stores SelfTest.IsolatedCase under SelfTest.IsolatedChange. A
+'     forced gap stores SelfTest.PresentCase and SelfTest.AbsentCase under
+'     SelfTest.InventoryGap.
+'   - With no fault, reads TST_CertManifestCase from index 1 until it returns
+'     FALSE and stores each unit and case with TST_CertAddExpected.
+'
 ' ERROR POLICY
 '   - Does not raise. A case that cannot be stored flags the record, which
 '     forces FAIL | INCOMPLETE.
@@ -1952,6 +2017,9 @@ Private Sub TST_CertLoadExpected( _
 ' DEPENDENCIES
 '   - TST_CertManifestCase
 '   - TST_CertAddExpected
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -2015,7 +2083,7 @@ Private Sub TST_CertDispatchCase( _
     ByVal IncludeTitleBarTests As Boolean)
 '
 '------------------------------------------------------------------------------
-'                            TST CERT DISPATCH CASE
+'                        DISPATCH A CASE BY IDENTIFIER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one mandatory case by its stable identifier.
@@ -2037,9 +2105,25 @@ Private Sub TST_CertDispatchCase( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Selects on CaseId, with one label for each case of the manifest.
+'   - Calls the procedure the label names, passing IncludeTitleBarTests to the
+'     cases that take it.
+'   - Raises TEST_CERT_ERR_BASE + TST_CERT_ERR_UNKNOWN_CASE for any other
+'     identifier.
+'
 ' ERROR POLICY
 '   - Raises the failure of the case, unchanged.
 '   - Raises TEST_CERT_ERR_BASE + 11 for an identifier it does not dispatch.
+'
+' DEPENDENCIES
+'   - The Test_EXCEL_UI_* runners and the TST_Case_* procedures of the suites,
+'     one for each case the manifest lists
+'
+' NOTES
+'   A case is added here, in TST_CertManifestCase and in
+'   tools/certification-manifest.json together, because the static gate holds
+'   the three to each other.
 '
 ' CALLED FROM
 '   - TST_CertRunCase
@@ -2234,7 +2318,7 @@ Public Sub TST_CertRunCase( _
     ByVal IncludeTitleBarTests As Boolean)
 '
 '------------------------------------------------------------------------------
-'                              TST CERT RUN CASE
+'                           RUN AND RECORD ONE CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one mandatory case and record its start and its one terminal status
@@ -2272,6 +2356,10 @@ Public Sub TST_CertRunCase( _
 '   - TST_CertCaseStart
 '   - TST_CertCaseEnd
 '
+' NOTES
+'   Public so that the other test modules, such as M_EXCEL_UI_TEST_TITLEBAR,
+'   can run their cases through it.
+'
 ' CALLED FROM
 '   - TST_RunRegressionPack
 '   - TST_CertExecuteUnit
@@ -2295,7 +2383,7 @@ Public Sub TST_CertRunCase( _
     Dim FailDescription As String   'Error text of a failed case
 
 '------------------------------------------------------------------------------
-' RUN WITHOUT RECORDING
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Outside a certification run the case behaves exactly as it always did
         If Not m_CertActive Then
@@ -2303,13 +2391,14 @@ Public Sub TST_CertRunCase( _
             Exit Sub
         End If
 
-'------------------------------------------------------------------------------
-' RECORD START, RUN, RECORD STATUS
-'------------------------------------------------------------------------------
+    'Record the start of the case, then arm the handler for the run
         TST_CertCaseStart CaseId
 
         On Error GoTo ErrorHandler
 
+'------------------------------------------------------------------------------
+' RUN AND RECORD STATUS
+'------------------------------------------------------------------------------
         TST_CertDispatchCase CaseId, IncludeTitleBarTests
 
         On Error GoTo 0
@@ -2354,7 +2443,7 @@ Private Function TST_CertCaptureBaseline( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT CAPTURE BASELINE
+'                          CAPTURE THE HOST BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Capture the certification-owned baseline of the Excel host, which cleanup
@@ -2408,6 +2497,12 @@ Private Function TST_CertCaptureBaseline( _
 '   - TST_CertCaptureActive
 '   - TST_CertCaptureRibbon
 '   - TST_CertAddUnverified
+'
+' NOTES
+'   Base is overwritten with an unwritten tCertBaseline first, so a second
+'   capture into the same variable starts from nothing. The stages run in a
+'   fixed order, because the active-window and Ribbon stages read what the
+'   earlier stages stored.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -2486,7 +2581,7 @@ Private Function TST_CertCaptureCounts( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           TST CERT CAPTURE COUNTS
+'                      CAPTURE WORKBOOK AND WINDOW COUNTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record Workbooks.Count and Application.Windows.Count on entry.
@@ -2562,11 +2657,17 @@ Private Function TST_CertCaptureAppProps( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT CAPTURE APP PROPS
+'                        CAPTURE APPLICATION PROPERTIES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record the four application-level properties the component manages on
 '   entry.
+'
+' WHY THIS EXISTS
+'   Cleanup compares the application properties with their value on entry
+'   (#35). This stage holds those values, one property at a time, so that a
+'   property that cannot be read is named as unverified without stopping the
+'   others.
 '
 ' INPUTS
 '   Base / Rec
@@ -2577,11 +2678,22 @@ Private Function TST_CertCaptureAppProps( _
 '     TRUE when the stage ran to its end; a property that cannot be read is
 '     named as unverified, not as a failure.
 '
+' BEHAVIOR
+'   - Reads each of the TST_CERT_APP_COUNT properties of Application by name,
+'     through TST_CertReadProp.
+'   - Stores a value that was read in Base.AppKnown and Base.AppValue.
+'   - Names a property that could not be read as unverified, with the reason.
+'   - Returns TRUE after the last property. An error raised on the way is a
+'     baseline.appProperties finding, and the result is FALSE.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertReadProp
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
@@ -2661,7 +2773,7 @@ Private Function TST_CertCaptureWindows( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           TST CERT CAPTURE WINDOWS
+'                          CAPTURE THE ENTRY WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Retain every Window present on entry and record its managed state.
@@ -2694,6 +2806,11 @@ Private Function TST_CertCaptureWindows( _
 '   - TST_CertReadProp
 '   - TST_TryGetWindowStyle
 '   - UI_InternalTryReadFrameState
+'
+' NOTES
+'   The frame registry also holds the owned bits, the written bits and whether
+'   a baseline exists. They are read and not kept: only the refresh debt and
+'   the component-hidden flag are compared.
 '
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
@@ -2850,7 +2967,7 @@ Private Function TST_CertCaptureActive( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           TST CERT CAPTURE ACTIVE
+'                          CAPTURE THE ACTIVE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record which retained window was active on entry.
@@ -2870,11 +2987,25 @@ Private Function TST_CertCaptureActive( _
 '     TRUE when the stage ran to its end; an active window that cannot be
 '     identified is named as unverified, not as a failure.
 '
+' BEHAVIOR
+'   - Reads Application.ActiveWindow. When there is none, names the active
+'     window as unverified.
+'   - Reads its hWnd with TST_CertTryReadHwnd. When that fails, names it as
+'     unverified.
+'   - Stores the hWnd in Base.ActiveHwnd and looks for it among the retained
+'     windows; the first match sets Base.ActiveIndex.
+'   - Sets Base.ActiveKnown when a window matched. Otherwise names the active
+'     window as unverified.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertTryReadHwnd
+'
+' NOTES
+'   Reads Base.WindowCount, Base.WinHwnd and Base.WinHwndKnown, so it runs
+'   after TST_CertCaptureWindows.
 '
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
@@ -2980,7 +3111,7 @@ Private Function TST_CertCaptureRibbon( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           TST CERT CAPTURE RIBBON
+'                           CAPTURE THE RIBBON STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record the Ribbon of the entry active window, when that window can be
@@ -3001,12 +3132,26 @@ Private Function TST_CertCaptureRibbon( _
 '     TRUE when the stage ran to its end; a Ribbon that cannot be attributed
 '     is named as unverified, not as a failure.
 '
+' BEHAVIOR
+'   - Names the Ribbon as unverified when no active window was identified on
+'     entry (Base.ActiveKnown is FALSE).
+'   - Reads the Ribbon visibility with TST_TryGetRibbonVisible. When that
+'     fails, names the Ribbon as unverified.
+'   - Reads the active window and its hWnd again, and accepts the value only
+'     when that hWnd is still Base.ActiveHwnd. Otherwise names the Ribbon as
+'     unverified, with the reason.
+'   - Stores Base.RibbonKnown and Base.RibbonVisible for an accepted value.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_TryGetRibbonVisible
 '   - TST_CertTryReadHwnd
+'
+' NOTES
+'   Reads Base.ActiveKnown and Base.ActiveHwnd, so it runs after
+'   TST_CertCaptureActive.
 '
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
@@ -3111,7 +3256,7 @@ Private Function TST_CertEvaluateCleanup( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT EVALUATE CLEANUP
+'                   COMPARE THE EXIT STATE WITH THE BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare the exit state of the host with the entry baseline, and record
@@ -3164,6 +3309,11 @@ Private Function TST_CertEvaluateCleanup( _
 '   - TST_CertCmpWindows
 '   - TST_CertCmpActive
 '   - TST_CertCmpRibbon
+'
+' NOTES
+'   The result is relative to the findings Rec held on entry: findings added
+'   earlier do not make this call return FALSE, but a record that failed to
+'   store an entry does.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -3223,7 +3373,7 @@ Private Sub TST_CertCmpSnapshot( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                            TST CERT CMP SNAPSHOT
+'                          CHECK FOR A LEFT SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report an EXCEL_UI snapshot left in the snapshot slot.
@@ -3299,7 +3449,7 @@ Private Sub TST_CertCmpCounts( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT CMP COUNTS
+'                      COMPARE WORKBOOK AND WINDOW COUNTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare Workbooks.Count and Application.Windows.Count with their entry
@@ -3314,8 +3464,28 @@ Private Sub TST_CertCmpCounts( _
 '   Base / Rec
 '     ByRef. The baseline and the record that receives the findings.
 '
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Reads Application.Workbooks.Count and counts the comparison.
+'   - Records workbooks.count when it differs from Base.BookCount.
+'   - Reads Application.Windows.Count and counts the comparison.
+'   - Records windows.count when it differs from Base.WindowCount.
+'   - An error raised on the way is a cleanup.counts finding.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   - Application.Workbooks.Count
+'   - Application.Windows.Count
+'   - TST_CertCountCheck
+'   - TST_CertAddFinding
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
@@ -3386,7 +3556,7 @@ Private Sub TST_CertCmpAppProps( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                            TST CERT CMP APP PROPS
+'                        COMPARE APPLICATION PROPERTIES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare DisplayStatusBar, DisplayScrollBars, DisplayFormulaBar and
@@ -3401,6 +3571,9 @@ Private Sub TST_CertCmpAppProps( _
 '   Base / Rec
 '     ByRef. The baseline and the record that receives the findings.
 '
+' RETURNS
+'   Nothing
+'
 ' BEHAVIOR
 '   - A property read on entry and not on exit is a finding. One not read on
 '     entry was named as unverified when the baseline was captured.
@@ -3410,6 +3583,9 @@ Private Sub TST_CertCmpAppProps( _
 '
 ' DEPENDENCIES
 '   - TST_CertReadProp
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
@@ -3492,7 +3668,7 @@ Private Sub TST_CertCmpWindows( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT CMP WINDOWS
+'                          COMPARE THE ENTRY WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Prove every window present on entry is still the same usable window with
@@ -3510,6 +3686,9 @@ Private Sub TST_CertCmpWindows( _
 ' INPUTS
 '   Base / Rec
 '     ByRef. The baseline and the record that receives the findings.
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   Per entry window, in entry order:
@@ -3532,6 +3711,10 @@ Private Sub TST_CertCmpWindows( _
 '   - TST_CertReadProp
 '   - TST_TryGetWindowStyle
 '   - UI_InternalTryReadFrameState
+'
+' NOTES
+'   An armed TST_CERT_HELPER_FAULT_STAGE makes the stage raise before it
+'   compares anything, so that the cleanup.windows finding is exercised.
 '
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
@@ -3806,7 +3989,7 @@ Private Sub TST_CertCmpActive( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT CMP ACTIVE
+'                          COMPARE THE ACTIVE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare the active window with the one active on entry.
@@ -3819,6 +4002,9 @@ Private Sub TST_CertCmpActive( _
 '   Base / Rec
 '     ByRef. The baseline and the record that receives the finding.
 '
+' RETURNS
+'   Nothing
+'
 ' BEHAVIOR
 '   - Compares handles, never Window objects with Is, because Excel returns a
 '     new wrapper from every read of Application.ActiveWindow.
@@ -3829,6 +4015,11 @@ Private Sub TST_CertCmpActive( _
 '
 ' DEPENDENCIES
 '   - TST_CertTryReadHwnd
+'
+' NOTES
+'   Compares nothing when the entry active window was not identified
+'   (Base.ActiveKnown is FALSE); TST_CertCaptureActive named it as unverified
+'   on entry.
 '
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
@@ -3915,7 +4106,7 @@ Private Sub TST_CertCmpRibbon( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT CMP RIBBON
+'                           COMPARE THE RIBBON STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare the Ribbon of the entry active window with its entry value, only
@@ -3933,12 +4124,30 @@ Private Sub TST_CertCmpRibbon( _
 '     ByRef. The baseline and the record that receives the finding and the
 '     unverified entry.
 '
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Compares nothing when no entry Ribbon was recorded (Base.RibbonKnown is
+'     FALSE).
+'   - Requires the active window on exit to be the entry active window, by
+'     hWnd. Otherwise names ribbon.exit as unverified and stops.
+'   - Reads the Ribbon with TST_TryGetRibbonVisible. A read that fails is a
+'     ribbon.read finding, and the comparison stops.
+'   - Requires the same window to be active after the read. Otherwise names
+'     ribbon.exit as unverified and stops.
+'   - Records ribbon.visible when the value differs from Base.RibbonVisible.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_TryGetRibbonVisible
 '   - TST_CertTryReadHwnd
+'
+' NOTES
+'   A Ribbon that cannot be attributed to the entry window is named as
+'   unverified, never as clean, as TST_CertCaptureRibbon does on entry.
 '
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
@@ -4066,7 +4275,7 @@ Private Sub TST_CertRestoreActiveWindow( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                        TST CERT RESTORE ACTIVE WINDOW
+'                       RESTORE THE ENTRY ACTIVE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make the entry active window active again when a run left another one
@@ -4081,6 +4290,9 @@ Private Sub TST_CertRestoreActiveWindow( _
 '   Base / Rec
 '     ByRef. The baseline and the record that receives the finding.
 '
+' RETURNS
+'   Nothing
+'
 ' BEHAVIOR
 '   - Does nothing when the entry active window is active, or was not
 '     identified.
@@ -4091,6 +4303,10 @@ Private Sub TST_CertRestoreActiveWindow( _
 '
 ' DEPENDENCIES
 '   - TST_CertTryReadHwnd
+'
+' NOTES
+'   Activates the retained Window object of the entry,
+'   Base.Win(Base.ActiveIndex), not a window looked up by caption or index.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -4194,7 +4410,7 @@ Private Function TST_CertReadProp( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                              TST CERT READ PROP
+'                           READ A BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read one Boolean property for the cleanup baseline or its comparison.
@@ -4261,7 +4477,7 @@ Private Function TST_CertTryReadHwnd( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                            TST CERT TRY READ HWND
+'                             READ A WINDOW HANDLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read the hWnd of a Window object, which is also the probe that the object
@@ -4283,8 +4499,24 @@ Private Function TST_CertTryReadHwnd( _
 '   Boolean
 '     TRUE when a non-zero handle was read.
 '
+' BEHAVIOR
+'   - Sets the result to FALSE, HwndOut to zero and FailMsg to empty.
+'   - Fails with "the Window is Nothing" when TargetWindow is Nothing.
+'   - Reads TargetWindow.hWnd. Fails with "the Window reports hWnd 0" when the
+'     handle is zero.
+'   - Returns TRUE only for a non-zero handle.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   - Window.hWnd
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   Written twice under #If VBA7: HwndOut is a LongPtr there and a Long in the
+'   legacy compilation, and the bodies are the same. An error raised by the
+'   read is caught, and FailMsg then holds the runtime error text.
 '
 ' CALLED FROM
 '   - the cleanup capture and comparison stages
@@ -4295,6 +4527,11 @@ Private Function TST_CertTryReadHwnd( _
 ' UPDATED
 '   2026-11-18
 '------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertTryReadHwnd"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -4349,7 +4586,7 @@ Private Function TST_CertWindowLabel( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT WINDOW LABEL
+'                             BUILD A WINDOW LABEL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name a window for a finding.
@@ -4406,7 +4643,7 @@ Private Function TST_CertAppPropName( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT APP PROP NAME
+'                         NAME AN APPLICATION PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name the application-level property at a baseline index.
@@ -4463,7 +4700,7 @@ Private Function TST_CertWindowPropName( _
     As String
 '
 '------------------------------------------------------------------------------
-'                          TST CERT WINDOW PROP NAME
+'                            NAME A WINDOW PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name the window-level property at a baseline index.
@@ -4511,7 +4748,7 @@ Private Sub TST_CertInjectHelperFault( _
     ByVal FaultKind As Long)
 '
 '------------------------------------------------------------------------------
-'                         TST CERT INJECT HELPER FAULT
+'                          ARM A CLEANUP HELPER FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot fault in the cleanup helpers.
@@ -4555,7 +4792,7 @@ Private Function TST_CertTakeHelperFault( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT TAKE HELPER FAULT
+'                           CONSUME THE HELPER FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report whether the armed helper fault is this kind, and disarm it in the
@@ -4594,7 +4831,7 @@ Private Sub TST_CertApplyRunFault()
 
 '
 '------------------------------------------------------------------------------
-'                           TST CERT APPLY RUN FAULT
+'                    INVERT THE STATUS BAR FOR A RUN FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Alter the host in place of the mandatory units, for the run fault that
@@ -4638,7 +4875,7 @@ Private Sub TST_CertNoteHostFailure( _
     ByRef FailDescription As String)
 '
 '------------------------------------------------------------------------------
-'                          TST CERT NOTE HOST FAILURE
+'                        ADD A HOST RESTORATION FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make a host state that a case could not put back part of its failure.
@@ -4683,7 +4920,7 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
 '
 '------------------------------------------------------------------------------
-'                  TEST EXCEL UI RUN OWNERSHIP CLEANUP CHECKS
+'                        VERIFY OWNED SNAPSHOT CLEANUP
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a runner which creates its own snapshot releases it on every
@@ -4700,6 +4937,9 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '   Cleanup must also not swallow the failure that triggered it. Safe_Exit runs
 '   under On Error Resume Next, so a cleanup step that raised would leave the
 '   caller with a cleared Err and no idea anything went wrong.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -4792,7 +5032,7 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
     Dim ForcedReport            As String   'Case E: composed text evidence
 
 '------------------------------------------------------------------------------
-' VALIDATE PRECONDITIONS
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Every case below reasons about the snapshot slot being empty afterwards,
     'which says nothing unless it was empty to begin with
@@ -4804,9 +5044,6 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
                 "restore it before running these checks"
         End If
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
         On Error GoTo ErrorHandler
 
         TST_InjectPostCapture TEST_FAULT_NONE
@@ -5380,7 +5617,7 @@ Public Sub Test_EXCEL_UI_RunAll()
 
 '
 '------------------------------------------------------------------------------
-'                            TEST EXCEL UI RUN ALL
+'                         RUN THE FULL REGRESSION PACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the full regression-test pack for EXCEL_UI, including title-bar tests
@@ -5388,6 +5625,9 @@ Public Sub Test_EXCEL_UI_RunAll()
 ' WHY THIS EXISTS
 '   A single entry point is useful when validating the whole module before a
 '   release, refactor, or repository update
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -5427,7 +5667,7 @@ Public Sub Test_EXCEL_UI_RunCore()
 
 '
 '------------------------------------------------------------------------------
-'                            TEST EXCEL UI RUN CORE
+'                         RUN THE CORE REGRESSION PACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the core regression-test pack for EXCEL_UI, excluding the dedicated
@@ -5436,6 +5676,9 @@ Public Sub Test_EXCEL_UI_RunCore()
 ' WHY THIS EXISTS
 '   Core UI-state tests are useful when faster and less intrusive validation is
 '   preferred
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -5481,7 +5724,7 @@ Public Function TST_RunRunnerWithLog( _
     As String
 '
 '------------------------------------------------------------------------------
-'                           TST RUN RUNNER WITH LOG
+'                           RUN A RUNNER WITH A LOG
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one public runner with the log sink set, and return its verdict as
@@ -5517,6 +5760,18 @@ Public Function TST_RunRunnerWithLog( _
 ' ERROR POLICY
 '   - Does not raise; an unknown runner name gives a FAIL verdict
 '   - A log write failure never changes the runner's PASS or FAIL
+'
+' DEPENDENCIES
+'   - TST_LogSinkStart
+'   - TST_LogSinkWriteLine
+'   - TST_LogSinkStop
+'   - TST_Log
+'   - Test_EXCEL_UI_RunAll, Test_EXCEL_UI_RunCore,
+'     Test_EXCEL_UI_RunTitleBarOnly, Test_EXCEL_UI_RunSnapshotIdentity,
+'     Test_EXCEL_UI_RunTitleBarSdiIdentity,
+'     Test_EXCEL_UI_RunCertificationSelfTest,
+'     Test_EXCEL_UI_RunOwnershipCleanupChecks and
+'     Test_EXCEL_UI_RunRibbonSdiProbe, the runners it dispatches
 '
 ' NOTES
 '   - Test_EXCEL_UI_RunReleaseCertification is not accepted:
@@ -5646,7 +5901,7 @@ Private Sub TST_RunRegressionPack( _
     ByVal CallerProc As String)
 '
 '------------------------------------------------------------------------------
-'                           TST RUN REGRESSION PACK
+'                     RUN A PACK AND RESTORE THE UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute the requested regression-test pack and restore the pre-test UI
@@ -6049,7 +6304,7 @@ Private Sub TST_Case_CertificationCleanupUsesBaseline()
 
 '
 '------------------------------------------------------------------------------
-'                 TST CASE CERTIFICATION CLEANUP USES BASELINE
+'                    VERIFY CLEANUP USES THE ENTRY BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the certification cleanup verdict compares the host with the
@@ -6070,6 +6325,9 @@ Private Sub TST_Case_CertificationCleanupUsesBaseline()
 '   Test_EXCEL_UI_RunReleaseCertification would require a full destructive run
 '   to assert one comparison, and could not run from inside the pack at all.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
@@ -6081,6 +6339,23 @@ Private Sub TST_Case_CertificationCleanupUsesBaseline()
 '
 ' ERROR POLICY
 '   - Raises on assertion failure, after restoration.
+'
+' DEPENDENCIES
+'   - Application.ScreenUpdating
+'   - TST_CertCaptureBaseline
+'   - TST_CertEvaluateCleanup
+'   - TST_CertResetRecord
+'   - TST_CertEntryCodes
+'   - TST_CertEntrySummary
+'   - TST_CertNoteHostFailure
+'   - TST_AssertBooleanEquals
+'   - TST_AssertTrue
+'   - TST_Log
+'
+' NOTES
+'   Changes Application.ScreenUpdating on purpose and puts the entry value back
+'   in EXIT PROCEDURE. A value that does not read back as restored fails the
+'   case through TST_CertNoteHostFailure.
 '
 ' HISTORY
 '   2026-11-18 - Drives the retained-window baseline and records findings (#35).
@@ -6213,7 +6488,7 @@ Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
 
 '
 '------------------------------------------------------------------------------
-'                TST CASE CERT BASELINE MATCHES UNTOUCHED HOST
+'                 VERIFY A BASELINE MATCHES AN UNTOUCHED HOST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a baseline captured from the host and compared at once with the
@@ -6225,6 +6500,9 @@ Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
 '   make cleanup=OK mean nothing. This case holds both ends: a clean result, a
 '   count of comparisons made, and the unverified surfaces stated in both
 '   evidence documents.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -6391,7 +6669,7 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
 
 '
 '------------------------------------------------------------------------------
-'          TST CASE CERT CLEANUP DETECTS LEAKED AND REPLACED WINDOWS
+'                 VERIFY LEAKED AND REPLACED WINDOWS ARE FOUND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that cleanup reports a window the run leaked, and a window that
@@ -6402,6 +6680,9 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
 '   unchanged, and a closed window replaced by another leaves
 '   Application.Windows.Count unchanged. Neither was visible to a comparison of
 '   counts and a single anchor window (#35).
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -6644,7 +6925,7 @@ Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
 
 '
 '------------------------------------------------------------------------------
-'                 TST CASE CERT CLEANUP DETECTS PROPERTY DRIFT
+'                        VERIFY PROPERTY DRIFT IS FOUND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that cleanup reports an application-level property and a
@@ -6654,6 +6935,9 @@ Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
 '   Status Bar, Scroll Bars, Formula Bar, Headings, Workbook Tabs and
 '   Gridlines could be left altered with cleanup=OK, because only the workbook
 '   count and ScreenUpdating were compared (#35).
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -6891,7 +7175,7 @@ Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
 
 '
 '------------------------------------------------------------------------------
-'               TST CASE CERT CLEANUP DETECTS TITLE BAR MISMATCH
+'                     VERIFY A TITLE BAR MISMATCH IS FOUND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that cleanup reports a title bar, an owned frame bit and a frame
@@ -6900,6 +7184,9 @@ Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
 ' WHY THIS EXISTS
 '   A title bar left hidden, or carrying the wrong owned frame bits, or a
 '   pending frame refresh, could coexist with cleanup=OK (#35).
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -7050,7 +7337,7 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
 
 '
 '------------------------------------------------------------------------------
-'               TST CASE CERT CLEANUP HELPER FAILURE IS FINDING
+'                     VERIFY A HELPER FAILURE IS A FINDING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a cleanup helper or stage that fails produces a finding, that
@@ -7061,6 +7348,9 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
 '   Cleanup ran under On Error Resume Next, so a comparison that raised left
 '   the verdict as it was and looked, in the evidence, like one that had found
 '   nothing (#35).
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -7327,7 +7617,7 @@ Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
 
 '
 '------------------------------------------------------------------------------
-'              TST CASE CERT CLEANUP REPORTS QUIET UPDATE RESIDUE
+'                   VERIFY QUIET UPDATE RESIDUE IS REPORTED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the quiet-update handoff of #26: when the suppression write succeeds
@@ -7340,6 +7630,9 @@ Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
 '   confirms it. When the readback fails after a real write, the host is left
 '   with ScreenUpdating False and unowned, and no rollback is attempted. That
 '   is deliberate, and it is the residue this issue exists to detect (#26, #35).
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -7522,7 +7815,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
 
 '
 '------------------------------------------------------------------------------
-'                      TST CASE CERT RECORD FAILS CLOSED
+'                        VERIFY THE RECORD FAILS CLOSED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a certification record that cannot store an entry, or whose
@@ -7535,6 +7828,9 @@ Private Sub TST_Case_CertRecordFailsClosed()
 '   array did not hold, and the evidence loops read past its end with every
 '   error suppressed (#50). A gate that cannot record its own result must
 '   fail, never assemble a clean verdict from what is left.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -7890,7 +8186,7 @@ Private Sub TST_CertCheckRecordFault( _
     ByVal ExpectedStage As Long)
 '
 '------------------------------------------------------------------------------
-'                         TST CERT CHECK RECORD FAULT
+'                            CHECK ONE RECORD FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Inject one record allocation failure into a fresh local record and assert
@@ -7943,6 +8239,10 @@ Private Sub TST_CertCheckRecordFault( _
 '   - TST_CertRecordIsConsistent
 '   - TST_CertComposeEvidence
 '   - TST_CertAssertFailedEvidence
+'
+' NOTES
+'   The record fault is armed for the one append only and disarmed straight
+'   after it, so the later appends and the reset run unfaulted.
 '
 ' CALLED FROM
 '   - TST_Case_CertRecordFailsClosed
@@ -8153,7 +8453,7 @@ Private Sub TST_CertAssertFailedEvidence( _
     ByVal ReportText As String)
 '
 '------------------------------------------------------------------------------
-'                       TST CERT ASSERT FAILED EVIDENCE
+'                     ASSERT THE EVIDENCE SHOWS A FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that composed certification evidence reports a recording failure
@@ -8183,6 +8483,14 @@ Private Sub TST_CertAssertFailedEvidence( _
 '
 ' ERROR POLICY
 '   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - TST_AssertBooleanEquals
+'   - TST_AssertTrue
+'
+' NOTES
+'   The assertions match the evidence text literally, with InStr under binary
+'   compare, so a change in its wording or layout fails them.
 '
 ' CALLED FROM
 '   - TST_Case_CertRecordFailsClosed
@@ -8241,7 +8549,7 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 
 '
 '------------------------------------------------------------------------------
-'                    TST CASE CERT INVENTORY DETECTS DRIFT
+'                     VERIFY CASE INVENTORY DRIFT IS FOUND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a missing, duplicate, unexpected or result-less case, and an
@@ -8255,6 +8563,9 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 '   appear in the release verdict (#42). The comparison of expected and
 '   observed cases is what makes that visible, and nothing but this case
 '   asserts it.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -8528,7 +8839,7 @@ Private Sub TST_CertCheckInventoryScenario( _
     ByVal DoCompare As Boolean)
 '
 '------------------------------------------------------------------------------
-'                      TST CERT CHECK INVENTORY SCENARIO
+'                         CHECK ONE INVENTORY SCENARIO
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build one local record with one passing unit, expected cases, case starts
@@ -8560,6 +8871,19 @@ Private Sub TST_CertCheckInventoryScenario( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Resets a local record and stores one passing unit U, so that only the
+'     case inventory can fail the run.
+'   - Stores the expected cases, the case starts and the case statuses from
+'     the three lists.
+'   - Compares the inventory when DoCompare is TRUE, and asserts the result is
+'     clean exactly when ExpectedCode is empty.
+'   - Composes the evidence with cleanup passed as OK, and asserts that both
+'     documents carry the counts and the cases.
+'   - Asserts PASS | COMPLETE for an exact inventory. Otherwise asserts
+'     FAIL | INCOMPLETE, and the finding ExpectedCode in the record and in both
+'     documents, or the missing-comparison detail when DoCompare is FALSE.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure.
 '
@@ -8569,6 +8893,10 @@ Private Sub TST_CertCheckInventoryScenario( _
 '   - TST_CertEvaluateInventory
 '   - TST_CertComposeEvidence
 '   - TST_CertEntryCodes
+'
+' NOTES
+'   The record is local, so the certification run executing the case records
+'   nothing from it.
 '
 ' CALLED FROM
 '   - TST_Case_CertInventoryDetectsDrift
@@ -8753,7 +9081,7 @@ Private Function TST_CertStoreCaseIds( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           TST CERT STORE CASE IDS
+'                       STORE A LIST OF CASE IDENTIFIERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one entry of one kind for each identifier of a "|"-joined list.
@@ -8825,7 +9153,7 @@ Private Function TST_CertIdCount( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                              TST CERT ID COUNT
+'                            COUNT CASE IDENTIFIERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Count the identifiers of a "|"-joined list.
@@ -8863,7 +9191,7 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
 
 '
 '------------------------------------------------------------------------------
-'                 TST CASE CERT UNIT ISOLATES CAPTURE FAILURE
+'                   VERIFY A UNIT ISOLATES A CAPTURE FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a certification unit which fails after a capture reports the
@@ -8876,6 +9204,9 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
 '   raised "expected=True actual=False" without the failure list that named
 '   the element and the reason, and the snapshot that capture had created was
 '   left behind. Both later units then refused to run over it.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -8930,16 +9261,13 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
         "TitleBar | the active Excel Window is not the active native frame"
 
 '------------------------------------------------------------------------------
-' VALIDATE PRECONDITIONS
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Every snapshot below is this case's only if the slot is empty now. This is
     'asserted before the handler is armed, so a failure here cannot reach the
     'release below and clear a snapshot this case never owned.
         TST_AssertSnapshotAvailability False, PROC_NAME & ".NoSnapshotOnEntry"
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
         On Error GoTo ErrorHandler
 
         TST_Log PROC_NAME, "START", _
@@ -9033,7 +9361,7 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 
 '
 '------------------------------------------------------------------------------
-'            TST CASE DESTRUCTIVE RUNNERS PRESERVE CALLER SNAPSHOT
+'                    VERIFY RUNNERS KEEP A CALLER SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that every destructive public runner refuses a caller-owned snapshot
@@ -9051,6 +9379,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 '   flag can survive while the captured content does not. Each block therefore
 '   mutates the host and restores from the preserved snapshot, and asserts the
 '   original state came back.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -9326,15 +9657,40 @@ Private Sub TST_LogHostWindows( _
     ByVal Tag As String)
 '
 '------------------------------------------------------------------------------
-'                             TST LOG HOST WINDOWS
+'                          LOG THE HOST WINDOW STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Log the windows Excel holds and their state, so a run that fails because a
 '   window refused a property can be compared with one that did not.
 '
+' WHY THIS EXISTS
+'   The cleanup cases alter windows and their properties. Logging the state of
+'   every window at chosen points of a run, named by Tag, lets a run in which a
+'   window refused a property be compared with one in which none did. Added to
+'   diagnose DisplayHeadings refusals after the self-test cases (#35).
+'
 ' INPUTS
 '   Tag
 '     The label of the point in the run
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Suppresses errors, so a read that fails is left out of the line.
+'   - Builds one line: the window count, the caption of the active window,
+'     ScreenUpdating and DisplayStatusBar.
+'   - Appends, for each window, its index, caption, Visible, WindowState and
+'     the type of its active sheet.
+'   - Logs the line with TST_Log under Tag.
+'
+' ERROR POLICY
+'   - Does not raise. Every read runs under On Error Resume Next.
+'
+' DEPENDENCIES
+'   - Application.Windows, Application.ActiveWindow
+'   - Application.ScreenUpdating, Application.DisplayStatusBar
+'   - TST_Log
 '
 ' NOTES
 '   - Writes one TST_Log line and changes nothing.
@@ -9348,24 +9704,37 @@ Private Sub TST_LogHostWindows( _
 '   2026-11-19
 '------------------------------------------------------------------------------
 
-    Dim Index               As Long            'Window index
-    Dim StateText                As String          'Text logged
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_LogHostWindows"
 
-    On Error Resume Next
+    Dim Index       As Long     'Window index
+    Dim StateText   As String   'Text logged
 
-    StateText = "windows=" & CStr(Application.Windows.Count) & _
-           " active=" & Application.ActiveWindow.Caption & _
-           " screenUpdating=" & CStr(Application.ScreenUpdating) & _
-           " statusBar=" & CStr(Application.DisplayStatusBar)
+'------------------------------------------------------------------------------
+' READ THE HOST STATE
+'------------------------------------------------------------------------------
+    'A read that fails is left out of the line, so this helper never raises
+        On Error Resume Next
 
-    For Index = 1 To Application.Windows.Count
-        StateText = StateText & " | " & CStr(Index) & ":" & _
-               Application.Windows(Index).Caption & _
-               " visible=" & CStr(Application.Windows(Index).Visible) & _
-               " state=" & CStr(Application.Windows(Index).WindowState) & _
-               " sheet=" & TypeName(Application.Windows(Index).ActiveSheet)
-    Next Index
+        StateText = "windows=" & CStr(Application.Windows.Count) & _
+            " active=" & Application.ActiveWindow.Caption & _
+            " screenUpdating=" & CStr(Application.ScreenUpdating) & _
+            " statusBar=" & CStr(Application.DisplayStatusBar)
 
-    TST_Log "TST_LogHostWindows", Tag, StateText
+        For Index = 1 To Application.Windows.Count
+            StateText = StateText & " | " & CStr(Index) & ":" & _
+                Application.Windows(Index).Caption & _
+                " visible=" & CStr(Application.Windows(Index).Visible) & _
+                " state=" & CStr(Application.Windows(Index).WindowState) & _
+                " sheet=" & TypeName(Application.Windows(Index).ActiveSheet)
+        Next Index
+
+'------------------------------------------------------------------------------
+' LOG THE STATE
+'------------------------------------------------------------------------------
+    'Write the line under the caller's tag
+        TST_Log "TST_LogHostWindows", Tag, StateText
 
 End Sub
