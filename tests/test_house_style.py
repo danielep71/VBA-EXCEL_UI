@@ -9,12 +9,14 @@ leaves only the rules that need a person.
 
 import contextlib
 import io
+import re
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from gate_fixture import (
+    PLANT,
     REPO,
     LexicalError,
     executable_signature,
@@ -24,6 +26,7 @@ from gate_fixture import (
     house_rules_fixtures,
     house_style,
     layout_edit,
+    planted_module,
     reformat,
     vba_house,
     vba_house_rules,
@@ -185,14 +188,17 @@ class Tree(unittest.TestCase):
                 self.assertLessEqual(kinds, settled)
 
     def test_the_formatter_names_what_it_leaves(self) -> None:
-        _, name, text = next(m for m in modules() if m[1] == "M_EXCEL_UI_RUNTIME")
-        _, todos = vba_house.format_module(text, name)
-        self.assertTrue(any(message.startswith("header lacks") for _, message in todos))
+        # A module whose procedure header lacks a field: the formatter writes none, and says so.
+        text = house_format_fixtures.LEGACY_MODULE.replace(
+            "' NOTES\r\n'   A text such as \"GoTo Fail\" is data.\r\n'\r\n", "", 1)
+        self.assertNotEqual(text, house_format_fixtures.LEGACY_MODULE)
+        result, todos = vba_house.format_module(text, "M_PROBE")
+        self.assertIn(("Probe_Describe", "header lacks NOTES"), todos)
+        self.assertNotIn("' NOTES", result.split("Probe_Describe")[2])
 
     def test_a_rename_that_is_ambiguous_is_refused_before_anything_is_written(self) -> None:
-        _, name, text = next(m for m in modules() if m[1] == "M_EXCEL_UI_RUNTIME")
         with self.assertRaises(LexicalError):
-            reformat.reformat_text(text + "\r\nFail:\r\n", name, "house")
+            reformat.reformat_text(house_format_fixtures.HOUSE_MODULE + "\r\nFail:\r\n", "M_PROBE", "house")
 
 
 class SwitchedOn(unittest.TestCase):
@@ -207,14 +213,19 @@ class SwitchedOn(unittest.TestCase):
             with self.subTest(module=rel):
                 self.assertEqual(reformat.reformat_text(text, name), text)
 
+    def listed(self) -> str:
+        """The pending list, or nothing once the last finding is settled and the file is gone."""
+        path = REPO / vba_house_rules.PENDING_FILE
+        return path.read_text(encoding="ascii") if path.exists() else ""
+
     def test_the_pending_list_holds_the_findings_of_the_tree_and_nothing_else(self) -> None:
-        listed = (REPO / vba_house_rules.PENDING_FILE).read_text(encoding="ascii")
-        result = vba_house_rules.compare_pending(self.found(), listed)
+        result = vba_house_rules.compare_pending(self.found(), self.listed())
         self.assertEqual(result, ([], [], []))
 
     def test_the_list_is_what_the_tool_writes(self) -> None:
-        listed = (REPO / vba_house_rules.PENDING_FILE).read_text(encoding="ascii")
-        self.assertEqual(vba_house_rules.pending_text(self.found()), listed)
+        found = self.found()
+        expected = vba_house_rules.pending_text(found) if found else ""
+        self.assertEqual(expected, self.listed())
 
     def test_every_remaining_finding_is_one_a_person_settles(self) -> None:
         self.assertLessEqual({item.rule for _, item in self.found()}, {"header", "sections", "proc-name"})
@@ -227,15 +238,29 @@ class SwitchedOn(unittest.TestCase):
                     self.assertTrue(item.message.startswith("no DECLARE section"), item)
 
     def test_a_bare_literal_stands_only_under_the_deliberate_comment(self) -> None:
-        bare = 0
+        """No total is pinned: the property holds for however many such literals the tree has.
+
+        A constant outside a DECLARE section is a finding still to be settled, and is not read here.
+        """
+        constant = re.compile(r'^\s*Const PROC_NAME As String = "([^"]*)"\s*$')
         for _, name, text in modules():
             lines = text.split("\r\n")
+            procedure, section = "", ""
             for n, line in enumerate(lines):
+                signature = vba_house.SIG_RE.match(line.strip())
+                if signature:
+                    procedure, section = signature.group("name"), ""
+                if vba_house.is_rule(lines[n - 1]) and vba_house.is_rule(lines[(n + 1) % len(lines)]) \
+                        and line.startswith("' "):
+                    section = line[2:].strip()
+                m = constant.match(line)
+                if m and section == house_style.DECLARE:
+                    bare = m.group(1).lower() == procedure.lower()
+                    deliberate = n > 0 and lines[n - 1].strip() == house_style.DELIBERATE_VALUE_COMMENT
+                    self.assertEqual(bare, deliberate, (name, n + 1, procedure, m.group(1)))
                 if line.lstrip().startswith("'The value is deliberate"):
-                    bare += 1
-                    self.assertEqual(lines[n].strip(), house_style.DELIBERATE_VALUE_COMMENT, (name, n + 1))
+                    self.assertEqual(line.strip(), house_style.DELIBERATE_VALUE_COMMENT, (name, n + 1))
                     self.assertTrue(lines[n + 1].startswith("    Const PROC_NAME As String = "), (name, n + 2))
-        self.assertEqual(bare, 64)
 
     def test_every_select_case_has_a_case_else(self) -> None:
         self.assertEqual([item for _, item in self.found() if item.rule == "select-case"], [])
@@ -248,9 +273,8 @@ class WritePending(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         root = Path(self.directory.name)
-        _, self.name, text = next(m for m in modules() if m[1] == "M_EXCEL_UI_SNAPSHOT")
-        self.module = root / "M_EXCEL_UI_SNAPSHOT.bas"
-        self.module.write_bytes(text.encode("ascii"))
+        self.module = root / f"{PLANT}.bas"
+        self.module.write_bytes(planted_module().encode("ascii"))
         self.target = root / "pending.txt"
 
     def run_it(self) -> tuple[int, str]:
@@ -263,14 +287,15 @@ class WritePending(unittest.TestCase):
         status, _ = self.run_it()
         self.assertEqual(status, 0)
         text = self.target.read_text(encoding="ascii")
-        self.assertIn("M_EXCEL_UI_SNAPSHOT: header\n", text)
+        self.assertIn(f"{PLANT}: header\n", text)
+        self.assertIn(f"{PLANT}.Probe_Describe: header\n", text)
         self.assertEqual(self.run_it()[0], 0)
         self.assertEqual(self.target.read_text(encoding="ascii"), text)
 
     def test_it_removes_a_line_whose_finding_is_settled(self) -> None:
         self.run_it()
         text = self.target.read_text(encoding="ascii")
-        self.target.write_text(text + "M_EXCEL_UI_SNAPSHOT.UI_SnapshotClear: sections\n", encoding="ascii")
+        self.target.write_text(text + f"{PLANT}.Probe_Reset: sections\n", encoding="ascii")
         status, _ = self.run_it()
         self.assertEqual(status, 0)
         self.assertEqual(self.target.read_text(encoding="ascii"), text)
@@ -279,7 +304,7 @@ class WritePending(unittest.TestCase):
         self.run_it()
         lines = self.target.read_text(encoding="ascii").splitlines(keepends=True)
         gone = next(n for n, line in enumerate(lines)
-                    if line.startswith("M_EXCEL_UI_SNAPSHOT.") and line.endswith(": header\n"))
+                    if line.startswith(f"{PLANT}.") and line.endswith(": header\n"))
         before = "".join(lines[:gone] + lines[gone + 1:])
         self.target.write_text(before, encoding="ascii")
         status, out = self.run_it()
