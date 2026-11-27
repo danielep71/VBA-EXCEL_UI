@@ -82,6 +82,8 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/vba_lex.py",
     "tools/vba_analyze.py",
     "tools/vba_analyze_fixtures.py",
+    "tools/vba_syntax.py",
+    "tools/vba_syntax_fixtures.py",
     "tools/titlebar_control_fixtures.py",
     "tools/winapi_capture_fixtures.py",
     "tools/demo_cleanup_fixtures.py",
@@ -542,6 +544,27 @@ def check_vba_analyzer_selftest() -> None:
     for finding in findings:
         fail('VBA analyzer self-test', finding)
     print(f'  {count} VBA analyzer fixtures')
+
+
+def check_vba_syntax() -> None:
+    """Hold every module of every configuration to the #203 compile-error rules."""
+    from vba_syntax import load_projects, run, summary
+    from vba_syntax_fixtures import selftest
+    errors, count = selftest()
+    for finding in errors:
+        fail('VBA syntax', finding)
+    manifest = load_vba_project_manifest('VBA syntax')
+    if manifest is None:
+        return
+    found, coverage = run(REPO, ALL_MODULES, load_projects(manifest))
+    for item in found:
+        fail('VBA syntax', str(item))
+    for name, cov in coverage.items():
+        if not cov.procedures:
+            fail('VBA syntax', f'{name}: no procedure was read; the rules would pass without checking anything')
+    print(f'  {count} VBA syntax fixtures')
+    for line in summary(coverage):
+        print(f'  {line}')
 
 
 def check_titlebar_control() -> None:
@@ -3651,6 +3674,7 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("house labels", check_house_labels),
     ("VBA analyzer", check_vba_analyzer),
     ("VBA analyzer self-test", check_vba_analyzer_selftest),
+    ("VBA syntax", check_vba_syntax),
     ("title-bar control regression", check_titlebar_control),
     ("WinAPI error capture", check_winapi_error_capture),
     ("demo cleanup regression", check_demo_cleanup),
