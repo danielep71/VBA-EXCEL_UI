@@ -22,6 +22,27 @@ Option Private Module
 '   behavior change to one module. It also lets the style-merge policy be tested
 '   as pure arithmetic, with no window and no host required.
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Resolves a top-level window handle, either one the caller supplies or
+'     the active Excel Window paired with its own handle, and refuses an
+'     active pair the host does not agree on.
+'   - Keeps one frame-state entry per handle in a registry that retains the
+'     Excel Window of each entry as its generation token, and reclaims
+'     entries that fail the ownership test before the registry grows.
+'   - Reads GWL_STYLE, merges only the five owned bits into the live style,
+'     writes the result and repaints the frame with SetWindowPos. A repaint
+'     that fails is recorded as a debt and paid first on the next call.
+'   - Confirms every show from a live readback of the complete WS_CAPTION
+'     mask before it reports success.
+'   - Offers regression seams, the UI_Internal procedures, that arm faults
+'     and read or rebind registry state without a window.
+'
 ' ERROR POLICY
 '   - Internal entry points return False plus diagnostic text.
 '   - A zero API return is disambiguated from a genuine failure before being
@@ -454,7 +475,7 @@ Public Function UI_TryGetActiveFramePair( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                         UI TRY GET ACTIVE FRAME PAIR
+'                          RESOLVE ACTIVE FRAME PAIR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolve the active Excel Window together with the native handle read from
@@ -626,7 +647,7 @@ Public Sub UI_InternalInjectFramePairFault( _
     ByVal FaultKind As Long)
 '
 '------------------------------------------------------------------------------
-'                     UI INTERNAL INJECT FRAME PAIR FAULT
+'                             ARM FRAME PAIR FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot fault for the next active-frame pair resolution.
@@ -697,7 +718,7 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                       UI TRY GET ACTIVE TITLE BAR HWND
+'                       RESOLVE ACTIVE TITLE BAR HANDLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolves and validates the top-level window handle Excel currently reports
@@ -760,10 +781,15 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TryGetActiveTitleBarHwnd"
+
+    Dim ResolvedWindow  As Object   'Discarded; this caller wants the handle
+
+'------------------------------------------------------------------------------
 ' DELEGATE
 '------------------------------------------------------------------------------
-        Dim ResolvedWindow      As Object          'Discarded; this caller wants the handle
-
     'One implementation of the identity rule lives in UI_TryGetActiveFramePair.
     'This wrapper exists because two of its three callers want only the handle,
     'and keeping its signature unchanged meant no caller had to move.
@@ -790,7 +816,7 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                    UI TRY GET TITLE BAR VISIBLE FOR HWND
+'                     READ TITLE BAR VISIBILITY FOR HANDLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads title-bar visibility from the window style of an explicitly supplied
@@ -921,7 +947,7 @@ Public Function UI_TryGetTitleBarVisible( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                         UI TRY GET TITLE BAR VISIBLE
+'                       READ ACTIVE TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads title-bar visibility from the top-level window Excel currently
@@ -1023,7 +1049,7 @@ Public Function UI_TrySetTitleBarVisibleForHwndIfNeeded( _
 #End If
 '
 '------------------------------------------------------------------------------
-'               UI TRY SET TITLE BAR VISIBLE FOR HWND IF NEEDED
+'                     SET TITLE BAR VISIBILITY FOR HANDLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the requested title-bar state to an explicitly supplied top-level
@@ -1075,6 +1101,11 @@ Public Function UI_TrySetTitleBarVisibleForHwndIfNeeded( _
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TrySetTitleBarVisibleForHwndIfNeeded"
+
+'------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
@@ -1119,7 +1150,7 @@ Public Function UI_TrySetTitleBarVisibleIfNeeded( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                    UI TRY SET TITLE BAR VISIBLE IF NEEDED
+'                       SET ACTIVE TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the requested title-bar state to the top-level window Excel
@@ -1154,6 +1185,11 @@ Public Function UI_TrySetTitleBarVisibleIfNeeded( _
 ' DEPENDENCIES
 '   - UI_TryGetActiveTitleBarHwnd
 '   - UI_TrySetTitleBarVisibleForHwndIfNeeded
+'
+' NOTES
+'   The result describes the window that was active at the instant of the
+'   call. A caller that must write back to the same window later retains the
+'   handle and uses UI_TrySetTitleBarVisibleForHwndIfNeeded.
 '
 ' CALLED FROM
 '   - M_EXCEL_UI
@@ -1213,7 +1249,7 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                     UI INTERNAL IS TITLE BAR FRAME ALIVE
+'                         PROBE FRAME HANDLE LIVENESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reports whether a retained handle still refers to a live window.
@@ -1267,6 +1303,11 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_InternalIsTitleBarFrameAlive"
+
+'------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
@@ -1309,7 +1350,7 @@ Public Sub UI_InternalResetTitleBarBaseline()
 
 '
 '------------------------------------------------------------------------------
-'                     UI INTERNAL RESET TITLE BAR BASELINE
+'                          RESET FRAME STATE REGISTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Discards the entire frame-state registry, returning this module to the
@@ -1327,6 +1368,9 @@ Public Sub UI_InternalResetTitleBarBaseline()
 '   runs before it, captures a baseline first. Without this entry point the
 '   guarding case silently exercises the ordinary path and passes whether or
 '   not the defect is present.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -1385,7 +1429,7 @@ Public Function UI_InternalIsFrameRefreshPending( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                     UI INTERNAL IS FRAME REFRESH PENDING
+'                           READ FRAME REFRESH DEBT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reports whether a style write succeeded for a window while its frame
@@ -1405,6 +1449,14 @@ Public Function UI_InternalIsFrameRefreshPending( _
 '   Boolean
 '     True  => a frame refresh is owed for this window.
 '     False => no debt is recorded, or the window is unknown.
+'
+' BEHAVIOR
+'   - Looks the handle up with UI_FrameStateIndexForHwnd and creates no
+'     entry.
+'   - Reports False when the lookup finds no entry. The lookup proves an
+'     entry before it returns it, so one that fails the proof is discarded
+'     and reads as unknown.
+'   - Otherwise reports the RefreshPending flag of the entry.
 '
 ' ERROR POLICY
 '   - Does not raise.
@@ -1471,7 +1523,7 @@ Public Sub UI_InternalInjectFrameRefreshFailure( _
     ByVal FailNextRefresh As Boolean)
 '
 '------------------------------------------------------------------------------
-'                   UI INTERNAL INJECT FRAME REFRESH FAILURE
+'                          ARM FRAME REFRESH FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arms or disarms a one-shot failure of the next non-client frame refresh.
@@ -1529,7 +1581,7 @@ Public Sub UI_InternalInjectWindowStyleFault( _
     ByVal DllError As Long)
 '
 '------------------------------------------------------------------------------
-'                    UI INTERNAL INJECT WINDOW STYLE FAULT
+'                            ARM WINDOW STYLE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot fault for the next GWL_STYLE read or write.
@@ -1617,7 +1669,7 @@ Public Function UI_InternalSimulateFrameGenerationReuse( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                 UI INTERNAL SIMULATE FRAME GENERATION REUSE
+'                        REBIND SLOT TO ANOTHER WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attributes the registry slot that holds TargetHwnd to another window
@@ -1754,7 +1806,7 @@ Public Function UI_InternalTryReadFrameState( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                       UI INTERNAL TRY READ FRAME STATE
+'                          READ REGISTRY SLOT FIELDS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reports the fields of the registry slot that holds a numeric handle,
@@ -1879,7 +1931,7 @@ Public Function UI_InternalMergeTitleBarStyleBits( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                    UI INTERNAL MERGE TITLE BAR STYLE BITS
+'                            MERGE OWNED STYLE BITS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Merges the title-bar style bits owned by this module into a current
@@ -1954,7 +2006,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                 UI TRY SET TITLE BAR VISIBLE FOR HWND WORKER
+'                          APPLY TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Shows or hides the title bar of one explicitly supplied top-level window.
@@ -2279,7 +2331,7 @@ Private Function UI_TryResolveWindowForHwnd( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                        UI TRY RESOLVE WINDOW FOR HWND
+'                          RESOLVE WINDOW FOR HANDLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolves the live Excel Window that currently owns TargetHwnd.
@@ -2298,11 +2350,26 @@ Private Function UI_TryResolveWindowForHwnd( _
 '   2026-09-03
 '------------------------------------------------------------------------------
 
-    Dim Candidate           As Object
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TryResolveWindowForHwnd"
 
+    Dim Candidate   As Object   'Window under test
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Route unexpected runtime errors to the error handler
         On Error GoTo ErrorHandler
+
+    'Assume no window until one reports the handle
         Set WindowOut = Nothing
 
+'------------------------------------------------------------------------------
+' SCAN OPEN WINDOWS
+'------------------------------------------------------------------------------
+    'Return the first open Window whose handle matches
         For Each Candidate In Application.Windows
             If Candidate.hWnd = TargetHwnd Then
                 Set WindowOut = Candidate
@@ -2320,6 +2387,7 @@ Private Function UI_TryResolveWindowForHwnd( _
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Report no window when the scan cannot complete
         Set WindowOut = Nothing
         UI_TryResolveWindowForHwnd = False
 
@@ -2338,7 +2406,7 @@ Private Function UI_FrameStateIndexForHwnd( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                        UI FRAME STATE INDEX FOR HWND
+'                       FIND OR CREATE FRAME STATE ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the registry index holding the frame state for one window,
@@ -2538,7 +2606,7 @@ Private Function UI_FrameStateSlotForHwnd( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                         UI FRAME STATE SLOT FOR HWND
+'                         FIND REGISTRY SLOT BY HANDLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the registry index whose stored handle matches, saying nothing
@@ -2632,7 +2700,7 @@ Private Function UI_FrameStateEntryHolds( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          UI FRAME STATE ENTRY HOLDS
+'                           PROVE FRAME STATE ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reports whether a registry entry can still be proved to describe the
@@ -2803,7 +2871,7 @@ Private Sub UI_DiscardFrameStateEntry( _
     ByVal Slot As Long)
 '
 '------------------------------------------------------------------------------
-'                         UI DISCARD FRAME STATE ENTRY
+'                          DISCARD FRAME STATE ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes one registry entry and closes the gap it leaves behind.
@@ -2831,6 +2899,12 @@ Private Sub UI_DiscardFrameStateEntry( _
 '
 ' DEPENDENCIES
 '   None.
+'
+' NOTES
+'   Only the trailing retained Window is released explicitly. The Type
+'   element above the live count keeps its old values, and
+'   UI_FrameStateIndexForHwnd overwrites every field of it when it reuses
+'   the slot.
 '
 ' CALLED FROM
 '   - UI_FrameStateIndexForHwnd
@@ -2900,7 +2974,7 @@ Private Sub UI_CompactFrameStates()
 
 '
 '------------------------------------------------------------------------------
-'                           UI COMPACT FRAME STATES
+'                         COMPACT FRAME STATE REGISTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes registry entries that fail the ownership test in
@@ -2913,6 +2987,9 @@ Private Sub UI_CompactFrameStates()
 '   workbook window ever touched. Reclaiming closed windows at the moment the
 '   registry would have to grow bounds it by the number of windows actually
 '   open rather than by the number ever opened.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -2932,6 +3009,13 @@ Private Sub UI_CompactFrameStates()
 '
 ' DEPENDENCIES
 '   - UI_FrameStateEntryHolds
+'
+' NOTES
+'   - UI_FrameStateIndexForHwnd calls it only when a new entry is about to
+'     be appended, that is when CreateIfMissing is True and no entry holds
+'     the handle.
+'   - An entry is tested before any survivor is moved onto or past its slot,
+'     so every test reads the entry in its original position.
 '
 ' CALLED FROM
 '   - UI_FrameStateIndexForHwnd
@@ -3025,7 +3109,7 @@ Private Function UI_TryGetWindowStyle( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                           UI TRY GET WINDOW STYLE
+'                              READ WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads GWL_STYLE using the API matching the host bitness.
@@ -3067,6 +3151,14 @@ Private Function UI_TryGetWindowStyle( _
 '   - UI_TakeWindowStyleFault
 '   - UI_TitleBarBuildApiFailureText
 '   - UI_TitleBarBuildRuntimeErrorText
+'
+' NOTES
+'   - UI_TakeWindowStyleFault consumes any armed read fault before the
+'     capture sequence, so the seam never runs between the call and its
+'     capture. An armed fault then replaces only values the capture already
+'     took.
+'   - The failure text quotes API_GET_WINDOW_STYLE, the exported name of the
+'     function this compilation calls.
 '
 ' CALLED FROM
 '   - UI_TryGetTitleBarVisibleForHwnd
@@ -3208,7 +3300,7 @@ Private Function UI_TrySetWindowStyle( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                           UI TRY SET WINDOW STYLE
+'                              WRITE WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes GWL_STYLE using the API matching the host bitness.
@@ -3250,6 +3342,14 @@ Private Function UI_TrySetWindowStyle( _
 '   - UI_TakeWindowStyleFault
 '   - UI_TitleBarBuildApiFailureText
 '   - UI_TitleBarBuildRuntimeErrorText
+'
+' NOTES
+'   - UI_TakeWindowStyleFault consumes any armed write fault before the
+'     capture sequence, so the seam never runs between the call and its
+'     capture. An armed fault then replaces only values the capture already
+'     took, and the style has really been written.
+'   - The failure text quotes API_SET_WINDOW_STYLE, the exported name of the
+'     function this compilation calls.
 '
 ' CALLED FROM
 '   - UI_TrySetTitleBarVisibleForHwndWorker
@@ -3385,7 +3485,7 @@ Private Function UI_TryRefreshWindowFrame( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                         UI TRY REFRESH WINDOW FRAME
+'                             REFRESH WINDOW FRAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Recalculates and repaints the non-client frame after a style change.
@@ -3531,7 +3631,7 @@ Private Function UI_TakeWindowStyleFault( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                          UI TAKE WINDOW STYLE FAULT
+'                        TAKE ARMED WINDOW STYLE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Consumes the window-style fault armed for one operation.
@@ -3618,7 +3718,7 @@ Private Function UI_TitleBarBuildApiFailureText( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                     UI TITLE BAR BUILD API FAILURE TEXT
+'                            BUILD API FAILURE TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Builds the failure text for a native call that reported an error.
@@ -3680,7 +3780,7 @@ Private Function UI_TitleBarBuildRuntimeErrorText() _
     As String
 '
 '------------------------------------------------------------------------------
-'                    UI TITLE BAR BUILD RUNTIME ERROR TEXT
+'                           BUILD RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Builds a consistent diagnostic string from the active Err object.
@@ -3691,15 +3791,30 @@ Private Function UI_TitleBarBuildRuntimeErrorText() _
 '   dependency, so the WinAPI subsystem can be reasoned about and tested on its
 '   own. The duplication is the price of that isolation and is intentional.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   String
 '     Best-effort error number, description, source and Erl text.
+'
+' BEHAVIOR
+'   - Copies Err.Number, Err.Description, Err.Source and Erl into locals
+'     before any On Error statement runs.
+'   - Then suppresses formatting errors with On Error Resume Next.
+'   - Joins "<number>: <description>" with " | Source: <source>" when the
+'     source is not empty and " | Line: <line>" when Erl is not zero.
 '
 ' ERROR POLICY
 '   - Suppresses formatting errors locally.
 '
 ' DEPENDENCIES
 '   None.
+'
+' NOTES
+'   Every caller is the error handler of a procedure in this module and calls
+'   it before any statement that resets Err, such as an On Error statement,
+'   Err.Clear or Resume.
 '
 ' CALLED FROM
 '   - This module

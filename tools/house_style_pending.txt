@@ -14,20 +14,6 @@
 # Regenerate it with:
 #   python3 tools/reformat.py --write-pending src/*.bas test/*.bas demo/*.bas
 # Once the file exists, that only removes lines; it refuses to add one.
-M_EXCEL_UI_TITLEBAR: header
-M_EXCEL_UI_TITLEBAR.UI_TryGetActiveTitleBarHwnd: proc-name
-M_EXCEL_UI_TITLEBAR.UI_TrySetTitleBarVisibleForHwndIfNeeded: proc-name
-M_EXCEL_UI_TITLEBAR.UI_TrySetTitleBarVisibleIfNeeded: header
-M_EXCEL_UI_TITLEBAR.UI_InternalIsTitleBarFrameAlive: proc-name
-M_EXCEL_UI_TITLEBAR.UI_InternalResetTitleBarBaseline: header
-M_EXCEL_UI_TITLEBAR.UI_InternalIsFrameRefreshPending: header
-M_EXCEL_UI_TITLEBAR.UI_TryResolveWindowForHwnd: proc-name
-M_EXCEL_UI_TITLEBAR.UI_TryResolveWindowForHwnd: sections
-M_EXCEL_UI_TITLEBAR.UI_DiscardFrameStateEntry: header
-M_EXCEL_UI_TITLEBAR.UI_CompactFrameStates: header
-M_EXCEL_UI_TITLEBAR.UI_TryGetWindowStyle: header
-M_EXCEL_UI_TITLEBAR.UI_TrySetWindowStyle: header
-M_EXCEL_UI_TITLEBAR.UI_TitleBarBuildRuntimeErrorText: header
 M_EXCEL_UI_TEST_CERTIFICATION: header
 M_EXCEL_UI_TEST_CERTIFICATION.Test_EXCEL_UI_RunCertificationSelfTest: header
 M_EXCEL_UI_TEST_CERTIFICATION.Test_EXCEL_UI_RunCertificationSelfTest: sections
@@ -303,20 +289,3 @@ M_DEMO_CLEANUP_TESTS.DEMO_CT_Protect: header
 M_DEMO_CLEANUP_TESTS.DEMO_CT_ReadOptions: header
 M_DEMO_CLEANUP_TESTS.DEMO_CT_LogSinkWrite: header
 M_DEMO_CLEANUP_TESTS.DEMO_CT_LogSinkEncode: header
-M_EXCEL_UI_DEMO: header
-M_EXCEL_UI_DEMO.Demo_CreateDemoSheet: header
-M_EXCEL_UI_DEMO.Demo_ShowSelectedUI: header
-M_EXCEL_UI_DEMO.Demo_HideSelectedUI: header
-M_EXCEL_UI_DEMO.Demo_SyncCheckBoxesToUI: header
-M_EXCEL_UI_DEMO.Demo_SelectAllUI: header
-M_EXCEL_UI_DEMO.Demo_ClearAllUI: header
-M_EXCEL_UI_DEMO.Demo_PresetKiosk: header
-M_EXCEL_UI_DEMO.Demo_PresetAnalyst: header
-M_EXCEL_UI_DEMO.Demo_PresetMinimal: header
-M_EXCEL_UI_DEMO.Demo_CaptureUIState: header
-M_EXCEL_UI_DEMO.Demo_ResetUIToCapturedState: header
-M_EXCEL_UI_DEMO.Demo_ApplySelectedUI: header
-M_EXCEL_UI_DEMO.Demo_SetSelectionProfile: header
-M_EXCEL_UI_DEMO.Demo_TryGetRibbonVisibility: header
-M_EXCEL_UI_DEMO.Demo_TryGetTitleBarVisibility: header
-M_EXCEL_UI_DEMO.Demo_GetRuntimeErrorText: sections
