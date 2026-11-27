@@ -713,10 +713,11 @@ measured against that baseline.
   constant and moved in front of the variables in 57. In 61 procedures its
   literal stays the bare procedure name, not `<Module>.<Procedure>`, because the
   literal is what the procedure logs or raises as its source; a comment above
-  each says the value is deliberate. Nine `Select Case` blocks that had no
+  each says the value is deliberate, and the *house-style rules* check accepts
+  a bare name only under exactly that comment. Nine `Select Case` blocks that had no
   `Case Else` gained an empty one with a comment and no statement, so what they do is
-  unchanged. The header fields that need text, 12 procedures with variables or a
-  handler but no `DECLARE` section, and the 61 literals are listed in
+  unchanged. The header fields that need text and 12 procedures with variables or a
+  handler but no `DECLARE` section are listed in
   `tools/house_style_pending.txt`, which the *house-style rules* check holds the
   tree to in both directions (a finding that is not listed fails, and so does a
   line that matches no finding); `reformat.py --write-pending` writes it and

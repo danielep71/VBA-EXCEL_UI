@@ -220,8 +220,21 @@ def proc_name_findings(lines: list[Ln], view: ProcedureView, module: str) -> lis
     m = re.match(r'\s*Const\s+PROC_NAME\s+As\s+String\s*=\s*"((?:[^"]|"")*)"\s*$', raw, re.I)
     if m is None:
         return [Finding(first + 1, "proc-name", view.name, "DECLARE does not start with Const PROC_NAME As String")]
-    if m.group(1).lower() != f"{module}.{view.name}".lower():
-        said = f'PROC_NAME is "{m.group(1)}", expected "{module}.{view.name}"'
+    value = m.group(1).lower()
+    qualified = f"{module}.{view.name}"
+    deliberate = first > 0 and lines[first - 1].text.strip() == hs.DELIBERATE_VALUE_COMMENT
+    if value == view.name.lower():
+        if deliberate:
+            return []
+        said = (f'PROC_NAME is the bare name "{m.group(1)}": expected "{qualified}", or the comment '
+                f"{hs.DELIBERATE_VALUE_COMMENT} directly above it")
+        return [Finding(first + 1, "proc-name", view.name, said)]
+    if deliberate:
+        said = (f'the deliberate-value comment stands above PROC_NAME "{m.group(1)}", '
+                f'which is not the bare name "{view.name}"')
+        return [Finding(first + 1, "proc-name", view.name, said)]
+    if value != qualified.lower():
+        said = f'PROC_NAME is "{m.group(1)}", expected "{qualified}"'
         return [Finding(first + 1, "proc-name", view.name, said)]
     return []
 

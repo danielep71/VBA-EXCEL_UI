@@ -1217,6 +1217,19 @@ class HouseStyleRules(GateTestCase):
         found = self.assertFails("UI_HideExcelUI: ", f"is not listed in {vba_house_rules.PENDING_FILE}")
         self.assertEqual(len(found), 1, found)
 
+    def test_fails_on_a_bare_proc_name_without_its_comment(self) -> None:
+        text = self.repo.read_text(UI)
+        comment = "    " + house_style.DELIBERATE_VALUE_COMMENT + "\r\n"
+        self.assertIn(comment, text)
+        self.repo.write(UI, text.replace(comment, "", 1))
+        self.assertFails("UI_SetExcelUI: PROC_NAME is the bare name",
+                         f"is not listed in {vba_house_rules.PENDING_FILE}")
+
+    def test_fails_on_the_deliberate_comment_above_another_literal(self) -> None:
+        text = self.repo.read_text(UI)
+        self.repo.write(UI, text.replace('"UI_SetExcelUI"', '"M_EXCEL_UI.UI_SetExcelUI"', 1))
+        self.assertFails("UI_SetExcelUI: the deliberate-value comment stands above")
+
     def test_fails_on_a_line_that_is_not_an_entry(self) -> None:
         self.repo.append(vba_house_rules.PENDING_FILE, "settled in the next change\n")
         self.assertFails(f"{vba_house_rules.PENDING_FILE}:", "not a")

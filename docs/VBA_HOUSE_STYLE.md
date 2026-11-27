@@ -53,9 +53,7 @@ layout the modules had before, and the fixtures of the formatter and of each
 rule run in either state, so a rule stays proved whatever the constant says.
 
 **What is not settled yet.** The header fields that a person has to write, a
-procedure that has locals or a handler but no `DECLARE` section, and a
-`Const PROC_NAME` whose literal is deliberately the bare procedure name (a
-comment above it says so) are listed in `tools/house_style_pending.txt`, one
+procedure that has locals or a handler but no `DECLARE` section are listed in `tools/house_style_pending.txt`, one
 line per finding: `<Module>.<Procedure>: <rule>`, or `<Module>: <rule>` for the
 module header. The *house-style rules* check allows exactly those findings. A
 finding that is not listed fails it, and so does a listed line that no finding
@@ -222,6 +220,21 @@ a task section is a short UPPERCASE verb phrase for one logical step.
 | `EXIT PROCEDURE` | the clean exit: the `SafeExit:` label, the cleanup, then `Exit Sub` or `Exit Function` |
 | `ERROR HANDLER` | the `ErrorHandler:` label, then capture, cleanup and re-raise |
 
+The literal of `PROC_NAME` is `<Module>.<Procedure>`. Where a procedure has
+always logged or raised its bare name as the source (the tests assert it), the
+literal stays the bare procedure name and the line directly above the constant
+is exactly this comment:
+
+```vba
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "UI_HideExcelUI"
+```
+
+The *house-style rules* check accepts either form. It reports a bare name
+without that comment, a literal that is neither form, and the comment above a
+literal that is not the bare procedure name. The comment is not a way to excuse
+a new literal: a new procedure uses `<Module>.<Procedure>`.
+
 A trivial procedure, such as a one-line getter, keeps only the sections it
 needs. `DECLARE`, `INITIALIZE`, `EXIT PROCEDURE` and `ERROR HANDLER` appear only
 when there is something to put in them. The demo's cleanup flow, whose clean
@@ -348,7 +361,7 @@ and refuses a module where the rewrite would be ambiguous.
 |---|---|
 | Blank lines, banners and their characters, centred titles, header field order and spacing, `HISTORY`, `UPDATED` as one date, `RETURNS` of a `Sub` that says none, declaration alignment, section titles for the exit and the handler, `INITIALIZE` opened at the handler statement, label column, statement and comment indentation | `tools/reformat.py` rewrites them; `--check` and the *house-style formatter* check report drift |
 | The renames above | `tools/reformat.py`, which compares the executable tokens before it writes |
-| The nine fields present and in order, `UPDATED` a date, `RETURNS` of a `Sub` is `Nothing`, the section order, `On Error GoTo` in `INITIALIZE`, an `Exit` in `EXIT PROCEDURE`, `Const PROC_NAME` first in `DECLARE` with the procedure's own name, `Select Case` without `Case Else`, `InStr` and `StrComp` without a compare mode, one statement per line, `Next` without its counter, an `=` rule outside a component header | the *house-style rules* check (`tools/vba_house_rules.py`), which proves each rule on failing and passing fixtures (`tools/house_rules_fixtures.py`) |
+| The nine fields present and in order, `UPDATED` a date, `RETURNS` of a `Sub` is `Nothing`, the section order, `On Error GoTo` in `INITIALIZE`, an `Exit` in `EXIT PROCEDURE`, `Const PROC_NAME` first in `DECLARE` with `<Module>.<Procedure>` or the deliberate bare name under its comment, `Select Case` without `Case Else`, `InStr` and `StrComp` without a compare mode, one statement per line, `Next` without its counter, an `=` rule outside a component header | the *house-style rules* check (`tools/vba_house_rules.py`), which proves each rule on failing and passing fixtures (`tools/house_rules_fixtures.py`) |
 | The findings of those rules that are still to be settled by hand | `tools/house_style_pending.txt`, which the *house-style rules* check holds the tree to in both directions (see [What is not settled yet](#house-style-210)) |
 | Header text, the content of a field, a title that says what the procedure does rather than spelling its identifier, local variable names, `vbNullString`, line length | I write and review them; no check rewrites them |
 

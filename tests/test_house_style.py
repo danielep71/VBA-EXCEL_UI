@@ -219,13 +219,23 @@ class SwitchedOn(unittest.TestCase):
     def test_every_remaining_finding_is_one_a_person_settles(self) -> None:
         self.assertLessEqual({item.rule for _, item in self.found()}, {"header", "sections", "proc-name"})
 
-    def test_a_procedure_with_a_declare_section_starts_it_with_a_proc_name(self) -> None:
-        # What remains is a procedure without a DECLARE section, or a literal that is deliberately not
-        # <Module>.<Procedure>.
+    def test_every_procedure_with_a_declare_section_names_itself_in_proc_name(self) -> None:
+        # What remains is a procedure that has no DECLARE section at all.
         for name, item in self.found():
             if item.rule == "proc-name":
                 with self.subTest(module=name, procedure=item.where):
-                    self.assertTrue(item.message.startswith(("no DECLARE section", "PROC_NAME is")), item)
+                    self.assertTrue(item.message.startswith("no DECLARE section"), item)
+
+    def test_a_bare_literal_stands_only_under_the_deliberate_comment(self) -> None:
+        bare = 0
+        for _, name, text in modules():
+            lines = text.split("\r\n")
+            for n, line in enumerate(lines):
+                if line.lstrip().startswith("'The value is deliberate"):
+                    bare += 1
+                    self.assertEqual(lines[n].strip(), house_style.DELIBERATE_VALUE_COMMENT, (name, n + 1))
+                    self.assertTrue(lines[n + 1].startswith("    Const PROC_NAME As String = "), (name, n + 2))
+        self.assertEqual(bare, 61)
 
     def test_every_select_case_has_a_case_else(self) -> None:
         self.assertEqual([item for _, item in self.found() if item.rule == "select-case"], [])

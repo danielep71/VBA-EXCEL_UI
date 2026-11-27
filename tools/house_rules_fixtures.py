@@ -5,10 +5,14 @@ change at a time. The gate runs rules_selftest() on every push, whatever the
 state of house_style.HOUSE_STYLE_ACTIVE, so a rule stays proved while the
 tree is not yet held to it.
 """
+import house_style
 import vba_house_rules
 from house_format_fixtures import HOUSE_MODULE
 
 DASHES = "'" + "-" * 78
+DELIBERATE = "    " + house_style.DELIBERATE_VALUE_COMMENT + "\r\n"
+QUALIFIED_CONST = '    Const PROC_NAME As String = "M_PROBE.Probe_Describe"\r\n'
+BARE_CONST = '    Const PROC_NAME As String = "Probe_Describe"\r\n'
 EQUALS = "'" + "=" * 78
 
 BODY_END = "        Probe_Describe = Text\r\n"
@@ -43,6 +47,18 @@ FAILING: list[tuple[str, str, str, str, str]] = [
     ("the PROC_NAME text names another procedure", '"M_PROBE.Probe_Describe"', '"M_PROBE.Other"', "proc-name", "expected"),
     ("DECLARE does not start with PROC_NAME", "    Const PROC_NAME As String", "    Dim Zed As Long\r\n    Const PROC_NAME As String",
      "proc-name", "does not start with Const PROC_NAME"),
+    ("a bare PROC_NAME without the deliberate-value comment", QUALIFIED_CONST, BARE_CONST,
+     "proc-name", "is the bare name"),
+    ("a bare PROC_NAME whose comment is not the exact text", QUALIFIED_CONST,
+     DELIBERATE.replace("deliberate", "intended") + BARE_CONST, "proc-name", "is the bare name"),
+    ("a bare PROC_NAME whose comment is not directly above it", QUALIFIED_CONST, DELIBERATE + "\r\n" + BARE_CONST,
+     "proc-name", "is the bare name"),
+    ("a PROC_NAME that is only the module", QUALIFIED_CONST, QUALIFIED_CONST.replace("M_PROBE.Probe_Describe", "M_PROBE"),
+     "proc-name", "expected"),
+    ("the deliberate-value comment above a qualified PROC_NAME", QUALIFIED_CONST, DELIBERATE + QUALIFIED_CONST,
+     "proc-name", "not the bare name"),
+    ("the deliberate-value comment above another procedure's name", QUALIFIED_CONST,
+     DELIBERATE + QUALIFIED_CONST.replace("M_PROBE.Probe_Describe", "Other"), "proc-name", "not the bare name"),
     ("the constant keeps its previous name", "PROC_NAME", "PROC", "proc-name", "does not start with Const PROC_NAME"),
     ("a procedure with variables has no DECLARE", "' DECLARE\r\n", "' SET UP\r\n", "proc-name", "no DECLARE section"),
     ("a compact procedure whose PROC_NAME names another procedure", "        mState = 0\r\n", COMPACT_DECLARED.replace(
@@ -74,6 +90,9 @@ FAILING: list[tuple[str, str, str, str, str]] = [
 
 # Text that looks like a deviation and is not one.
 PASSING: list[tuple[str, str, str]] = [
+    ("a bare PROC_NAME with the deliberate-value comment directly above it", QUALIFIED_CONST, DELIBERATE + BARE_CONST),
+    ("a bare PROC_NAME in another letter case with the comment", QUALIFIED_CONST,
+     DELIBERATE + BARE_CONST.replace("Probe_Describe", "PROBE_DESCRIBE")),
     ("a compact procedure with a DECLARE that names itself", "        mState = 0\r\n",
      COMPACT_DECLARED.lstrip("\r\n")),
     ("the style fixture as it stands", "", ""),

@@ -51,6 +51,9 @@ HANDLER_TITLES = frozenset({"FAIL", "CLEAN FAIL", "ERROR", "HANDLER", "ERROR HAN
 
 PROC_CONSTANT_OLD = "PROC"
 PROC_CONSTANT = "PROC_NAME"
+# The comment that must stand directly above a Const PROC_NAME whose literal is the
+# bare procedure name instead of <Component>.<Procedure>.
+DELIBERATE_VALUE_COMMENT = "'The value is deliberate: it stays the bare procedure name, without the module prefix"
 
 # Indentation: a statement sits at CODE_INDENT plus INDENT_STEP per open block,
 # the one-line comment that introduces it at INTENT_INDENT plus the same steps,
