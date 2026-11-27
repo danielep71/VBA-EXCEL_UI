@@ -262,6 +262,72 @@ class VbaAnalyzerSelfTest(GateTestCase):
             self.assertFails("unresolved direct call")
 
 
+class VbaSyntax(GateTestCase):
+    check = "VBA syntax"
+    END_SUB = "\r\nEnd Sub\r\n"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_on_a_parenthesis_that_nothing_opened(self) -> None:
+        self.repo.replace(TESTS, "            FindingSummary:=FindingSummary\r\n",
+                          "            FindingSummary:=FindingSummary)\r\n")
+        self.assertFails(f"{TESTS}:", "TST_CertComposeEvidence: parentheses: "
+                         "a closing parenthesis has no opening parenthesis",
+                         "FindingSummary:=FindingSummary)")
+
+    def test_fails_when_a_long_takes_a_longptr_expression(self) -> None:
+        self.repo.replace(TITLEBAR_TESTS,
+                          "    Dim FixtureOwned        As LongPtr         'Owned bits the fixture writes",
+                          "    Dim FixtureOwned        As Long            'Owned bits the fixture writes")
+        self.repo.replace(TITLEBAR_TESTS, "                    FixtureOwned = TST_WS_BORDER\r\n",
+                          "                    FixtureOwned = EntryStyle And TST_TITLEBAR_OWNED_MASK\r\n")
+        found = self.assertFails(f"{TITLEBAR_TESTS}:", "vba7-x64: TST_Case_TitleBarVisibilityRequiresCompleteCaption: ",
+                                 "longptr-assignment: FixtureOwned is declared Long but the expression "
+                                 "reads EntryStyle, a LongPtr")
+        self.assertFalse([f for f in found if "legacy-x86" in f or "vba7-x86" in f], found)
+
+    def test_fails_when_a_block_is_closed_twice(self) -> None:
+        self.repo.replace(RUNTIME, self.END_SUB, "\r\n    End If" + self.END_SUB)
+        self.assertFails(f"{RUNTIME}:", "blocks: End If has no open If")
+
+    def test_fails_when_only_the_legacy_arm_loses_its_end_if(self) -> None:
+        text = self.repo.read_bytes(RUNTIME).decode("ascii")
+        arms = ("#If VBA7 Then\r\n    If True Then\r\n    End If\r\n#Else\r\n    If True Then\r\n#End If\r\n")
+        end = text.index(self.END_SUB)
+        self.repo.write(RUNTIME, (text[:end] + "\r\n" + arms.rstrip("\r\n") + text[end:]).encode("ascii"))
+        found = self.assertFails("legacy-x86: ", "blocks: If opened at line")
+        self.assertFalse([f for f in found if "vba7-" in f], found)
+
+    def test_fails_on_too_many_line_continuations(self) -> None:
+        call = "    Debug.Print 1" + " _\r\n        + 1" * 25
+        self.repo.replace(RUNTIME, self.END_SUB, "\r\n" + call + self.END_SUB)
+        self.assertFails(f"{RUNTIME}:", "continuations: 25 line continuations; VBA allows at most 24")
+
+    def test_fails_on_a_procedure_of_64_kb(self) -> None:
+        self.repo.replace(RUNTIME, self.END_SUB, "\r\n    '" + "x" * 65536 + self.END_SUB)
+        self.assertFails(f"{RUNTIME}:", "procedure-size: ", "bytes of source; VBA refuses a procedure of 65536")
+
+    def test_fails_when_a_long_goes_to_a_byref_longptr(self) -> None:
+        planted = ("\r\n    Dim Small As Integer\r\n    UI_FixtureCount Small\r\nEnd Sub\r\n"
+                   "Private Sub UI_FixtureCount(ByRef Total As Long)\r\nEnd Sub\r\n")
+        self.repo.replace(RUNTIME, self.END_SUB, planted)
+        self.assertFails(f"{RUNTIME}:", "byref-type: Small is declared Integer but UI_FixtureCount takes Total "
+                         "ByRef As Long")
+
+    def test_fails_on_a_conditional_directive_that_cannot_be_read(self) -> None:
+        self.repo.replace(RUNTIME, self.END_SUB, "\r\n#If UnknownHost Then\r\n#End If" + self.END_SUB)
+        self.assertFails(f"{RUNTIME}:", "unreadable: the conditional compilation could not be read")
+
+    def test_fails_when_the_fixtures_stop_detecting_a_stray_parenthesis(self) -> None:
+        with patch("vba_syntax_fixtures.findings", return_value=([], {})):
+            self.assertFails("#203 fixture a closing parenthesis nothing opened is rejected (FindingSummary)")
+
+    def test_fails_when_no_procedure_is_read(self) -> None:
+        with patch("vba_syntax.Reader.open_procedure"):
+            self.assertFails("no procedure was read")
+
+
 class TitleBarControlRegression(GateTestCase):
     check = "title-bar control regression"
 
