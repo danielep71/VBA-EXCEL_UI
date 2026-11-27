@@ -1,10 +1,12 @@
 Attribute VB_Name = "M_EXCEL_UI_TEST_RUNTIME"
+
 Option Explicit
 Option Private Module
 
+'
 '==============================================================================
-' M_EXCEL_UI_TEST_RUNTIME
-'------------------------------------------------------------------------------
+' MODULE: M_EXCEL_UI_TEST_RUNTIME
+'==============================================================================
 ' PURPOSE
 '   Hold the runtime regression cases of EXCEL_UI: visibility, convenience
 '   wrappers, structured results, window-target scope, the failure list and
@@ -15,6 +17,9 @@ Option Private Module
 '   behavior, selective application, leave-unchanged semantics, the
 '   convenience wrappers, the structured-result path or window-target scope.
 '   These cases detect such a regression
+'
+' DEPENDENCIES
+'   - M_EXCEL_UI_TEST_HARNESS
 '
 ' PUBLIC SURFACE
 '   None of its own. The cases are Public so that the regression pack in
@@ -50,44 +55,42 @@ Option Private Module
 '     - a list that cannot grow degrades visibly without raising
 '     - a first entry that cannot be allocated keeps the result contract
 '
-' DEPENDENCIES
-'   - M_EXCEL_UI_TEST_HARNESS
-'
-' UPDATED
-'   2026-11-15 - Split out of the single regression module; the cases moved
-'                here unchanged apart from visibility (#90).
-'
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
 '   1.1.2
+'
+' HISTORY
+'   2026-11-15 - Split out of the single regression module; the cases moved
+'                here unchanged apart from visibility (#90).
+'
+' UPDATED
+'   2026-11-15
 '==============================================================================
-
 
 '------------------------------------------------------------------------------
 ' TEST CONFIGURATION
 '------------------------------------------------------------------------------
-    Private Const TEST_QUIET_FAULT_NONE As Long = 0  'Quiet scope: no fault
-    Private Const TEST_QUIET_FAULT_ENTRY As Long = 1  'Quiet scope: entry read fails
-    Private Const TEST_QUIET_FAULT_WRITE As Long = 2  'Quiet scope: write ineffective
-    Private Const TEST_QUIET_FAULT_READBACK As Long = 3  'Quiet scope: readback fails
+    Private Const TEST_QUIET_FAULT_NONE     As Long = 0 'Quiet scope: no fault
+    Private Const TEST_QUIET_FAULT_ENTRY    As Long = 1 'Quiet scope: entry read fails
+    Private Const TEST_QUIET_FAULT_WRITE    As Long = 2 'Quiet scope: write ineffective
+    Private Const TEST_QUIET_FAULT_READBACK As Long = 3 'Quiet scope: readback fails
 
 
 '
 '------------------------------------------------------------------------------
 '
-'                           REGRESSION CASES
+'                               REGRESSION CASES
 '
 '------------------------------------------------------------------------------
 '
-
 
 Public Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 
 '
-'==============================================================================
-' TST_Case_ShowAllBaseline
+'------------------------------------------------------------------------------
+'                          TST CASE SHOW ALL BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the module can drive all managed UI elements to visible state
@@ -102,12 +105,12 @@ Public Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 '     FALSE => leave title-bar assertions out of this case
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -172,12 +175,11 @@ Public Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 
 End Sub
 
-
 Public Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 
 '
-'==============================================================================
-' TST_Case_SelectiveHide
+'------------------------------------------------------------------------------
+'                           TST CASE SELECTIVE HIDE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that selective hide requests affect only the requested UI elements
@@ -193,12 +195,12 @@ Public Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 '     FALSE => skip TitleBar assertions in this case
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -268,12 +270,11 @@ Public Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 
 End Sub
 
-
 Public Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 
 '
-'==============================================================================
-' TST_Case_SelectiveShow
+'------------------------------------------------------------------------------
+'                           TST CASE SELECTIVE SHOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that selective show requests affect only the requested UI elements
@@ -289,12 +290,12 @@ Public Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 '     FALSE => skip TitleBar assertions in this case
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -365,12 +366,11 @@ Public Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 
 End Sub
 
-
 Public Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 
 '
-'==============================================================================
-' TST_Case_NoOpLeaveUnchanged
+'------------------------------------------------------------------------------
+'                        TST CASE NO OP LEAVE UNCHANGED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a no-argument UI_SetExcelUI call behaves as a no-op
@@ -385,12 +385,12 @@ Public Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 '     FALSE => skip TitleBar assertions in this case
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -458,12 +458,11 @@ Public Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 
 End Sub
 
-
 Public Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 
 '
-'==============================================================================
-' TST_Case_ConvenienceWrappers
+'------------------------------------------------------------------------------
+'                        TST CASE CONVENIENCE WRAPPERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_HideExcelUI and UI_ShowExcelUI drive all managed UI elements
@@ -479,12 +478,12 @@ Public Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 '     FALSE => skip TitleBar assertions in this case
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -573,12 +572,11 @@ Public Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 
 End Sub
 
-
 Public Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean)
 
 '
-'==============================================================================
-' TST_Case_WithResult_AllSuccess
+'------------------------------------------------------------------------------
+'                       TST CASE WITH RESULT ALL SUCCESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult returns a clean-success outcome when
@@ -594,21 +592,23 @@ Public Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean)
 '     FALSE => leave TitleBar unchanged in this case
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises on assertion failure
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean         'Boolean success flag returned by the API
-    Dim FailureCount        As Long            'Number of recorded failures
-    Dim FailureList         As Variant         'Optional array of recorded failures
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_RUNTIME.TST_Case_WithResult_AllSuccess"
+
+    Dim OK              As Boolean  'Boolean success flag returned by the API
+    Dim FailureCount    As Long     'Number of recorded failures
+    Dim FailureList     As Variant  'Optional array of recorded failures
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -676,12 +676,11 @@ Public Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean)
 
 End Sub
 
-
 Public Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolean)
 
 '
-'==============================================================================
-' TST_Case_WithResult_NoOpSuccess
+'------------------------------------------------------------------------------
+'                      TST CASE WITH RESULT NO OP SUCCESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult returns a clean-success outcome when
@@ -697,21 +696,23 @@ Public Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolean
 '     FALSE => skip TitleBar assertions in this case
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises on assertion failure
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean         'Boolean success flag returned by the API
-    Dim FailureCount        As Long            'Number of recorded failures
-    Dim FailureList         As Variant         'Optional array of recorded failures
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_RUNTIME.TST_Case_WithResult_NoOpSuccess"
+
+    Dim OK              As Boolean  'Boolean success flag returned by the API
+    Dim FailureCount    As Long     'Number of recorded failures
+    Dim FailureList     As Variant  'Optional array of recorded failures
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -789,12 +790,11 @@ Public Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolean
 
 End Sub
 
-
 Public Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarTests As Boolean)
 
 '
-'==============================================================================
-' TST_Case_WithResult_SuccessWithoutFailureList
+'------------------------------------------------------------------------------
+'              TST CASE WITH RESULT SUCCESS WITHOUT FAILURE LIST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult succeeds cleanly when the caller omits
@@ -810,22 +810,27 @@ Public Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarTe
 '     FALSE => leave TitleBar unchanged in this case
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises on assertion failure
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Failure messages carry the structured result (#135).
 '   2026-07-25
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean         'Boolean success flag returned by the API
-    Dim FailureCount        As Long            'Number of recorded failures
-    Dim FailureList         As Variant         'Local untouched Variant proving omission path
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_RUNTIME.TST_Case_WithResult_SuccessWithoutFailureList"
+
+    Dim OK              As Boolean  'Boolean success flag returned by the API
+    Dim FailureCount    As Long     'Number of recorded failures
+    Dim FailureList     As Variant  'Local untouched Variant proving omission path
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -916,12 +921,11 @@ Public Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarTe
 
 End Sub
 
-
 Public Sub TST_Case_WithResult_InvalidVisibility()
 
 '
-'==============================================================================
-' TST_Case_WithResult_InvalidVisibility
+'------------------------------------------------------------------------------
+'                   TST CASE WITH RESULT INVALID VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult reports a structured failure when an
@@ -933,22 +937,27 @@ Public Sub TST_Case_WithResult_InvalidVisibility()
 '   invalid tri-state value
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises on assertion failure
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Failure messages carry the structured result (#135).
 '   2026-07-25
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean         'Boolean success flag returned by the API
-    Dim FailureCount        As Long            'Number of recorded failures
-    Dim FailureList         As Variant         'Recorded structured failures
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_RUNTIME.TST_Case_WithResult_InvalidVisibility"
+
+    Dim OK              As Boolean  'Boolean success flag returned by the API
+    Dim FailureCount    As Long     'Number of recorded failures
+    Dim FailureList     As Variant  'Recorded structured failures
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1000,12 +1009,11 @@ Public Sub TST_Case_WithResult_InvalidVisibility()
 
 End Sub
 
-
 Public Sub TST_Case_TargetScope_ActiveWindow()
 
 '
-'==============================================================================
-' TST_Case_TargetScope_ActiveWindow
+'------------------------------------------------------------------------------
+'                     TST CASE TARGET SCOPE ACTIVE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_TargetActiveWindow changes only the active Excel Window while
@@ -1016,12 +1024,14 @@ Public Sub TST_Case_TargetScope_ActiveWindow()
 '
 ' UPDATED
 '   2026-08-01
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TargetScope_ActiveWindow"
+
     Dim AnchorWindow        As Window
     Dim TargetWindow        As Window
     Dim SavedHeadings       As Boolean
@@ -1036,18 +1046,16 @@ Public Sub TST_Case_TargetScope_ActiveWindow()
     Dim FailSource          As String
     Dim FailDescription     As String
 
-    Const PROC As String = "TST_Case_TargetScope_ActiveWindow"
-
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         ThisWorkbook.Activate
         Set AnchorWindow = Application.ActiveWindow
 
         If AnchorWindow Is Nothing Then
-            Err.Raise TEST_TARGET_ERR_BASE + 1, PROC, _
+            Err.Raise TEST_TARGET_ERR_BASE + 1, PROC_NAME, _
                 "ThisWorkbook could not provide an active Excel window"
         End If
 
@@ -1059,7 +1067,7 @@ Public Sub TST_Case_TargetScope_ActiveWindow()
         Set TargetWindow = ThisWorkbook.NewWindow
 
         If TargetWindow Is Nothing Then
-            Err.Raise TEST_TARGET_ERR_BASE + 2, PROC, _
+            Err.Raise TEST_TARGET_ERR_BASE + 2, PROC_NAME, _
                 "ThisWorkbook.NewWindow did not return a target window"
         End If
 
@@ -1096,7 +1104,7 @@ Public Sub TST_Case_TargetScope_ActiveWindow()
             Succeeded:=OK, _
             FailureCount:=FailureCount, _
             FailureList:=FailureList, _
-            AssertionName:=PROC & ".Result"
+            AssertionName:=PROC_NAME & ".Result"
 
 '------------------------------------------------------------------------------
 ' ASSERT SCOPE
@@ -1104,29 +1112,29 @@ Public Sub TST_Case_TargetScope_ActiveWindow()
         TST_AssertApplicationProperty _
             Expected:=False, _
             PropertyName:="DisplayStatusBar", _
-            AssertionName:=PROC & ".ApplicationLevelUnaffectedByScope"
+            AssertionName:=PROC_NAME & ".ApplicationLevelUnaffectedByScope"
 
         TST_AssertSnapshotWindowState _
             TargetWindow:=TargetWindow, _
             ExpectedHeadings:=False, _
             ExpectedWorkbookTabs:=False, _
             ExpectedGridlines:=False, _
-            AssertionName:=PROC & ".TargetWindow"
+            AssertionName:=PROC_NAME & ".TargetWindow"
 
         TST_AssertSnapshotWindowState _
             TargetWindow:=AnchorWindow, _
             ExpectedHeadings:=True, _
             ExpectedWorkbookTabs:=True, _
             ExpectedGridlines:=True, _
-            AssertionName:=PROC & ".NonTargetWindow"
+            AssertionName:=PROC_NAME & ".NonTargetWindow"
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Only the active window received window-level changes"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         On Error Resume Next
 
         TST_SafeCloseWindow TargetWindow
@@ -1151,21 +1159,20 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TargetScope_ActiveWorkbookWindows()
 
 '
-'==============================================================================
-' TST_Case_TargetScope_ActiveWorkbookWindows
+'------------------------------------------------------------------------------
+'                TST CASE TARGET SCOPE ACTIVE WORKBOOK WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_TargetActiveWorkbookWindows changes every Window belonging to
@@ -1176,32 +1183,32 @@ Public Sub TST_Case_TargetScope_ActiveWorkbookWindows()
 '
 ' UPDATED
 '   2026-08-01
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OriginalWindow      As Window
-    Dim TargetBook          As Workbook
-    Dim OtherBook           As Workbook
-    Dim TargetWindowOne     As Window
-    Dim TargetWindowTwo     As Window
-    Dim OtherWindow         As Window
-    Dim OK                  As Boolean
-    Dim FailureCount        As Long
-    Dim FailureList         As Variant
-    Dim HasFailure          As Boolean
-    Dim FailNumber          As Long
-    Dim FailSource          As String
-    Dim FailDescription     As String
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TargetScope_ActiveWorkbookWindows"
 
-    Const PROC As String = "TST_Case_TargetScope_ActiveWorkbookWindows"
+    Dim OriginalWindow  As Window
+    Dim TargetBook      As Workbook
+    Dim OtherBook       As Workbook
+    Dim TargetWindowOne As Window
+    Dim TargetWindowTwo As Window
+    Dim OtherWindow     As Window
+    Dim OK              As Boolean
+    Dim FailureCount    As Long
+    Dim FailureList     As Variant
+    Dim HasFailure      As Boolean
+    Dim FailNumber      As Long
+    Dim FailSource      As String
+    Dim FailDescription As String
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         Set OriginalWindow = Application.ActiveWindow
 
@@ -1216,7 +1223,7 @@ Public Sub TST_Case_TargetScope_ActiveWorkbookWindows()
            TargetWindowTwo Is Nothing Or _
            OtherWindow Is Nothing Then
 
-            Err.Raise TEST_TARGET_ERR_BASE + 3, PROC, _
+            Err.Raise TEST_TARGET_ERR_BASE + 3, PROC_NAME, _
                 "temporary workbook windows could not be created"
         End If
 
@@ -1238,7 +1245,7 @@ Public Sub TST_Case_TargetScope_ActiveWorkbookWindows()
         TargetWindowOne.Activate
 
         If Not (Application.ActiveWorkbook Is TargetBook) Then
-            Err.Raise TEST_TARGET_ERR_BASE + 4, PROC, _
+            Err.Raise TEST_TARGET_ERR_BASE + 4, PROC_NAME, _
                 "temporary target workbook could not be activated"
         End If
 
@@ -1260,7 +1267,7 @@ Public Sub TST_Case_TargetScope_ActiveWorkbookWindows()
             Succeeded:=OK, _
             FailureCount:=FailureCount, _
             FailureList:=FailureList, _
-            AssertionName:=PROC & ".Result"
+            AssertionName:=PROC_NAME & ".Result"
 
 '------------------------------------------------------------------------------
 ' ASSERT SCOPE
@@ -1270,29 +1277,29 @@ Public Sub TST_Case_TargetScope_ActiveWorkbookWindows()
             ExpectedHeadings:=False, _
             ExpectedWorkbookTabs:=False, _
             ExpectedGridlines:=False, _
-            AssertionName:=PROC & ".TargetWindowOne"
+            AssertionName:=PROC_NAME & ".TargetWindowOne"
 
         TST_AssertSnapshotWindowState _
             TargetWindow:=TargetWindowTwo, _
             ExpectedHeadings:=False, _
             ExpectedWorkbookTabs:=False, _
             ExpectedGridlines:=False, _
-            AssertionName:=PROC & ".TargetWindowTwo"
+            AssertionName:=PROC_NAME & ".TargetWindowTwo"
 
         TST_AssertSnapshotWindowState _
             TargetWindow:=OtherWindow, _
             ExpectedHeadings:=True, _
             ExpectedWorkbookTabs:=True, _
             ExpectedGridlines:=True, _
-            AssertionName:=PROC & ".OtherWorkbookWindow"
+            AssertionName:=PROC_NAME & ".OtherWorkbookWindow"
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Only windows belonging to the active workbook were changed"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         On Error Resume Next
 
         TST_SafeCloseWorkbook TargetBook
@@ -1313,21 +1320,20 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TargetScope_InvalidValue()
 
 '
-'==============================================================================
-' TST_Case_TargetScope_InvalidValue
+'------------------------------------------------------------------------------
+'                     TST CASE TARGET SCOPE INVALID VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify ordered invalid-scope diagnostics, application-level continuation,
@@ -1338,36 +1344,36 @@ Public Sub TST_Case_TargetScope_InvalidValue()
 '
 ' UPDATED
 '   2026-08-01
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow        As Window
-    Dim InvalidScope        As UIWindowTargetScope
-    Dim SavedHeadings       As Boolean
-    Dim SavedStatusBar      As Boolean
-    Dim OK                  As Boolean
-    Dim FailureCount        As Long
-    Dim FailureList         As Variant
-    Dim HasFailure          As Boolean
-    Dim FailNumber          As Long
-    Dim FailSource          As String
-    Dim FailDescription     As String
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TargetScope_InvalidValue"
 
-    Const PROC As String = "TST_Case_TargetScope_InvalidValue"
+    Dim AnchorWindow    As Window
+    Dim InvalidScope    As UIWindowTargetScope
+    Dim SavedHeadings   As Boolean
+    Dim SavedStatusBar  As Boolean
+    Dim OK              As Boolean
+    Dim FailureCount    As Long
+    Dim FailureList     As Variant
+    Dim HasFailure      As Boolean
+    Dim FailNumber      As Long
+    Dim FailSource      As String
+    Dim FailDescription As String
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         ThisWorkbook.Activate
         Set AnchorWindow = Application.ActiveWindow
 
         If AnchorWindow Is Nothing Then
-            Err.Raise TEST_TARGET_ERR_BASE + 5, PROC, _
+            Err.Raise TEST_TARGET_ERR_BASE + 5, PROC_NAME, _
                 "ThisWorkbook could not provide an active Excel window"
         End If
 
@@ -1396,7 +1402,7 @@ Public Sub TST_Case_TargetScope_InvalidValue()
             FailureCount:=FailureCount, _
             FailureList:=FailureList, _
             ExpectedPrefix:="TargetScope | invalid UIWindowTargetScope value: 999", _
-            AssertionName:=PROC & ".Result"
+            AssertionName:=PROC_NAME & ".Result"
 
 '------------------------------------------------------------------------------
 ' ASSERT CONTINUATION AND WINDOW SUPPRESSION
@@ -1404,20 +1410,20 @@ Public Sub TST_Case_TargetScope_InvalidValue()
         TST_AssertApplicationProperty _
             Expected:=False, _
             PropertyName:="DisplayStatusBar", _
-            AssertionName:=PROC & ".ApplicationLevelContinued"
+            AssertionName:=PROC_NAME & ".ApplicationLevelContinued"
 
         TST_AssertBooleanEquals _
             Expected:=True, _
             Actual:=AnchorWindow.DisplayHeadings, _
-            AssertionName:=PROC & ".WindowLevelSkipped"
+            AssertionName:=PROC_NAME & ".WindowLevelSkipped"
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Invalid scope was reported while application-level work continued"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         On Error Resume Next
 
         If Not AnchorWindow Is Nothing Then
@@ -1438,21 +1444,20 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_ScreenUpdatingPreserved()
 
 '
-'==============================================================================
-' TST_Case_ScreenUpdatingPreserved
+'------------------------------------------------------------------------------
+'                      TST CASE SCREEN UPDATING PRESERVED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the EXCEL_UI apply path restores Application.ScreenUpdating to
@@ -1464,19 +1469,21 @@ Public Sub TST_Case_ScreenUpdatingPreserved()
 '   invisible to callers from a state-management perspective
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises on assertion failure
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SavedScreenUpdating As Boolean         'Caller-visible ScreenUpdating baseline
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_RUNTIME.TST_Case_ScreenUpdatingPreserved"
+
+    Dim SavedScreenUpdating As Boolean  'Caller-visible ScreenUpdating baseline
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1529,12 +1536,11 @@ Public Sub TST_Case_ScreenUpdatingPreserved()
 
 End Sub
 
-
 Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 
 '
-'==============================================================================
-' TST_Case_FailureAccumulatorDegradesSafely
+'------------------------------------------------------------------------------
+'                 TST CASE FAILURE ACCUMULATOR DEGRADES SAFELY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a failure list which cannot be grown degrades visibly instead of
@@ -1553,7 +1559,7 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 '   which is the sequence that exercises the truncation marker.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Records one failure normally and asserts it was listed.
@@ -1571,26 +1577,30 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 '   Public only for same-project regression access; Option Private Module keeps
 '   it out of the external automation namespace.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Asserts the exact marker text and an Empty list (#38).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Succeeded           As Boolean         'Result contract success flag
-    Dim FailureCount        As Long            'Result contract failure count
-    Dim FailureList         As Variant         'Result contract failure list
-    Dim MarkerText          As String          'Final entry after truncation
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_FailureAccumulatorDegradesSafely"
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim Succeeded       As Boolean  'Result contract success flag
+    Dim FailureCount    As Long     'Result contract failure count
+    Dim FailureList     As Variant  'Result contract failure list
+    Dim MarkerText      As String   'Final entry after truncation
 
-    Const PROC As String = "TST_Case_FailureAccumulatorDegradesSafely"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
+
     Const MARKER_TEXT As String = _
         "Diagnostics | failure list could not be grown; " & _
         "2 failures were counted and fewer are listed"
@@ -1598,9 +1608,9 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that failure accumulation degrades instead of raising"
 
     'Start from the documented empty result contract
@@ -1612,7 +1622,7 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 '------------------------------------------------------------------------------
     'A healthy append is the precondition for the truncation case below
         UI_RuntimeHandleFailure _
-            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            PROC_NAME, False, Succeeded, FailureCount, FailureList, True, _
             "StageOne", "first failure detail"
 
         TST_AssertBooleanEquals _
@@ -1635,7 +1645,7 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
         UI_InternalInjectFailureListGrowthFailure True
 
         UI_RuntimeHandleFailure _
-            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            PROC_NAME, False, Succeeded, FailureCount, FailureList, True, _
             "StageTwo", "second failure detail"
 
 '------------------------------------------------------------------------------
@@ -1674,7 +1684,7 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
         UI_InternalInjectFailureListGrowthFailure True
 
         UI_RuntimeHandleFailure _
-            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            PROC_NAME, False, Succeeded, FailureCount, FailureList, True, _
             "StageThree", "third failure detail"
 
         TST_AssertBooleanEquals _
@@ -1689,16 +1699,16 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Accumulation degraded visibly and never raised"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disarm the seam whatever happened above
         On Error Resume Next
-            UI_InternalInjectFailureListGrowthFailure False
+        UI_InternalInjectFailureListGrowthFailure False
         On Error GoTo 0
 
     'Raise the captured failure after cleanup when needed
@@ -1711,22 +1721,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_FirstFailureAllocationKeepsContract()
 
 '
-'==============================================================================
-' TST_Case_FirstFailureAllocationKeepsContract
+'------------------------------------------------------------------------------
+'               TST CASE FIRST FAILURE ALLOCATION KEEPS CONTRACT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the documented result contract when the FIRST failure-list entry
@@ -1741,7 +1750,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
 '   facade never passes.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Fails the first allocation of an invalid-Ribbon call made over stale
@@ -1766,36 +1775,37 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
 '
 ' UPDATED
 '   2026-11-14
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean         'Result returned by the facade
-    Dim Succeeded           As Boolean         'Accumulator success flag
-    Dim FailureCount        As Long            'Result contract failure count
-    Dim FailureList         As Variant         'Result contract failure list
-    Dim InvalidVisibility   As UIVisibility    'Value the facade must reject
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_FirstFailureAllocationKeepsContract"
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim OK                  As Boolean      'Result returned by the facade
+    Dim Succeeded           As Boolean      'Accumulator success flag
+    Dim FailureCount        As Long         'Result contract failure count
+    Dim FailureList         As Variant      'Result contract failure list
+    Dim InvalidVisibility   As UIVisibility 'Value the facade must reject
 
-    Const PROC As String = "TST_Case_FirstFailureAllocationKeepsContract"
-    Const RIBBON_ENTRY As String = "Ribbon | invalid UIVisibility value: 999"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
+
+    Const RIBBON_ENTRY  As String = "Ribbon | invalid UIVisibility value: 999"
     Const STATUSBAR_ENTRY As String = _
         "StatusBar | invalid UIVisibility value: 999"
     Const CORRUPT_ENTRY As String = "StageCorrupt | corrupt buffer detail"
-    Const GROW_ENTRY As String = "StageGrow | grow detail"
+    Const GROW_ENTRY    As String = "StageGrow | grow detail"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating the result contract when the first list entry fails"
 
         InvalidVisibility = 999
@@ -1820,7 +1830,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             FailureList:=FailureList, _
             ExpectedCount:=1, _
             ExpectedEntry:=vbNullString, _
-            AssertionName:=PROC & ".FirstAllocationFailed"
+            AssertionName:=PROC_NAME & ".FirstAllocationFailed"
 
 '------------------------------------------------------------------------------
 ' REPEAT WITHOUT THE SEAM
@@ -1838,7 +1848,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             FailureList:=FailureList, _
             ExpectedCount:=1, _
             ExpectedEntry:=RIBBON_ENTRY, _
-            AssertionName:=PROC & ".SeamWasOneShot"
+            AssertionName:=PROC_NAME & ".SeamWasOneShot"
 
 '------------------------------------------------------------------------------
 ' FAIL THE FIRST OF TWO ENTRIES
@@ -1859,7 +1869,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             FailureList:=FailureList, _
             ExpectedCount:=2, _
             ExpectedEntry:=STATUSBAR_ENTRY, _
-            AssertionName:=PROC & ".LaterEntryRecorded"
+            AssertionName:=PROC_NAME & ".LaterEntryRecorded"
 
 '------------------------------------------------------------------------------
 ' OMIT THE LIST
@@ -1873,17 +1883,17 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             FailureCount:=FailureCount)
 
         TST_AssertBooleanEquals _
-            False, OK, PROC & ".NoListResult"
+            False, OK, PROC_NAME & ".NoListResult"
 
         TST_AssertTrue _
-            (FailureCount = 1), PROC & ".NoListCount"
+            (FailureCount = 1), PROC_NAME & ".NoListCount"
 
         TST_AssertTrue _
-            (UBound(FailureList) = 1), PROC & ".NoListLeftUntouched"
+            (UBound(FailureList) = 1), PROC_NAME & ".NoListLeftUntouched"
 
         TST_AssertTrue _
             (StrComp(FailureList(1), STATUSBAR_ENTRY, vbBinaryCompare) = 0), _
-            PROC & ".NoListEntryUntouched"
+            PROC_NAME & ".NoListEntryUntouched"
 
     'The next call that does capture a list consumes the seam still armed
         OK = UI_SetExcelUI_WithResult( _
@@ -1897,7 +1907,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             FailureList:=FailureList, _
             ExpectedCount:=1, _
             ExpectedEntry:=vbNullString, _
-            AssertionName:=PROC & ".SeamSurvivedNoListCall"
+            AssertionName:=PROC_NAME & ".SeamSurvivedNoListCall"
 
 '------------------------------------------------------------------------------
 ' REUSE THE BUFFERS FOR A CLEAN CALL
@@ -1911,7 +1921,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             Succeeded:=OK, _
             FailureCount:=FailureCount, _
             FailureList:=FailureList, _
-            AssertionName:=PROC & ".LaterSuccessCleared"
+            AssertionName:=PROC_NAME & ".LaterSuccessCleared"
 
 '------------------------------------------------------------------------------
 ' FAIL THE FIRST ALLOCATION OVER A NON-ARRAY BUFFER
@@ -1925,7 +1935,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
         UI_InternalInjectFailureListFirstAllocationFailure True
 
         UI_RuntimeHandleFailure _
-            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            PROC_NAME, False, Succeeded, FailureCount, FailureList, True, _
             "StageCorrupt", "corrupt buffer detail"
 
         TST_AssertFailureResultExact _
@@ -1934,7 +1944,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             FailureList:=FailureList, _
             ExpectedCount:=1, _
             ExpectedEntry:=vbNullString, _
-            AssertionName:=PROC & ".CorruptBufferLeftEmpty"
+            AssertionName:=PROC_NAME & ".CorruptBufferLeftEmpty"
 
     'Without the seam the same buffer is replaced by a fresh list
         Succeeded = True
@@ -1942,7 +1952,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
         FailureList = "corrupt buffer"
 
         UI_RuntimeHandleFailure _
-            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            PROC_NAME, False, Succeeded, FailureCount, FailureList, True, _
             "StageCorrupt", "corrupt buffer detail"
 
         TST_AssertFailureResultExact _
@@ -1951,7 +1961,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             FailureList:=FailureList, _
             ExpectedCount:=1, _
             ExpectedEntry:=CORRUPT_ENTRY, _
-            AssertionName:=PROC & ".CorruptBufferReplaced"
+            AssertionName:=PROC_NAME & ".CorruptBufferReplaced"
 
 '------------------------------------------------------------------------------
 ' GROW AN EXISTING LIST WHILE ARMED
@@ -1960,25 +1970,25 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
         UI_InternalInjectFailureListFirstAllocationFailure True
 
         UI_RuntimeHandleFailure _
-            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            PROC_NAME, False, Succeeded, FailureCount, FailureList, True, _
             "StageGrow", "grow detail"
 
         TST_AssertTrue _
-            (FailureCount = 2), PROC & ".GrowthCount"
+            (FailureCount = 2), PROC_NAME & ".GrowthCount"
 
         TST_AssertTrue _
-            (UBound(FailureList) = 2), PROC & ".GrowthNotFailed"
+            (UBound(FailureList) = 2), PROC_NAME & ".GrowthNotFailed"
 
         TST_AssertTrue _
             (StrComp(FailureList(2), GROW_ENTRY, vbBinaryCompare) = 0), _
-            PROC & ".GrowthEntryText"
+            PROC_NAME & ".GrowthEntryText"
 
     'Cleared buffers make the next append a first allocation, which consumes it
         Succeeded = True
         UI_RuntimeClearResultBuffer FailureCount, FailureList, True
 
         UI_RuntimeHandleFailure _
-            PROC, False, Succeeded, FailureCount, FailureList, True, _
+            PROC_NAME, False, Succeeded, FailureCount, FailureList, True, _
             "StageCorrupt", "corrupt buffer detail"
 
         TST_AssertFailureResultExact _
@@ -1987,22 +1997,22 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
             FailureList:=FailureList, _
             ExpectedCount:=1, _
             ExpectedEntry:=vbNullString, _
-            AssertionName:=PROC & ".SeamSurvivedGrowth"
+            AssertionName:=PROC_NAME & ".SeamSurvivedGrowth"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "A failed first allocation left a counted failure and an Empty list"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disarm both list seams whatever happened above
         On Error Resume Next
-            UI_InternalInjectFailureListFirstAllocationFailure False
-            UI_InternalInjectFailureListGrowthFailure False
+        UI_InternalInjectFailureListFirstAllocationFailure False
+        UI_InternalInjectFailureListGrowthFailure False
         On Error GoTo 0
 
     'Raise the captured failure after cleanup when needed
@@ -2015,22 +2025,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 
 '
-'==============================================================================
-' TST_Case_QuietScopeOwnershipIsVerified
+'------------------------------------------------------------------------------
+'                  TST CASE QUIET SCOPE OWNERSHIP IS VERIFIED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the quiet-update scope claims ownership only of a suppression
@@ -2049,7 +2058,7 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 '   would break first.
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   Six branches. Each asserts the ownership flag, the reported entry value
@@ -2064,31 +2073,31 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 '   - UI_RuntimeBeginQuietUpdate
 '   - UI_RuntimeEndQuietUpdate
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   ScreenUpdating is restored explicitly after every branch rather than by the
 '   scope under test. A test that relied on the code it is testing to clean up
 '   would pass for the wrong reason on exactly the branches that matter.
 '
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
 ' UPDATED
 '   2026-08-29
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OldValue            As Boolean         'Entry value the scope reports
-    Dim Changed             As Boolean         'Ownership the scope claims
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_QuietScopeOwnershipIsVerified"
 
-    Const PROC As String = "TST_Case_QuietScopeOwnershipIsVerified"
+    Dim OldValue    As Boolean  'Entry value the scope reports
+    Dim Changed     As Boolean  'Ownership the scope claims
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that quiet-scope ownership follows a confirmed readback"
 
         UI_InternalInjectQuietUpdateFault TEST_QUIET_FAULT_NONE
@@ -2102,15 +2111,15 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 
         UI_RuntimeBeginQuietUpdate OldValue, Changed
 
-        TST_AssertBooleanEquals True, OldValue, PROC & ".Ordinary.EntryValue"
-        TST_AssertBooleanEquals True, Changed, PROC & ".Ordinary.Owned"
+        TST_AssertBooleanEquals True, OldValue, PROC_NAME & ".Ordinary.EntryValue"
+        TST_AssertBooleanEquals True, Changed, PROC_NAME & ".Ordinary.Owned"
         TST_AssertApplicationProperty _
-            False, "ScreenUpdating", PROC & ".Ordinary.Suppressed"
+            False, "ScreenUpdating", PROC_NAME & ".Ordinary.Suppressed"
 
         UI_RuntimeEndQuietUpdate OldValue, Changed
 
         TST_AssertApplicationProperty _
-            True, "ScreenUpdating", PROC & ".Ordinary.Restored"
+            True, "ScreenUpdating", PROC_NAME & ".Ordinary.Restored"
 
 '------------------------------------------------------------------------------
 ' BRANCH 2 - AN ALREADY-SUPPRESSED CALLER IS NOT OWNED
@@ -2122,14 +2131,14 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 
         UI_RuntimeBeginQuietUpdate OldValue, Changed
 
-        TST_AssertBooleanEquals False, OldValue, PROC & ".AlreadyOff.EntryValue"
-        TST_AssertBooleanEquals False, Changed, PROC & ".AlreadyOff.NotOwned"
+        TST_AssertBooleanEquals False, OldValue, PROC_NAME & ".AlreadyOff.EntryValue"
+        TST_AssertBooleanEquals False, Changed, PROC_NAME & ".AlreadyOff.NotOwned"
 
         UI_RuntimeEndQuietUpdate OldValue, Changed
 
     'End must not re-enable a caller's suppression
         TST_AssertApplicationProperty _
-            False, "ScreenUpdating", PROC & ".AlreadyOff.Untouched"
+            False, "ScreenUpdating", PROC_NAME & ".AlreadyOff.Untouched"
 
         Application.ScreenUpdating = True
 
@@ -2145,15 +2154,15 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 
     'The entry value is defined but not an observation, so only its
     'determinism is asserted
-        TST_AssertBooleanEquals True, OldValue, PROC & ".EntryFails.Deterministic"
-        TST_AssertBooleanEquals False, Changed, PROC & ".EntryFails.NotOwned"
+        TST_AssertBooleanEquals True, OldValue, PROC_NAME & ".EntryFails.Deterministic"
+        TST_AssertBooleanEquals False, Changed, PROC_NAME & ".EntryFails.NotOwned"
         TST_AssertApplicationProperty _
-            True, "ScreenUpdating", PROC & ".EntryFails.HostUntouched"
+            True, "ScreenUpdating", PROC_NAME & ".EntryFails.HostUntouched"
 
         UI_RuntimeEndQuietUpdate OldValue, Changed
 
         TST_AssertApplicationProperty _
-            True, "ScreenUpdating", PROC & ".EntryFails.NoRestore"
+            True, "ScreenUpdating", PROC_NAME & ".EntryFails.NoRestore"
 
 '------------------------------------------------------------------------------
 ' BRANCH 4 - AN INEFFECTIVE WRITE OWNS NOTHING
@@ -2165,18 +2174,18 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 
         UI_RuntimeBeginQuietUpdate OldValue, Changed
 
-        TST_AssertBooleanEquals True, OldValue, PROC & ".WriteIgnored.EntryValue"
-        TST_AssertBooleanEquals False, Changed, PROC & ".WriteIgnored.NotOwned"
+        TST_AssertBooleanEquals True, OldValue, PROC_NAME & ".WriteIgnored.EntryValue"
+        TST_AssertBooleanEquals False, Changed, PROC_NAME & ".WriteIgnored.NotOwned"
 
     'The readback reported the host still enabled, which is what refused
     'ownership; the host really is still enabled
         TST_AssertApplicationProperty _
-            True, "ScreenUpdating", PROC & ".WriteIgnored.HostUnchanged"
+            True, "ScreenUpdating", PROC_NAME & ".WriteIgnored.HostUnchanged"
 
         UI_RuntimeEndQuietUpdate OldValue, Changed
 
         TST_AssertApplicationProperty _
-            True, "ScreenUpdating", PROC & ".WriteIgnored.NoRestore"
+            True, "ScreenUpdating", PROC_NAME & ".WriteIgnored.NoRestore"
 
 '------------------------------------------------------------------------------
 ' BRANCH 5 - A FAILED READBACK OWNS NOTHING, AND NOTHING IS ROLLED BACK
@@ -2192,17 +2201,17 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 
         UI_RuntimeBeginQuietUpdate OldValue, Changed
 
-        TST_AssertBooleanEquals True, OldValue, PROC & ".ReadbackFails.EntryValue"
-        TST_AssertBooleanEquals False, Changed, PROC & ".ReadbackFails.NotOwned"
+        TST_AssertBooleanEquals True, OldValue, PROC_NAME & ".ReadbackFails.EntryValue"
+        TST_AssertBooleanEquals False, Changed, PROC_NAME & ".ReadbackFails.NotOwned"
 
     'The documented consequence: suppressed, unowned, not rolled back
         TST_AssertApplicationProperty _
-            False, "ScreenUpdating", PROC & ".ReadbackFails.LeftSuppressed"
+            False, "ScreenUpdating", PROC_NAME & ".ReadbackFails.LeftSuppressed"
 
         UI_RuntimeEndQuietUpdate OldValue, Changed
 
         TST_AssertApplicationProperty _
-            False, "ScreenUpdating", PROC & ".ReadbackFails.NoRestore"
+            False, "ScreenUpdating", PROC_NAME & ".ReadbackFails.NoRestore"
 
     'The scope did not own it, so this case restores the baseline
         Application.ScreenUpdating = True
@@ -2224,17 +2233,17 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 
         UI_RuntimeBeginQuietUpdate OldValue, Changed
 
-        TST_AssertBooleanEquals True, Changed, PROC & ".OneShot.SecondScopeOwns"
+        TST_AssertBooleanEquals True, Changed, PROC_NAME & ".OneShot.SecondScopeOwns"
 
         UI_RuntimeEndQuietUpdate OldValue, Changed
 
         TST_AssertApplicationProperty _
-            True, "ScreenUpdating", PROC & ".OneShot.Restored"
+            True, "ScreenUpdating", PROC_NAME & ".OneShot.Restored"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Quiet-scope ownership followed the readback on every branch"
 
 End Sub

@@ -98,6 +98,68 @@ def mutate(before: str, after: str) -> str:
     return HOUSE_MODULE.replace(before, after, 1) if before else HOUSE_MODULE
 
 
+def module_findings(*edits: tuple[str, str]) -> list[tuple[str, vba_house_rules.Finding]]:
+    """The findings (module, finding) of HOUSE_MODULE after each edit (text before, text after) in turn."""
+    text = HOUSE_MODULE
+    for before, after in edits:
+        if text.count(before) < 1:
+            raise ValueError(f"fixture text not found: {before!r}")
+        text = text.replace(before, after, 1)
+    return [("M_PROBE", f) for f in vba_house_rules.findings(text, "M_PROBE")]
+
+
+LACKS_NOTES = ("' NOTES\r\n'   A text such as \"GoTo ErrorHandler\" is data.\r\n'\r\n", "")
+# The component header holds the first UPDATED, so the date of the procedure is the last one.
+BAD_DATE = ("'   2026-11-02\r\n'" + "-" * 78 + "\r\n\r\n'" + "-" * 78 + "\r\n' DECLARE", "'   2026-11-02 - Added.\r\n'" + "-" * 78
+            + "\r\n\r\n'" + "-" * 78 + "\r\n' DECLARE")
+LISTED = "M_PROBE.Probe_Describe: header\n"
+
+
+def pending_failures() -> tuple[list[str], int]:
+    """The pending list holds the tree to its findings in both directions."""
+    failures: list[str] = []
+    count = 0
+    one = module_findings(LACKS_NOTES)
+    two = module_findings(LACKS_NOTES, BAD_DATE)
+    clean = module_findings()
+    if len(one) != 1 or len(two) != 2 or clean:
+        return [f"the pending fixtures need one, two and no finding, got {len(one)}, {len(two)}, {len(clean)}"], 1
+
+    def expect(name: str, found: list[tuple[str, vba_house_rules.Finding]], text: str,
+               unlisted: int, stale: list[int], problems: int) -> None:
+        nonlocal count
+        count += 1
+        result = vba_house_rules.compare_pending(found, text)
+        got = (len(result.unlisted), [entry.number for entry in result.stale], len(result.problems))
+        if got != (unlisted, stale, problems):
+            failures.append(f"{name}: expected {(unlisted, stale, problems)!r} (unlisted, stale lines, problems), got {got!r}")
+
+    expect("a listed finding is allowed", one, LISTED, 0, [], 0)
+    expect("a finding that is not listed fails", one, "", 1, [], 0)
+    expect("a finding listed for another procedure is not listed", one, "M_PROBE.Other: header\n", 1, [1], 0)
+    expect("a line that no finding matches is stale", clean, "# a comment\n\n" + LISTED, 0, [3], 0)
+    expect("a line for another rule is stale", one, LISTED + "M_PROBE.Probe_Describe: sections\n", 0, [2], 0)
+    expect("a line stands for one finding: the second is not covered", two, LISTED, 1, [], 0)
+    expect("two findings take two lines", two, LISTED * 2, 0, [], 0)
+    expect("a surplus line is stale", one, LISTED * 2, 0, [2], 0)
+    expect("comments and blank lines are not entries", one, "# note\r\n\r\n" + LISTED, 0, [], 0)
+    expect("a line that is not an entry is a problem", one, LISTED + "listed above\n", 0, [], 1)
+    expect("an unknown rule is a problem", one, LISTED + "M_PROBE.Probe_Describe: tidy\n", 0, [], 1)
+    expect("a module-level finding has no procedure", [("M_PROBE", vba_house_rules.Finding(7, "header", "M_PROBE", "lacks"))],
+           "M_PROBE: header\n", 0, [], 0)
+    count += 1
+    if vba_house_rules.additions(one, LISTED) or vba_house_rules.additions(clean, LISTED):
+        failures.append("a list that already holds every finding gains no line")
+    count += 1
+    if vba_house_rules.additions(two, LISTED) != ["M_PROBE.Probe_Describe: header"]:
+        failures.append("a second finding of a kind that is listed once is an addition")
+    count += 1
+    text = vba_house_rules.pending_text(two)
+    if vba_house_rules.compare_pending(two, text) != ([], [], []) or "# " not in text:
+        failures.append("the generated list holds its own findings")
+    return failures, count
+
+
 def rules_selftest() -> tuple[list[str], int]:
     """Failure descriptions and the number of fixtures run."""
     failures: list[str] = []
@@ -119,4 +181,5 @@ def rules_selftest() -> tuple[list[str], int]:
         found = vba_house_rules.findings(mutate(before, after), "M_PROBE")
         if found:
             failures.append(f"{name}: unexpected {[(f.rule, f.message) for f in found]!r}")
-    return failures, count
+    more, extra = pending_failures()
+    return failures + more, count + extra

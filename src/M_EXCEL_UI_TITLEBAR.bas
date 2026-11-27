@@ -1,10 +1,12 @@
 Attribute VB_Name = "M_EXCEL_UI_TITLEBAR"
+
 Option Explicit
 Option Private Module
 
+'
 '==============================================================================
-' M_EXCEL_UI_TITLEBAR
-'------------------------------------------------------------------------------
+' MODULE: M_EXCEL_UI_TITLEBAR
+'==============================================================================
 ' PURPOSE
 '   Owns every WinAPI declaration, mutable frame state and style-merging rule
 '   required to show or hide the title bar of a specified top-level Excel
@@ -19,6 +21,50 @@ Option Private Module
 '   mutable state, and confines the blast radius of any Windows or Office
 '   behavior change to one module. It also lets the style-merge policy be tested
 '   as pure arithmetic, with no window and no host required.
+'
+' ERROR POLICY
+'   - Internal entry points return False plus diagnostic text.
+'   - A zero API return is disambiguated from a genuine failure before being
+'     reported.
+'   - No user-interface message is displayed.
+'
+' DEPENDENCIES
+'   None. This module deliberately has no project-module dependency, which is
+'   why it carries its own error-text builder rather than calling the one in
+'   M_EXCEL_UI_RUNTIME.
+'
+' NOTES
+'   - Title-bar behavior can vary with Excel version, window state, Windows
+'     desktop-composition settings and other loaded add-ins. It is documented
+'     as best effort throughout.
+'   - The merge arithmetic relies on GWL_STYLE never setting bit 31 on Excel's
+'     main window, which holds because that window is not WS_POPUP. Were it
+'     set, the Long mask would sign-extend when widened to LongPtr.
+'   - Module state is lost on a VBA project reset while the window style
+'     itself survives, because the style belongs to the running Excel process.
+'   - Windows reissues window handles once the window that held one has
+'     closed, and IsWindow cannot tell a reissued handle from the original: it
+'     answers for whatever window holds the handle now. An entry is therefore
+'     reused only while its retained Window object still reports the stored
+'     handle. An entry that also claims the frame, by having hidden it or by
+'     owing a repaint, must in addition find the live owned bits equal to
+'     LastWrittenBits; that comparison checks state consistency, not
+'     identity. The deliberate cost is that a frame change made by Excel or
+'     another add-in while this component holds the frame hidden also discards
+'     the entry. The baseline is then recaptured from the live bits, which is
+'     the same self-healing rule that already applies while the component
+'     owns nothing. The regression for ICR-UI-112-P2-02 (#32) keeps the
+'     stored handle value unchanged and attributes the entry to another
+'     window generation, with equal-zero and equal-nonzero owned bits.
+'   - The frame-state registry is bounded by compaction, not by growth alone.
+'     Before the registry is extended, every entry that fails the ownership
+'     test in UI_FrameStateEntryHolds is reclaimed, which includes every entry
+'     whose handle no longer passes IsWindow, so a long session that opens and
+'     closes many workbook windows does not accumulate dead entries.
+'   - Conditional compilation appears inside the frame-state Type so that one
+'     declaration serves both handle widths. The alternative, declaring the
+'     whole Type twice, duplicates the member list and lets the two copies
+'     drift apart.
 '
 ' INTERNAL SURFACE
 '   Entry points used by the snapshot engine:
@@ -121,12 +167,6 @@ Option Private Module
 '     allowed to conclude that there is nothing to do.
 '   - Entry points are fail-soft and report through a ByRef FailMsg.
 '
-' ERROR POLICY
-'   - Internal entry points return False plus diagnostic text.
-'   - A zero API return is disambiguated from a genuine failure before being
-'     reported.
-'   - No user-interface message is displayed.
-'
 ' WINAPI ERROR CAPTURE
 '   Err.LastDllError is the only source of a native error code here. VBA sets
 '   it after every Declare call, the next Declare call replaces it, and
@@ -148,11 +188,6 @@ Option Private Module
 '   state is a second place for the ordering rule to drift. The static gate
 '   checks the sequence in every compilation.
 '
-' DEPENDENCIES
-'   None. This module deliberately has no project-module dependency, which is
-'   why it carries its own error-text builder rather than calling the one in
-'   M_EXCEL_UI_RUNTIME.
-'
 ' PLATFORM / COMPATIBILITY
 '   - Windows only.
 '   - Supports 32-bit and 64-bit Office through conditional compilation:
@@ -160,40 +195,13 @@ Option Private Module
 '       VBA7 + Win32  => GetWindowLong / SetWindowLong with LongPtr handles
 '       pre-VBA7      => GetWindowLong / SetWindowLong with Long handles
 '
-' NOTES
-'   - Title-bar behavior can vary with Excel version, window state, Windows
-'     desktop-composition settings and other loaded add-ins. It is documented
-'     as best effort throughout.
-'   - The merge arithmetic relies on GWL_STYLE never setting bit 31 on Excel's
-'     main window, which holds because that window is not WS_POPUP. Were it
-'     set, the Long mask would sign-extend when widened to LongPtr.
-'   - Module state is lost on a VBA project reset while the window style
-'     itself survives, because the style belongs to the running Excel process.
-'   - Windows reissues window handles once the window that held one has
-'     closed, and IsWindow cannot tell a reissued handle from the original: it
-'     answers for whatever window holds the handle now. An entry is therefore
-'     reused only while its retained Window object still reports the stored
-'     handle. An entry that also claims the frame, by having hidden it or by
-'     owing a repaint, must in addition find the live owned bits equal to
-'     LastWrittenBits; that comparison checks state consistency, not
-'     identity. The deliberate cost is that a frame change made by Excel or
-'     another add-in while this component holds the frame hidden also discards
-'     the entry. The baseline is then recaptured from the live bits, which is
-'     the same self-healing rule that already applies while the component
-'     owns nothing. The regression for ICR-UI-112-P2-02 (#32) keeps the
-'     stored handle value unchanged and attributes the entry to another
-'     window generation, with equal-zero and equal-nonzero owned bits.
-'   - The frame-state registry is bounded by compaction, not by growth alone.
-'     Before the registry is extended, every entry that fails the ownership
-'     test in UI_FrameStateEntryHolds is reclaimed, which includes every entry
-'     whose handle no longer passes IsWindow, so a long session that opens and
-'     closes many workbook windows does not accumulate dead entries.
-'   - Conditional compilation appears inside the frame-state Type so that one
-'     declaration serves both handle widths. The alternative, declaring the
-'     whole Type twice, duplicates the member list and lets the two copies
-'     drift apart.
+' AUTHOR
+'   Daniele Penza
 '
-' UPDATED
+' VERSION
+'   1.1.2
+'
+' HISTORY
 '   2026-11-18 - Every title-bar visibility decision now tests the complete
 '                WS_CAPTION mask, (style And WS_CAPTION) = WS_CAPTION: the
 '                visibility reader, the show fallback condition and both show
@@ -233,17 +241,13 @@ Option Private Module
 '                one. Fixes ICR-UI-P1-01, ICR-UI-P2-04 and ICR-UI-P2-03.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
-' AUTHOR
-'   Daniele Penza
-'
-' VERSION
-'   1.1.2
+' UPDATED
+'   2026-11-18
 '==============================================================================
 
-'==============================================================================
+'------------------------------------------------------------------------------
 ' WIN32 / WIN64 API DECLARATIONS
-'==============================================================================
-
+'------------------------------------------------------------------------------
 #If VBA7 Then
 
     #If Win64 Then
@@ -310,65 +314,63 @@ Option Private Module
 
 #End If
 
-'==============================================================================
+'------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
-'==============================================================================
+'------------------------------------------------------------------------------
+    'Window-style index passed to the GetWindowLong / SetWindowLong family.
+    Private Const GWL_STYLE As Long = -16
 
-'Window-style index passed to the GetWindowLong / SetWindowLong family.
-Private Const GWL_STYLE                 As Long = -16
-
-'Exported names of the GWL_STYLE read and write in this compilation. Failure
-'text quotes them, so a report names the function that actually ran.
+    'Exported names of the GWL_STYLE read and write in this compilation. Failure
+    'text quotes them, so a report names the function that actually ran.
 #If VBA7 Then
     #If Win64 Then
-Private Const API_GET_WINDOW_STYLE      As String = "GetWindowLongPtrA"
-Private Const API_SET_WINDOW_STYLE      As String = "SetWindowLongPtrA"
+Private Const API_GET_WINDOW_STYLE  As String = "GetWindowLongPtrA"
+Private Const API_SET_WINDOW_STYLE  As String = "SetWindowLongPtrA"
     #Else
-Private Const API_GET_WINDOW_STYLE      As String = "GetWindowLongA"
-Private Const API_SET_WINDOW_STYLE      As String = "SetWindowLongA"
+Private Const API_GET_WINDOW_STYLE  As String = "GetWindowLongA"
+Private Const API_SET_WINDOW_STYLE  As String = "SetWindowLongA"
     #End If
 #Else
-Private Const API_GET_WINDOW_STYLE      As String = "GetWindowLongA"
-Private Const API_SET_WINDOW_STYLE      As String = "SetWindowLongA"
+Private Const API_GET_WINDOW_STYLE  As String = "GetWindowLongA"
+Private Const API_SET_WINDOW_STYLE  As String = "SetWindowLongA"
 #End If
 
-'The five frame bits this module claims. Nothing outside this set is written.
-Private Const WS_CAPTION                As Long = &HC00000
-Private Const WS_SYSMENU                As Long = &H80000
-Private Const WS_THICKFRAME             As Long = &H40000
-Private Const WS_MINIMIZEBOX            As Long = &H20000
-Private Const WS_MAXIMIZEBOX            As Long = &H10000
+    'The five frame bits this module claims. Nothing outside this set is written.
+    Private Const WS_CAPTION        As Long = &HC00000
+    Private Const WS_SYSMENU        As Long = &H80000
+    Private Const WS_THICKFRAME     As Long = &H40000
+    Private Const WS_MINIMIZEBOX    As Long = &H20000
+    Private Const WS_MAXIMIZEBOX    As Long = &H10000
 
-'Union of the five owned bits above, held as a literal so the merge helper
-'needs a single mask rather than five OR-ed constants on every call.
-Private Const TITLEBAR_OWNED_STYLE_MASK As Long = &HCF0000
+    'Union of the five owned bits above, held as a literal so the merge helper
+    'needs a single mask rather than five OR-ed constants on every call.
+    Private Const TITLEBAR_OWNED_STYLE_MASK As Long = &HCF0000
 
-'Owned bits assumed when a show is requested and no baseline was ever captured
-'for the current handle. Restoring the full owned frame is the only safe
-'assumption in that case: the alternative is to re-apply the current hidden
-'bits, which silently leaves the title bar hidden and reports success.
-Private Const TITLEBAR_DEFAULT_STYLE_BITS As Long = &HCF0000
+    'Owned bits assumed when a show is requested and no baseline was ever captured
+    'for the current handle. Restoring the full owned frame is the only safe
+    'assumption in that case: the alternative is to re-apply the current hidden
+    'bits, which silently leaves the title bar hidden and reports success.
+    Private Const TITLEBAR_DEFAULT_STYLE_BITS   As Long = &HCF0000
 
-'SetWindowPos flags. Only the frame is recalculated: position, size, Z-order
-'and owner Z-order are all left untouched.
-Private Const SWP_NOSIZE                As Long = &H1
-Private Const SWP_NOMOVE                As Long = &H2
-Private Const SWP_NOZORDER              As Long = &H4
-Private Const SWP_FRAMECHANGED          As Long = &H20
-Private Const SWP_NOOWNERZORDER         As Long = &H200
+    'SetWindowPos flags. Only the frame is recalculated: position, size, Z-order
+    'and owner Z-order are all left untouched.
+    Private Const SWP_NOSIZE        As Long = &H1
+    Private Const SWP_NOMOVE        As Long = &H2
+    Private Const SWP_NOZORDER      As Long = &H4
+    Private Const SWP_FRAMECHANGED  As Long = &H20
+    Private Const SWP_NOOWNERZORDER As Long = &H200
 
-'Slots added each time the frame-state registry has to grow. Excel sessions
-'rarely hold more than a handful of workbook windows, so a small step keeps the
-'registry compact without reallocating on every new window.
-Private Const FRAME_STATE_GROWTH_SLOTS  As Long = 8
+    'Slots added each time the frame-state registry has to grow. Excel sessions
+    'rarely hold more than a handful of workbook windows, so a small step keeps the
+    'registry compact without reallocating on every new window.
+    Private Const FRAME_STATE_GROWTH_SLOTS  As Long = 8
 
-'==============================================================================
+'------------------------------------------------------------------------------
 ' PRIVATE TYPES
-'==============================================================================
-
-'One registry entry per top-level window this module has operated on. See the
-'FRAME STATE REGISTRY section of the module header for the invariants.
-Private Type tTitleBarFrameState
+'------------------------------------------------------------------------------
+    'One registry entry per top-level window this module has operated on. See the
+    'FRAME STATE REGISTRY section of the module header for the invariants.
+    Private Type tTitleBarFrameState
 #If VBA7 Then
     hWnd                As LongPtr             'Window the entry belongs to
     OwnedStyleBits      As LongPtr             'Baseline a show re-applies
@@ -378,64 +380,63 @@ Private Type tTitleBarFrameState
     OwnedStyleBits      As Long                'Baseline a show re-applies
     LastWrittenBits     As Long                'Owned bits last written here
 #End If
-    HasBaseline         As Boolean             'OwnedStyleBits ever captured
-    ComponentHidden     As Boolean             'This component hid the frame
-    RefreshPending      As Boolean             'Frame refresh still owed
-End Type
+        HasBaseline         As Boolean             'OwnedStyleBits ever captured
+        ComponentHidden     As Boolean             'This component hid the frame
+        RefreshPending      As Boolean             'Frame refresh still owed
+    End Type
 
-'==============================================================================
+'------------------------------------------------------------------------------
 ' PRIVATE MODULE STATE
-'==============================================================================
+'------------------------------------------------------------------------------
+    'Frame state per top-level window. Held only in memory and lost on a VBA
+    'project reset, while the window styles themselves survive in the Excel process.
+    Private m_FrameStates()         As tTitleBarFrameState
+    Private m_FrameStateWindows()   As Object
+    Private m_FrameStateCount       As Long
 
-'Frame state per top-level window. Held only in memory and lost on a VBA
-'project reset, while the window styles themselves survive in the Excel process.
-Private m_FrameStates()                 As tTitleBarFrameState
-Private m_FrameStateWindows()           As Object
-Private m_FrameStateCount               As Long
+    'Regression seam. When True the next frame refresh reports failure without
+    'calling SetWindowPos, so the refresh-debt path can be exercised without a
+    'way to make Windows fail on demand.
+    Private m_InjectFrameRefreshFailure As Boolean
 
-'Regression seam. When True the next frame refresh reports failure without
-'calling SetWindowPos, so the refresh-debt path can be exercised without a
-'way to make Windows fail on demand.
-Private m_InjectFrameRefreshFailure     As Boolean
+    'Regression seam for the active-frame pair. The mismatch it stands in for is an
+    'SDI activation transition observed mid-call, which cannot be provoked on
+    'demand, so the fail-closed branch would otherwise never execute. Kinds are
+    'private: the seam takes a Long rather than exporting an enumeration.
+    '
+    '   0  no fault
+    '   1  the sampled Application.hWnd disagrees with the resolved Window.hWnd
+    Private Const FRAME_PAIR_FAULT_NONE     As Long = 0
+    Private Const FRAME_PAIR_FAULT_MISMATCH As Long = 1
 
-'Regression seam for the active-frame pair. The mismatch it stands in for is an
-'SDI activation transition observed mid-call, which cannot be provoked on
-'demand, so the fail-closed branch would otherwise never execute. Kinds are
-'private: the seam takes a Long rather than exporting an enumeration.
-'
-'   0  no fault
-'   1  the sampled Application.hWnd disagrees with the resolved Window.hWnd
-Private Const FRAME_PAIR_FAULT_NONE     As Long = 0
-Private Const FRAME_PAIR_FAULT_MISMATCH As Long = 1
+    Private m_InjectFramePairFault  As Long
 
-Private m_InjectFramePairFault          As Long
+    'Regression seam for the GWL_STYLE read and write. Windows cannot be made to
+    'return a valid zero, fail with a chosen error or leave a stale last-error on
+    'demand, so each of those branches is reached by replacing what the capture
+    'took, after it took it. Operations and kinds are private Longs, mirrored in
+    'M_EXCEL_UI_TEST_TITLEBAR.
+    '
+    '   Operation   0  none   1  GWL_STYLE read   2  GWL_STYLE write
+    '   Kind        0  no fault
+    '               1  valid zero: the captured result becomes zero
+    '               2  DLL error: the captured result becomes zero and the
+    '                  captured error becomes the armed error
+    '               3  stale error: the armed error is left in the thread
+    '                  last-error before the clear, and the captured result
+    '                  becomes zero
+    Private Const WINDOW_STYLE_OP_NONE  As Long = 0
+    Private Const WINDOW_STYLE_OP_READ  As Long = 1
+    Private Const WINDOW_STYLE_OP_WRITE As Long = 2
 
-'Regression seam for the GWL_STYLE read and write. Windows cannot be made to
-'return a valid zero, fail with a chosen error or leave a stale last-error on
-'demand, so each of those branches is reached by replacing what the capture
-'took, after it took it. Operations and kinds are private Longs, mirrored in
-'M_EXCEL_UI_TEST_TITLEBAR.
-'
-'   Operation   0  none   1  GWL_STYLE read   2  GWL_STYLE write
-'   Kind        0  no fault
-'               1  valid zero: the captured result becomes zero
-'               2  DLL error: the captured result becomes zero and the
-'                  captured error becomes the armed error
-'               3  stale error: the armed error is left in the thread
-'                  last-error before the clear, and the captured result
-'                  becomes zero
-Private Const WINDOW_STYLE_OP_NONE          As Long = 0
-Private Const WINDOW_STYLE_OP_READ          As Long = 1
-Private Const WINDOW_STYLE_OP_WRITE         As Long = 2
+    Private Const WINDOW_STYLE_FAULT_NONE           As Long = 0
+    Private Const WINDOW_STYLE_FAULT_VALID_ZERO     As Long = 1
+    Private Const WINDOW_STYLE_FAULT_DLL_ERROR      As Long = 2
+    Private Const WINDOW_STYLE_FAULT_STALE_ERROR    As Long = 3
 
-Private Const WINDOW_STYLE_FAULT_NONE       As Long = 0
-Private Const WINDOW_STYLE_FAULT_VALID_ZERO As Long = 1
-Private Const WINDOW_STYLE_FAULT_DLL_ERROR  As Long = 2
-Private Const WINDOW_STYLE_FAULT_STALE_ERROR As Long = 3
-
-Private m_InjectWindowStyleOperation    As Long
-Private m_InjectWindowStyleFault        As Long
-Private m_InjectWindowStyleError        As Long
+    Private m_InjectWindowStyleOperation    As Long
+    Private m_InjectWindowStyleFault        As Long
+    Private m_InjectWindowStyleError        As Long
 
 
 #If VBA7 Then
@@ -452,8 +453,8 @@ Public Function UI_TryGetActiveFramePair( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TryGetActiveFramePair
+'------------------------------------------------------------------------------
+'                         UI TRY GET ACTIVE FRAME PAIR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolve the active Excel Window together with the native handle read from
@@ -502,10 +503,6 @@ Public Function UI_TryGetActiveFramePair( _
 '   - UI_InternalIsTitleBarFrameAlive
 '   - UI_TitleBarBuildRuntimeErrorText
 '
-' CALLED FROM
-'   - UI_TryGetActiveTitleBarHwnd
-'   - M_EXCEL_UI_SNAPSHOT
-'
 ' NOTES
 '   The comparison narrows the race; it does not close it. Both values can move
 '   during a transition, so no sampling order makes the pair provably current.
@@ -517,29 +514,34 @@ Public Function UI_TryGetActiveFramePair( _
 '   and the caller is better served by a refusal it can report than by a pair
 '   that happened to agree on the second look.
 '
+' CALLED FROM
+'   - UI_TryGetActiveTitleBarHwnd
+'   - M_EXCEL_UI_SNAPSHOT
+'
 ' UPDATED
 '   2026-09-03
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ActiveTargetWindow  As Object          'Window the handle is read from
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TryGetActiveFramePair"
+
+    Dim ActiveTargetWindow  As Object   'Window the handle is read from
 
 #If VBA7 Then
-    Dim SampledHwnd         As LongPtr         'Application-level active handle
+    Dim SampledHwnd As LongPtr  'Application-level active handle
 #Else
-    Dim SampledHwnd         As Long            'Application-level active handle
+    Dim SampledHwnd As Long 'Application-level active handle
 #End If
 
-    Dim Fault               As Long            'Armed regression fault, if any
+    Dim Fault   As Long 'Armed regression fault, if any
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until a live, agreed pair has been resolved
         UI_TryGetActiveFramePair = False
@@ -563,7 +565,7 @@ Public Function UI_TryGetActiveFramePair( _
 
         If ActiveTargetWindow Is Nothing Then
             FailMsg = "no active Excel Window is available"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         HwndOut = ActiveTargetWindow.hWnd
@@ -582,7 +584,7 @@ Public Function UI_TryGetActiveFramePair( _
         If SampledHwnd <> HwndOut Then
             HwndOut = 0
             FailMsg = "the active Excel Window is not the active native frame"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -592,7 +594,7 @@ Public Function UI_TryGetActiveFramePair( _
         If Not UI_InternalIsTitleBarFrameAlive(HwndOut) Then
             HwndOut = 0
             FailMsg = "invalid Excel window handle"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -601,25 +603,30 @@ Public Function UI_TryGetActiveFramePair( _
         Set WindowOut = ActiveTargetWindow
         UI_TryGetActiveFramePair = True
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         Set WindowOut = Nothing
         HwndOut = 0
         FailMsg = UI_TitleBarBuildRuntimeErrorText
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Public Sub UI_InternalInjectFramePairFault( _
     ByVal FaultKind As Long)
 '
-'==============================================================================
-' UI_InternalInjectFramePairFault
+'------------------------------------------------------------------------------
+'                     UI INTERNAL INJECT FRAME PAIR FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot fault for the next active-frame pair resolution.
@@ -642,7 +649,7 @@ Public Sub UI_InternalInjectFramePairFault( _
 '     module; neither is exported.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Records the fault for the next resolution to consume.
@@ -656,19 +663,18 @@ Public Sub UI_InternalInjectFramePairFault( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_TITLEBAR
-'   - M_EXCEL_UI_TEST_CERTIFICATION
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     keeps it off the external facade, so this is project-public surface.
 '   - Production code must never call it.
 '
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'   - M_EXCEL_UI_TEST_CERTIFICATION
+'
 ' UPDATED
 '   2026-09-03
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' SET SEAM
@@ -677,7 +683,6 @@ Public Sub UI_InternalInjectFramePairFault( _
         m_InjectFramePairFault = FaultKind
 
 End Sub
-
 
 #If VBA7 Then
 Public Function UI_TryGetActiveTitleBarHwnd( _
@@ -691,8 +696,8 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TryGetActiveTitleBarHwnd
+'------------------------------------------------------------------------------
+'                       UI TRY GET ACTIVE TITLE BAR HWND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolves and validates the top-level window handle Excel currently reports
@@ -736,26 +741,28 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
 ' DEPENDENCIES
 '   - UI_TryGetActiveFramePair
 '
+' NOTES
+'   The handle is valid only for as long as that window is open. Callers that
+'   retain it must re-probe with UI_InternalIsTitleBarFrameAlive before use.
+'
 ' CALLED FROM
 '   - UI_TryGetTitleBarVisible
 '   - UI_TrySetTitleBarVisibleIfNeeded
 '   - M_EXCEL_UI_TEST_TITLEBAR
 '
-' NOTES
-'   The handle is valid only for as long as that window is open. Callers that
-'   retain it must re-probe with UI_InternalIsTitleBarFrameAlive before use.
-'
-' UPDATED
+' HISTORY
 '   2026-09-03 - Paired the active Excel Window with its own hWnd, then
 '                delegated to UI_TryGetActiveFramePair.
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-09-03
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DELEGATE
 '------------------------------------------------------------------------------
-    Dim ResolvedWindow      As Object          'Discarded; this caller wants the handle
+        Dim ResolvedWindow      As Object          'Discarded; this caller wants the handle
 
     'One implementation of the identity rule lives in UI_TryGetActiveFramePair.
     'This wrapper exists because two of its three callers want only the handle,
@@ -767,7 +774,6 @@ Public Function UI_TryGetActiveTitleBarHwnd( _
         Set ResolvedWindow = Nothing
 
 End Function
-
 
 #If VBA7 Then
 Public Function UI_TryGetTitleBarVisibleForHwnd( _
@@ -783,8 +789,8 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TryGetTitleBarVisibleForHwnd
+'------------------------------------------------------------------------------
+'                    UI TRY GET TITLE BAR VISIBLE FOR HWND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads title-bar visibility from the window style of an explicitly supplied
@@ -827,34 +833,38 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
 '   - UI_TryGetWindowStyle
 '   - UI_TitleBarBuildRuntimeErrorText
 '
-' CALLED FROM
-'   - M_EXCEL_UI_SNAPSHOT
-'   - UI_TryGetTitleBarVisible
-'
 ' NOTES
 '   The complete WS_CAPTION mask is the visibility signal; the other four owned
 '   bits travel with it but do not participate in this decision.
 '
-' UPDATED
+' CALLED FROM
+'   - M_EXCEL_UI_SNAPSHOT
+'   - UI_TryGetTitleBarVisible
+'
+' HISTORY
 '   2026-11-18 - Tests the complete mask instead of any caption bit (#6).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TryGetTitleBarVisibleForHwnd"
+
 #If VBA7 Then
-    Dim StyleValue          As LongPtr         'Live GWL_STYLE value
+    Dim StyleValue  As LongPtr  'Live GWL_STYLE value
 #Else
-    Dim StyleValue          As Long            'Live GWL_STYLE value
+    Dim StyleValue  As Long 'Live GWL_STYLE value
 #End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the style has been read
         UI_TryGetTitleBarVisibleForHwnd = False
@@ -869,7 +879,7 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
     'Reject a handle that is absent or no longer refers to a window
         If Not UI_InternalIsTitleBarFrameAlive(TargetHwnd) Then
             FailMsg = "target window is not available; hWnd=" & CStr(TargetHwnd)
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -877,7 +887,7 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
 '------------------------------------------------------------------------------
     'Read the live style through the shared bitness-aware helper
         If Not UI_TryGetWindowStyle(TargetHwnd, StyleValue, FailMsg) Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -889,30 +899,29 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
         UI_TryGetTitleBarVisibleForHwnd = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Public Function UI_TryGetTitleBarVisible( _
     ByRef IsVisible As Boolean, _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_TryGetTitleBarVisible
+'------------------------------------------------------------------------------
+'                         UI TRY GET TITLE BAR VISIBLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads title-bar visibility from the top-level window Excel currently
@@ -947,26 +956,27 @@ Public Function UI_TryGetTitleBarVisible( _
 '   - UI_TryGetActiveTitleBarHwnd
 '   - UI_TryGetTitleBarVisibleForHwnd
 '
-' CALLED FROM
-'   None. No procedure in this project calls it.
-'
 ' NOTES
 '   The value describes the active window at the instant of the call and must
 '   not be stored for later restoration. Use the explicit-target entry points
 '   for anything that spans two operations.
 '
+' CALLED FROM
+'   None. No procedure in this project calls it.
+'
 ' UPDATED
 '   2026-08-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TryGetTitleBarVisible"
+
 #If VBA7 Then
-    Dim TargetHwnd          As LongPtr         'Active top-level window handle
+    Dim TargetHwnd  As LongPtr  'Active top-level window handle
 #Else
-    Dim TargetHwnd          As Long            'Active top-level window handle
+    Dim TargetHwnd  As Long 'Active top-level window handle
 #End If
 
 '------------------------------------------------------------------------------
@@ -998,7 +1008,6 @@ Public Function UI_TryGetTitleBarVisible( _
 
 End Function
 
-
 #If VBA7 Then
 Public Function UI_TrySetTitleBarVisibleForHwndIfNeeded( _
     ByVal TargetHwnd As LongPtr, _
@@ -1013,8 +1022,8 @@ Public Function UI_TrySetTitleBarVisibleForHwndIfNeeded( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TrySetTitleBarVisibleForHwndIfNeeded
+'------------------------------------------------------------------------------
+'               UI TRY SET TITLE BAR VISIBLE FOR HWND IF NEEDED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the requested title-bar state to an explicitly supplied top-level
@@ -1053,24 +1062,23 @@ Public Function UI_TrySetTitleBarVisibleForHwndIfNeeded( _
 '   - UI_TrySetTitleBarVisibleForHwndWorker
 '   - UI_TitleBarBuildRuntimeErrorText
 '
-' CALLED FROM
-'   - M_EXCEL_UI_SNAPSHOT
-'   - UI_TrySetTitleBarVisibleIfNeeded
-'
 ' NOTES
 '   The IfNeeded decision itself lives in the worker; this entry point exists to
 '   present the same naming shape as the M_EXCEL_UI_RUNTIME helpers.
 '
+' CALLED FROM
+'   - M_EXCEL_UI_SNAPSHOT
+'   - UI_TrySetTitleBarVisibleIfNeeded
+'
 ' UPDATED
 '   2026-08-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the worker reports otherwise
         UI_TrySetTitleBarVisibleForHwndIfNeeded = False
@@ -1089,30 +1097,29 @@ Public Function UI_TrySetTitleBarVisibleForHwndIfNeeded( _
                 FailMsg:=FailMsg)
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Public Function UI_TrySetTitleBarVisibleIfNeeded( _
     ByVal IsVisible As Boolean, _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_TrySetTitleBarVisibleIfNeeded
+'------------------------------------------------------------------------------
+'                    UI TRY SET TITLE BAR VISIBLE IF NEEDED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the requested title-bar state to the top-level window Excel
@@ -1153,16 +1160,17 @@ Public Function UI_TrySetTitleBarVisibleIfNeeded( _
 '
 ' UPDATED
 '   2026-08-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TrySetTitleBarVisibleIfNeeded"
+
 #If VBA7 Then
-    Dim TargetHwnd          As LongPtr         'Active top-level window handle
+    Dim TargetHwnd  As LongPtr  'Active top-level window handle
 #Else
-    Dim TargetHwnd          As Long            'Active top-level window handle
+    Dim TargetHwnd  As Long 'Active top-level window handle
 #End If
 
 '------------------------------------------------------------------------------
@@ -1194,7 +1202,6 @@ Public Function UI_TrySetTitleBarVisibleIfNeeded( _
 
 End Function
 
-
 #If VBA7 Then
 Public Function UI_InternalIsTitleBarFrameAlive( _
     ByVal TargetHwnd As LongPtr) _
@@ -1205,8 +1212,8 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_InternalIsTitleBarFrameAlive
+'------------------------------------------------------------------------------
+'                     UI INTERNAL IS TITLE BAR FRAME ALIVE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reports whether a retained handle still refers to a live window.
@@ -1236,10 +1243,6 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - M_EXCEL_UI_SNAPSHOT
-'   - This module
-'
 ' NOTES
 '   Handle reuse means a True result proves a window exists, not that it is the
 '   same window. Every caller therefore pairs this probe with something a handle
@@ -1249,19 +1252,25 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
 '   live owned bits with LastWrittenBits checks state consistency, not
 '   identity.
 '
-' UPDATED
+' CALLED FROM
+'   - M_EXCEL_UI_SNAPSHOT
+'   - This module
+'
+' HISTORY
 '   2026-09-03 - Both pairings now rest on a retained Window object.
 '   2026-08-21 - Recorded the second pairing, added with the frame-registry
 '                proof.
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-09-03
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume not alive until the probe says otherwise
         UI_InternalIsTitleBarFrameAlive = False
@@ -1271,7 +1280,7 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
 '------------------------------------------------------------------------------
     'A zero handle never refers to a window, so do not call the API for it
         If TargetHwnd = 0 Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1281,26 +1290,26 @@ Public Function UI_InternalIsTitleBarFrameAlive( _
         UI_InternalIsTitleBarFrameAlive = (IsWindow(TargetHwnd) <> 0)
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'A probe that cannot complete must never claim the window is usable
         UI_InternalIsTitleBarFrameAlive = False
 
 End Function
 
-
 Public Sub UI_InternalResetTitleBarBaseline()
+
 '
-'==============================================================================
-' UI_InternalResetTitleBarBaseline
+'------------------------------------------------------------------------------
+'                     UI INTERNAL RESET TITLE BAR BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Discards the entire frame-state registry, returning this module to the
@@ -1320,7 +1329,7 @@ Public Sub UI_InternalResetTitleBarBaseline()
 '   not the defect is present.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Discards every registry entry, including any outstanding refresh debt.
@@ -1332,20 +1341,22 @@ Public Sub UI_InternalResetTitleBarBaseline()
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_TITLEBAR
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     prevents exposure to external VBA projects.
 '   - Not part of the supported public API. Production code must never call it:
 '     doing so discards the frame every pending show would restore.
 '
-' UPDATED
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'
+' HISTORY
 '   2026-11-06 - Also disarms the window-style seam (#27).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' CLEAR REGISTRY
@@ -1363,7 +1374,6 @@ Public Sub UI_InternalResetTitleBarBaseline()
 
 End Sub
 
-
 #If VBA7 Then
 Public Function UI_InternalIsFrameRefreshPending( _
     ByVal TargetHwnd As LongPtr) _
@@ -1374,8 +1384,8 @@ Public Function UI_InternalIsFrameRefreshPending( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_InternalIsFrameRefreshPending
+'------------------------------------------------------------------------------
+'                     UI INTERNAL IS FRAME REFRESH PENDING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reports whether a style write succeeded for a window while its frame
@@ -1402,28 +1412,29 @@ Public Function UI_InternalIsFrameRefreshPending( _
 ' DEPENDENCIES
 '   - UI_FrameStateIndexForHwnd
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_TITLEBAR
-'
 ' NOTES
 '   Public only for same-project regression access. Not part of the supported
 '   public API.
 '
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'
 ' UPDATED
 '   2026-08-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Slot                As Long            'Registry index for TargetHwnd
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_InternalIsFrameRefreshPending"
+
+    Dim Slot    As Long 'Registry index for TargetHwnd
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume no debt until an entry says otherwise
         UI_InternalIsFrameRefreshPending = False
@@ -1435,33 +1446,32 @@ Public Function UI_InternalIsFrameRefreshPending( _
         Slot = UI_FrameStateIndexForHwnd(TargetHwnd, False)
 
         If Slot < 1 Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         UI_InternalIsFrameRefreshPending = m_FrameStates(Slot).RefreshPending
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'A seam must never raise into the harness that called it
         UI_InternalIsFrameRefreshPending = False
 
 End Function
 
-
 Public Sub UI_InternalInjectFrameRefreshFailure( _
     ByVal FailNextRefresh As Boolean)
 '
-'==============================================================================
-' UI_InternalInjectFrameRefreshFailure
+'------------------------------------------------------------------------------
+'                   UI INTERNAL INJECT FRAME REFRESH FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arms or disarms a one-shot failure of the next non-client frame refresh.
@@ -1479,7 +1489,7 @@ Public Sub UI_InternalInjectFrameRefreshFailure( _
 '     True arms the seam; False disarms it.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - The armed state is consumed by the next refresh attempt and is not
@@ -1493,18 +1503,17 @@ Public Sub UI_InternalInjectFrameRefreshFailure( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_TITLEBAR
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     prevents exposure to external VBA projects.
 '   - Production code must never call it.
 '
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'
 ' UPDATED
 '   2026-08-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' SET SEAM
@@ -1514,14 +1523,13 @@ Public Sub UI_InternalInjectFrameRefreshFailure( _
 
 End Sub
 
-
 Public Sub UI_InternalInjectWindowStyleFault( _
     ByVal Operation As Long, _
     ByVal FaultKind As Long, _
     ByVal DllError As Long)
 '
-'==============================================================================
-' UI_InternalInjectWindowStyleFault
+'------------------------------------------------------------------------------
+'                    UI INTERNAL INJECT WINDOW STYLE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot fault for the next GWL_STYLE read or write.
@@ -1556,7 +1564,7 @@ Public Sub UI_InternalInjectWindowStyleFault( _
 '     module; neither is exported.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Records the fault for the next call of the named operation.
@@ -1574,18 +1582,17 @@ Public Sub UI_InternalInjectWindowStyleFault( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_TITLEBAR
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     keeps it off the external facade, so this is project-public surface.
 '   - Production code must never call it.
 '
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' SET SEAM
@@ -1596,7 +1603,6 @@ Public Sub UI_InternalInjectWindowStyleFault( _
         m_InjectWindowStyleError = DllError
 
 End Sub
-
 
 #If VBA7 Then
 Public Function UI_InternalSimulateFrameGenerationReuse( _
@@ -1610,8 +1616,8 @@ Public Function UI_InternalSimulateFrameGenerationReuse( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_InternalSimulateFrameGenerationReuse
+'------------------------------------------------------------------------------
+'                 UI INTERNAL SIMULATE FRAME GENERATION REUSE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attributes the registry slot that holds TargetHwnd to another window
@@ -1656,30 +1662,34 @@ Public Function UI_InternalSimulateFrameGenerationReuse( _
 ' DEPENDENCIES
 '   - UI_FrameStateSlotForHwnd
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_TITLEBAR
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     keeps it off the external facade, so this is project-public surface.
 '   - Production code must never call it.
 '
-' UPDATED
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'
+' HISTORY
 '   2026-11-16 - Replaced UI_InternalSimulateFrameHandleReuse, which also
 '                rewrote the stored hWnd and the last-written bits (#32).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Slot                As Long            'Registry index for TargetHwnd
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_InternalSimulateFrameGenerationReuse"
+
+    Dim Slot    As Long 'Registry index for TargetHwnd
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume nothing was rebound until the slot has changed
         UI_InternalSimulateFrameGenerationReuse = False
@@ -1689,14 +1699,14 @@ Public Function UI_InternalSimulateFrameGenerationReuse( _
 '------------------------------------------------------------------------------
     'A slot always retains an object, so an absent one is not a generation
         If PriorOwner Is Nothing Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Find the slot by numeric handle alone, as the production scan does
         Slot = UI_FrameStateSlotForHwnd(TargetHwnd)
 
         If Slot < 1 Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1708,21 +1718,20 @@ Public Function UI_InternalSimulateFrameGenerationReuse( _
         UI_InternalSimulateFrameGenerationReuse = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'A seam must never raise into the harness that called it
         UI_InternalSimulateFrameGenerationReuse = False
 
 End Function
-
 
 #If VBA7 Then
 Public Function UI_InternalTryReadFrameState( _
@@ -1744,8 +1753,8 @@ Public Function UI_InternalTryReadFrameState( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_InternalTryReadFrameState
+'------------------------------------------------------------------------------
+'                       UI INTERNAL TRY READ FRAME STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reports the fields of the registry slot that holds a numeric handle,
@@ -1783,29 +1792,33 @@ Public Function UI_InternalTryReadFrameState( _
 ' DEPENDENCIES
 '   - UI_FrameStateSlotForHwnd
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_TITLEBAR
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     keeps it off the external facade, so this is project-public surface.
 '   - Production code must never call it.
 '
-' UPDATED
-'   2026-11-16 (#32)
-'==============================================================================
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
+' HISTORY
+'   2026-11-16 (#32)
+'
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Slot                As Long            'Registry index for TargetHwnd
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_InternalTryReadFrameState"
+
+    Dim Slot    As Long 'Registry index for TargetHwnd
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Report an empty slot until one is found
         UI_InternalTryReadFrameState = False
@@ -1822,7 +1835,7 @@ Public Function UI_InternalTryReadFrameState( _
         Slot = UI_FrameStateSlotForHwnd(TargetHwnd)
 
         If Slot < 1 Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1838,21 +1851,20 @@ Public Function UI_InternalTryReadFrameState( _
         UI_InternalTryReadFrameState = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'A seam must never raise into the harness that called it
         UI_InternalTryReadFrameState = False
 
 End Function
-
 
 #If VBA7 Then
 Public Function UI_InternalMergeTitleBarStyleBits( _
@@ -1866,8 +1878,8 @@ Public Function UI_InternalMergeTitleBarStyleBits( _
     As Long
 #End If
 '
-'==============================================================================
-' UI_InternalMergeTitleBarStyleBits
+'------------------------------------------------------------------------------
+'                    UI INTERNAL MERGE TITLE BAR STYLE BITS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Merges the title-bar style bits owned by this module into a current
@@ -1903,20 +1915,19 @@ Public Function UI_InternalMergeTitleBarStyleBits( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - UI_TrySetTitleBarVisibleForHwndWorker
-'   - M_EXCEL_UI_TEST_TITLEBAR
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     keeps it out of the cross-project automation namespace.
 '   - Passing zero owned bits is the hide case; passing captured bits is the
 '     show case. The helper itself has no notion of show or hide.
 '
+' CALLED FROM
+'   - UI_TrySetTitleBarVisibleForHwndWorker
+'   - M_EXCEL_UI_TEST_TITLEBAR
+'
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' MERGE OWNED BITS
@@ -1927,7 +1938,6 @@ Public Function UI_InternalMergeTitleBarStyleBits( _
             (OwnedStyleBits And TITLEBAR_OWNED_STYLE_MASK)
 
 End Function
-
 
 #If VBA7 Then
 Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
@@ -1943,8 +1953,8 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TrySetTitleBarVisibleForHwndWorker
+'------------------------------------------------------------------------------
+'                 UI TRY SET TITLE BAR VISIBLE FOR HWND WORKER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Shows or hides the title bar of one explicitly supplied top-level window.
@@ -2006,45 +2016,49 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 '   - UI_TryRefreshWindowFrame
 '   - UI_TitleBarBuildRuntimeErrorText
 '
-' CALLED FROM
-'   - UI_TrySetTitleBarVisibleForHwndIfNeeded
-'
 ' NOTES
 '   Registry state lives only in module memory. A VBA project reset discards it
 '   while the window styles themselves survive in the running Excel process, so
 '   the two can disagree after a reset. The visible-baseline fallback below is
 '   what keeps a show a real recovery path in that situation.
 '
-' UPDATED
+' CALLED FROM
+'   - UI_TrySetTitleBarVisibleForHwndIfNeeded
+'
+' HISTORY
 '   2026-11-18 - The fallback condition and both readbacks test the complete
 '                WS_CAPTION mask instead of any caption bit (#6).
 '   2026-08-21 - Recorded the owned bits behind every adoption of ownership.
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TrySetTitleBarVisibleForHwndWorker"
+
 #If VBA7 Then
-    Dim CurrentStyle        As LongPtr         'Live GWL_STYLE value
-    Dim NewStyle            As LongPtr         'Merged GWL_STYLE value to write
-    Dim RestoreBits         As LongPtr         'Owned bits a show will re-apply
-    Dim VerifiedStyle       As LongPtr         'Post-operation visibility readback
+    Dim CurrentStyle    As LongPtr  'Live GWL_STYLE value
+    Dim NewStyle        As LongPtr  'Merged GWL_STYLE value to write
+    Dim RestoreBits     As LongPtr  'Owned bits a show will re-apply
+    Dim VerifiedStyle   As LongPtr  'Post-operation visibility readback
 #Else
-    Dim CurrentStyle        As Long            'Live GWL_STYLE value
-    Dim NewStyle            As Long            'Merged GWL_STYLE value to write
-    Dim RestoreBits         As Long            'Owned bits a show will re-apply
-    Dim VerifiedStyle       As Long            'Post-operation visibility readback
+    Dim CurrentStyle    As Long 'Live GWL_STYLE value
+    Dim NewStyle        As Long 'Merged GWL_STYLE value to write
+    Dim RestoreBits     As Long 'Owned bits a show will re-apply
+    Dim VerifiedStyle   As Long 'Post-operation visibility readback
 #End If
 
-    Dim Slot                As Long            'Registry index for TargetHwnd
+    Dim Slot    As Long 'Registry index for TargetHwnd
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until every step has completed
         UI_TrySetTitleBarVisibleForHwndWorker = False
@@ -2060,7 +2074,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
     'hand is the failure mode this module was reworked to remove.
         If Not UI_InternalIsTitleBarFrameAlive(TargetHwnd) Then
             FailMsg = "target window is not available; hWnd=" & CStr(TargetHwnd)
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2071,7 +2085,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 
         If Slot < 1 Then
             FailMsg = "unable to allocate title-bar frame state"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2079,7 +2093,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 '------------------------------------------------------------------------------
     'Read the live style; unrelated bits will be preserved from this value
         If Not UI_TryGetWindowStyle(TargetHwnd, CurrentStyle, FailMsg) Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2092,7 +2106,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
         If m_FrameStates(Slot).RefreshPending Then
 
             If Not UI_TryRefreshWindowFrame(TargetHwnd, FailMsg) Then
-                GoTo Safe_Exit
+                GoTo SafeExit
             End If
 
             m_FrameStates(Slot).RefreshPending = False
@@ -2124,20 +2138,20 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
     'the helper preserves every unrelated bit from CurrentStyle.
         If IsVisible Then
 
-            'A show must never re-apply a baseline that is not a visible frame.
-            'That happens when the first title-bar call after a VBA project
-            'reset is a show while the frame is already hidden: the capture
-            'above then records zero owned bits, the merge becomes a no-op,
-            'and the short circuit below would report success while the title
-            'bar stays hidden. A non-zero baseline without the caption, and
-            'one with only WS_BORDER or only WS_DLGFRAME, fail the same way.
-            'WS_CAPTION is a composite, so the baseline is usable only when
-            'the complete mask is present. Falling back to the full owned
-            'frame keeps UI_ShowExcelUI a real recovery path.
-                If Not m_FrameStates(Slot).HasBaseline _
-                   Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then
-                    RestoreBits = TITLEBAR_DEFAULT_STYLE_BITS
-                End If
+        'A show must never re-apply a baseline that is not a visible frame.
+        'That happens when the first title-bar call after a VBA project
+        'reset is a show while the frame is already hidden: the capture
+        'above then records zero owned bits, the merge becomes a no-op,
+        'and the short circuit below would report success while the title
+        'bar stays hidden. A non-zero baseline without the caption, and
+        'one with only WS_BORDER or only WS_DLGFRAME, fail the same way.
+        'WS_CAPTION is a composite, so the baseline is usable only when
+        'the complete mask is present. Falling back to the full owned
+        'frame keeps UI_ShowExcelUI a real recovery path.
+            If Not m_FrameStates(Slot).HasBaseline _
+               Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then
+                RestoreBits = TITLEBAR_DEFAULT_STYLE_BITS
+            End If
 
             NewStyle = UI_InternalMergeTitleBarStyleBits( _
                 CurrentStyle:=CurrentStyle, _
@@ -2155,34 +2169,34 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
     'refresh debt was already settled above, so this really is a no-op.
         If NewStyle = CurrentStyle Then
 
-            'Nothing is written here, but the component still adopts the state
-            'as its own. Record the owned bits the entry now claims, so a later
-            'call can tell this window from one that has merely inherited its
-            'handle.
-                m_FrameStates(Slot).LastWrittenBits = _
-                    NewStyle And TITLEBAR_OWNED_STYLE_MASK
+        'Nothing is written here, but the component still adopts the state
+        'as its own. Record the owned bits the entry now claims, so a later
+        'call can tell this window from one that has merely inherited its
+        'handle.
+            m_FrameStates(Slot).LastWrittenBits = _
+                NewStyle And TITLEBAR_OWNED_STYLE_MASK
 
-                m_FrameStates(Slot).ComponentHidden = Not IsVisible
+            m_FrameStates(Slot).ComponentHidden = Not IsVisible
 
-            'A style-equality no-op is not proof that a show achieved a visible
-            'caption. Read the live frame again and require the complete
-            'WS_CAPTION mask before reporting success.
-                If IsVisible Then
-                    If Not UI_TryGetWindowStyle( _
-                        TargetHwnd, VerifiedStyle, FailMsg) Then
+        'A style-equality no-op is not proof that a show achieved a visible
+        'caption. Read the live frame again and require the complete
+        'WS_CAPTION mask before reporting success.
+            If IsVisible Then
+                If Not UI_TryGetWindowStyle( _
+                    TargetHwnd, VerifiedStyle, FailMsg) Then
 
-                        GoTo Safe_Exit
-                    End If
-
-                    If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then
-                        FailMsg = _
-                            "title-bar show completed without a visible caption"
-                        GoTo Safe_Exit
-                    End If
+                    GoTo SafeExit
                 End If
 
+                If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then
+                    FailMsg = _
+                        "title-bar show completed without a visible caption"
+                    GoTo SafeExit
+                End If
+            End If
+
             UI_TrySetTitleBarVisibleForHwndWorker = True
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2190,7 +2204,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 '------------------------------------------------------------------------------
     'Write the merged style
         If Not UI_TrySetWindowStyle(TargetHwnd, NewStyle, FailMsg) Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'The style is committed, so this component now owns the resulting state
@@ -2210,7 +2224,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
     'from the matching style bits that there is nothing left to do.
         If Not UI_TryRefreshWindowFrame(TargetHwnd, FailMsg) Then
             m_FrameStates(Slot).RefreshPending = True
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2223,12 +2237,12 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
             If Not UI_TryGetWindowStyle( _
                 TargetHwnd, VerifiedStyle, FailMsg) Then
 
-                GoTo Safe_Exit
+                GoTo SafeExit
             End If
 
             If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then
                 FailMsg = "title-bar show did not produce a visible caption"
-                GoTo Safe_Exit
+                GoTo SafeExit
             End If
         End If
 
@@ -2236,22 +2250,21 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
         UI_TrySetTitleBarVisibleForHwndWorker = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 #If VBA7 Then
 Private Function UI_TryResolveWindowForHwnd( _
@@ -2265,8 +2278,8 @@ Private Function UI_TryResolveWindowForHwnd( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TryResolveWindowForHwnd
+'------------------------------------------------------------------------------
+'                        UI TRY RESOLVE WINDOW FOR HWND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolves the live Excel Window that currently owns TargetHwnd.
@@ -2283,11 +2296,11 @@ Private Function UI_TryResolveWindowForHwnd( _
 '
 ' UPDATED
 '   2026-09-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
     Dim Candidate           As Object
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
         Set WindowOut = Nothing
 
         For Each Candidate In Application.Windows
@@ -2298,14 +2311,19 @@ Private Function UI_TryResolveWindowForHwnd( _
             End If
         Next Candidate
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
         Exit Function
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         Set WindowOut = Nothing
         UI_TryResolveWindowForHwnd = False
 
 End Function
-
 
 #If VBA7 Then
 Private Function UI_FrameStateIndexForHwnd( _
@@ -2319,8 +2337,8 @@ Private Function UI_FrameStateIndexForHwnd( _
     As Long
 #End If
 '
-'==============================================================================
-' UI_FrameStateIndexForHwnd
+'------------------------------------------------------------------------------
+'                        UI FRAME STATE INDEX FOR HWND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the registry index holding the frame state for one window,
@@ -2373,34 +2391,38 @@ Private Function UI_FrameStateIndexForHwnd( _
 '   - UI_FrameStateSlotForHwnd
 '   - UI_TryResolveWindowForHwnd
 '
-' CALLED FROM
-'   - UI_TrySetTitleBarVisibleForHwndWorker
-'   - UI_InternalIsFrameRefreshPending
-'
 ' NOTES
 '   - UI_TrySetTitleBarVisibleForHwndWorker reports every -1 as "unable to
 '     allocate title-bar frame state", so its message does not distinguish a
 '     handle no Excel Window reports from an allocation failure (#114).
 '
-' UPDATED
+' CALLED FROM
+'   - UI_TrySetTitleBarVisibleForHwndWorker
+'   - UI_InternalIsFrameRefreshPending
+'
+' HISTORY
 '   2026-09-03 - Returns -1 when no Excel Window reports the handle, and
 '                retains that Window with each new entry.
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-09-03
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Slot                As Long            'Entry already held, if any
-    Dim Capacity            As Long            'Slots currently allocated
-    Dim TargetWindow        As Object          'Excel Window owning TargetHwnd
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_FrameStateIndexForHwnd"
+
+    Dim Slot            As Long     'Entry already held, if any
+    Dim Capacity        As Long     'Slots currently allocated
+    Dim TargetWindow    As Object   'Excel Window owning TargetHwnd
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume the handle is unknown until the scan or the append says otherwise
         UI_FrameStateIndexForHwnd = -1
@@ -2410,13 +2432,13 @@ Private Function UI_FrameStateIndexForHwnd( _
 '------------------------------------------------------------------------------
     'A zero handle never names a window and must never be given an entry
         If TargetHwnd = 0 Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'A numeric handle alone has no generation identity. Resolve the owning
     'Excel Window now and retain that object with any new slot.
         If Not UI_TryResolveWindowForHwnd(TargetHwnd, TargetWindow) Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2427,18 +2449,18 @@ Private Function UI_FrameStateIndexForHwnd( _
 
         If Slot >= 1 Then
 
-            'Hand it back only while it can still be proved to describe the
-            'window the handle names now
-                If UI_FrameStateEntryHolds(Slot) Then
-                    UI_FrameStateIndexForHwnd = Slot
-                    GoTo Safe_Exit
-                End If
+        'Hand it back only while it can still be proved to describe the
+        'window the handle names now
+            If UI_FrameStateEntryHolds(Slot) Then
+                UI_FrameStateIndexForHwnd = Slot
+                GoTo SafeExit
+            End If
 
-            'It cannot. Either Windows has issued this handle to a different
-            'window or the frame has moved out from under the claim; in both
-            'cases the entry is evidence about a window that is not this one,
-            'so it is dropped rather than applied to whatever answers now.
-                UI_DiscardFrameStateEntry Slot
+        'It cannot. Either Windows has issued this handle to a different
+        'window or the frame has moved out from under the claim; in both
+        'cases the entry is evidence about a window that is not this one,
+        'so it is dropped rather than applied to whatever answers now.
+            UI_DiscardFrameStateEntry Slot
         End If
 
 '------------------------------------------------------------------------------
@@ -2446,7 +2468,7 @@ Private Function UI_FrameStateIndexForHwnd( _
 '------------------------------------------------------------------------------
     'A pure lookup reports the miss and leaves the registry untouched
         If Not CreateIfMissing Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2490,21 +2512,20 @@ Private Function UI_FrameStateIndexForHwnd( _
         UI_FrameStateIndexForHwnd = m_FrameStateCount
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'A registry that cannot be extended must report the miss, not a bad index
         UI_FrameStateIndexForHwnd = -1
 
 End Function
-
 
 #If VBA7 Then
 Private Function UI_FrameStateSlotForHwnd( _
@@ -2516,8 +2537,8 @@ Private Function UI_FrameStateSlotForHwnd( _
     As Long
 #End If
 '
-'==============================================================================
-' UI_FrameStateSlotForHwnd
+'------------------------------------------------------------------------------
+'                         UI FRAME STATE SLOT FOR HWND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the registry index whose stored handle matches, saying nothing
@@ -2552,23 +2573,27 @@ Private Function UI_FrameStateSlotForHwnd( _
 '   - UI_InternalSimulateFrameGenerationReuse
 '   - UI_InternalTryReadFrameState
 '
-' UPDATED
+' HISTORY
 '   2026-11-16 - Called by the two registry seams (#32).
 '   2026-09-03
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ScanIdx             As Long            'Cursor over the live entries
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_FrameStateSlotForHwnd"
+
+    Dim ScanIdx As Long 'Cursor over the live entries
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume the handle is unknown until the scan says otherwise
         UI_FrameStateSlotForHwnd = -1
@@ -2581,34 +2606,33 @@ Private Function UI_FrameStateSlotForHwnd( _
 
             If m_FrameStates(ScanIdx).hWnd = TargetHwnd Then
                 UI_FrameStateSlotForHwnd = ScanIdx
-                GoTo Safe_Exit
+                GoTo SafeExit
             End If
 
         Next ScanIdx
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'A scan that cannot complete must report a miss, not a doubtful index
         UI_FrameStateSlotForHwnd = -1
 
 End Function
 
-
 Private Function UI_FrameStateEntryHolds( _
     ByVal Slot As Long) _
     As Boolean
 '
-'==============================================================================
-' UI_FrameStateEntryHolds
+'------------------------------------------------------------------------------
+'                          UI FRAME STATE ENTRY HOLDS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reports whether a registry entry can still be proved to describe the
@@ -2649,10 +2673,6 @@ Private Function UI_FrameStateEntryHolds( _
 '   - UI_InternalIsTitleBarFrameAlive
 '   - UI_TryGetWindowStyle
 '
-' CALLED FROM
-'   - UI_FrameStateIndexForHwnd
-'   - UI_CompactFrameStates
-'
 ' NOTES
 '   - A frame change made by Excel or another add-in while this component
 '     holds the frame hidden also fails the check. Discarding the entry is
@@ -2660,31 +2680,39 @@ Private Function UI_FrameStateEntryHolds( _
 '     the window this component can defend, and adopting them is the same
 '     self-healing rule that applies while it owns nothing.
 '
-' UPDATED
+' CALLED FROM
+'   - UI_FrameStateIndexForHwnd
+'   - UI_CompactFrameStates
+'
+' HISTORY
 '   2026-09-03 - Required retained Window/hWnd generation identity; also
 '                applied by UI_CompactFrameStates.
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-09-03
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_FrameStateEntryHolds"
+
 #If VBA7 Then
-    Dim CurrentStyle        As LongPtr         'Live GWL_STYLE value
-    Dim RetainedHwnd        As LongPtr         'Handle read from retained Window
+    Dim CurrentStyle    As LongPtr  'Live GWL_STYLE value
+    Dim RetainedHwnd    As LongPtr  'Handle read from retained Window
 #Else
-    Dim CurrentStyle        As Long            'Live GWL_STYLE value
-    Dim RetainedHwnd        As Long            'Handle read from retained Window
+    Dim CurrentStyle    As Long 'Live GWL_STYLE value
+    Dim RetainedHwnd    As Long 'Handle read from retained Window
 #End If
 
-    Dim ProbeMsg            As String          'Style-read diagnostic, unused
+    Dim ProbeMsg    As String   'Style-read diagnostic, unused
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume the entry cannot be proved until a check says it can
         UI_FrameStateEntryHolds = False
@@ -2694,7 +2722,7 @@ Private Function UI_FrameStateEntryHolds( _
 '------------------------------------------------------------------------------
     'A slot outside the live range names no entry at all
         If Slot < 1 Or Slot > m_FrameStateCount Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2704,13 +2732,13 @@ Private Function UI_FrameStateEntryHolds( _
     'returns a different handle; either result discards the slot before any
     'baseline, ownership flag or refresh debt can cross generations.
         If m_FrameStateWindows(Slot) Is Nothing Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         RetainedHwnd = m_FrameStateWindows(Slot).hWnd
 
         If RetainedHwnd <> m_FrameStates(Slot).hWnd Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2719,7 +2747,7 @@ Private Function UI_FrameStateEntryHolds( _
     'An entry whose window has closed describes nothing, whoever holds the
     'handle next
         If Not UI_InternalIsTitleBarFrameAlive(m_FrameStates(Slot).hWnd) Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2732,7 +2760,7 @@ Private Function UI_FrameStateEntryHolds( _
 
             If Not m_FrameStates(Slot).RefreshPending Then
                 UI_FrameStateEntryHolds = True
-                GoTo Safe_Exit
+                GoTo SafeExit
             End If
 
         End If
@@ -2744,7 +2772,7 @@ Private Function UI_FrameStateEntryHolds( _
         If Not UI_TryGetWindowStyle( _
             m_FrameStates(Slot).hWnd, CurrentStyle, ProbeMsg) Then
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'The claim holds only while the window still carries the owned bits this
@@ -2756,27 +2784,26 @@ Private Function UI_FrameStateEntryHolds( _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Fail closed: an unproved entry is discarded, never applied
         UI_FrameStateEntryHolds = False
 
 End Function
 
-
 Private Sub UI_DiscardFrameStateEntry( _
     ByVal Slot As Long)
 '
-'==============================================================================
-' UI_DiscardFrameStateEntry
+'------------------------------------------------------------------------------
+'                         UI DISCARD FRAME STATE ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes one registry entry and closes the gap it leaves behind.
@@ -2793,7 +2820,7 @@ Private Sub UI_DiscardFrameStateEntry( _
 '     ignored rather than treated as an error.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Moves every later entry down one slot, preserving order.
@@ -2808,29 +2835,33 @@ Private Sub UI_DiscardFrameStateEntry( _
 ' CALLED FROM
 '   - UI_FrameStateIndexForHwnd
 '
-' UPDATED
+' HISTORY
 '   2026-09-03
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-09-03
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim MoveIdx             As Long            'Cursor over the entries above
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_DiscardFrameStateEntry"
+
+    Dim MoveIdx As Long 'Cursor over the entries above
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' VALIDATE INPUTS
 '------------------------------------------------------------------------------
     'A slot outside the live range names no entry to remove
         If Slot < 1 Or Slot > m_FrameStateCount Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -2850,26 +2881,26 @@ Private Sub UI_DiscardFrameStateEntry( _
         m_FrameStateCount = m_FrameStateCount - 1
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Leave the registry exactly as it was rather than truncating it on error
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
-
 Private Sub UI_CompactFrameStates()
+
 '
-'==============================================================================
-' UI_CompactFrameStates
+'------------------------------------------------------------------------------
+'                           UI COMPACT FRAME STATES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes registry entries that fail the ownership test in
@@ -2884,7 +2915,7 @@ Private Sub UI_CompactFrameStates()
 '   open rather than by the number ever opened.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Keeps only entries that pass UI_FrameStateEntryHolds: the retained
@@ -2905,28 +2936,32 @@ Private Sub UI_CompactFrameStates()
 ' CALLED FROM
 '   - UI_FrameStateIndexForHwnd
 '
-' UPDATED
+' HISTORY
 '   2026-09-03 - Applies the full ownership test in UI_FrameStateEntryHolds
 '                instead of a liveness probe.
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-09-03
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ReadIdx             As Long            'Cursor over existing entries
-    Dim KeepCount           As Long            'Entries retained so far
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_CompactFrameStates"
+
+    Dim ReadIdx     As Long 'Cursor over existing entries
+    Dim KeepCount   As Long 'Entries retained so far
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Nothing to compact before the registry has been allocated
         If m_FrameStateCount = 0 Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         KeepCount = 0
@@ -2960,21 +2995,20 @@ Private Sub UI_CompactFrameStates()
         m_FrameStateCount = KeepCount
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Leave the registry exactly as it was rather than truncating it on error
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 #If VBA7 Then
 Private Function UI_TryGetWindowStyle( _
@@ -2990,8 +3024,8 @@ Private Function UI_TryGetWindowStyle( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TryGetWindowStyle
+'------------------------------------------------------------------------------
+'                           UI TRY GET WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads GWL_STYLE using the API matching the host bitness.
@@ -3039,33 +3073,37 @@ Private Function UI_TryGetWindowStyle( _
 '   - UI_TrySetTitleBarVisibleForHwndWorker
 '   - UI_FrameStateEntryHolds
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Captured Err.LastDllError immediately after the call in
 '                place of GetLastError, and named the API, operation, error
 '                and hWnd in the failure text (#27).
 '   2026-08-21 - Recorded the two callers the list had never named.
 '   2026-08-18
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TryGetWindowStyle"
+
 #If VBA7 Then
-    Dim ApiResult           As LongPtr         'Value the read API returned
+    Dim ApiResult   As LongPtr  'Value the read API returned
 #Else
-    Dim ApiResult           As Long            'Value the read API returned
+    Dim ApiResult   As Long 'Value the read API returned
 #End If
 
-    Dim DllError            As Long            'Err.LastDllError after the read
-    Dim Fault               As Long            'Armed regression fault, if any
-    Dim FaultError          As Long            'Error the armed fault supplies
+    Dim DllError    As Long 'Err.LastDllError after the read
+    Dim Fault       As Long 'Armed regression fault, if any
+    Dim FaultError  As Long 'Error the armed fault supplies
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the style has been read
         UI_TryGetWindowStyle = False
@@ -3080,7 +3118,7 @@ Private Function UI_TryGetWindowStyle( _
     'Validate the window handle
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -3132,7 +3170,7 @@ Private Function UI_TryGetWindowStyle( _
                 DllError:=DllError, _
                 TargetHwnd:=hWnd)
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Publish the value only once it is known to be valid
@@ -3140,21 +3178,20 @@ Private Function UI_TryGetWindowStyle( _
         UI_TryGetWindowStyle = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
 
 End Function
-
 
 #If VBA7 Then
 Private Function UI_TrySetWindowStyle( _
@@ -3170,8 +3207,8 @@ Private Function UI_TrySetWindowStyle( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TrySetWindowStyle
+'------------------------------------------------------------------------------
+'                           UI TRY SET WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes GWL_STYLE using the API matching the host bitness.
@@ -3217,32 +3254,36 @@ Private Function UI_TrySetWindowStyle( _
 ' CALLED FROM
 '   - UI_TrySetTitleBarVisibleForHwndWorker
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Captured Err.LastDllError immediately after the call in
 '                place of GetLastError, and named the API, operation, error
 '                and hWnd in the failure text (#27).
 '   2026-08-18
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TrySetWindowStyle"
+
 #If VBA7 Then
-    Dim ApiResult           As LongPtr         'Style value replaced by the write
+    Dim ApiResult   As LongPtr  'Style value replaced by the write
 #Else
-    Dim ApiResult           As Long            'Style value replaced by the write
+    Dim ApiResult   As Long 'Style value replaced by the write
 #End If
 
-    Dim DllError            As Long            'Err.LastDllError after the write
-    Dim Fault               As Long            'Armed regression fault, if any
-    Dim FaultError          As Long            'Error the armed fault supplies
+    Dim DllError    As Long 'Err.LastDllError after the write
+    Dim Fault       As Long 'Armed regression fault, if any
+    Dim FaultError  As Long 'Error the armed fault supplies
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the style has been written
         UI_TrySetWindowStyle = False
@@ -3256,7 +3297,7 @@ Private Function UI_TrySetWindowStyle( _
     'Validate the window handle
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -3309,28 +3350,27 @@ Private Function UI_TrySetWindowStyle( _
                 DllError:=DllError, _
                 TargetHwnd:=hWnd)
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Report success
         UI_TrySetWindowStyle = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
 
 End Function
-
 
 #If VBA7 Then
 Private Function UI_TryRefreshWindowFrame( _
@@ -3344,8 +3384,8 @@ Private Function UI_TryRefreshWindowFrame( _
     As Boolean
 #End If
 '
-'==============================================================================
-' UI_TryRefreshWindowFrame
+'------------------------------------------------------------------------------
+'                         UI TRY REFRESH WINDOW FRAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Recalculates and repaints the non-client frame after a style change.
@@ -3379,33 +3419,37 @@ Private Function UI_TryRefreshWindowFrame( _
 ' DEPENDENCIES
 '   - UI_TitleBarBuildRuntimeErrorText
 '
-' CALLED FROM
-'   - UI_TrySetTitleBarVisibleForHwndWorker
-'
 ' NOTES
 '   SetWindowPos returns a BOOL, so zero is unambiguously a failure here and no
 '   zero disambiguation is required. The capture sequence still applies: the
 '   error the failure text reports must be the one this call left.
 '
-' UPDATED
+' CALLED FROM
+'   - UI_TrySetTitleBarVisibleForHwndWorker
+'
+' HISTORY
 '   2026-11-06 - Captured Err.LastDllError immediately after the call in
 '                place of GetLastError, and named the API, operation, error
 '                and hWnd in the failure text (#27).
 '   2026-08-18
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ApiOK               As Long            'SetWindowPos BOOL result
-    Dim DllError            As Long            'Err.LastDllError after the call
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TryRefreshWindowFrame"
+
+    Dim ApiOK       As Long 'SetWindowPos BOOL result
+    Dim DllError    As Long 'Err.LastDllError after the call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the frame has been recalculated
         UI_TryRefreshWindowFrame = False
@@ -3419,7 +3463,7 @@ Private Function UI_TryRefreshWindowFrame( _
     'Validate the window handle
         If hWnd = 0 Then
             FailMsg = "invalid window handle"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -3431,7 +3475,7 @@ Private Function UI_TryRefreshWindowFrame( _
         If m_InjectFrameRefreshFailure Then
             m_InjectFrameRefreshFailure = False
             FailMsg = "SetWindowPos failure injected by the regression harness"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -3459,36 +3503,35 @@ Private Function UI_TryRefreshWindowFrame( _
                 DllError:=DllError, _
                 TargetHwnd:=hWnd)
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Report success
         UI_TryRefreshWindowFrame = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_TitleBarBuildRuntimeErrorText
 
 End Function
-
 
 Private Function UI_TakeWindowStyleFault( _
     ByVal Operation As Long, _
     ByRef FaultErrorOut As Long) _
     As Long
 '
-'==============================================================================
-' UI_TakeWindowStyleFault
+'------------------------------------------------------------------------------
+'                          UI TAKE WINDOW STYLE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Consumes the window-style fault armed for one operation.
@@ -3527,8 +3570,7 @@ Private Function UI_TakeWindowStyleFault( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3559,7 +3601,6 @@ Private Function UI_TakeWindowStyleFault( _
 
 End Function
 
-
 #If VBA7 Then
 Private Function UI_TitleBarBuildApiFailureText( _
     ByVal ApiName As String, _
@@ -3576,8 +3617,8 @@ Private Function UI_TitleBarBuildApiFailureText( _
     As String
 #End If
 '
-'==============================================================================
-' UI_TitleBarBuildApiFailureText
+'------------------------------------------------------------------------------
+'                     UI TITLE BAR BUILD API FAILURE TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Builds the failure text for a native call that reported an error.
@@ -3619,8 +3660,7 @@ Private Function UI_TitleBarBuildApiFailureText( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' BUILD DIAGNOSTIC TEXT
@@ -3636,12 +3676,11 @@ Private Function UI_TitleBarBuildApiFailureText( _
 
 End Function
 
-
 Private Function UI_TitleBarBuildRuntimeErrorText() _
     As String
 '
-'==============================================================================
-' UI_TitleBarBuildRuntimeErrorText
+'------------------------------------------------------------------------------
+'                    UI TITLE BAR BUILD RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Builds a consistent diagnostic string from the active Err object.
@@ -3667,16 +3706,17 @@ Private Function UI_TitleBarBuildRuntimeErrorText() _
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ErrNumber           As Long            'Err.Number captured on entry
-    Dim ErrDescription      As String          'Err.Description captured on entry
-    Dim ErrSource           As String          'Err.Source captured on entry
-    Dim ErrLine             As Long            'Erl captured on entry
+    Const PROC_NAME As String = "M_EXCEL_UI_TITLEBAR.UI_TitleBarBuildRuntimeErrorText"
+
+    Dim ErrNumber       As Long     'Err.Number captured on entry
+    Dim ErrDescription  As String   'Err.Description captured on entry
+    Dim ErrSource       As String   'Err.Source captured on entry
+    Dim ErrLine         As Long     'Erl captured on entry
 
 '------------------------------------------------------------------------------
 ' CAPTURE ERR STATE

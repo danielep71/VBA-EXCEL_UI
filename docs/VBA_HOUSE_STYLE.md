@@ -45,17 +45,25 @@ verification (#52)](#formatter-verification-52) says how `tools/reformat.py`
 produces it and proves that doing so changes nothing the code executes.
 
 **The switch.** `HOUSE_STYLE_ACTIVE` in `tools/house_style.py` says whether the
-tree is held to this form. It is `False` while the twelve modules are still in
-the layout they had before: `tools/reformat.py --check` accepts that layout, the
-*house labels* check accepts its spellings (`Err_Handler`, `Safe_Exit`,
-`Clean_Exit`, `Clean_Fail`), and the *house-style rules* check runs its fixtures
-but does not read the modules. While it is `False`, write to the layout the
-modules have and run `python3 tools/reformat.py --write` as before; the form
-below replaces it for the whole tree in one change. To see what that change does
-to a module, run `python3 tools/reformat.py --style house --write` on a copy, or
-`--style house --check` on the module itself. I reformat the modules and set the
-constant to `True` in the same change, so that no commit holds a tree the gate
-would reject.
+tree is held to this form. It is `True`: the twelve modules are in this layout,
+`tools/reformat.py --check` accepts only it, the *house labels* check accepts
+its spellings (`ErrorHandler`, `SafeExit`, `CleanExit`, `CleanFail`) and the
+*house-style rules* check reads the modules. `--style legacy` still writes the
+layout the modules had before, and the fixtures of the formatter and of each
+rule run in either state, so a rule stays proved whatever the constant says.
+
+**What is not settled yet.** The header fields that a person has to write, a
+procedure that has locals or a handler but no `DECLARE` section, and a
+`Const PROC_NAME` whose literal is deliberately the bare procedure name (a
+comment above it says so) are listed in `tools/house_style_pending.txt`, one
+line per finding: `<Module>.<Procedure>: <rule>`, or `<Module>: <rule>` for the
+module header. The *house-style rules* check allows exactly those findings. A
+finding that is not listed fails it, and so does a listed line that no finding
+matches any more, so the list can only shrink: settle a finding, then delete its
+line. New code follows the style and is never listed. `python3 tools/reformat.py
+--write-pending src/*.bas test/*.bas demo/*.bas` rewrites the list from the
+modules; once the file exists it refuses to add a line. I delete the file when
+it is empty.
 
 ### Files
 
@@ -341,6 +349,7 @@ and refuses a module where the rewrite would be ambiguous.
 | Blank lines, banners and their characters, centred titles, header field order and spacing, `HISTORY`, `UPDATED` as one date, `RETURNS` of a `Sub` that says none, declaration alignment, section titles for the exit and the handler, `INITIALIZE` opened at the handler statement, label column, statement and comment indentation | `tools/reformat.py` rewrites them; `--check` and the *house-style formatter* check report drift |
 | The renames above | `tools/reformat.py`, which compares the executable tokens before it writes |
 | The nine fields present and in order, `UPDATED` a date, `RETURNS` of a `Sub` is `Nothing`, the section order, `On Error GoTo` in `INITIALIZE`, an `Exit` in `EXIT PROCEDURE`, `Const PROC_NAME` first in `DECLARE` with the procedure's own name, `Select Case` without `Case Else`, `InStr` and `StrComp` without a compare mode, one statement per line, `Next` without its counter, an `=` rule outside a component header | the *house-style rules* check (`tools/vba_house_rules.py`), which proves each rule on failing and passing fixtures (`tools/house_rules_fixtures.py`) |
+| The findings of those rules that are still to be settled by hand | `tools/house_style_pending.txt`, which the *house-style rules* check holds the tree to in both directions (see [What is not settled yet](#house-style-210)) |
 | Header text, the content of a field, a title that says what the procedure does rather than spelling its identifier, local variable names, `vbNullString`, line length | I write and review them; no check rewrites them |
 
 A title that repeats the identifier of its procedure becomes the words of that
@@ -401,6 +410,21 @@ relocation is normalized. The house form never moves, adds or removes a
 statement. This bounded equivalence check is not compilation or Excel runtime
 certification. Every fixture is exercised by the existing formatter self-test in
 static CI, whatever the state of the switch.
+
+`python3 tools/reformat.py --equivalent BASE_DIR NEW_DIR` proves the same thing
+between two trees, for a change made by hand or in several steps: it reads every
+`.bas` module under both directories and compares the ordered executable tokens
+of each procedure and of the module outside its procedures, a statement wrapped
+over several lines counting as one. It accepts only these differences: comments,
+whitespace and blank lines; the renames above, which it applies to `BASE_DIR`
+first; `Const PROC_NAME As String = "<Module>.<Procedure>"` added where the base
+has none, or moved within its procedure with the same literal; and an empty
+`Case Else` directly before `End Select`. A changed operator, a changed literal,
+a deleted or an inserted statement, a changed `Option` statement or a different
+order of procedures is reported with the procedure and the first differing
+statement, and the command exits 1. The fixtures are in
+`tools/house_equiv_fixtures.py`. Export a base tree with
+`git archive <ref> src test demo` into an empty directory.
 
 `--write` preflights all inputs and replaces each changed file through a flushed
 same-directory temporary file and `os.replace`. Existing permissions are kept,

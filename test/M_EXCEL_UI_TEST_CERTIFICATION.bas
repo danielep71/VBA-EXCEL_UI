@@ -1,10 +1,12 @@
 Attribute VB_Name = "M_EXCEL_UI_TEST_CERTIFICATION"
+
 Option Explicit
 Option Private Module
 
+'
 '==============================================================================
-' M_EXCEL_UI_TEST_CERTIFICATION
-'------------------------------------------------------------------------------
+' MODULE: M_EXCEL_UI_TEST_CERTIFICATION
+'==============================================================================
 ' PURPOSE
 '   Run the release certification and the combined regression pack, and hold
 '   the cases that check the certification and the destructive runners
@@ -14,6 +16,12 @@ Option Private Module
 '   complete/incomplete and pass/fail verdict with machine-readable evidence.
 '   It and the combined pack are the only runners that span every suite, so
 '   they live above the suite modules rather than in any one of them
+'
+' DEPENDENCIES
+'   - M_EXCEL_UI_TEST_HARNESS
+'   - M_EXCEL_UI_TEST_RUNTIME
+'   - M_EXCEL_UI_TEST_SNAPSHOT
+'   - M_EXCEL_UI_TEST_TITLEBAR
 '
 ' PUBLIC SURFACE
 '   - Test_EXCEL_UI_RunAll
@@ -83,13 +91,13 @@ Option Private Module
 '   - Certification releases a snapshot a unit left behind before the next
 '     unit runs, and reports it as a cleanup failure
 '
-' DEPENDENCIES
-'   - M_EXCEL_UI_TEST_HARNESS
-'   - M_EXCEL_UI_TEST_RUNTIME
-'   - M_EXCEL_UI_TEST_SNAPSHOT
-'   - M_EXCEL_UI_TEST_TITLEBAR
+' AUTHOR
+'   Daniele Penza
 '
-' UPDATED
+' VERSION
+'   1.1.2
+'
+' HISTORY
 '   2026-11-28 - The entry baseline is captured before the isolated units, so
 '                what they leave behind is judged against it and reported as
 '                an isolated finding, and the entry window is restored before
@@ -118,65 +126,61 @@ Option Private Module
 '                re-raises.
 '   2026-08-19 - Added the certification runner.
 '
-' AUTHOR
-'   Daniele Penza
-'
-' VERSION
-'   1.1.2
+' UPDATED
+'   2026-11-28
 '==============================================================================
-
 
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
 '------------------------------------------------------------------------------
-    Private Const TST_CERT_APP_COUNT As Long = 4  'Application-level properties the baseline compares
-    Private Const TST_CERT_APP_STATUSBAR As Long = 1  'Baseline index: DisplayStatusBar
-    Private Const TST_CERT_APP_SCREEN As Long = 4  'Baseline index: ScreenUpdating
-    Private Const TST_CERT_WINPROP_COUNT As Long = 3  'Window-level properties the baseline compares
-    Private Const TST_CERT_WINPROP_TABS As Long = 2  'Baseline index: DisplayWorkbookTabs
-    Private Const TST_CERT_WS_SYSMENU As Long = &H80000  'WS_SYSMENU, an owned frame bit other than the caption
+    Private Const TST_CERT_APP_COUNT        As Long = 4         'Application-level properties the baseline compares
+    Private Const TST_CERT_APP_STATUSBAR    As Long = 1         'Baseline index: DisplayStatusBar
+    Private Const TST_CERT_APP_SCREEN       As Long = 4         'Baseline index: ScreenUpdating
+    Private Const TST_CERT_WINPROP_COUNT    As Long = 3         'Window-level properties the baseline compares
+    Private Const TST_CERT_WINPROP_TABS     As Long = 2         'Baseline index: DisplayWorkbookTabs
+    Private Const TST_CERT_WS_SYSMENU       As Long = &H80000   'WS_SYSMENU, an owned frame bit other than the caption
 
     'Cleanup helper faults (TST_CertInjectHelperFault)
-    Private Const TST_CERT_HELPER_FAULT_NONE As Long = 0  'Helper fault: none armed
-    Private Const TST_CERT_HELPER_FAULT_READ As Long = 1  'Helper fault: the next property read fails
-    Private Const TST_CERT_HELPER_FAULT_STAGE As Long = 2  'Helper fault: the next window comparison raises
+    Private Const TST_CERT_HELPER_FAULT_NONE    As Long = 0 'Helper fault: none armed
+    Private Const TST_CERT_HELPER_FAULT_READ    As Long = 1 'Helper fault: the next property read fails
+    Private Const TST_CERT_HELPER_FAULT_STAGE   As Long = 2 'Helper fault: the next window comparison raises
 
     'Unknown case raised by the dispatcher
-    Private Const TST_CERT_ERR_UNKNOWN_CASE As Long = 11  'Offset from TEST_CERT_ERR_BASE
+    Private Const TST_CERT_ERR_UNKNOWN_CASE As Long = 11    'Offset from TEST_CERT_ERR_BASE
 
     'Quiet-update fault kinds of UI_InternalInjectQuietUpdateFault, mirrored here
     'as the runtime regression module mirrors them
-    Private Const TST_CERT_QUIET_FAULT_NONE As Long = 0  'Quiet scope: no fault
-    Private Const TST_CERT_QUIET_FAULT_READBACK As Long = 3  'Quiet scope: readback fails
+    Private Const TST_CERT_QUIET_FAULT_NONE     As Long = 0 'Quiet scope: no fault
+    Private Const TST_CERT_QUIET_FAULT_READBACK As Long = 3 'Quiet scope: readback fails
 
 '------------------------------------------------------------------------------
 ' PRIVATE TYPES
 '------------------------------------------------------------------------------
-'The certification-owned baseline of the Excel host. It is held in the caller's
-'variable, written only by TST_CertCaptureBaseline, and shares no state with the
-'production snapshot subsystem (#35). Every window present on entry is retained
-'as an object: it is the proof, on exit, that the same window still responds.
-'Windows are matched by the handle each object reports, never with Is, because
-'Excel returns a new wrapper from every read of Application.ActiveWindow.
-Private Type tCertBaseline
-    Captured            As Boolean             'TRUE once every capture stage ran
-    BookCount           As Long                'Workbooks.Count on entry
-    WindowCount         As Long                'Application.Windows.Count on entry
-    AppKnown(1 To 4)    As Boolean             'Application property was read
-    AppValue(1 To 4)    As Boolean             'Application property value
-    Win()               As Object              'Every window present on entry
-    WinLabel()          As String              'Caption label, diagnostic only
-    WinHwndKnown()      As Boolean             'The window's hWnd was read
-    WinPropKnown()      As Boolean             'Window property was read (window, property)
-    WinPropValue()      As Boolean             'Window property value (window, property)
-    WinTitleKnown()     As Boolean             'The frame style was read
-    WinRegFound()       As Boolean             'A frame-registry slot held the hWnd
-    WinRegRefresh()     As Boolean             'Registry: a frame refresh was owed
-    WinRegHidden()      As Boolean             'Registry: the component hid the frame
-    ActiveKnown         As Boolean             'The active window was identified
-    ActiveIndex         As Long                'Index of the active window in Win
-    RibbonKnown         As Boolean             'The Ribbon was attributed to the active window
-    RibbonVisible       As Boolean             'Ribbon visibility of the active window
+    'The certification-owned baseline of the Excel host. It is held in the caller's
+    'variable, written only by TST_CertCaptureBaseline, and shares no state with the
+    'production snapshot subsystem (#35). Every window present on entry is retained
+    'as an object: it is the proof, on exit, that the same window still responds.
+    'Windows are matched by the handle each object reports, never with Is, because
+    'Excel returns a new wrapper from every read of Application.ActiveWindow.
+    Private Type tCertBaseline
+        Captured            As Boolean             'TRUE once every capture stage ran
+        BookCount           As Long                'Workbooks.Count on entry
+        WindowCount         As Long                'Application.Windows.Count on entry
+        AppKnown(1 To 4)    As Boolean             'Application property was read
+        AppValue(1 To 4)    As Boolean             'Application property value
+        Win()               As Object              'Every window present on entry
+        WinLabel()          As String              'Caption label, diagnostic only
+        WinHwndKnown()      As Boolean             'The window's hWnd was read
+        WinPropKnown()      As Boolean             'Window property was read (window, property)
+        WinPropValue()      As Boolean             'Window property value (window, property)
+        WinTitleKnown()     As Boolean             'The frame style was read
+        WinRegFound()       As Boolean             'A frame-registry slot held the hWnd
+        WinRegRefresh()     As Boolean             'Registry: a frame refresh was owed
+        WinRegHidden()      As Boolean             'Registry: the component hid the frame
+        ActiveKnown         As Boolean             'The active window was identified
+        ActiveIndex         As Long                'Index of the active window in Win
+        RibbonKnown         As Boolean             'The Ribbon was attributed to the active window
+        RibbonVisible       As Boolean             'Ribbon visibility of the active window
 #If VBA7 Then
     WinHwnd()           As LongPtr             'hWnd each window reported
     WinStyle()          As LongPtr             'Complete GWL_STYLE of each frame
@@ -186,41 +190,40 @@ Private Type tCertBaseline
     WinStyle()          As Long                'Complete GWL_STYLE of each frame
     ActiveHwnd          As Long                'hWnd of the active window
 #End If
-End Type
+    End Type
 
-'The outcome of one isolated unit, held outside the certification record until
-'that record is open. The unit runs while no certification is active, because
-'it calls certification itself; the record it would otherwise write to is
-'cleared by that call.
-Private Type tCertIsolated
-    Ran                 As Boolean             'TRUE once the unit was dispatched
-    Passed              As Boolean             'TRUE when it completed without raising
-    Detail              As String              'Failure text, and any release of a leaked snapshot
-    LeftSnapshot        As Boolean             'TRUE when it left a snapshot behind
-End Type
+    'The outcome of one isolated unit, held outside the certification record until
+    'that record is open. The unit runs while no certification is active, because
+    'it calls certification itself; the record it would otherwise write to is
+    'cleared by that call.
+    Private Type tCertIsolated
+        Ran                 As Boolean             'TRUE once the unit was dispatched
+        Passed              As Boolean             'TRUE when it completed without raising
+        Detail              As String              'Failure text, and any release of a leaked snapshot
+        LeftSnapshot        As Boolean             'TRUE when it left a snapshot behind
+    End Type
 
 '------------------------------------------------------------------------------
 ' PRIVATE MODULE STATE
 '------------------------------------------------------------------------------
-'One-shot cleanup helper fault, consumed by the first helper it matches. Only
-'TST_CertInjectHelperFault arms it, and only the helper-failure case calls that.
-Private m_CertHelperFault               As Long
+    'One-shot cleanup helper fault, consumed by the first helper it matches. Only
+    'TST_CertInjectHelperFault arms it, and only the helper-failure case calls that.
+    Private m_CertHelperFault   As Long
 
 
 '
 '------------------------------------------------------------------------------
 '
-'                              PUBLIC RUNNERS
+'                                PUBLIC RUNNERS
 '
 '------------------------------------------------------------------------------
 '
-
 
 Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 
 '
-'==============================================================================
-' Test_EXCEL_UI_RunCertificationSelfTest
+'------------------------------------------------------------------------------
+'                  TEST EXCEL UI RUN CERTIFICATION SELF TEST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a failure inside release certification reaches the caller with
@@ -236,22 +239,8 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '   run without being noticed. Only the raise was missing, and nothing asserted
 '   the raise.
 '
-' WHY IT IS NOT PART OF THE PACK
-'   The only errors that travel through the certification handler are raised
-'   after the handler is armed, which means the run has already reset the
-'   counters and set m_CertActive. Triggering one from inside the regression
-'   pack would corrupt the accounting of the very run executing it, and the
-'   re-entrancy guard deliberately refuses a nested invocation before the
-'   handler is reached, so the handler path cannot be exercised from within a
-'   certification run at all.
-'
-'   It is therefore not a case of the regression pack. It stays a runner that
-'   can be invoked directly, and release certification runs it exactly once,
-'   as the isolated unit CertificationSelfTest: before the live record opens,
-'   while no certification is active, with its outcome recorded afterwards.
-'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Refuses to run while an explicit snapshot exists.
@@ -274,28 +263,45 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '   snapshot would destroy it silently. The precondition is refused instead,
 '   which is what every other destructive runner in this module does.
 '
-' UPDATED
+' WHY IT IS NOT PART OF THE PACK
+'   The only errors that travel through the certification handler are raised
+'   after the handler is armed, which means the run has already reset the
+'   counters and set m_CertActive. Triggering one from inside the regression
+'   pack would corrupt the accounting of the very run executing it, and the
+'   re-entrancy guard deliberately refuses a nested invocation before the
+'   handler is reached, so the handler path cannot be exercised from within a
+'   certification run at all.
+'
+'   It is therefore not a case of the regression pack. It stays a runner that
+'   can be invoked directly, and release certification runs it exactly once,
+'   as the isolated unit CertificationSelfTest: before the live record opens,
+'   while no certification is active, with its outcome recorded afterwards.
+'
+' HISTORY
 '   2026-11-27 - Release certification runs it once, as an isolated unit (#42).
 '   2026-08-21 - Refused to run while an explicit snapshot exists, rather than
 '                replacing and then discarding it.
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim RaisedNumber        As Long            'Error number reaching the caller
-    Dim RaisedDescription   As String          'Error text reaching the caller
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Test_EXCEL_UI_RunCertificationSelfTest"
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim RaisedNumber        As Long     'Error number reaching the caller
+    Dim RaisedDescription   As String   'Error text reaching the caller
 
-    Dim CreatedSnapshot     As Boolean         'TRUE once this run owns one
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
-    Const PROC As String = "Test_EXCEL_UI_RunCertificationSelfTest"
+    Dim CreatedSnapshot As Boolean  'TRUE once this run owns one
 
 '------------------------------------------------------------------------------
 ' VALIDATE PRECONDITIONS
@@ -313,7 +319,7 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 21, _
-                PROC, _
+                PROC_NAME, _
                 "an explicit EXCEL_UI snapshot already exists; clear or " & _
                 "restore it before running this destructive test"
         End If
@@ -323,9 +329,9 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '------------------------------------------------------------------------------
         CreatedSnapshot = False
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a certification failure reaches the caller"
 
 '------------------------------------------------------------------------------
@@ -345,7 +351,7 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
         If Not CreatedSnapshot Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 20, _
-                PROC, _
+                PROC_NAME, _
                 "unable to establish a snapshot; the precondition under test " & _
                 "cannot be triggered"
         End If
@@ -359,13 +365,16 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
             Case TEST_FAULT_ASSERTION
                 TST_AssertTrue _
                     ActualValue:=False, _
-                    AssertionName:=PROC & ".InjectedAssertion"
+                    AssertionName:=PROC_NAME & ".InjectedAssertion"
 
             Case TEST_FAULT_UNEXPECTED
                 Err.Raise _
                     TEST_OWNERSHIP_ERR_BASE + 1, _
-                    PROC & ".InjectedUnexpected", _
+                    PROC_NAME & ".InjectedUnexpected", _
                     "injected unexpected post-capture failure"
+
+            Case Else
+            'Continue the ordinary run when no fault is armed
 
         End Select
 
@@ -375,14 +384,14 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
     'Capture immediately, before anything else can clear Err
         On Error Resume Next
 
-            Test_EXCEL_UI_RunReleaseCertification
+        Test_EXCEL_UI_RunReleaseCertification
 
-            RaisedNumber = Err.Number
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ASSERT THE FAILURE SURVIVED
@@ -401,21 +410,21 @@ Public Sub Test_EXCEL_UI_RunCertificationSelfTest()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Certification failure reached the caller as " & _
             CStr(RaisedNumber)
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Release only a snapshot this run created. A caller-owned snapshot reaches
     'this label whenever an early failure resumes here, and clearing it would
     'destroy state this runner never owned.
         On Error Resume Next
-            If CreatedSnapshot Then
-                UI_ClearExcelUIStateSnapshot
-            End If
+        If CreatedSnapshot Then
+            UI_ClearExcelUIStateSnapshot
+        End If
         On Error GoTo 0
 
     'Raise the captured failure after cleanup when needed
@@ -428,22 +437,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub Test_EXCEL_UI_RunReleaseCertification()
 
 '
-'==============================================================================
-' Test_EXCEL_UI_RunReleaseCertification
+'------------------------------------------------------------------------------
+'                   TEST EXCEL UI RUN RELEASE CERTIFICATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute every mandatory regression unit in one pass and emit an unambiguous
@@ -468,7 +476,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   was obtained on is recorded alongside it.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Refuses to start when an explicit EXCEL_UI snapshot already exists, rather
@@ -538,7 +546,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   certification itself. Their outcome is held in local variables, because
 '   that nested call clears the record.
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Runs the isolated units, records and compares the case
 '                inventory, and adds the failed-unit and inventory-gap run
 '                faults (#42).
@@ -550,43 +558,46 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   2026-11-06 - A snapshot a unit left behind fails cleanup, although it is
 '                released before the next unit runs (#135).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Baseline            As tCertBaseline   'Host state captured on entry
-    Dim EntryRec            As tCertRecord     'What the entry capture recorded, held across the isolated units
-    Dim IsolatedRec         As tCertRecord     'What the isolated units left behind
-    Dim RunIsolated         As Boolean         'TRUE when the isolated units run
-    Dim FaultKind           As Long            'Run fault taken for this call
-    Dim IsolatedSelfTest    As tCertIsolated   'Outcome of the self-test unit, held outside the record
-    Dim IsolatedOwnership   As tCertIsolated   'Outcome of the ownership unit, held outside the record
-    Dim InventoryOK         As Boolean         'TRUE when the expected and observed cases agree
-    Dim UnitDetail          As String          'Failed units, for the error raised
-    Dim InventoryDetail     As String          'Inventory findings, for the error raised
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Test_EXCEL_UI_RunReleaseCertification"
 
-    Dim UnitsFailed         As Long            'Units that reported failure
-    Dim CleanupOK           As Boolean         'TRUE when no state leaked
-    Dim CleanupDetail       As String          'Detail of cleanup outside the record
+    Dim Baseline            As tCertBaseline    'Host state captured on entry
+    Dim EntryRec            As tCertRecord      'What the entry capture recorded, held across the isolated units
+    Dim IsolatedRec         As tCertRecord      'What the isolated units left behind
+    Dim RunIsolated         As Boolean          'TRUE when the isolated units run
+    Dim FaultKind           As Long             'Run fault taken for this call
+    Dim IsolatedSelfTest    As tCertIsolated    'Outcome of the self-test unit, held outside the record
+    Dim IsolatedOwnership   As tCertIsolated    'Outcome of the ownership unit, held outside the record
+    Dim InventoryOK         As Boolean          'TRUE when the expected and observed cases agree
+    Dim UnitDetail          As String           'Failed units, for the error raised
+    Dim InventoryDetail     As String           'Inventory findings, for the error raised
 
-    Dim Complete            As Boolean         'TRUE when nothing was skipped
-    Dim Passed              As Boolean         'TRUE when the verdict is a pass
-    Dim Verdict             As String          'Human-readable verdict line
+    Dim UnitsFailed     As Long     'Units that reported failure
+    Dim CleanupOK       As Boolean  'TRUE when no state leaked
+    Dim CleanupDetail   As String   'Detail of cleanup outside the record
 
-    Dim JsonText            As String          'Machine-readable evidence
-    Dim ReportText          As String          'Human-readable evidence
-    Dim JsonPath            As String          'Path the JSON was written to
-    Dim ReportPath          As String          'Path the report was written to
-    Dim RecordingDetail     As String          'Names a recording failure
+    Dim Complete    As Boolean  'TRUE when nothing was skipped
+    Dim Passed      As Boolean  'TRUE when the verdict is a pass
+    Dim Verdict     As String   'Human-readable verdict line
 
-    Dim FailNumber          As Long            'Error number captured on entry
-    Dim FailSource          As String          'Error source captured on entry
-    Dim FailDescription     As String          'Error text captured on entry
-    Dim FailLine            As Long            'Error line captured on entry
+    Dim JsonText        As String   'Machine-readable evidence
+    Dim ReportText      As String   'Human-readable evidence
+    Dim JsonPath        As String   'Path the JSON was written to
+    Dim ReportPath      As String   'Path the report was written to
+    Dim RecordingDetail As String   'Names a recording failure
 
-    Const PROC As String = "Test_EXCEL_UI_RunReleaseCertification"
+    Dim FailNumber      As Long     'Error number captured on entry
+    Dim FailSource      As String   'Error source captured on entry
+    Dim FailDescription As String   'Error text captured on entry
+    Dim FailLine        As Long     'Error line captured on entry
 
 '------------------------------------------------------------------------------
 ' GUARD RE-ENTRY
@@ -599,7 +610,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
         If m_CertActive Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 4, _
-                PROC, _
+                PROC_NAME, _
                 "release certification is already running; nested invocation " & _
                 "is not supported"
         End If
@@ -611,13 +622,13 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_CertResetCounters
 
         m_CertActive = True
 
-        TST_Log PROC, "START", "Release certification started"
+        TST_Log PROC_NAME, "START", "Release certification started"
 
 '------------------------------------------------------------------------------
 ' VALIDATE PRECONDITIONS
@@ -630,7 +641,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 1, _
-                PROC, _
+                PROC_NAME, _
                 "an explicit EXCEL_UI snapshot already exists; clear or " & _
                 "restore it before certifying a release"
         End If
@@ -638,7 +649,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
         If Application.ActiveWindow Is Nothing Then
             Err.Raise _
                 TEST_CERT_ERR_BASE + 2, _
-                PROC, _
+                PROC_NAME, _
                 "no active Excel window is available"
         End If
 
@@ -655,7 +666,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
     'cleanup, so the run goes on and says so rather than stopping on an
     'unproved baseline.
         If Not TST_CertCaptureBaseline(Baseline, EntryRec) Then
-            TST_Log PROC, "BASELINE", _
+            TST_Log PROC_NAME, "BASELINE", _
                 "The entry baseline was not captured completely; cleanup will " & _
                 "be reported as FAILED"
         End If
@@ -736,8 +747,8 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
                 TST_CertRunUnit "SelfTest.InventoryGap"
 
             Case TEST_CERT_RUN_FAULT_ISOLATED
-                'The synthetic isolated unit inverted the status bar. Putting it
-                'back here leaves the isolated phase as the only difference
+            'The synthetic isolated unit inverted the status bar. Putting it
+            'back here leaves the isolated phase as the only difference
                 Application.DisplayStatusBar = Not Application.DisplayStatusBar
 
             Case Else
@@ -775,7 +786,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
         InventoryOK = TST_CertEvaluateInventory(m_CertRecord)
 
         If Not InventoryOK Then
-            TST_Log PROC, "INVENTORY", _
+            TST_Log PROC_NAME, "INVENTORY", _
                 "The expected and observed cases differ; the verdict will be FAIL | INCOMPLETE"
         End If
 
@@ -807,8 +818,8 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '------------------------------------------------------------------------------
 ' EMIT EVIDENCE
 '------------------------------------------------------------------------------
-        TST_Log PROC, "EVIDENCE", vbNewLine & ReportText
-        TST_Log PROC, "JSON", JsonText
+        TST_Log PROC_NAME, "EVIDENCE", vbNewLine & ReportText
+        TST_Log PROC_NAME, "JSON", JsonText
 
     'File output is a convenience, never a gate on the verdict. A run under a
     'run fault writes none: its evidence is a deliberate failure, and the
@@ -816,16 +827,16 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
         If FaultKind = TEST_CERT_RUN_FAULT_NONE Then
 
             If TST_CertTryWriteEvidence(JsonText, "json", JsonPath) Then
-                TST_Log PROC, "WROTE", JsonPath
+                TST_Log PROC_NAME, "WROTE", JsonPath
             End If
 
             If TST_CertTryWriteEvidence(ReportText, "txt", ReportPath) Then
-                TST_Log PROC, "WROTE", ReportPath
+                TST_Log PROC_NAME, "WROTE", ReportPath
             End If
 
         End If
 
-        TST_Log PROC, IIf(Passed, "PASS", "FAIL"), Verdict
+        TST_Log PROC_NAME, IIf(Passed, "PASS", "FAIL"), Verdict
 
 '------------------------------------------------------------------------------
 ' RAISE ON A NON-PASSING VERDICT
@@ -849,7 +860,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 
             Err.Raise _
                 TEST_CERT_ERR_BASE + 3, _
-                PROC, _
+                PROC_NAME, _
                 Verdict & _
                 IIf(Len(CleanupDetail) > 0, " | " & CleanupDetail, vbNullString) & _
                 IIf(Len(RecordingDetail) > 0, " | " & RecordingDetail, vbNullString) & _
@@ -859,9 +870,9 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Certification accounting must not leak into a later legacy run
         m_CertActive = False
 
@@ -870,7 +881,7 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture every error field BEFORE calling anything. TST_Log contains
     'On Error Resume Next, which clears Err, so a read taken after it returns
     'yields zero and an empty description. Raising from that reports no failure
@@ -885,7 +896,7 @@ Err_Handler:
         m_CertActive = False
 
     'Log from the captured values, never from Err
-        TST_Log PROC, "FAIL", _
+        TST_Log PROC_NAME, "FAIL", _
             CStr(FailNumber) & ": " & FailDescription & _
             IIf(FailLine <> 0, " | Line: " & CStr(FailLine), vbNullString)
 
@@ -894,13 +905,11 @@ Err_Handler:
 
 End Sub
 
-
 Private Sub TST_CertRunUnit( _
     ByVal UnitName As String)
-
 '
-'==============================================================================
-' TST_CertRunUnit
+'------------------------------------------------------------------------------
+'                              TST CERT RUN UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute one mandatory certification unit and record its outcome without
@@ -917,7 +926,7 @@ Private Sub TST_CertRunUnit( _
 '     Identifier of the unit to execute.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Executes the unit through TST_CertExecuteUnit, which traps its failure
@@ -934,22 +943,26 @@ Private Sub TST_CertRunUnit( _
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Recording moved to TST_CertRecordOutcome, which the isolated
 '                units share (#42).
 '   2026-11-18 - The leak is recorded as a cleanup finding (#35).
 '   2026-11-06 - Execution moved to TST_CertExecuteUnit; a snapshot the unit
 '                left behind is recorded for the cleanup verdict (#135).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Passed              As Boolean         'TRUE when the unit completed
-    Dim Detail              As String          'Failure and release detail
-    Dim LeftSnapshot        As Boolean         'TRUE when the unit left one
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertRunUnit"
+
+    Dim Passed          As Boolean  'TRUE when the unit completed
+    Dim Detail          As String   'Failure and release detail
+    Dim LeftSnapshot    As Boolean  'TRUE when the unit left one
 
 '------------------------------------------------------------------------------
 ' EXECUTE UNIT
@@ -969,16 +982,14 @@ Private Sub TST_CertRunUnit( _
 
 End Sub
 
-
 Private Sub TST_CertRecordOutcome( _
     ByVal UnitName As String, _
     ByVal Passed As Boolean, _
     ByVal Detail As String, _
     ByVal LeftSnapshot As Boolean)
-
 '
-'==============================================================================
-' TST_CertRecordOutcome
+'------------------------------------------------------------------------------
+'                           TST CERT RECORD OUTCOME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record the outcome of one unit and, when it left a snapshot behind, record
@@ -993,7 +1004,7 @@ Private Sub TST_CertRecordOutcome( _
 '     As TST_CertExecuteUnit reported them.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Does not raise. A record that cannot be stored is flagged, which forces
@@ -1008,10 +1019,12 @@ Private Sub TST_CertRecordOutcome( _
 '   - TST_CertRunUnit
 '   - TST_CertRecordIsolatedUnit
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Extracted from TST_CertRunUnit (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RECORD OUTCOME
@@ -1034,14 +1047,12 @@ Private Sub TST_CertRecordOutcome( _
 
 End Sub
 
-
 Private Sub TST_CertRunIsolatedUnit( _
     ByVal UnitName As String, _
     ByRef Outcome As tCertIsolated)
-
 '
-'==============================================================================
-' TST_CertRunIsolatedUnit
+'------------------------------------------------------------------------------
+'                          TST CERT RUN ISOLATED UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute one unit outside the live certification record and hold its
@@ -1064,7 +1075,7 @@ Private Sub TST_CertRunIsolatedUnit( _
 '     whether it left a snapshot behind.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Does not raise. A failing unit is reported through Outcome.
@@ -1075,10 +1086,12 @@ Private Sub TST_CertRunIsolatedUnit( _
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' EXECUTE UNIT
@@ -1101,15 +1114,13 @@ Private Sub TST_CertRunIsolatedUnit( _
 
 End Sub
 
-
 Private Sub TST_CertRecordIsolatedUnit( _
     ByVal UnitName As String, _
     ByVal CaseId As String, _
     ByRef Outcome As tCertIsolated)
-
 '
-'==============================================================================
-' TST_CertRecordIsolatedUnit
+'------------------------------------------------------------------------------
+'                        TST CERT RECORD ISOLATED UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record an isolated unit and its one case in the live record, once that
@@ -1129,7 +1140,7 @@ Private Sub TST_CertRecordIsolatedUnit( _
 '     ByRef. What TST_CertRunIsolatedUnit held.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Does not raise. A record that cannot be stored is flagged, which forces
@@ -1143,10 +1154,12 @@ Private Sub TST_CertRecordIsolatedUnit( _
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RECORD UNIT AND CASE
@@ -1167,16 +1180,14 @@ Private Sub TST_CertRecordIsolatedUnit( _
 
 End Sub
 
-
 Private Sub TST_CertExecuteUnit( _
     ByVal UnitName As String, _
     ByRef Passed As Boolean, _
     ByRef Detail As String, _
     ByRef LeftSnapshot As Boolean)
-
 '
-'==============================================================================
-' TST_CertExecuteUnit
+'------------------------------------------------------------------------------
+'                            TST CERT EXECUTE UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one unit under its own error boundary and release any snapshot it left
@@ -1211,7 +1222,7 @@ Private Sub TST_CertExecuteUnit( _
 '     ByRef. Receives TRUE when the unit left a snapshot behind.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Records whether a snapshot existed before the unit ran. When one did, it
@@ -1234,11 +1245,6 @@ Private Sub TST_CertExecuteUnit( _
 '   - TST_CertSelfTestIsolatedChangeUnit
 '   - TST_CertAppendDetail
 '
-' CALLED FROM
-'   - TST_CertRunUnit
-'   - TST_CertRunIsolatedUnit
-'   - TST_Case_CertUnitIsolatesCaptureFailure
-'
 ' NOTES
 '   Dispatch is an explicit Select Case rather than Application.Run because the
 '   units include Private procedures and a name-based call would fail silently
@@ -1254,17 +1260,26 @@ Private Sub TST_CertExecuteUnit( _
 '   its start and status when the run is live and nothing when the unit runs
 '   in isolation. TST_CertDispatchCase holds the dispatch of every case.
 '
-' UPDATED
+' CALLED FROM
+'   - TST_CertRunUnit
+'   - TST_CertRunIsolatedUnit
+'   - TST_Case_CertUnitIsolatesCaptureFailure
+'
+' HISTORY
 '   2026-11-27 - Dispatches the isolated units and the run-fault units, and
 '                runs single-case units through TST_CertRunCase (#42).
 '   2026-11-06
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim HadSnapshot         As Boolean         'TRUE when the slot was occupied
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertExecuteUnit"
+
+    Dim HadSnapshot As Boolean  'TRUE when the slot was occupied
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1277,7 +1292,7 @@ Private Sub TST_CertExecuteUnit( _
     'that failed must never license clearing a snapshot someone else owns.
         HadSnapshot = True
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         HadSnapshot = UI_HasExcelUIStateSnapshot
 
@@ -1334,9 +1349,9 @@ Private Sub TST_CertExecuteUnit( _
         Passed = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Release a snapshot this unit created, on every path. The next unit would
     'otherwise refuse to run over it, and its failure would be this unit's.
         On Error Resume Next
@@ -1364,20 +1379,19 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture the failure before anything else can clear Err
         Detail = CStr(Err.Number) & ": " & Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertSelfTestCaptureFailureUnit()
 
 '
-'==============================================================================
-' TST_CertSelfTestCaptureFailureUnit
+'------------------------------------------------------------------------------
+'                   TST CERT SELF TEST CAPTURE FAILURE UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Fail the way the first real-host certification run failed: an assertion
@@ -1392,7 +1406,7 @@ Private Sub TST_CertSelfTestCaptureFailureUnit()
 '   exactly as a host refusal does.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises the TST_AssertResultSuccess failure, on purpose.
@@ -1409,17 +1423,17 @@ Private Sub TST_CertSelfTestCaptureFailureUnit()
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OK                  As Boolean         'Structured capture result
-    Dim FailureCount        As Long            'Structured failure count
-    Dim FailureList         As Variant         'Structured failure list
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_CertSelfTestCaptureFailureUnit"
 
-    Const PROC As String = "TST_CertSelfTestCaptureFailureUnit"
+    Dim OK              As Boolean  'Structured capture result
+    Dim FailureCount    As Long     'Structured failure count
+    Dim FailureList     As Variant  'Structured failure list
 
 '------------------------------------------------------------------------------
 ' CAPTURE WITH AN INJECTED FAILURE
@@ -1443,16 +1457,15 @@ Private Sub TST_CertSelfTestCaptureFailureUnit()
             Succeeded:=OK, _
             FailureCount:=FailureCount, _
             FailureList:=FailureList, _
-            AssertionName:=PROC & ".Result"
+            AssertionName:=PROC_NAME & ".Result"
 
 End Sub
-
 
 Private Sub TST_CertSelfTestFollowingUnit()
 
 '
-'==============================================================================
-' TST_CertSelfTestFollowingUnit
+'------------------------------------------------------------------------------
+'                      TST CERT SELF TEST FOLLOWING UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Stand in for the unit that runs after a failed one.
@@ -1465,7 +1478,7 @@ Private Sub TST_CertSelfTestFollowingUnit()
 '   without running a full destructive unit a second time.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises when an explicit EXCEL_UI snapshot exists.
@@ -1475,8 +1488,7 @@ Private Sub TST_CertSelfTestFollowingUnit()
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE PRECONDITIONS
@@ -1495,12 +1507,11 @@ Private Sub TST_CertSelfTestFollowingUnit()
 
 End Sub
 
-
 Private Sub TST_CertSelfTestForcedFailureUnit()
 
 '
-'==============================================================================
-' TST_CertSelfTestForcedFailureUnit
+'------------------------------------------------------------------------------
+'                    TST CERT SELF TEST FORCED FAILURE UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Fail as a mandatory unit does, so that the failure can be seen to fail the
@@ -1517,7 +1528,7 @@ Private Sub TST_CertSelfTestForcedFailureUnit()
 '   the failed status, and raises it, which is the path a failing case takes.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises the dispatcher's refusal, on purpose.
@@ -1528,21 +1539,22 @@ Private Sub TST_CertSelfTestForcedFailureUnit()
 ' CALLED FROM
 '   - TST_CertExecuteUnit
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
         TST_CertRunCase "SelfTest.ForcedCase", True
 
 End Sub
 
-
 Private Sub TST_CertSelfTestInventoryGapUnit()
 
 '
-'==============================================================================
-' TST_CertSelfTestInventoryGapUnit
+'------------------------------------------------------------------------------
+'                    TST CERT SELF TEST INVENTORY GAP UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Pass as a unit while one case that the run expects is never started, so
@@ -1556,7 +1568,7 @@ Private Sub TST_CertSelfTestInventoryGapUnit()
 '   which starts and passes only the first.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Does not raise.
@@ -1568,10 +1580,12 @@ Private Sub TST_CertSelfTestInventoryGapUnit()
 ' CALLED FROM
 '   - TST_CertExecuteUnit
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
         TST_CertCaseStart "SelfTest.PresentCase"
 
@@ -1579,12 +1593,11 @@ Private Sub TST_CertSelfTestInventoryGapUnit()
 
 End Sub
 
-
 Private Sub TST_CertSelfTestIsolatedChangeUnit()
 
 '
-'==============================================================================
-' TST_CertSelfTestIsolatedChangeUnit
+'------------------------------------------------------------------------------
+'                   TST CERT SELF TEST ISOLATED CHANGE UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Alter the host the way an isolated unit may, and leave it altered.
@@ -1597,7 +1610,7 @@ Private Sub TST_CertSelfTestIsolatedChangeUnit()
 '   TEST_CERT_RUN_FAULT_ISOLATED runs this unit in place of the isolated units.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises what the write raises.
@@ -1605,34 +1618,33 @@ Private Sub TST_CertSelfTestIsolatedChangeUnit()
 ' CALLED FROM
 '   - TST_CertExecuteUnit
 '
-' UPDATED
+' HISTORY
 '   2026-11-28 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
 
         Application.DisplayStatusBar = Not Application.DisplayStatusBar
 
 End Sub
 
-
 '
 '------------------------------------------------------------------------------
 '
-'                         MANDATORY CASE MANIFEST
+'                           MANDATORY CASE MANIFEST
 '
 '------------------------------------------------------------------------------
 '
-
 
 Private Function TST_CertManifestCase( _
     ByVal Index As Long, _
     ByRef UnitName As String, _
     ByRef CaseId As String) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertManifestCase
+'------------------------------------------------------------------------------
+'                            TST CERT MANIFEST CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Register the mandatory cases of release certification, one per index, with
@@ -1659,18 +1671,20 @@ Private Function TST_CertManifestCase( _
 ' ERROR POLICY
 '   - Does not raise.
 '
-' CALLED FROM
-'   - TST_CertLoadExpected
-'
 ' NOTES
 '   A case identifier is the name of the procedure that runs it. Version 1 of
 '   the manifest names TST_Case_TitleBarSameHwndGenerationReuse where #42 named
 '   TST_Case_TitleBarSameStyleHandleReuse: #32 replaced that case.
 '
-' UPDATED
-'   2026-11-27 - Added (#42).
-'==============================================================================
+' CALLED FROM
+'   - TST_CertLoadExpected
 '
+' HISTORY
+'   2026-11-27 - Added (#42).
+'
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' LOOK UP THE CASE
@@ -1906,13 +1920,11 @@ Private Function TST_CertManifestCase( _
 
 End Function
 
-
 Private Sub TST_CertLoadExpected( _
     ByVal FaultKind As Long)
-
 '
-'==============================================================================
-' TST_CertLoadExpected
+'------------------------------------------------------------------------------
+'                            TST CERT LOAD EXPECTED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store the cases the run expects in the certification record.
@@ -1931,7 +1943,7 @@ Private Sub TST_CertLoadExpected( _
 '     the run starts one.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Does not raise. A case that cannot be stored flags the record, which
@@ -1944,17 +1956,21 @@ Private Sub TST_CertLoadExpected( _
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Index               As Long            'Position in the manifest
-    Dim UnitName            As String          'Unit of the case
-    Dim CaseId              As String          'Identifier of the case
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertLoadExpected"
+
+    Dim Index       As Long     'Position in the manifest
+    Dim UnitName    As String   'Unit of the case
+    Dim CaseId      As String   'Identifier of the case
 
 '------------------------------------------------------------------------------
 ' STORE EXPECTED CASES
@@ -1965,7 +1981,7 @@ Private Sub TST_CertLoadExpected( _
         Select Case FaultKind
 
             Case TEST_CERT_RUN_FAULT_CLEANUP
-                'No unit runs, so no case is expected
+            'No unit runs, so no case is expected
 
             Case TEST_CERT_RUN_FAULT_UNIT
                 TST_CertAddExpected m_CertRecord, _
@@ -1994,14 +2010,12 @@ Private Sub TST_CertLoadExpected( _
 
 End Sub
 
-
 Private Sub TST_CertDispatchCase( _
     ByVal CaseId As String, _
     ByVal IncludeTitleBarTests As Boolean)
-
 '
-'==============================================================================
-' TST_CertDispatchCase
+'------------------------------------------------------------------------------
+'                            TST CERT DISPATCH CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one mandatory case by its stable identifier.
@@ -2021,7 +2035,7 @@ Private Sub TST_CertDispatchCase( _
 '     The title-bar switch of the pack, for the cases that take it.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises the failure of the case, unchanged.
@@ -2030,10 +2044,12 @@ Private Sub TST_CertDispatchCase( _
 ' CALLED FROM
 '   - TST_CertRunCase
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DISPATCH CASE
@@ -2213,14 +2229,12 @@ Private Sub TST_CertDispatchCase( _
 
 End Sub
 
-
 Public Sub TST_CertRunCase( _
     ByVal CaseId As String, _
     ByVal IncludeTitleBarTests As Boolean)
-
 '
-'==============================================================================
-' TST_CertRunCase
+'------------------------------------------------------------------------------
+'                              TST CERT RUN CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one mandatory case and record its start and its one terminal status
@@ -2240,7 +2254,7 @@ Public Sub TST_CertRunCase( _
 '     The title-bar switch of the pack.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - While no certification is active, runs the case and records nothing, so
@@ -2264,17 +2278,21 @@ Public Sub TST_CertRunCase( _
 '   - Test_EXCEL_UI_RunTitleBarSdiIdentity
 '   - TST_CertSelfTestForcedFailureUnit
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim FailNumber          As Long            'Error number of a failed case
-    Dim FailSource          As String          'Error source of a failed case
-    Dim FailDescription     As String          'Error text of a failed case
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertRunCase"
+
+    Dim FailNumber      As Long     'Error number of a failed case
+    Dim FailSource      As String   'Error source of a failed case
+    Dim FailDescription As String   'Error text of a failed case
 
 '------------------------------------------------------------------------------
 ' RUN WITHOUT RECORDING
@@ -2290,7 +2308,7 @@ Public Sub TST_CertRunCase( _
 '------------------------------------------------------------------------------
         TST_CertCaseStart CaseId
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_CertDispatchCase CaseId, IncludeTitleBarTests
 
@@ -2298,12 +2316,15 @@ Public Sub TST_CertRunCase( _
 
         TST_CertCaseEnd CaseId, True, vbNullString
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture every error field BEFORE calling anything, then disable the
     'handler so that the raise below leaves this procedure
         FailNumber = Err.Number
@@ -2319,24 +2340,21 @@ Err_Handler:
 
 End Sub
 
-
 '
 '------------------------------------------------------------------------------
 '
-'                       CERTIFICATION CLEANUP BASELINE
+'                        CERTIFICATION CLEANUP BASELINE
 '
 '------------------------------------------------------------------------------
 '
-
 
 Private Function TST_CertCaptureBaseline( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertCaptureBaseline
+'------------------------------------------------------------------------------
+'                          TST CERT CAPTURE BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Capture the certification-owned baseline of the Excel host, which cleanup
@@ -2395,17 +2413,21 @@ Private Function TST_CertCaptureBaseline( _
 '   - Test_EXCEL_UI_RunReleaseCertification
 '   - the cleanup regression cases
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Blank               As tCertBaseline   'Never written: the cleared value
-    Dim Complete            As Boolean         'TRUE while every stage completed
-    Dim StageDone           As Boolean         'Outcome of the stage just run
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCaptureBaseline"
+
+    Dim Blank       As tCertBaseline    'Never written: the cleared value
+    Dim Complete    As Boolean          'TRUE while every stage completed
+    Dim StageDone   As Boolean          'Outcome of the stage just run
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2458,15 +2480,13 @@ Private Function TST_CertCaptureBaseline( _
 
 End Function
 
-
 Private Function TST_CertCaptureCounts( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertCaptureCounts
+'------------------------------------------------------------------------------
+'                           TST CERT CAPTURE COUNTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record Workbooks.Count and Application.Windows.Count on entry.
@@ -2485,21 +2505,28 @@ Private Function TST_CertCaptureCounts( _
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Msg                 As String          'Diagnostic from an error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCaptureCounts"
+
+    Dim Msg As String   'Diagnostic from an error
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' CAPTURE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         TST_CertCaptureCounts = False
 
         Base.BookCount = Application.Workbooks.Count
@@ -2508,16 +2535,16 @@ Private Function TST_CertCaptureCounts( _
         TST_CertCaptureCounts = True
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "baseline.counts", _
@@ -2525,19 +2552,17 @@ Err_Handler:
 
         TST_CertCaptureCounts = False
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function TST_CertCaptureAppProps( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertCaptureAppProps
+'------------------------------------------------------------------------------
+'                          TST CERT CAPTURE APP PROPS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record the four application-level properties the component manages on
@@ -2561,23 +2586,30 @@ Private Function TST_CertCaptureAppProps( _
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim PropIdx             As Long            'Cursor over the properties
-    Dim PropValue           As Boolean         'Value read
-    Dim Msg                 As String          'Diagnostic from a read or error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCaptureAppProps"
+
+    Dim PropIdx     As Long     'Cursor over the properties
+    Dim PropValue   As Boolean  'Value read
+    Dim Msg         As String   'Diagnostic from a read or error
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' CAPTURE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         TST_CertCaptureAppProps = False
 
         For PropIdx = 1 To TST_CERT_APP_COUNT
@@ -2602,16 +2634,16 @@ Private Function TST_CertCaptureAppProps( _
         TST_CertCaptureAppProps = True
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "baseline.appProperties", _
@@ -2619,19 +2651,17 @@ Err_Handler:
 
         TST_CertCaptureAppProps = False
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function TST_CertCaptureWindows( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertCaptureWindows
+'------------------------------------------------------------------------------
+'                           TST CERT CAPTURE WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Retain every Window present on entry and record its managed state.
@@ -2668,46 +2698,50 @@ Private Function TST_CertCaptureWindows( _
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WinIdx              As Long            'Cursor over the windows
-    Dim PropIdx             As Long            'Cursor over the window properties
-    Dim TargetWindow        As Object          'Window being captured
-    Dim PropValue           As Boolean         'Property value read
-    Dim Label               As String          'Diagnostic label of the window
-    Dim Msg                 As String          'Diagnostic from a read or error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCaptureWindows"
 
-    Dim HasBaseline         As Boolean         'Registry field, not compared
-    Dim HiddenNow           As Boolean         'Registry: component hid the frame
-    Dim PendingNow          As Boolean         'Registry: frame refresh owed
+    Dim WinIdx          As Long     'Cursor over the windows
+    Dim PropIdx         As Long     'Cursor over the window properties
+    Dim TargetWindow    As Object   'Window being captured
+    Dim PropValue       As Boolean  'Property value read
+    Dim Label           As String   'Diagnostic label of the window
+    Dim Msg             As String   'Diagnostic from a read or error
+
+    Dim HasBaseline As Boolean  'Registry field, not compared
+    Dim HiddenNow   As Boolean  'Registry: component hid the frame
+    Dim PendingNow  As Boolean  'Registry: frame refresh owed
 
 #If VBA7 Then
-    Dim StyleValue          As LongPtr         'GWL_STYLE read
-    Dim OwnedBits           As LongPtr         'Registry field, not compared
-    Dim WrittenBits         As LongPtr         'Registry field, not compared
+    Dim StyleValue  As LongPtr  'GWL_STYLE read
+    Dim OwnedBits   As LongPtr  'Registry field, not compared
+    Dim WrittenBits As LongPtr  'Registry field, not compared
 #Else
-    Dim StyleValue          As Long            'GWL_STYLE read
-    Dim OwnedBits           As Long            'Registry field, not compared
-    Dim WrittenBits         As Long            'Registry field, not compared
+    Dim StyleValue  As Long 'GWL_STYLE read
+    Dim OwnedBits   As Long 'Registry field, not compared
+    Dim WrittenBits As Long 'Registry field, not compared
 #End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_CertCaptureWindows = False
 
     'No window, nothing to retain
         If Base.WindowCount < 1 Then
             TST_CertCaptureWindows = True
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         ReDim Base.Win(1 To Base.WindowCount)
@@ -2789,16 +2823,16 @@ Private Function TST_CertCaptureWindows( _
         TST_CertCaptureWindows = True
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "baseline.windows", _
@@ -2806,19 +2840,17 @@ Err_Handler:
 
         TST_CertCaptureWindows = False
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function TST_CertCaptureActive( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertCaptureActive
+'------------------------------------------------------------------------------
+'                           TST CERT CAPTURE ACTIVE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record which retained window was active on entry.
@@ -2847,29 +2879,36 @@ Private Function TST_CertCaptureActive( _
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WinIdx              As Long            'Cursor over the retained windows
-    Dim ActiveWin           As Object          'The active window
-    Dim Msg                 As String          'Diagnostic from a read or error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCaptureActive"
+
+    Dim WinIdx      As Long     'Cursor over the retained windows
+    Dim ActiveWin   As Object   'The active window
+    Dim Msg         As String   'Diagnostic from a read or error
 
 #If VBA7 Then
-    Dim ActiveHwnd          As LongPtr         'Handle of the active window
+    Dim ActiveHwnd  As LongPtr  'Handle of the active window
 #Else
-    Dim ActiveHwnd          As Long            'Handle of the active window
+    Dim ActiveHwnd  As Long 'Handle of the active window
 #End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' CAPTURE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         TST_CertCaptureActive = False
 
         Set ActiveWin = Application.ActiveWindow
@@ -2914,16 +2953,16 @@ Private Function TST_CertCaptureActive( _
         TST_CertCaptureActive = True
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "baseline.activeWindow", _
@@ -2931,19 +2970,17 @@ Err_Handler:
 
         TST_CertCaptureActive = False
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function TST_CertCaptureRibbon( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertCaptureRibbon
+'------------------------------------------------------------------------------
+'                           TST CERT CAPTURE RIBBON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record the Ribbon of the entry active window, when that window can be
@@ -2974,29 +3011,36 @@ Private Function TST_CertCaptureRibbon( _
 ' CALLED FROM
 '   - TST_CertCaptureBaseline
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim RibbonValue         As Boolean         'Ribbon visibility read
-    Dim ActiveWin           As Object          'The active window after the read
-    Dim Msg                 As String          'Diagnostic from a read or error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCaptureRibbon"
+
+    Dim RibbonValue As Boolean  'Ribbon visibility read
+    Dim ActiveWin   As Object   'The active window after the read
+    Dim Msg         As String   'Diagnostic from a read or error
 
 #If VBA7 Then
-    Dim HwndAfter           As LongPtr         'Active handle after the read
+    Dim HwndAfter   As LongPtr  'Active handle after the read
 #Else
-    Dim HwndAfter           As Long            'Active handle after the read
+    Dim HwndAfter   As Long 'Active handle after the read
 #End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' CAPTURE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         TST_CertCaptureRibbon = False
 
         If Not Base.ActiveKnown Then
@@ -3040,16 +3084,16 @@ Private Function TST_CertCaptureRibbon( _
         TST_CertCaptureRibbon = True
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "baseline.ribbon", _
@@ -3057,19 +3101,17 @@ Err_Handler:
 
         TST_CertCaptureRibbon = False
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function TST_CertEvaluateCleanup( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertEvaluateCleanup
+'------------------------------------------------------------------------------
+'                          TST CERT EVALUATE CLEANUP
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare the exit state of the host with the entry baseline, and record
@@ -3127,18 +3169,22 @@ Private Function TST_CertEvaluateCleanup( _
 '   - Test_EXCEL_UI_RunReleaseCertification
 '   - the cleanup regression cases
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Compares the retained entry windows, every managed property,
 '                the title bar and the frame registry, and records findings
 '                instead of joining text (#35).
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim FindingsBefore      As Long            'Findings before this call
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertEvaluateCleanup"
+
+    Dim FindingsBefore  As Long 'Findings before this call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3173,13 +3219,11 @@ Private Function TST_CertEvaluateCleanup( _
 
 End Function
 
-
 Private Sub TST_CertCmpSnapshot( _
     ByRef Rec As tCertRecord)
-
 '
-'==============================================================================
-' TST_CertCmpSnapshot
+'------------------------------------------------------------------------------
+'                            TST CERT CMP SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report an EXCEL_UI snapshot left in the snapshot slot.
@@ -3201,21 +3245,28 @@ Private Sub TST_CertCmpSnapshot( _
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Msg                 As String          'Diagnostic from an error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCmpSnapshot"
+
+    Dim Msg As String   'Diagnostic from an error
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' COMPARE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         TST_CertCountCheck Rec
 
         If UI_HasExcelUIStateSnapshot Then
@@ -3224,33 +3275,31 @@ Private Sub TST_CertCmpSnapshot( _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "cleanup.snapshot", _
             "the snapshot comparison raised | " & Msg
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertCmpCounts( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord)
-
 '
-'==============================================================================
-' TST_CertCmpCounts
+'------------------------------------------------------------------------------
+'                             TST CERT CMP COUNTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare Workbooks.Count and Application.Windows.Count with their entry
@@ -3271,22 +3320,29 @@ Private Sub TST_CertCmpCounts( _
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CountNow            As Long            'Count read on exit
-    Dim Msg                 As String          'Diagnostic from an error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCmpCounts"
+
+    Dim CountNow    As Long     'Count read on exit
+    Dim Msg         As String   'Diagnostic from an error
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' COMPARE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         CountNow = Application.Workbooks.Count
         TST_CertCountCheck Rec
 
@@ -3306,33 +3362,31 @@ Private Sub TST_CertCmpCounts( _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "cleanup.counts", _
             "the count comparison raised | " & Msg
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertCmpAppProps( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord)
-
 '
-'==============================================================================
-' TST_CertCmpAppProps
+'------------------------------------------------------------------------------
+'                            TST CERT CMP APP PROPS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare DisplayStatusBar, DisplayScrollBars, DisplayFormulaBar and
@@ -3360,23 +3414,30 @@ Private Sub TST_CertCmpAppProps( _
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim PropIdx             As Long            'Cursor over the properties
-    Dim PropNow             As Boolean         'Value read on exit
-    Dim Msg                 As String          'Diagnostic from a read or error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCmpAppProps"
+
+    Dim PropIdx As Long     'Cursor over the properties
+    Dim PropNow As Boolean  'Value read on exit
+    Dim Msg     As String   'Diagnostic from a read or error
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' COMPARE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         For PropIdx = 1 To TST_CERT_APP_COUNT
 
             If Base.AppKnown(PropIdx) Then
@@ -3407,33 +3468,31 @@ Private Sub TST_CertCmpAppProps( _
         Next PropIdx
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "cleanup.appProperties", _
             "the application-property comparison raised | " & Msg
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertCmpWindows( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord)
-
 '
-'==============================================================================
-' TST_CertCmpWindows
+'------------------------------------------------------------------------------
+'                             TST CERT CMP WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Prove every window present on entry is still the same usable window with
@@ -3477,56 +3536,59 @@ Private Sub TST_CertCmpWindows( _
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ExitCount           As Long            'Application.Windows.Count on exit
-    Dim WinIdx              As Long            'Cursor over the entry windows
-    Dim LiveIdx             As Long            'Cursor over the listed windows
-    Dim PropIdx             As Long            'Cursor over the window properties
-    Dim Label               As String          'Diagnostic label of a window
-    Dim Msg                 As String          'Diagnostic from a read or error
-    Dim PropNow             As Boolean         'Property value read on exit
-    Dim EntryVisible        As Boolean         'Caption visible on entry
-    Dim ExitVisible         As Boolean         'Caption visible on exit
-    Dim RegFound            As Boolean         'Registry slot exists on exit
-    Dim HasBaseline         As Boolean         'Registry field, not compared
-    Dim HiddenNow           As Boolean         'Registry: component hid the frame
-    Dim PendingNow          As Boolean         'Registry: frame refresh owed
-    Dim Listed              As Boolean         'Entry window found in the list
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_CertCmpWindows"
 
-    Dim LiveKnown()         As Boolean         'Listed window's hWnd was read
-    Dim LiveClaimed()       As Boolean         'Listed window accounted for
+    Dim ExitCount       As Long     'Application.Windows.Count on exit
+    Dim WinIdx          As Long     'Cursor over the entry windows
+    Dim LiveIdx         As Long     'Cursor over the listed windows
+    Dim PropIdx         As Long     'Cursor over the window properties
+    Dim Label           As String   'Diagnostic label of a window
+    Dim Msg             As String   'Diagnostic from a read or error
+    Dim PropNow         As Boolean  'Property value read on exit
+    Dim EntryVisible    As Boolean  'Caption visible on entry
+    Dim ExitVisible     As Boolean  'Caption visible on exit
+    Dim RegFound        As Boolean  'Registry slot exists on exit
+    Dim HasBaseline     As Boolean  'Registry field, not compared
+    Dim HiddenNow       As Boolean  'Registry: component hid the frame
+    Dim PendingNow      As Boolean  'Registry: frame refresh owed
+    Dim Listed          As Boolean  'Entry window found in the list
+
+    Dim LiveKnown()     As Boolean  'Listed window's hWnd was read
+    Dim LiveClaimed()   As Boolean  'Listed window accounted for
 
 #If VBA7 Then
-    Dim LiveHwnd()          As LongPtr         'hWnd of each listed window
-    Dim HwndNow             As LongPtr         'hWnd a retained window reports
-    Dim StyleNow            As LongPtr         'GWL_STYLE read on exit
-    Dim OwnedBits           As LongPtr         'Registry field, not compared
-    Dim WrittenBits         As LongPtr         'Registry field, not compared
+    Dim LiveHwnd()  As LongPtr  'hWnd of each listed window
+    Dim HwndNow     As LongPtr  'hWnd a retained window reports
+    Dim StyleNow    As LongPtr  'GWL_STYLE read on exit
+    Dim OwnedBits   As LongPtr  'Registry field, not compared
+    Dim WrittenBits As LongPtr  'Registry field, not compared
 #Else
-    Dim LiveHwnd()          As Long            'hWnd of each listed window
-    Dim HwndNow             As Long            'hWnd a retained window reports
-    Dim StyleNow            As Long            'GWL_STYLE read on exit
-    Dim OwnedBits           As Long            'Registry field, not compared
-    Dim WrittenBits         As Long            'Registry field, not compared
+    Dim LiveHwnd()  As Long 'hWnd of each listed window
+    Dim HwndNow     As Long 'hWnd a retained window reports
+    Dim StyleNow    As Long 'GWL_STYLE read on exit
+    Dim OwnedBits   As Long 'Registry field, not compared
+    Dim WrittenBits As Long 'Registry field, not compared
 #End If
-
-    Const PROC As String = "TST_CertCmpWindows"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Fault seam: a stage that raises must be recorded, not swallowed
         If TST_CertTakeHelperFault(TST_CERT_HELPER_FAULT_STAGE) Then
-            Err.Raise TEST_CERT_ERR_BASE + 50, PROC, _
+            Err.Raise TEST_CERT_ERR_BASE + 50, PROC_NAME, _
                 "injected cleanup stage failure"
         End If
 
@@ -3720,33 +3782,31 @@ Private Sub TST_CertCmpWindows( _
         Next LiveIdx
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "cleanup.windows", _
             "the window comparison raised | " & Msg
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertCmpActive( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord)
-
 '
-'==============================================================================
-' TST_CertCmpActive
+'------------------------------------------------------------------------------
+'                             TST CERT CMP ACTIVE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare the active window with the one active on entry.
@@ -3773,30 +3833,37 @@ Private Sub TST_CertCmpActive( _
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ActiveWin           As Object          'The active window now
-    Dim Msg                 As String          'Diagnostic from a read or error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCmpActive"
+
+    Dim ActiveWin   As Object   'The active window now
+    Dim Msg         As String   'Diagnostic from a read or error
 
 #If VBA7 Then
-    Dim HwndNow             As LongPtr         'Handle of the active window now
+    Dim HwndNow As LongPtr  'Handle of the active window now
 #Else
-    Dim HwndNow             As Long            'Handle of the active window now
+    Dim HwndNow As Long 'Handle of the active window now
 #End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' COMPARE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         If Not Base.ActiveKnown Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         Set ActiveWin = Application.ActiveWindow
@@ -3824,33 +3891,31 @@ Private Sub TST_CertCmpActive( _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "cleanup.activeWindow", _
             "the active-window comparison raised | " & Msg
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertCmpRibbon( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord)
-
 '
-'==============================================================================
-' TST_CertCmpRibbon
+'------------------------------------------------------------------------------
+'                             TST CERT CMP RIBBON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare the Ribbon of the entry active window with its entry value, only
@@ -3878,34 +3943,41 @@ Private Sub TST_CertCmpRibbon( _
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ActiveWin           As Object          'The active window
-    Dim RibbonNow           As Boolean         'Ribbon visibility read on exit
-    Dim Msg                 As String          'Diagnostic from a read or error
-    Dim Owned               As Boolean         'TRUE while the owner is active
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCmpRibbon"
+
+    Dim ActiveWin   As Object   'The active window
+    Dim RibbonNow   As Boolean  'Ribbon visibility read on exit
+    Dim Msg         As String   'Diagnostic from a read or error
+    Dim Owned       As Boolean  'TRUE while the owner is active
 
 #If VBA7 Then
-    Dim HwndBefore          As LongPtr         'Active handle before the read
-    Dim HwndAfter           As LongPtr         'Active handle after the read
+    Dim HwndBefore  As LongPtr  'Active handle before the read
+    Dim HwndAfter   As LongPtr  'Active handle after the read
 #Else
-    Dim HwndBefore          As Long            'Active handle before the read
-    Dim HwndAfter           As Long            'Active handle after the read
+    Dim HwndBefore  As Long 'Active handle before the read
+    Dim HwndAfter   As Long 'Active handle after the read
 #End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' COMPARE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         If Not Base.RibbonKnown Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'The owner must be the active window before the read
@@ -3927,7 +3999,7 @@ Private Sub TST_CertCmpRibbon( _
                 "the Ribbon was not compared on exit, because the Ribbon acts " & _
                 "only on the active window and its owner is not active | " & Msg
 
-            GoTo Safe_Exit
+            GoTo SafeExit
 
         End If
 
@@ -3937,7 +4009,7 @@ Private Sub TST_CertCmpRibbon( _
             TST_CertAddFinding Rec, "ribbon.read", _
                 "the Ribbon could not be read on exit | " & Msg
 
-            GoTo Safe_Exit
+            GoTo SafeExit
 
         End If
 
@@ -3957,7 +4029,7 @@ Private Sub TST_CertCmpRibbon( _
                 "the Ribbon was not compared on exit, because the active " & _
                 "window changed while it was read"
 
-            GoTo Safe_Exit
+            GoTo SafeExit
 
         End If
 
@@ -3970,33 +4042,31 @@ Private Sub TST_CertCmpRibbon( _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "cleanup.ribbon", _
             "the Ribbon comparison raised | " & Msg
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertRestoreActiveWindow( _
     ByRef Base As tCertBaseline, _
     ByRef Rec As tCertRecord)
-
 '
-'==============================================================================
-' TST_CertRestoreActiveWindow
+'------------------------------------------------------------------------------
+'                        TST CERT RESTORE ACTIVE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make the entry active window active again when a run left another one
@@ -4026,34 +4096,41 @@ Private Sub TST_CertRestoreActiveWindow( _
 '   - Test_EXCEL_UI_RunReleaseCertification
 '   - the cleanup regression cases
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ActiveWin           As Object          'The active window
-    Dim Msg                 As String          'Diagnostic from a read or error
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertRestoreActiveWindow"
+
+    Dim ActiveWin   As Object   'The active window
+    Dim Msg         As String   'Diagnostic from a read or error
 
 #If VBA7 Then
-    Dim HwndNow             As LongPtr         'Active handle now
+    Dim HwndNow As LongPtr  'Active handle now
 #Else
-    Dim HwndNow             As Long            'Active handle now
+    Dim HwndNow As Long 'Active handle now
 #End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' RESTORE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         If Not Base.Captured Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         If Not Base.ActiveKnown Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Nothing to do while the entry window is active
@@ -4062,7 +4139,7 @@ Private Sub TST_CertRestoreActiveWindow( _
         If Not ActiveWin Is Nothing Then
             If TST_CertTryReadHwnd(ActiveWin, HwndNow, Msg) Then
                 If HwndNow = Base.ActiveHwnd Then
-                    GoTo Safe_Exit
+                    GoTo SafeExit
                 End If
             End If
         End If
@@ -4090,25 +4167,24 @@ Private Sub TST_CertRestoreActiveWindow( _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Msg = TST_BuildRuntimeErrorText
 
         TST_CertAddFinding Rec, "activeWindow.restore", _
             "restoring the entry active window raised | " & Msg
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Function TST_CertReadProp( _
     ByVal Target As Object, _
@@ -4116,10 +4192,9 @@ Private Function TST_CertReadProp( _
     ByRef ValueOut As Boolean, _
     ByRef FailMsg As String) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertReadProp
+'------------------------------------------------------------------------------
+'                              TST CERT READ PROP
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read one Boolean property for the cleanup baseline or its comparison.
@@ -4149,10 +4224,12 @@ Private Function TST_CertReadProp( _
 ' CALLED FROM
 '   - the cleanup capture and comparison stages
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' READ
@@ -4169,7 +4246,6 @@ Private Function TST_CertReadProp( _
 
 End Function
 
-
 #If VBA7 Then
 Private Function TST_CertTryReadHwnd( _
     ByVal TargetWindow As Object, _
@@ -4183,10 +4259,9 @@ Private Function TST_CertTryReadHwnd( _
     ByRef FailMsg As String) _
     As Boolean
 #End If
-
 '
-'==============================================================================
-' TST_CertTryReadHwnd
+'------------------------------------------------------------------------------
+'                            TST CERT TRY READ HWND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read the hWnd of a Window object, which is also the probe that the object
@@ -4214,64 +4289,67 @@ Private Function TST_CertTryReadHwnd( _
 ' CALLED FROM
 '   - the cleanup capture and comparison stages
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' READ
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         TST_CertTryReadHwnd = False
         HwndOut = 0
         FailMsg = vbNullString
 
         If TargetWindow Is Nothing Then
             FailMsg = "the Window is Nothing"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         HwndOut = TargetWindow.hWnd
 
         If HwndOut = 0 Then
             FailMsg = "the Window reports hWnd 0"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         TST_CertTryReadHwnd = True
 
 '------------------------------------------------------------------------------
-' RETURN
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailMsg = TST_BuildRuntimeErrorText
 
         HwndOut = 0
 
         TST_CertTryReadHwnd = False
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function TST_CertWindowLabel( _
     ByVal TargetWindow As Object, _
     ByVal Index As Long) _
     As String
-
 '
-'==============================================================================
-' TST_CertWindowLabel
+'------------------------------------------------------------------------------
+'                            TST CERT WINDOW LABEL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name a window for a finding.
@@ -4295,15 +4373,19 @@ Private Function TST_CertWindowLabel( _
 ' CALLED FROM
 '   - the cleanup capture and comparison stages
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CaptionText         As String          'Caption, when it can be read
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertWindowLabel"
+
+    Dim CaptionText As String   'Caption, when it can be read
 
 '------------------------------------------------------------------------------
 ' READ CAPTION
@@ -4319,14 +4401,12 @@ Private Function TST_CertWindowLabel( _
 
 End Function
 
-
 Private Function TST_CertAppPropName( _
     ByVal Index As Long) _
     As String
-
 '
-'==============================================================================
-' TST_CertAppPropName
+'------------------------------------------------------------------------------
+'                            TST CERT APP PROP NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name the application-level property at a baseline index.
@@ -4350,10 +4430,12 @@ Private Function TST_CertAppPropName( _
 ' CALLED FROM
 '   - the cleanup capture and comparison stages
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
         Select Case Index
 
@@ -4369,18 +4451,19 @@ Private Function TST_CertAppPropName( _
             Case 4
                 TST_CertAppPropName = "ScreenUpdating"
 
+            Case Else
+            'Leave the name empty for any other index
+
         End Select
 
 End Function
 
-
 Private Function TST_CertWindowPropName( _
     ByVal Index As Long) _
     As String
-
 '
-'==============================================================================
-' TST_CertWindowPropName
+'------------------------------------------------------------------------------
+'                          TST CERT WINDOW PROP NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name the window-level property at a baseline index.
@@ -4399,10 +4482,12 @@ Private Function TST_CertWindowPropName( _
 ' CALLED FROM
 '   - the cleanup capture and comparison stages
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
         Select Case Index
 
@@ -4415,17 +4500,18 @@ Private Function TST_CertWindowPropName( _
             Case 3
                 TST_CertWindowPropName = "DisplayGridlines"
 
+            Case Else
+            'Leave the name empty for any other index
+
         End Select
 
 End Function
 
-
 Private Sub TST_CertInjectHelperFault( _
     ByVal FaultKind As Long)
-
 '
-'==============================================================================
-' TST_CertInjectHelperFault
+'------------------------------------------------------------------------------
+'                         TST CERT INJECT HELPER FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot fault in the cleanup helpers.
@@ -4441,35 +4527,35 @@ Private Sub TST_CertInjectHelperFault( _
 '     the baseline makes. _STAGE makes the next window comparison raise.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Cannot raise.
-'
-' CALLED FROM
-'   - TST_Case_CertCleanupHelperFailureIsFinding
 '
 ' NOTES
 '   Private to this module on purpose: the seam shares no state with the
 '   production modules, and only the cases below arm it.
 '
-' UPDATED
-'   2026-11-18 - Added (#35).
-'==============================================================================
+' CALLED FROM
+'   - TST_Case_CertCleanupHelperFailureIsFinding
 '
+' HISTORY
+'   2026-11-18 - Added (#35).
+'
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
         m_CertHelperFault = FaultKind
 
 End Sub
 
-
 Private Function TST_CertTakeHelperFault( _
     ByVal FaultKind As Long) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertTakeHelperFault
+'------------------------------------------------------------------------------
+'                          TST CERT TAKE HELPER FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report whether the armed helper fault is this kind, and disarm it in the
@@ -4490,10 +4576,12 @@ Private Function TST_CertTakeHelperFault( _
 '   - TST_CertReadProp
 '   - TST_CertCmpWindows
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
         If m_CertHelperFault = FaultKind Then
             m_CertHelperFault = TST_CERT_HELPER_FAULT_NONE
@@ -4502,12 +4590,11 @@ Private Function TST_CertTakeHelperFault( _
 
 End Function
 
-
 Private Sub TST_CertApplyRunFault()
 
 '
-'==============================================================================
-' TST_CertApplyRunFault
+'------------------------------------------------------------------------------
+'                           TST CERT APPLY RUN FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Alter the host in place of the mandatory units, for the run fault that
@@ -4520,7 +4607,7 @@ Private Sub TST_CertApplyRunFault()
 '   the cleanup comparison to find. The caller that armed the fault restores it.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises what the write raises, into the certification handler.
@@ -4528,10 +4615,12 @@ Private Sub TST_CertApplyRunFault()
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
         TST_Log "TST_CertApplyRunFault", "FAULT", _
             "No unit runs; DisplayStatusBar is inverted before cleanup is verified"
@@ -4540,7 +4629,6 @@ Private Sub TST_CertApplyRunFault()
 
 End Sub
 
-
 Private Sub TST_CertNoteHostFailure( _
     ByVal CallerProc As String, _
     ByVal Msg As String, _
@@ -4548,10 +4636,9 @@ Private Sub TST_CertNoteHostFailure( _
     ByRef FailNumber As Long, _
     ByRef FailSource As String, _
     ByRef FailDescription As String)
-
 '
-'==============================================================================
-' TST_CertNoteHostFailure
+'------------------------------------------------------------------------------
+'                          TST CERT NOTE HOST FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make a host state that a case could not put back part of its failure.
@@ -4574,10 +4661,12 @@ Private Sub TST_CertNoteHostFailure( _
 ' CALLED FROM
 '   - the cleanup regression cases
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Added (#35).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
         If Not HasFailure Then
             HasFailure = True
@@ -4590,12 +4679,11 @@ Private Sub TST_CertNoteHostFailure( _
 
 End Sub
 
-
 Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
 '
-'==============================================================================
-' Test_EXCEL_UI_RunOwnershipCleanupChecks
+'------------------------------------------------------------------------------
+'                  TEST EXCEL UI RUN OWNERSHIP CLEANUP CHECKS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a runner which creates its own snapshot releases it on every
@@ -4614,7 +4702,7 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '   caller with a cleared Err and no idea anything went wrong.
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   A  no injection            - normal return, no error, snapshot released
@@ -4647,9 +4735,6 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '   - Test_EXCEL_UI_RunSnapshotIdentity
 '   - Test_EXCEL_UI_RunReleaseCertification
 '
-' CALLED FROM
-'   - Invoked directly
-'
 ' NOTES
 '   Deliberately not a case of TST_RunRegressionPack. The self-test calls
 '   certification, and while a certification run is active that call meets the
@@ -4669,36 +4754,42 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '   no evidence file, and check what the call raises and records. Cases E and H
 '   invert the status bar and restore it themselves.
 '
-' UPDATED
+' CALLED FROM
+'   - Invoked directly
+'
+' HISTORY
 '   2026-11-28 - Added case H, an isolated unit that alters the host (#42).
 '   2026-11-27 - Added cases F and G, the forced failed unit and the forced
 '                inventory gap, and its role as an isolated unit (#42).
 '   2026-11-18 - Added case E, the forced cleanup failure (#35).
 '   2026-08-29
-'==============================================================================
 '
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim RaisedNumber        As Long            'Error number reaching this run
-    Dim RaisedSource        As String          'Error source reaching this run
-    Dim RaisedDescription   As String          'Error text reaching this run
-    Dim WindowsBefore       As Long            'Window count before case D
-    Dim WindowsAfter        As Long            'Window count after case D
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Test_EXCEL_UI_RunOwnershipCleanupChecks"
 
-    Dim EntryStatusBar      As Boolean         'DisplayStatusBar before case E
-    Dim StatusBarAtRisk     As Boolean         'TRUE while case E may have inverted it
-    Dim ForcedUnitsFailed   As Long            'Case E: composed failed-unit count
-    Dim ForcedComplete      As Boolean         'Case E: composed completeness
-    Dim ForcedPassed        As Boolean         'Case E: composed verdict
-    Dim ForcedVerdict       As String          'Case E: composed RESULT line
-    Dim ForcedDetail        As String          'Case E: composed cleanup detail
-    Dim ForcedRecordingDetail As String          'Case E: composed recording failure
-    Dim ForcedJson          As String          'Case E: composed JSON evidence
-    Dim ForcedReport        As String          'Case E: composed text evidence
+    Dim RaisedNumber        As Long     'Error number reaching this run
+    Dim RaisedSource        As String   'Error source reaching this run
+    Dim RaisedDescription   As String   'Error text reaching this run
+    Dim WindowsBefore       As Long     'Window count before case D
+    Dim WindowsAfter        As Long     'Window count after case D
 
-    Const PROC As String = "Test_EXCEL_UI_RunOwnershipCleanupChecks"
+    Dim EntryStatusBar          As Boolean  'DisplayStatusBar before case E
+    Dim StatusBarAtRisk         As Boolean  'TRUE while case E may have inverted it
+    Dim ForcedUnitsFailed       As Long     'Case E: composed failed-unit count
+    Dim ForcedComplete          As Boolean  'Case E: composed completeness
+    Dim ForcedPassed            As Boolean  'Case E: composed verdict
+    Dim ForcedVerdict           As String   'Case E: composed RESULT line
+    Dim ForcedDetail            As String   'Case E: composed cleanup detail
+    Dim ForcedRecordingDetail   As String   'Case E: composed recording failure
+    Dim ForcedJson              As String   'Case E: composed JSON evidence
+    Dim ForcedReport            As String   'Case E: composed text evidence
 
 '------------------------------------------------------------------------------
 ' VALIDATE PRECONDITIONS
@@ -4708,7 +4799,7 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_OWNERSHIP_ERR_BASE + 10, _
-                PROC, _
+                PROC_NAME, _
                 "an explicit EXCEL_UI snapshot already exists; clear or " & _
                 "restore it before running these checks"
         End If
@@ -4716,35 +4807,35 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_InjectPostCapture TEST_FAULT_NONE
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating runner-owned snapshot cleanup on every exit"
 
-        TST_LogHostWindows PROC & ".Entry"
+        TST_LogHostWindows PROC_NAME & ".Entry"
 
 '------------------------------------------------------------------------------
 ' CASE A - NORMAL SUCCESS RELEASES THE SNAPSHOT
 '------------------------------------------------------------------------------
         On Error Resume Next
 
-            Test_EXCEL_UI_RunCertificationSelfTest
+        Test_EXCEL_UI_RunCertificationSelfTest
 
-            RaisedNumber = Err.Number
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_AssertTrue _
             (RaisedNumber = 0), _
-            PROC & ".SelfTestSuccess.NoError"
+            PROC_NAME & ".SelfTestSuccess.NoError"
 
         TST_AssertSnapshotAvailability False, _
-            PROC & ".SelfTestSuccess.SnapshotReleased"
+            PROC_NAME & ".SelfTestSuccess.SnapshotReleased"
 
 '------------------------------------------------------------------------------
 ' CASE B - AN ASSERTION AFTER CAPTURE STILL RELEASES THE SNAPSHOT
@@ -4753,15 +4844,15 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunCertificationSelfTest
+        Test_EXCEL_UI_RunCertificationSelfTest
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_AssertRefusal _
             ExpectedNumber:=TEST_SNAPSHOT_ID_ERR_BASE + 20, _
@@ -4771,10 +4862,10 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
-            AssertionName:=PROC & ".SelfTestAssertion.Preserved"
+            AssertionName:=PROC_NAME & ".SelfTestAssertion.Preserved"
 
         TST_AssertSnapshotAvailability False, _
-            PROC & ".SelfTestAssertion.SnapshotReleased"
+            PROC_NAME & ".SelfTestAssertion.SnapshotReleased"
 
 '------------------------------------------------------------------------------
 ' CASE C - AN UNEXPECTED ERROR AFTER CAPTURE STILL RELEASES THE SNAPSHOT
@@ -4783,15 +4874,15 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunCertificationSelfTest
+        Test_EXCEL_UI_RunCertificationSelfTest
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_AssertRefusal _
             ExpectedNumber:=TEST_OWNERSHIP_ERR_BASE + 1, _
@@ -4801,10 +4892,10 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
-            AssertionName:=PROC & ".SelfTestUnexpected.Preserved"
+            AssertionName:=PROC_NAME & ".SelfTestUnexpected.Preserved"
 
         TST_AssertSnapshotAvailability False, _
-            PROC & ".SelfTestUnexpected.SnapshotReleased"
+            PROC_NAME & ".SelfTestUnexpected.SnapshotReleased"
 
 '------------------------------------------------------------------------------
 ' CASE D - THE IDENTITY RUNNER RELEASES SNAPSHOT AND WINDOWS ALIKE
@@ -4814,21 +4905,21 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
     'replacement window, so cleanup has more than the snapshot to release.
         WindowsBefore = ThisWorkbook.Windows.Count
 
-        TST_LogHostWindows PROC & ".BeforeCaseD"
+        TST_LogHostWindows PROC_NAME & ".BeforeCaseD"
 
         TST_InjectPostCapture TEST_FAULT_ASSERTION
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunSnapshotIdentity
+        Test_EXCEL_UI_RunSnapshotIdentity
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_AssertRefusal _
             ExpectedNumber:=TEST_SNAPSHOT_ID_ERR_BASE + 20, _
@@ -4838,16 +4929,16 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
-            AssertionName:=PROC & ".IdentityAssertion.Preserved"
+            AssertionName:=PROC_NAME & ".IdentityAssertion.Preserved"
 
         TST_AssertSnapshotAvailability False, _
-            PROC & ".IdentityAssertion.SnapshotReleased"
+            PROC_NAME & ".IdentityAssertion.SnapshotReleased"
 
         WindowsAfter = ThisWorkbook.Windows.Count
 
         TST_AssertTrue _
             (WindowsAfter = WindowsBefore), _
-            PROC & ".IdentityAssertion.WindowsReleased"
+            PROC_NAME & ".IdentityAssertion.WindowsReleased"
 
 '------------------------------------------------------------------------------
 ' CASE E - A FORCED CLEANUP FAILURE FAILS THE OUTER CERTIFICATION
@@ -4864,15 +4955,15 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunReleaseCertification
+        Test_EXCEL_UI_RunReleaseCertification
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Put the host back before anything is asserted, so a failed assertion leaves
     'Excel as it was found
@@ -4883,39 +4974,39 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
         TST_AssertTrue _
             (RaisedNumber = TEST_CERT_ERR_BASE + 3), _
-            PROC & ".ForcedCleanup.ErrorNumberPreserved"
+            PROC_NAME & ".ForcedCleanup.ErrorNumberPreserved"
 
         TST_AssertTrue _
             (RaisedSource = "Test_EXCEL_UI_RunReleaseCertification"), _
-            PROC & ".ForcedCleanup.ErrorSourcePreserved"
+            PROC_NAME & ".ForcedCleanup.ErrorSourcePreserved"
 
     'The diagnostic fields carry the verdict and the finding, not just a number
         TST_AssertTrue _
             (InStr(1, RaisedDescription, "cleanup=FAILED", vbBinaryCompare) > 0), _
-            PROC & ".ForcedCleanup.DescriptionCarriesTheVerdict"
+            PROC_NAME & ".ForcedCleanup.DescriptionCarriesTheVerdict"
 
         TST_AssertTrue _
             (InStr(1, RaisedDescription, "DisplayStatusBar changed from", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedCleanup.DescriptionCarriesTheFinding"
+            PROC_NAME & ".ForcedCleanup.DescriptionCarriesTheFinding"
 
         TST_AssertBooleanEquals False, m_CertActive, _
-            PROC & ".ForcedCleanup.RunClosed"
+            PROC_NAME & ".ForcedCleanup.RunClosed"
 
     'The findings were recorded, and nothing was lost in recording them
         TST_AssertTrue _
             (m_CertRecord.FindingCount >= 1) And Not m_CertRecord.RecordFailed, _
-            PROC & ".ForcedCleanup.FindingRecorded"
+            PROC_NAME & ".ForcedCleanup.FindingRecorded"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(m_CertRecord, TEST_CERT_ENTRY_FINDING), _
                 "|app.DisplayStatusBar|", vbBinaryCompare) > 0), _
-            PROC & ".ForcedCleanup.FindingNamesTheProperty"
+            PROC_NAME & ".ForcedCleanup.FindingNamesTheProperty"
 
     'The fault was one-shot: the call consumed it
         TST_AssertTrue _
             (TST_CertTakeRunFault() = TEST_CERT_RUN_FAULT_NONE), _
-            PROC & ".ForcedCleanup.FaultConsumed"
+            PROC_NAME & ".ForcedCleanup.FaultConsumed"
 
     'The evidence the run composed, rebuilt from the record it left behind
         TST_CertComposeEvidence _
@@ -4931,26 +5022,26 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             ReportText:=ForcedReport
 
         TST_AssertBooleanEquals False, ForcedPassed, _
-            PROC & ".ForcedCleanup.Evidence.NotPassed"
+            PROC_NAME & ".ForcedCleanup.Evidence.NotPassed"
 
         TST_AssertTrue _
             (InStr(1, ForcedVerdict, "RESULT: FAIL | ", vbBinaryCompare) = 1) And _
             (InStr(1, ForcedVerdict, " cleanup=FAILED", vbBinaryCompare) > 0), _
-            PROC & ".ForcedCleanup.Evidence.Verdict"
+            PROC_NAME & ".ForcedCleanup.Evidence.Verdict"
 
         TST_AssertTrue _
             (InStr(1, ForcedJson, """cleanup"":""FAILED""", vbBinaryCompare) > 0), _
-            PROC & ".ForcedCleanup.Evidence.JsonCleanupFailed"
+            PROC_NAME & ".ForcedCleanup.Evidence.JsonCleanupFailed"
 
         TST_AssertTrue _
             (InStr(1, ForcedJson, """code"":""app.DisplayStatusBar""", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedCleanup.Evidence.JsonListsTheFinding"
+            PROC_NAME & ".ForcedCleanup.Evidence.JsonListsTheFinding"
 
         TST_AssertTrue _
             (InStr(1, ForcedReport, vbNewLine & "  CLEANUP  app.DisplayStatusBar | ", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedCleanup.Evidence.ReportListsTheFinding"
+            PROC_NAME & ".ForcedCleanup.Evidence.ReportListsTheFinding"
 
 '------------------------------------------------------------------------------
 ' CASE F - A FORCED FAILED UNIT FAILS THE OUTER CERTIFICATION
@@ -4964,32 +5055,32 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunReleaseCertification
+        Test_EXCEL_UI_RunReleaseCertification
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
 
         TST_AssertTrue _
             (RaisedNumber = TEST_CERT_ERR_BASE + 3), _
-            PROC & ".ForcedUnit.ErrorNumberPreserved"
+            PROC_NAME & ".ForcedUnit.ErrorNumberPreserved"
 
         TST_AssertTrue _
             (RaisedSource = "Test_EXCEL_UI_RunReleaseCertification"), _
-            PROC & ".ForcedUnit.ErrorSourcePreserved"
+            PROC_NAME & ".ForcedUnit.ErrorSourcePreserved"
 
     'The text carries the verdict and the failure of the unit, not only a number
         TST_AssertTrue _
             (InStr(1, RaisedDescription, _
                 "RESULT: FAIL | COMPLETE | units=1 failed=1 skipped=0 cleanup=", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedUnit.DescriptionCarriesTheVerdict"
+            PROC_NAME & ".ForcedUnit.DescriptionCarriesTheVerdict"
 
         TST_AssertTrue _
             (InStr(1, RaisedDescription, _
@@ -4997,10 +5088,10 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             (InStr(1, RaisedDescription, _
                 "unknown certification case: SelfTest.ForcedCase", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedUnit.DescriptionCarriesTheFailure"
+            PROC_NAME & ".ForcedUnit.DescriptionCarriesTheFailure"
 
         TST_AssertBooleanEquals False, m_CertActive, _
-            PROC & ".ForcedUnit.RunClosed"
+            PROC_NAME & ".ForcedUnit.RunClosed"
 
     'The record holds the whole run: one failed unit, and one case that started
     'and recorded a status, so the inventory is exact
@@ -5011,11 +5102,11 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             (m_CertRecord.InventoryCount = 0) And _
             m_CertRecord.InventoryChecked And _
             Not m_CertRecord.RecordFailed, _
-            PROC & ".ForcedUnit.RecordHoldsTheRun"
+            PROC_NAME & ".ForcedUnit.RecordHoldsTheRun"
 
         TST_AssertTrue _
             (TST_CertTakeRunFault() = TEST_CERT_RUN_FAULT_NONE), _
-            PROC & ".ForcedUnit.FaultConsumed"
+            PROC_NAME & ".ForcedUnit.FaultConsumed"
 
         ForcedDetail = vbNullString
 
@@ -5032,18 +5123,18 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             ReportText:=ForcedReport
 
         TST_AssertBooleanEquals False, ForcedPassed, _
-            PROC & ".ForcedUnit.Evidence.NotPassed"
+            PROC_NAME & ".ForcedUnit.Evidence.NotPassed"
 
         TST_AssertTrue _
             (InStr(1, ForcedJson, """unitsFailed"":1", vbBinaryCompare) > 0) And _
             (InStr(1, ForcedJson, """inventory"":""OK""", vbBinaryCompare) > 0), _
-            PROC & ".ForcedUnit.Evidence.JsonFailsTheUnitNotTheInventory"
+            PROC_NAME & ".ForcedUnit.Evidence.JsonFailsTheUnitNotTheInventory"
 
         TST_AssertTrue _
             (InStr(1, ForcedReport, vbNewLine & "  CASE  FAIL  " & _
                 "SelfTest.ForcedFailure  SelfTest.ForcedCase | ", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedUnit.Evidence.ReportListsTheFailedCase"
+            PROC_NAME & ".ForcedUnit.Evidence.ReportListsTheFailedCase"
 
 '------------------------------------------------------------------------------
 ' CASE G - A FORCED INVENTORY GAP FAILS THE OUTER CERTIFICATION
@@ -5055,39 +5146,39 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunReleaseCertification
+        Test_EXCEL_UI_RunReleaseCertification
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
 
         TST_AssertTrue _
             (RaisedNumber = TEST_CERT_ERR_BASE + 3), _
-            PROC & ".ForcedGap.ErrorNumberPreserved"
+            PROC_NAME & ".ForcedGap.ErrorNumberPreserved"
 
         TST_AssertTrue _
             (RaisedSource = "Test_EXCEL_UI_RunReleaseCertification"), _
-            PROC & ".ForcedGap.ErrorSourcePreserved"
+            PROC_NAME & ".ForcedGap.ErrorSourcePreserved"
 
         TST_AssertTrue _
             (InStr(1, RaisedDescription, _
                 "RESULT: FAIL | INCOMPLETE | units=1 failed=0 skipped=0 cleanup=", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedGap.DescriptionCarriesTheVerdict"
+            PROC_NAME & ".ForcedGap.DescriptionCarriesTheVerdict"
 
         TST_AssertTrue _
             (InStr(1, RaisedDescription, _
                 "inventory: missing:SelfTest.AbsentCase: ", vbBinaryCompare) > 0), _
-            PROC & ".ForcedGap.DescriptionCarriesTheFinding"
+            PROC_NAME & ".ForcedGap.DescriptionCarriesTheFinding"
 
         TST_AssertBooleanEquals False, m_CertActive, _
-            PROC & ".ForcedGap.RunClosed"
+            PROC_NAME & ".ForcedGap.RunClosed"
 
         TST_AssertTrue _
             (m_CertRecord.UnitCount = 1) And _
@@ -5096,11 +5187,11 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             (m_CertRecord.InventoryCount = 1) And _
             m_CertRecord.InventoryChecked And _
             Not m_CertRecord.RecordFailed, _
-            PROC & ".ForcedGap.RecordHoldsTheRun"
+            PROC_NAME & ".ForcedGap.RecordHoldsTheRun"
 
         TST_AssertTrue _
             (TST_CertTakeRunFault() = TEST_CERT_RUN_FAULT_NONE), _
-            PROC & ".ForcedGap.FaultConsumed"
+            PROC_NAME & ".ForcedGap.FaultConsumed"
 
         ForcedDetail = vbNullString
 
@@ -5117,10 +5208,10 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             ReportText:=ForcedReport
 
         TST_AssertBooleanEquals False, ForcedPassed, _
-            PROC & ".ForcedGap.Evidence.NotPassed"
+            PROC_NAME & ".ForcedGap.Evidence.NotPassed"
 
         TST_AssertBooleanEquals False, ForcedComplete, _
-            PROC & ".ForcedGap.Evidence.NotComplete"
+            PROC_NAME & ".ForcedGap.Evidence.NotComplete"
 
     'The units passed, and the inventory alone failed the run
         TST_AssertTrue _
@@ -5128,7 +5219,7 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             (InStr(1, ForcedJson, """inventory"":""FAILED""", vbBinaryCompare) > 0) And _
             (InStr(1, ForcedJson, """code"":""missing:SelfTest.AbsentCase""", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedGap.Evidence.JsonFailsTheInventoryNotTheUnit"
+            PROC_NAME & ".ForcedGap.Evidence.JsonFailsTheInventoryNotTheUnit"
 
         TST_AssertTrue _
             (InStr(1, ForcedReport, vbNewLine & "  PASS  SelfTest.InventoryGap", _
@@ -5136,7 +5227,7 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             (InStr(1, ForcedReport, vbNewLine & _
                 "  INVENTORY  missing:SelfTest.AbsentCase | ", _
                 vbBinaryCompare) > 0), _
-            PROC & ".ForcedGap.Evidence.ReportListsTheFinding"
+            PROC_NAME & ".ForcedGap.Evidence.ReportListsTheFinding"
 
 '------------------------------------------------------------------------------
 ' CASE H - WHAT AN ISOLATED UNIT LEAVES BEHIND IS REPORTED
@@ -5153,31 +5244,31 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunReleaseCertification
+        Test_EXCEL_UI_RunReleaseCertification
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
 
     'The run put the host back, and this case does not do it for the run
         TST_AssertBooleanEquals EntryStatusBar, Application.DisplayStatusBar, _
-            PROC & ".IsolatedChange.HostPutBack"
+            PROC_NAME & ".IsolatedChange.HostPutBack"
 
         StatusBarAtRisk = False
 
         TST_AssertTrue _
             (RaisedNumber = TEST_CERT_ERR_BASE + 3), _
-            PROC & ".IsolatedChange.ErrorNumberPreserved"
+            PROC_NAME & ".IsolatedChange.ErrorNumberPreserved"
 
         TST_AssertTrue _
             (RaisedSource = "Test_EXCEL_UI_RunReleaseCertification"), _
-            PROC & ".IsolatedChange.ErrorSourcePreserved"
+            PROC_NAME & ".IsolatedChange.ErrorSourcePreserved"
 
         TST_AssertTrue _
             (InStr(1, RaisedDescription, _
@@ -5185,10 +5276,10 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
                 vbBinaryCompare) > 0) And _
             (InStr(1, RaisedDescription, "DisplayStatusBar changed from", _
                 vbBinaryCompare) > 0), _
-            PROC & ".IsolatedChange.DescriptionCarriesTheFinding"
+            PROC_NAME & ".IsolatedChange.DescriptionCarriesTheFinding"
 
         TST_AssertBooleanEquals False, m_CertActive, _
-            PROC & ".IsolatedChange.RunClosed"
+            PROC_NAME & ".IsolatedChange.RunClosed"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(m_CertRecord, TEST_CERT_ENTRY_FINDING), _
@@ -5197,11 +5288,11 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
                 "|app.DisplayStatusBar|", vbBinaryCompare) = 0) And _
             (m_CertRecord.InventoryCount = 0) And _
             Not m_CertRecord.RecordFailed, _
-            PROC & ".IsolatedChange.OnlyTheIsolatedPhaseIsNamed"
+            PROC_NAME & ".IsolatedChange.OnlyTheIsolatedPhaseIsNamed"
 
         TST_AssertTrue _
             (TST_CertTakeRunFault() = TEST_CERT_RUN_FAULT_NONE), _
-            PROC & ".IsolatedChange.FaultConsumed"
+            PROC_NAME & ".IsolatedChange.FaultConsumed"
 
         ForcedDetail = vbNullString
 
@@ -5218,73 +5309,78 @@ Public Sub Test_EXCEL_UI_RunOwnershipCleanupChecks()
             ReportText:=ForcedReport
 
         TST_AssertBooleanEquals False, ForcedPassed, _
-            PROC & ".IsolatedChange.Evidence.NotPassed"
+            PROC_NAME & ".IsolatedChange.Evidence.NotPassed"
 
         TST_AssertTrue _
             (InStr(1, ForcedJson, """cleanup"":""FAILED""", vbBinaryCompare) > 0) And _
             (InStr(1, ForcedJson, """code"":""isolated.app.DisplayStatusBar""", _
                 vbBinaryCompare) > 0), _
-            PROC & ".IsolatedChange.Evidence.JsonListsTheFinding"
+            PROC_NAME & ".IsolatedChange.Evidence.JsonListsTheFinding"
 
         TST_AssertTrue _
             (InStr(1, ForcedReport, vbNewLine & _
                 "  CLEANUP  isolated.app.DisplayStatusBar | ", vbBinaryCompare) > 0), _
-            PROC & ".IsolatedChange.Evidence.ReportListsTheFinding"
+            PROC_NAME & ".IsolatedChange.Evidence.ReportListsTheFinding"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Runner-owned snapshots were released on every exit, every " & _
             "failure survived cleanup, and a forced cleanup failure, a forced " & _
             "failed unit, a forced inventory gap and a change left by an " & _
             "isolated unit each failed the certification call"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
     'Disarm whatever this run armed. A fault left armed would fire inside an
     'unrelated runner later in the same session. Case E inverted the status bar,
     'so it is put back here on every path.
         On Error Resume Next
-            TST_InjectPostCapture TEST_FAULT_NONE
-            TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
+        TST_InjectPostCapture TEST_FAULT_NONE
+        TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
 
-            If StatusBarAtRisk Then
-                Application.DisplayStatusBar = EntryStatusBar
-            End If
+        If StatusBarAtRisk Then
+            Application.DisplayStatusBar = EntryStatusBar
+        End If
         On Error GoTo 0
 
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
     'Capture before anything else touches Err
         RaisedNumber = Err.Number
         RaisedSource = Err.Source
         RaisedDescription = Err.Description
 
-        TST_Log PROC, "FAIL", _
+        TST_Log PROC_NAME, "FAIL", _
             "Error " & CStr(RaisedNumber) & _
             " | Source: " & RaisedSource & _
             " | " & RaisedDescription
 
         On Error Resume Next
-            TST_InjectPostCapture TEST_FAULT_NONE
-            TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
+        TST_InjectPostCapture TEST_FAULT_NONE
+        TST_CertInjectRunFault TEST_CERT_RUN_FAULT_NONE
 
-            If StatusBarAtRisk Then
-                Application.DisplayStatusBar = EntryStatusBar
-            End If
+        If StatusBarAtRisk Then
+            Application.DisplayStatusBar = EntryStatusBar
+        End If
         On Error GoTo 0
 
         Err.Raise RaisedNumber, RaisedSource, RaisedDescription
 
 End Sub
 
-
 Public Sub Test_EXCEL_UI_RunAll()
 
 '
-'==============================================================================
-' Test_EXCEL_UI_RunAll
+'------------------------------------------------------------------------------
+'                            TEST EXCEL UI RUN ALL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the full regression-test pack for EXCEL_UI, including title-bar tests
@@ -5294,7 +5390,7 @@ Public Sub Test_EXCEL_UI_RunAll()
 '   release, refactor, or repository update
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Snapshots current state
@@ -5317,8 +5413,8 @@ Public Sub Test_EXCEL_UI_RunAll()
 '
 ' UPDATED
 '   2026-08-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' APPLY FULL PACK
 '------------------------------------------------------------------------------
@@ -5327,12 +5423,11 @@ Public Sub Test_EXCEL_UI_RunAll()
 
 End Sub
 
-
 Public Sub Test_EXCEL_UI_RunCore()
 
 '
-'==============================================================================
-' Test_EXCEL_UI_RunCore
+'------------------------------------------------------------------------------
+'                            TEST EXCEL UI RUN CORE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the core regression-test pack for EXCEL_UI, excluding the dedicated
@@ -5343,7 +5438,7 @@ Public Sub Test_EXCEL_UI_RunCore()
 '   preferred
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Snapshots current state
@@ -5364,11 +5459,14 @@ Public Sub Test_EXCEL_UI_RunCore()
 '   cases, so it cannot stand for the mandatory case inventory, and it records
 '   none. Use Test_EXCEL_UI_RunReleaseCertification to certify a release.
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - States that it is not release certification (#42).
 '   2026-07-25
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' APPLY CORE PACK
 '------------------------------------------------------------------------------
@@ -5377,15 +5475,13 @@ Public Sub Test_EXCEL_UI_RunCore()
 
 End Sub
 
-
 Public Function TST_RunRunnerWithLog( _
     ByVal RunnerName As String, _
     ByVal LogPath As String) _
     As String
-
 '
-'==============================================================================
-' TST_RunRunnerWithLog
+'------------------------------------------------------------------------------
+'                           TST RUN RUNNER WITH LOG
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one public runner with the log sink set, and return its verdict as
@@ -5426,31 +5522,34 @@ Public Function TST_RunRunnerWithLog( _
 '   - Test_EXCEL_UI_RunReleaseCertification is not accepted:
 '     tools\Certify-EXCEL_UI.ps1 runs it and collects its evidence
 '
-' UPDATED
+' HISTORY
 '   2026-11-16 - Added for the scripted Excel checks (#197).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Verdict             As String          'The verdict line
-    Dim SinkFailure         As String          'First log write failure, if any
-    Dim RaisedNumber        As Long            'Error the runner raised
-    Dim RaisedSource        As String          'Source of that error
-    Dim RaisedDescription   As String          'Text of that error
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_RunRunnerWithLog"
 
-    Const PROC As String = "TST_RunRunnerWithLog"
+    Dim Verdict             As String   'The verdict line
+    Dim SinkFailure         As String   'First log write failure, if any
+    Dim RaisedNumber        As Long     'Error the runner raised
+    Dim RaisedSource        As String   'Source of that error
+    Dim RaisedDescription   As String   'Text of that error
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
         TST_LogSinkStart LogPath
 
-        TST_Log PROC, "START", RunnerName & " | " & _
+        TST_Log PROC_NAME, "START", RunnerName & " | " & _
             Format$(Now, "yyyy-mm-dd hh:nn:ss")
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' RUN
@@ -5484,7 +5583,7 @@ Public Function TST_RunRunnerWithLog( _
             Case Else
                 Err.Raise _
                     TEST_CERT_ERR_BASE + 40, _
-                    PROC, _
+                    PROC_NAME, _
                     "unknown runner: " & RunnerName
 
         End Select
@@ -5492,9 +5591,9 @@ Public Function TST_RunRunnerWithLog( _
         Verdict = "RESULT: PASS"
 
 '------------------------------------------------------------------------------
-' REPORT VERDICT
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Every path arrives here with the handler disabled or released
         On Error GoTo 0
 
@@ -5520,7 +5619,7 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture before anything else touches Err
         RaisedNumber = Err.Number
         RaisedSource = Err.Source
@@ -5530,27 +5629,24 @@ Err_Handler:
             " | Source: " & RaisedSource & _
             " | " & RaisedDescription
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
 
-
 '
 '------------------------------------------------------------------------------
 '
-'                          PRIVATE PACK RUNNERS
+'                             PRIVATE PACK RUNNERS
 '
 '------------------------------------------------------------------------------
 '
-
 
 Private Sub TST_RunRegressionPack( _
     ByVal IncludeTitleBarTests As Boolean, _
     ByVal CallerProc As String)
-
 '
-'==============================================================================
-' TST_RunRegressionPack
+'------------------------------------------------------------------------------
+'                           TST RUN REGRESSION PACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute the requested regression-test pack and restore the pre-test UI
@@ -5569,7 +5665,7 @@ Private Sub TST_RunRegressionPack( _
 '     Public caller procedure name used for diagnostics
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Snapshots current UI state
@@ -5601,7 +5697,7 @@ Private Sub TST_RunRegressionPack( _
 '     expects. Under Test_EXCEL_UI_RunAll and Test_EXCEL_UI_RunCore the same
 '     calls record nothing.
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Runs every case through TST_CertRunCase and registered the
 '                case-inventory case (#42).
 '   2026-11-18 - Registered the cleanup cases and failed the pack when the UI
@@ -5615,51 +5711,56 @@ Private Sub TST_RunRegressionPack( _
 '   2026-08-21 - Registered the frame-refresh-debt and stale-frame-entry cases,
 '                which certification did not reach.
 '   2026-07-29
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SavedRibbonKnown    As Boolean         'TRUE when pre-test Ribbon state was read successfully
-    Dim SavedRibbonVisible  As Boolean         'Pre-test Ribbon visibility
-    Dim SavedStatusBarVisible As Boolean         'Pre-test StatusBar visibility
-    Dim SavedScrollBarsVisible As Boolean         'Pre-test ScrollBars visibility
-    Dim SavedFormulaBarVisible As Boolean         'Pre-test FormulaBar visibility
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_RunRegressionPack"
 
-    Dim SavedWindowCount    As Long            'Pre-test Application.Windows.Count
-    Dim SavedHeadingsVisible() As Boolean         'Pre-test per-window Headings visibility
-    Dim SavedWorkbookTabsVisible() As Boolean         'Pre-test per-window WorkbookTabs visibility
-    Dim SavedGridlinesVisible() As Boolean         'Pre-test per-window Gridlines visibility
+    Dim SavedRibbonKnown        As Boolean  'TRUE when pre-test Ribbon state was read successfully
+    Dim SavedRibbonVisible      As Boolean  'Pre-test Ribbon visibility
+    Dim SavedStatusBarVisible   As Boolean  'Pre-test StatusBar visibility
+    Dim SavedScrollBarsVisible  As Boolean  'Pre-test ScrollBars visibility
+    Dim SavedFormulaBarVisible  As Boolean  'Pre-test FormulaBar visibility
 
-    Dim SavedTitleBarKnown  As Boolean         'TRUE when pre-test title-bar state was read successfully
-    Dim SavedTitleBarVisible As Boolean         'Pre-test title-bar visibility
+    Dim SavedWindowCount            As Long     'Pre-test Application.Windows.Count
+    Dim SavedHeadingsVisible()      As Boolean  'Pre-test per-window Headings visibility
+    Dim SavedWorkbookTabsVisible()  As Boolean  'Pre-test per-window WorkbookTabs visibility
+    Dim SavedGridlinesVisible()     As Boolean  'Pre-test per-window Gridlines visibility
+
+    Dim SavedTitleBarKnown      As Boolean  'TRUE when pre-test title-bar state was read successfully
+    Dim SavedTitleBarVisible    As Boolean  'Pre-test title-bar visibility
 
 #If VBA7 Then
-    Dim EntryHwnd           As LongPtr         'Frame active before the run
-    Dim EntryFrameStyle     As LongPtr         'Its style before the run
+    Dim EntryHwnd       As LongPtr  'Frame active before the run
+    Dim EntryFrameStyle As LongPtr  'Its style before the run
 #Else
-    Dim EntryHwnd           As Long            'Frame active before the run
-    Dim EntryFrameStyle     As Long            'Its style before the run
+    Dim EntryHwnd       As Long 'Frame active before the run
+    Dim EntryFrameStyle As Long 'Its style before the run
 #End If
 
-    Dim EntryFrameCaptured  As Boolean         'TRUE once EntryFrameStyle was read
-    Dim FrameRestored       As Boolean         'TRUE once the style is back
-    Dim FrameRestoreMsg     As String          'Diagnostic from the restoration
+    Dim EntryFrameCaptured  As Boolean  'TRUE once EntryFrameStyle was read
+    Dim FrameRestored       As Boolean  'TRUE once the style is back
+    Dim FrameRestoreMsg     As String   'Diagnostic from the restoration
 
-    Dim RestoreOK           As Boolean         'TRUE once every UI state step completed
-    Dim RestoreFindings     As tCertRecord     'Steps the restoration could not complete
+    Dim RestoreOK       As Boolean      'TRUE once every UI state step completed
+    Dim RestoreFindings As tCertRecord  'Steps the restoration could not complete
 
-    Dim HadExplicitSnapshot As Boolean         'TRUE when an explicit EXCEL_UI snapshot already existed before the run
-    Dim OldScreenUpdating   As Boolean         'Cached ScreenUpdating state
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim HadExplicitSnapshot As Boolean  'TRUE when an explicit EXCEL_UI snapshot already existed before the run
+    Dim OldScreenUpdating   As Boolean  'Cached ScreenUpdating state
+    Dim HasFailure          As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber          As Long     'Captured failure number
+    Dim FailSource          As String   'Captured failure source
+    Dim FailDescription     As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Capture whether an explicit EXCEL_UI snapshot already exists before the run
         HadExplicitSnapshot = UI_HasExcelUIStateSnapshot
@@ -5786,36 +5887,36 @@ Private Sub TST_RunRegressionPack( _
     'snapshot object safely
         If HadExplicitSnapshot Then
 
-            'Record that snapshot-destructive cases were skipped. Under the
-            'certification runner a skip is a failure, not a quiet log line.
-                TST_CertRecordSkip CallerProc, _
-                    "Snapshot lifecycle cases skipped because an explicit EXCEL_UI snapshot already existed before the run"
+        'Record that snapshot-destructive cases were skipped. Under the
+        'certification runner a skip is a failure, not a quiet log line.
+            TST_CertRecordSkip CallerProc, _
+                "Snapshot lifecycle cases skipped because an explicit EXCEL_UI snapshot already existed before the run"
 
         Else
 
-            'Run structured snapshot capture clean-success case
-                TST_CertRunCase "TST_Case_SnapshotCaptureResultSuccess", IncludeTitleBarTests
+        'Run structured snapshot capture clean-success case
+            TST_CertRunCase "TST_Case_SnapshotCaptureResultSuccess", IncludeTitleBarTests
 
-            'Run structured snapshot restoration clean-success case
-                TST_CertRunCase "TST_Case_SnapshotResetResultSuccess", IncludeTitleBarTests
+        'Run structured snapshot restoration clean-success case
+            TST_CertRunCase "TST_Case_SnapshotResetResultSuccess", IncludeTitleBarTests
 
-            'Run structured restoration no-snapshot failure case
-                TST_CertRunCase "TST_Case_SnapshotResetResultNoSnapshot", IncludeTitleBarTests
+        'Run structured restoration no-snapshot failure case
+            TST_CertRunCase "TST_Case_SnapshotResetResultNoSnapshot", IncludeTitleBarTests
 
-            'Run per-element application-level capture and restoration case
-                TST_CertRunCase "TST_Case_SnapshotCapturePartialApplicationRead", IncludeTitleBarTests
+        'Run per-element application-level capture and restoration case
+            TST_CertRunCase "TST_Case_SnapshotCapturePartialApplicationRead", IncludeTitleBarTests
 
-            'Run the compatibility-wrapper snapshot lifecycle case
-                TST_CertRunCase "TST_Case_SnapshotLifecycle", IncludeTitleBarTests
+        'Run the compatibility-wrapper snapshot lifecycle case
+            TST_CertRunCase "TST_Case_SnapshotLifecycle", IncludeTitleBarTests
 
-            'Run the compatibility-wrapper reset-without-snapshot no-op case
-                TST_CertRunCase "TST_Case_ResetWithoutSnapshot_NoOp", IncludeTitleBarTests
+        'Run the compatibility-wrapper reset-without-snapshot no-op case
+            TST_CertRunCase "TST_Case_ResetWithoutSnapshot_NoOp", IncludeTitleBarTests
 
-            'Run the destructive-runner snapshot-ownership case
-                TST_CertRunCase "TST_Case_DestructiveRunnersPreserveCallerSnapshot", IncludeTitleBarTests
+        'Run the destructive-runner snapshot-ownership case
+            TST_CertRunCase "TST_Case_DestructiveRunnersPreserveCallerSnapshot", IncludeTitleBarTests
 
-            'Run the certification unit-isolation case for a failed capture
-                TST_CertRunCase "TST_Case_CertUnitIsolatesCaptureFailure", IncludeTitleBarTests
+        'Run the certification unit-isolation case for a failed capture
+            TST_CertRunCase "TST_Case_CertUnitIsolatesCaptureFailure", IncludeTitleBarTests
 
         End If
 
@@ -5861,34 +5962,34 @@ Private Sub TST_RunRegressionPack( _
         TST_Log CallerProc, "PASS", "All requested regression cases passed"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Attempt to restore the original pre-test UI state. Both results start
     'FALSE, so a step that raised past this boundary counts as failed.
         RestoreOK = False
         FrameRestored = False
 
         On Error Resume Next
-            RestoreOK = TST_RestoreState( _
-                RibbonKnown:=SavedRibbonKnown, _
-                RibbonVisible:=SavedRibbonVisible, _
-                StatusBarVisible:=SavedStatusBarVisible, _
-                ScrollBarsVisible:=SavedScrollBarsVisible, _
-                FormulaBarVisible:=SavedFormulaBarVisible, _
-                WindowCount:=SavedWindowCount, _
-                HeadingsVisible:=SavedHeadingsVisible, _
-                WorkbookTabsVisible:=SavedWorkbookTabsVisible, _
-                GridlinesVisible:=SavedGridlinesVisible, _
-                TitleBarKnown:=SavedTitleBarKnown, _
-                TitleBarVisible:=SavedTitleBarVisible, _
-                Findings:=RestoreFindings)
+        RestoreOK = TST_RestoreState( _
+            RibbonKnown:=SavedRibbonKnown, _
+            RibbonVisible:=SavedRibbonVisible, _
+            StatusBarVisible:=SavedStatusBarVisible, _
+            ScrollBarsVisible:=SavedScrollBarsVisible, _
+            FormulaBarVisible:=SavedFormulaBarVisible, _
+            WindowCount:=SavedWindowCount, _
+            HeadingsVisible:=SavedHeadingsVisible, _
+            WorkbookTabsVisible:=SavedWorkbookTabsVisible, _
+            GridlinesVisible:=SavedGridlinesVisible, _
+            TitleBarKnown:=SavedTitleBarKnown, _
+            TitleBarVisible:=SavedTitleBarVisible, _
+            Findings:=RestoreFindings)
 
-        'Put the entry frame's exact style back through the harness. The
-        'restore above goes through the API under test, and a defect there
-        'must not be able to leave the host with a hidden title bar.
-            FrameRestored = TST_RestoreTitleBarStyle( _
-                EntryHwnd, EntryFrameStyle, EntryFrameCaptured, FrameRestoreMsg)
+    'Put the entry frame's exact style back through the harness. The
+    'restore above goes through the API under test, and a defect there
+    'must not be able to leave the host with a hidden title bar.
+        FrameRestored = TST_RestoreTitleBarStyle( _
+            EntryHwnd, EntryFrameStyle, EntryFrameCaptured, FrameRestoreMsg)
         On Error GoTo 0
 
     'Restore ScreenUpdating before leaving the harness
@@ -5919,7 +6020,7 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture failure information so it can be re-raised after restoration
         HasFailure = True
         FailNumber = Err.Number
@@ -5932,25 +6033,23 @@ Err_Handler:
             CStr(FailNumber) & ": " & FailDescription & _
             IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
-
 '
 '------------------------------------------------------------------------------
 '
-'                           REGRESSION CASES
+'                               REGRESSION CASES
 '
 '------------------------------------------------------------------------------
 '
-
 
 Private Sub TST_Case_CertificationCleanupUsesBaseline()
 
 '
-'==============================================================================
-' TST_Case_CertificationCleanupUsesBaseline
+'------------------------------------------------------------------------------
+'                 TST CASE CERTIFICATION CLEANUP USES BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the certification cleanup verdict compares the host with the
@@ -5972,7 +6071,7 @@ Private Sub TST_Case_CertificationCleanupUsesBaseline()
 '   to assert one comparison, and could not run from inside the pack at all.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Suppresses screen updating and asserts a matching baseline is clean.
@@ -5983,33 +6082,36 @@ Private Sub TST_Case_CertificationCleanupUsesBaseline()
 ' ERROR POLICY
 '   - Raises on assertion failure, after restoration.
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Drives the retained-window baseline and records findings (#35).
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim EntryScreenUpdating As Boolean         'Value to restore on exit
-    Dim Base                As tCertBaseline   'Baseline under test
-    Dim Rec                 As tCertRecord     'Record under test
-    Dim CleanupOK           As Boolean         'Result under test
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertificationCleanupUsesBaseline"
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim EntryScreenUpdating As Boolean          'Value to restore on exit
+    Dim Base                As tCertBaseline    'Baseline under test
+    Dim Rec                 As tCertRecord      'Record under test
+    Dim CleanupOK           As Boolean          'Result under test
 
-    Const PROC As String = "TST_Case_CertificationCleanupUsesBaseline"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that cleanup is judged against the entry state"
 
         EntryScreenUpdating = Application.ScreenUpdating
@@ -6068,20 +6170,20 @@ Private Sub TST_Case_CertificationCleanupUsesBaseline()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Cleanup compared the entry state and still reported a real change"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Restore the value found on entry, whatever happened above
         On Error Resume Next
-            Application.ScreenUpdating = EntryScreenUpdating
+        Application.ScreenUpdating = EntryScreenUpdating
         On Error GoTo 0
 
         If Application.ScreenUpdating <> EntryScreenUpdating Then
-            TST_CertNoteHostFailure PROC, _
+            TST_CertNoteHostFailure PROC_NAME, _
                 "ScreenUpdating could not be restored to " & _
                 CStr(EntryScreenUpdating), _
                 HasFailure, FailNumber, FailSource, FailDescription
@@ -6097,22 +6199,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
 
 '
-'==============================================================================
-' TST_Case_CertBaselineMatchesUntouchedHost
+'------------------------------------------------------------------------------
+'                TST CASE CERT BASELINE MATCHES UNTOUCHED HOST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a baseline captured from the host and compared at once with the
@@ -6126,7 +6227,7 @@ Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
 '   evidence documents.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   1  capture     every window is retained, the counts equal the host's, and
@@ -6145,59 +6246,62 @@ Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
 '   - TST_CertEvaluateCleanup
 '   - TST_CertComposeEvidence
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   The baseline and the record are local. The record of the certification run
 '   executing this case is not touched.
 '
-' UPDATED
-'   2026-11-18 - Added (#35).
-'==============================================================================
+' CALLED FROM
+'   - TST_RunRegressionPack
 '
+' HISTORY
+'   2026-11-18 - Added (#35).
+'
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Base                As tCertBaseline   'Baseline under test
-    Dim Rec                 As tCertRecord     'Record under test
-    Dim PropIdx             As Long            'Cursor over the application properties
-    Dim KnownCount          As Long            'Application properties read
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertBaselineMatchesUntouchedHost"
 
-    Dim UnitsFailed         As Long            'Composed failed-unit count
-    Dim Complete            As Boolean         'Composed completeness
-    Dim Passed              As Boolean         'Composed verdict
-    Dim Verdict             As String          'Composed RESULT line
-    Dim CleanupDetail       As String          'Composed cleanup detail
-    Dim RecordingDetail     As String          'Composed recording failure
-    Dim JsonText            As String          'Composed JSON evidence
-    Dim ReportText          As String          'Composed text evidence
+    Dim Base        As tCertBaseline    'Baseline under test
+    Dim Rec         As tCertRecord      'Record under test
+    Dim PropIdx     As Long             'Cursor over the application properties
+    Dim KnownCount  As Long             'Application properties read
 
-    Const PROC As String = "TST_Case_CertBaselineMatchesUntouchedHost"
+    Dim UnitsFailed     As Long     'Composed failed-unit count
+    Dim Complete        As Boolean  'Composed completeness
+    Dim Passed          As Boolean  'Composed verdict
+    Dim Verdict         As String   'Composed RESULT line
+    Dim CleanupDetail   As String   'Composed cleanup detail
+    Dim RecordingDetail As String   'Composed recording failure
+    Dim JsonText        As String   'Composed JSON evidence
+    Dim ReportText      As String   'Composed text evidence
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that an untouched host matches its own baseline"
 
 '------------------------------------------------------------------------------
 ' CAPTURE
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals True, TST_CertCaptureBaseline(Base, Rec), _
-            PROC & ".Captured"
+            PROC_NAME & ".Captured"
 
         TST_AssertTrue (Base.BookCount = Application.Workbooks.Count), _
-            PROC & ".WorkbookCount"
+            PROC_NAME & ".WorkbookCount"
 
         TST_AssertTrue (Base.WindowCount = Application.Windows.Count), _
-            PROC & ".WindowCount"
+            PROC_NAME & ".WindowCount"
 
     'Every window is retained by object, so the count is not all that is kept
-        TST_AssertTrue (Base.WindowCount >= 1), PROC & ".AWindowIsOpen"
+        TST_AssertTrue (Base.WindowCount >= 1), PROC_NAME & ".AWindowIsOpen"
 
-        TST_AssertTrue (Not Base.Win(1) Is Nothing), PROC & ".WindowRetained"
+        TST_AssertTrue (Not Base.Win(1) Is Nothing), PROC_NAME & ".WindowRetained"
 
         For PropIdx = 1 To TST_CERT_APP_COUNT
             If Base.AppKnown(PropIdx) Then
@@ -6206,20 +6310,20 @@ Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
         Next PropIdx
 
         TST_AssertTrue (KnownCount = TST_CERT_APP_COUNT), _
-            PROC & ".EveryApplicationPropertyRead"
+            PROC_NAME & ".EveryApplicationPropertyRead"
 
-        TST_AssertBooleanEquals True, Base.ActiveKnown, PROC & ".ActiveWindowKnown"
+        TST_AssertBooleanEquals True, Base.ActiveKnown, PROC_NAME & ".ActiveWindowKnown"
 
 '------------------------------------------------------------------------------
 ' COMPARE
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals True, TST_CertEvaluateCleanup(Base, Rec), _
-            PROC & ".Clean"
+            PROC_NAME & ".Clean"
 
-        TST_AssertTrue (Rec.FindingCount = 0), PROC & ".NoFinding"
+        TST_AssertTrue (Rec.FindingCount = 0), PROC_NAME & ".NoFinding"
 
     'cleanup=OK is only as strong as what was compared
-        TST_AssertTrue (Rec.CheckCount >= 6), PROC & ".ComparisonsWereMade"
+        TST_AssertTrue (Rec.CheckCount >= 6), PROC_NAME & ".ComparisonsWereMade"
 
 '------------------------------------------------------------------------------
 ' WHAT CANNOT BE COMPARED IS NAMED
@@ -6227,17 +6331,17 @@ Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(Rec, TEST_CERT_ENTRY_UNVERIFIED), _
                 "|ribbon.scope|", vbBinaryCompare) > 0), _
-            PROC & ".RibbonScopeNamed"
+            PROC_NAME & ".RibbonScopeNamed"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(Rec, TEST_CERT_ENTRY_UNVERIFIED), _
                 "|frameRegistry.scope|", vbBinaryCompare) > 0), _
-            PROC & ".FrameRegistryScopeNamed"
+            PROC_NAME & ".FrameRegistryScopeNamed"
 
     'A record that never compared its case inventory is not a complete pass, so
     'the comparison of an empty inventory is made first
         TST_AssertBooleanEquals True, TST_CertEvaluateInventory(Rec), _
-            PROC & ".Inventory.Compared"
+            PROC_NAME & ".Inventory.Compared"
 
     'An unverified surface does not fail cleanup, and is in both documents
         TST_CertComposeEvidence _
@@ -6252,43 +6356,42 @@ Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
             JsonText:=JsonText, _
             ReportText:=ReportText
 
-        TST_AssertBooleanEquals True, Passed, PROC & ".Evidence.Passed"
+        TST_AssertBooleanEquals True, Passed, PROC_NAME & ".Evidence.Passed"
 
         TST_AssertTrue _
             (InStr(1, Verdict, " cleanup=OK", vbBinaryCompare) > 0), _
-            PROC & ".Evidence.CleanupOK"
+            PROC_NAME & ".Evidence.CleanupOK"
 
         TST_AssertTrue _
             (InStr(1, JsonText, """cleanupFindings"":[]", vbBinaryCompare) > 0), _
-            PROC & ".Evidence.JsonNoFindings"
+            PROC_NAME & ".Evidence.JsonNoFindings"
 
         TST_AssertTrue _
             (InStr(1, JsonText, """code"":""ribbon.scope""", vbBinaryCompare) > 0), _
-            PROC & ".Evidence.JsonListsUnverified"
+            PROC_NAME & ".Evidence.JsonListsUnverified"
 
         TST_AssertTrue _
             (InStr(1, JsonText, """cleanupChecked"":0", vbBinaryCompare) = 0), _
-            PROC & ".Evidence.JsonCountsComparisons"
+            PROC_NAME & ".Evidence.JsonCountsComparisons"
 
         TST_AssertTrue _
             (InStr(1, ReportText, vbNewLine & "  UNVERIFIED  ribbon.scope | ", _
                 vbBinaryCompare) > 0), _
-            PROC & ".Evidence.ReportListsUnverified"
+            PROC_NAME & ".Evidence.ReportListsUnverified"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "An untouched host matched its baseline, and the evidence named what it could not compare"
 
 End Sub
 
-
 Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
 
 '
-'==============================================================================
-' TST_Case_CertCleanupDetectsLeakedAndReplacedWindows
+'------------------------------------------------------------------------------
+'          TST CASE CERT CLEANUP DETECTS LEAKED AND REPLACED WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that cleanup reports a window the run leaked, and a window that
@@ -6301,7 +6404,7 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
 '   counts and a single anchor window (#35).
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   A  leaked window     a baseline, a new window, a comparison: the window
@@ -6323,58 +6426,61 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
 '   - TST_CertRestoreActiveWindow
 '   - TST_SafeCloseWindow
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   Every baseline and record is local. Windows are matched through retained
 '   objects, so the case holds if Windows reissues the handle of the window it
 '   closed to the one it opens next.
 '
-' UPDATED
-'   2026-11-18 - Added (#35).
-'==============================================================================
+' CALLED FROM
+'   - TST_RunRegressionPack
 '
+' HISTORY
+'   2026-11-18 - Added (#35).
+'
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim EntryBase           As tCertBaseline   'Baseline of the host as found
-    Dim ReplaceBase         As tCertBaseline   'Baseline that holds a temporary window
-    Dim EntryRec            As tCertRecord     'Record of the entry capture
-    Dim LeakRec             As tCertRecord     'Findings of scenario A
-    Dim ReplaceRec          As tCertRecord     'Findings of scenario B
-    Dim RecoverRec          As tCertRecord     'Findings of the recovery
-    Dim CleanRec            As tCertRecord     'Findings after recovery
-    Dim ScratchRec          As tCertRecord     'Record of the baseline in scenario B
-    Dim LeakedWindow        As Window          'Window scenario A leaks
-    Dim FirstTemp           As Window          'Window scenario B puts in the baseline
-    Dim SecondTemp          As Window          'Window scenario B replaces it with
-    Dim LeakCodes           As String          'Finding identifiers of scenario A
-    Dim ReplaceCodes        As String          'Finding identifiers of scenario B
-    Dim EntryCaptured       As Boolean         'TRUE once the entry baseline exists
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertCleanupDetectsLeakedAndReplacedWindows"
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim EntryBase       As tCertBaseline    'Baseline of the host as found
+    Dim ReplaceBase     As tCertBaseline    'Baseline that holds a temporary window
+    Dim EntryRec        As tCertRecord      'Record of the entry capture
+    Dim LeakRec         As tCertRecord      'Findings of scenario A
+    Dim ReplaceRec      As tCertRecord      'Findings of scenario B
+    Dim RecoverRec      As tCertRecord      'Findings of the recovery
+    Dim CleanRec        As tCertRecord      'Findings after recovery
+    Dim ScratchRec      As tCertRecord      'Record of the baseline in scenario B
+    Dim LeakedWindow    As Window           'Window scenario A leaks
+    Dim FirstTemp       As Window           'Window scenario B puts in the baseline
+    Dim SecondTemp      As Window           'Window scenario B replaces it with
+    Dim LeakCodes       As String           'Finding identifiers of scenario A
+    Dim ReplaceCodes    As String           'Finding identifiers of scenario B
+    Dim EntryCaptured   As Boolean          'TRUE once the entry baseline exists
 
-    Const PROC As String = "TST_Case_CertCleanupDetectsLeakedAndReplacedWindows"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a leaked or replaced window is reported"
 
         EntryCaptured = TST_CertCaptureBaseline(EntryBase, EntryRec)
 
-        TST_AssertBooleanEquals True, EntryCaptured, PROC & ".EntryCaptured"
+        TST_AssertBooleanEquals True, EntryCaptured, PROC_NAME & ".EntryCaptured"
 
         TST_AssertBooleanEquals True, EntryBase.ActiveKnown, _
-            PROC & ".EntryActiveWindowKnown"
+            PROC_NAME & ".EntryActiveWindowKnown"
 
 '------------------------------------------------------------------------------
 ' A - A LEAKED WINDOW
@@ -6382,28 +6488,28 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
         Set LeakedWindow = ThisWorkbook.NewWindow
 
         If LeakedWindow Is Nothing Then
-            Err.Raise TEST_CERT_ERR_BASE + 60, PROC, _
+            Err.Raise TEST_CERT_ERR_BASE + 60, PROC_NAME, _
                 "ThisWorkbook.NewWindow did not return a temporary window"
         End If
 
         TST_WaitUI TEST_WAIT_SECONDS
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(EntryBase, LeakRec), _
-            PROC & ".Leak.NotClean"
+            PROC_NAME & ".Leak.NotClean"
 
         LeakCodes = TST_CertEntryCodes(LeakRec, TEST_CERT_ENTRY_FINDING)
 
         TST_AssertTrue (InStr(1, LeakCodes, "|windows.count|", vbBinaryCompare) > 0), _
-            PROC & ".Leak.CountChanged"
+            PROC_NAME & ".Leak.CountChanged"
 
         TST_AssertTrue (InStr(1, LeakCodes, "|window.unexpected|", vbBinaryCompare) > 0), _
-            PROC & ".Leak.WindowUnexpected"
+            PROC_NAME & ".Leak.WindowUnexpected"
 
         TST_AssertTrue (InStr(1, LeakCodes, "|activeWindow.changed|", vbBinaryCompare) > 0), _
-            PROC & ".Leak.ActiveWindowChanged"
+            PROC_NAME & ".Leak.ActiveWindowChanged"
 
         TST_AssertTrue (InStr(1, LeakCodes, "|window.missing|", vbBinaryCompare) = 0), _
-            PROC & ".Leak.NoEntryWindowMissing"
+            PROC_NAME & ".Leak.NoEntryWindowMissing"
 
     'Close it, then make the entry window active again, as the runner does
         TST_SafeCloseWindow LeakedWindow
@@ -6412,7 +6518,7 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
         TST_CertRestoreActiveWindow EntryBase, RecoverRec
 
         TST_AssertTrue (RecoverRec.FindingCount = 0), _
-            PROC & ".Leak.ActiveWindowRestored"
+            PROC_NAME & ".Leak.ActiveWindowRestored"
 
 '------------------------------------------------------------------------------
 ' B - A WINDOW REPLACED WHILE THE COUNT STAYS THE SAME
@@ -6420,14 +6526,14 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
         Set FirstTemp = ThisWorkbook.NewWindow
 
         If FirstTemp Is Nothing Then
-            Err.Raise TEST_CERT_ERR_BASE + 61, PROC, _
+            Err.Raise TEST_CERT_ERR_BASE + 61, PROC_NAME, _
                 "ThisWorkbook.NewWindow did not return the first temporary window"
         End If
 
         TST_WaitUI TEST_WAIT_SECONDS
 
         TST_AssertBooleanEquals True, TST_CertCaptureBaseline(ReplaceBase, ScratchRec), _
-            PROC & ".Replace.Captured"
+            PROC_NAME & ".Replace.Captured"
 
         TST_SafeCloseWindow FirstTemp
         TST_WaitUI TEST_WAIT_SECONDS
@@ -6435,33 +6541,33 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
         Set SecondTemp = ThisWorkbook.NewWindow
 
         If SecondTemp Is Nothing Then
-            Err.Raise TEST_CERT_ERR_BASE + 62, PROC, _
+            Err.Raise TEST_CERT_ERR_BASE + 62, PROC_NAME, _
                 "ThisWorkbook.NewWindow did not return the second temporary window"
         End If
 
         TST_WaitUI TEST_WAIT_SECONDS
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(ReplaceBase, ReplaceRec), _
-            PROC & ".Replace.NotClean"
+            PROC_NAME & ".Replace.NotClean"
 
         ReplaceCodes = TST_CertEntryCodes(ReplaceRec, TEST_CERT_ENTRY_FINDING)
 
     'The count matches, which is exactly why it cannot be the only comparison
         TST_AssertTrue (InStr(1, ReplaceCodes, "|windows.count|", vbBinaryCompare) = 0), _
-            PROC & ".Replace.CountUnchanged"
+            PROC_NAME & ".Replace.CountUnchanged"
 
         TST_AssertTrue (InStr(1, ReplaceCodes, "|window.missing|", vbBinaryCompare) > 0), _
-            PROC & ".Replace.EntryWindowMissing"
+            PROC_NAME & ".Replace.EntryWindowMissing"
 
         TST_AssertTrue (InStr(1, ReplaceCodes, "|window.unexpected|", vbBinaryCompare) > 0), _
-            PROC & ".Replace.WindowUnexpected"
+            PROC_NAME & ".Replace.WindowUnexpected"
 
     'Findings are in the order the comparison runs: an entry window is judged
     'before a window nothing accounts for
         TST_AssertTrue _
             (InStr(1, ReplaceCodes, "|window.missing|", vbBinaryCompare) < _
              InStr(1, ReplaceCodes, "|window.unexpected|", vbBinaryCompare)), _
-            PROC & ".Replace.DeterministicOrder"
+            PROC_NAME & ".Replace.DeterministicOrder"
 
 '------------------------------------------------------------------------------
 ' C - THE HOST IS BACK AT ITS BASELINE
@@ -6472,23 +6578,23 @@ Private Sub TST_Case_CertCleanupDetectsLeakedAndReplacedWindows()
         TST_CertRestoreActiveWindow EntryBase, RecoverRec
 
         TST_AssertBooleanEquals True, TST_CertEvaluateCleanup(EntryBase, CleanRec), _
-            PROC & ".Recovered.Clean"
+            PROC_NAME & ".Recovered.Clean"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "A leaked window and a replaced window were both reported, and the host was put back"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Close whatever is still open, whatever happened above
         On Error Resume Next
-            TST_SafeCloseWindow LeakedWindow
-            TST_SafeCloseWindow FirstTemp
-            TST_SafeCloseWindow SecondTemp
+        TST_SafeCloseWindow LeakedWindow
+        TST_SafeCloseWindow FirstTemp
+        TST_SafeCloseWindow SecondTemp
         On Error GoTo 0
 
     'The entry window must be active again; a window that could not be closed
@@ -6498,14 +6604,14 @@ Safe_Exit:
             TST_CertRestoreActiveWindow EntryBase, RecoverRec
 
             If RecoverRec.FindingCount > 0 Then
-                TST_CertNoteHostFailure PROC, _
+                TST_CertNoteHostFailure PROC_NAME, _
                     "the entry window could not be made active again | " & _
                     TST_CertEntrySummary(RecoverRec, TEST_CERT_ENTRY_FINDING), _
                     HasFailure, FailNumber, FailSource, FailDescription
             End If
 
             If Application.Windows.Count <> EntryBase.WindowCount Then
-                TST_CertNoteHostFailure PROC, _
+                TST_CertNoteHostFailure PROC_NAME, _
                     "a temporary window is still open; Application.Windows.Count is " & _
                     CStr(Application.Windows.Count) & ", not " & _
                     CStr(EntryBase.WindowCount), _
@@ -6524,22 +6630,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
 
 '
-'==============================================================================
-' TST_Case_CertCleanupDetectsPropertyDrift
+'------------------------------------------------------------------------------
+'                 TST CASE CERT CLEANUP DETECTS PROPERTY DRIFT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that cleanup reports an application-level property and a
@@ -6551,7 +6656,7 @@ Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
 '   count and ScreenUpdating were compared (#35).
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   A  application    Application.DisplayStatusBar inverted: reported with
@@ -6569,65 +6674,68 @@ Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
 '   - TST_CertCaptureBaseline
 '   - TST_CertEvaluateCleanup
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   The case writes the properties itself, never through the API under test,
 '   and puts them back itself.
 '
-' UPDATED
-'   2026-11-18 - Added (#35).
-'==============================================================================
+' CALLED FROM
+'   - TST_RunRegressionPack
 '
+' HISTORY
+'   2026-11-18 - Added (#35).
+'
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Base                As tCertBaseline   'Baseline of the host as found
-    Dim Rec                 As tCertRecord     'Record of the capture
-    Dim AppRec              As tCertRecord     'Findings of scenario A
-    Dim WinRec              As tCertRecord     'Findings of scenario B
-    Dim BothRec             As tCertRecord     'Findings of scenario C
-    Dim CleanRec            As tCertRecord     'Findings after restoration
-    Dim TabsWindow          As Object          'Entry active window, retained
-    Dim EntryStatusBar      As Boolean         'DisplayStatusBar as found
-    Dim EntryTabs           As Boolean         'DisplayWorkbookTabs as found
-    Dim StatusBarAltered    As Boolean         'TRUE while the status bar is inverted
-    Dim TabsAltered         As Boolean         'TRUE while the tabs are inverted
-    Dim BothCodes           As String          'Finding identifiers of scenario C
-    Dim ActiveIdx           As Long            'Index of the entry active window
-    Dim Captured            As Boolean         'TRUE once the baseline exists
-    Dim ValuesRead          As Boolean         'TRUE once the values found are known
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertCleanupDetectsPropertyDrift"
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim Base                As tCertBaseline    'Baseline of the host as found
+    Dim Rec                 As tCertRecord      'Record of the capture
+    Dim AppRec              As tCertRecord      'Findings of scenario A
+    Dim WinRec              As tCertRecord      'Findings of scenario B
+    Dim BothRec             As tCertRecord      'Findings of scenario C
+    Dim CleanRec            As tCertRecord      'Findings after restoration
+    Dim TabsWindow          As Object           'Entry active window, retained
+    Dim EntryStatusBar      As Boolean          'DisplayStatusBar as found
+    Dim EntryTabs           As Boolean          'DisplayWorkbookTabs as found
+    Dim StatusBarAltered    As Boolean          'TRUE while the status bar is inverted
+    Dim TabsAltered         As Boolean          'TRUE while the tabs are inverted
+    Dim BothCodes           As String           'Finding identifiers of scenario C
+    Dim ActiveIdx           As Long             'Index of the entry active window
+    Dim Captured            As Boolean          'TRUE once the baseline exists
+    Dim ValuesRead          As Boolean          'TRUE once the values found are known
 
-    Const PROC As String = "TST_Case_CertCleanupDetectsPropertyDrift"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that an altered application or window property is reported"
 
         Captured = TST_CertCaptureBaseline(Base, Rec)
 
-        TST_AssertBooleanEquals True, Captured, PROC & ".Captured"
+        TST_AssertBooleanEquals True, Captured, PROC_NAME & ".Captured"
 
         TST_AssertBooleanEquals True, Base.AppKnown(TST_CERT_APP_STATUSBAR), _
-            PROC & ".StatusBarWasRead"
+            PROC_NAME & ".StatusBarWasRead"
 
-        TST_AssertBooleanEquals True, Base.ActiveKnown, PROC & ".ActiveWindowKnown"
+        TST_AssertBooleanEquals True, Base.ActiveKnown, PROC_NAME & ".ActiveWindowKnown"
 
         ActiveIdx = Base.ActiveIndex
 
         TST_AssertBooleanEquals True, Base.WinPropKnown(ActiveIdx, TST_CERT_WINPROP_TABS), _
-            PROC & ".WorkbookTabsWasRead"
+            PROC_NAME & ".WorkbookTabsWasRead"
 
         Set TabsWindow = Base.Win(ActiveIdx)
 
@@ -6643,18 +6751,18 @@ Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
         StatusBarAltered = True
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, AppRec), _
-            PROC & ".App.NotClean"
+            PROC_NAME & ".App.NotClean"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(AppRec, TEST_CERT_ENTRY_FINDING), _
                 "|app.DisplayStatusBar|", vbBinaryCompare) > 0), _
-            PROC & ".App.Named"
+            PROC_NAME & ".App.Named"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntrySummary(AppRec, TEST_CERT_ENTRY_FINDING), _
                 "DisplayStatusBar changed from " & CStr(EntryStatusBar) & _
                 " to " & CStr(Not EntryStatusBar), vbBinaryCompare) > 0), _
-            PROC & ".App.NamesBothValues"
+            PROC_NAME & ".App.NamesBothValues"
 
         Application.DisplayStatusBar = EntryStatusBar
         StatusBarAltered = False
@@ -6666,18 +6774,18 @@ Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
         TabsAltered = True
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, WinRec), _
-            PROC & ".Window.NotClean"
+            PROC_NAME & ".Window.NotClean"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(WinRec, TEST_CERT_ENTRY_FINDING), _
                 "|window.DisplayWorkbookTabs|", vbBinaryCompare) > 0), _
-            PROC & ".Window.Named"
+            PROC_NAME & ".Window.Named"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntrySummary(WinRec, TEST_CERT_ENTRY_FINDING), _
                 "DisplayWorkbookTabs changed from " & CStr(EntryTabs) & _
                 " to " & CStr(Not EntryTabs), vbBinaryCompare) > 0), _
-            PROC & ".Window.NamesBothValues"
+            PROC_NAME & ".Window.NamesBothValues"
 
         TabsWindow.DisplayWorkbookTabs = EntryTabs
         TabsAltered = False
@@ -6691,22 +6799,22 @@ Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
         TabsAltered = True
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, BothRec), _
-            PROC & ".Both.NotClean"
+            PROC_NAME & ".Both.NotClean"
 
         BothCodes = TST_CertEntryCodes(BothRec, TEST_CERT_ENTRY_FINDING)
 
         TST_AssertTrue _
             (InStr(1, BothCodes, "|app.DisplayStatusBar|", vbBinaryCompare) > 0), _
-            PROC & ".Both.AppReported"
+            PROC_NAME & ".Both.AppReported"
 
         TST_AssertTrue _
             (InStr(1, BothCodes, "|window.DisplayWorkbookTabs|", vbBinaryCompare) > 0), _
-            PROC & ".Both.WindowReported"
+            PROC_NAME & ".Both.WindowReported"
 
         TST_AssertTrue _
             (InStr(1, BothCodes, "|app.DisplayStatusBar|", vbBinaryCompare) < _
              InStr(1, BothCodes, "|window.DisplayWorkbookTabs|", vbBinaryCompare)), _
-            PROC & ".Both.DeterministicOrder"
+            PROC_NAME & ".Both.DeterministicOrder"
 
         Application.DisplayStatusBar = EntryStatusBar
         StatusBarAltered = False
@@ -6717,41 +6825,41 @@ Private Sub TST_Case_CertCleanupDetectsPropertyDrift()
 ' D - RESTORED
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals True, TST_CertEvaluateCleanup(Base, CleanRec), _
-            PROC & ".Restored.Clean"
+            PROC_NAME & ".Restored.Clean"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "An altered application property and window property were both reported with their values"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Put both properties back, whatever happened above
         On Error Resume Next
-            If StatusBarAltered Then
-                Application.DisplayStatusBar = EntryStatusBar
-            End If
+        If StatusBarAltered Then
+            Application.DisplayStatusBar = EntryStatusBar
+        End If
 
-            If TabsAltered Then
-                TabsWindow.DisplayWorkbookTabs = EntryTabs
-            End If
+        If TabsAltered Then
+            TabsWindow.DisplayWorkbookTabs = EntryTabs
+        End If
         On Error GoTo 0
 
     'A property that did not read back as found leaves Excel altered
         If ValuesRead Then
 
             If Application.DisplayStatusBar <> EntryStatusBar Then
-                TST_CertNoteHostFailure PROC, _
+                TST_CertNoteHostFailure PROC_NAME, _
                     "DisplayStatusBar could not be restored to " & _
                     CStr(EntryStatusBar), _
                     HasFailure, FailNumber, FailSource, FailDescription
             End If
 
             If TabsWindow.DisplayWorkbookTabs <> EntryTabs Then
-                TST_CertNoteHostFailure PROC, _
+                TST_CertNoteHostFailure PROC_NAME, _
                     "DisplayWorkbookTabs could not be restored to " & _
                     CStr(EntryTabs), _
                     HasFailure, FailNumber, FailSource, FailDescription
@@ -6769,22 +6877,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
 
 '
-'==============================================================================
-' TST_Case_CertCleanupDetectsTitleBarMismatch
+'------------------------------------------------------------------------------
+'               TST CASE CERT CLEANUP DETECTS TITLE BAR MISMATCH
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that cleanup reports a title bar, an owned frame bit and a frame
@@ -6795,7 +6902,7 @@ Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
 '   pending frame refresh, could coexist with cleanup=OK (#35).
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   A  caption       the baseline records the caption bits inverted: both
@@ -6813,53 +6920,56 @@ Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
 '   - TST_CertCaptureBaseline
 '   - TST_CertEvaluateCleanup
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   The fault is injected into the local baseline record, never into a frame:
 '   the live title bar is only read, so no path of this case can leave Excel
 '   with a hidden title bar. The write and the refresh of a real frame are
 '   covered by the title-bar cases.
 '
-' UPDATED
-'   2026-11-18 - Added (#35).
-'==============================================================================
+' CALLED FROM
+'   - TST_RunRegressionPack
 '
+' HISTORY
+'   2026-11-18 - Added (#35).
+'
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Base                As tCertBaseline   'Baseline whose record is altered
-    Dim Rec                 As tCertRecord     'Record of the capture
-    Dim CaptionRec          As tCertRecord     'Findings of scenario A
-    Dim MenuRec             As tCertRecord     'Findings of scenario B
-    Dim RegistryRec         As tCertRecord     'Findings of scenario C
-    Dim CleanRec            As tCertRecord     'Findings of scenario D
-    Dim ActiveIdx           As Long            'Index of the entry active window
-    Dim Codes               As String          'Finding identifiers of a scenario
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertCleanupDetectsTitleBarMismatch"
 
-    Const PROC As String = "TST_Case_CertCleanupDetectsTitleBarMismatch"
+    Dim Base        As tCertBaseline    'Baseline whose record is altered
+    Dim Rec         As tCertRecord      'Record of the capture
+    Dim CaptionRec  As tCertRecord      'Findings of scenario A
+    Dim MenuRec     As tCertRecord      'Findings of scenario B
+    Dim RegistryRec As tCertRecord      'Findings of scenario C
+    Dim CleanRec    As tCertRecord      'Findings of scenario D
+    Dim ActiveIdx   As Long             'Index of the entry active window
+    Dim Codes       As String           'Finding identifiers of a scenario
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a title-bar or frame-state mismatch is reported"
 
         TST_AssertBooleanEquals True, TST_CertCaptureBaseline(Base, Rec), _
-            PROC & ".Captured"
+            PROC_NAME & ".Captured"
 
-        TST_AssertBooleanEquals True, Base.ActiveKnown, PROC & ".ActiveWindowKnown"
+        TST_AssertBooleanEquals True, Base.ActiveKnown, PROC_NAME & ".ActiveWindowKnown"
 
         ActiveIdx = Base.ActiveIndex
 
     'The active window's frame is the one the host agrees on, so it is readable
         TST_AssertBooleanEquals True, Base.WinTitleKnown(ActiveIdx), _
-            PROC & ".TitleBarWasRead"
+            PROC_NAME & ".TitleBarWasRead"
 
         TST_AssertBooleanEquals True, Base.WinHwndKnown(ActiveIdx), _
-            PROC & ".FrameHandleWasRead"
+            PROC_NAME & ".FrameHandleWasRead"
 
 '------------------------------------------------------------------------------
 ' A - THE CAPTION BITS DIFFER
@@ -6867,20 +6977,20 @@ Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
         Base.WinStyle(ActiveIdx) = Base.WinStyle(ActiveIdx) Xor TST_WS_CAPTION
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, CaptionRec), _
-            PROC & ".Caption.NotClean"
+            PROC_NAME & ".Caption.NotClean"
 
         Codes = TST_CertEntryCodes(CaptionRec, TEST_CERT_ENTRY_FINDING)
 
         TST_AssertTrue (InStr(1, Codes, "|titleBar.visible|", vbBinaryCompare) > 0), _
-            PROC & ".Caption.VisibilityReported"
+            PROC_NAME & ".Caption.VisibilityReported"
 
         TST_AssertTrue (InStr(1, Codes, "|titleBar.ownedBits|", vbBinaryCompare) > 0), _
-            PROC & ".Caption.OwnedBitsReported"
+            PROC_NAME & ".Caption.OwnedBitsReported"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntrySummary(CaptionRec, TEST_CERT_ENTRY_FINDING), _
                 "title bar visibility changed from", vbBinaryCompare) > 0), _
-            PROC & ".Caption.NamesBothStates"
+            PROC_NAME & ".Caption.NamesBothStates"
 
         Base.WinStyle(ActiveIdx) = Base.WinStyle(ActiveIdx) Xor TST_WS_CAPTION
 
@@ -6890,15 +7000,15 @@ Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
         Base.WinStyle(ActiveIdx) = Base.WinStyle(ActiveIdx) Xor TST_CERT_WS_SYSMENU
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, MenuRec), _
-            PROC & ".SysMenu.NotClean"
+            PROC_NAME & ".SysMenu.NotClean"
 
         Codes = TST_CertEntryCodes(MenuRec, TEST_CERT_ENTRY_FINDING)
 
         TST_AssertTrue (InStr(1, Codes, "|titleBar.ownedBits|", vbBinaryCompare) > 0), _
-            PROC & ".SysMenu.OwnedBitsReported"
+            PROC_NAME & ".SysMenu.OwnedBitsReported"
 
         TST_AssertTrue (InStr(1, Codes, "|titleBar.visible|", vbBinaryCompare) = 0), _
-            PROC & ".SysMenu.VisibilityUnchanged"
+            PROC_NAME & ".SysMenu.VisibilityUnchanged"
 
         Base.WinStyle(ActiveIdx) = Base.WinStyle(ActiveIdx) Xor TST_CERT_WS_SYSMENU
 
@@ -6909,15 +7019,15 @@ Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
         Base.WinRegHidden(ActiveIdx) = Not Base.WinRegHidden(ActiveIdx)
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, RegistryRec), _
-            PROC & ".Registry.NotClean"
+            PROC_NAME & ".Registry.NotClean"
 
         Codes = TST_CertEntryCodes(RegistryRec, TEST_CERT_ENTRY_FINDING)
 
         TST_AssertTrue (InStr(1, Codes, "|frame.refreshPending|", vbBinaryCompare) > 0), _
-            PROC & ".Registry.RefreshDebtReported"
+            PROC_NAME & ".Registry.RefreshDebtReported"
 
         TST_AssertTrue (InStr(1, Codes, "|frame.componentHidden|", vbBinaryCompare) > 0), _
-            PROC & ".Registry.OwnershipReported"
+            PROC_NAME & ".Registry.OwnershipReported"
 
         Base.WinRegRefresh(ActiveIdx) = Not Base.WinRegRefresh(ActiveIdx)
         Base.WinRegHidden(ActiveIdx) = Not Base.WinRegHidden(ActiveIdx)
@@ -6926,22 +7036,21 @@ Private Sub TST_Case_CertCleanupDetectsTitleBarMismatch()
 ' D - WITH EVERY RECORD PUT BACK, NOTHING IS REPORTED
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals True, TST_CertEvaluateCleanup(Base, CleanRec), _
-            PROC & ".Untouched.Clean"
+            PROC_NAME & ".Untouched.Clean"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "A title-bar mismatch, an owned-bit mismatch and a registry mismatch were each reported"
 
 End Sub
 
-
 Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
 
 '
-'==============================================================================
-' TST_Case_CertCleanupHelperFailureIsFinding
+'------------------------------------------------------------------------------
+'               TST CASE CERT CLEANUP HELPER FAILURE IS FINDING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a cleanup helper or stage that fails produces a finding, that
@@ -6954,7 +7063,7 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
 '   nothing (#35).
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   A  failed read    the first property read on exit fails: reported as a
@@ -6979,60 +7088,63 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
 '   - TST_CertAddFinding
 '   - TST_CertComposeEvidence
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   Both faults are one-shot and local to this module or to a local record. The
 '   certification run executing this case has its own baseline and record, and
 '   neither is touched.
 '
-' UPDATED
-'   2026-11-18 - Added (#35).
-'==============================================================================
+' CALLED FROM
+'   - TST_RunRegressionPack
 '
+' HISTORY
+'   2026-11-18 - Added (#35).
+'
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Base                As tCertBaseline   'Baseline of the host as found
-    Dim Blank               As tCertBaseline   'A baseline that was never captured
-    Dim Rec                 As tCertRecord     'Record of the capture
-    Dim ReadRec             As tCertRecord     'Findings of scenario A
-    Dim StageRec            As tCertRecord     'Findings of scenario B
-    Dim BlankRec            As tCertRecord     'Findings of scenario C
-    Dim StoreRec            As tCertRecord     'Record of scenario E
-    Dim PropIdx             As Long            'Cursor over the properties
-    Dim KnownCount          As Long            'Application properties read
-    Dim MinChecks           As Long            'Comparisons a surviving stage run makes
-    Dim Stored              As Boolean         'Result of storing a finding
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertCleanupHelperFailureIsFinding"
 
-    Dim UnitsFailed         As Long            'Composed failed-unit count
-    Dim Complete            As Boolean         'Composed completeness
-    Dim Passed              As Boolean         'Composed verdict
-    Dim Verdict             As String          'Composed RESULT line
-    Dim CleanupDetail       As String          'Composed cleanup detail
-    Dim RecordingDetail     As String          'Composed recording failure
-    Dim JsonText            As String          'Composed JSON evidence
-    Dim ReportText          As String          'Composed text evidence
+    Dim Base        As tCertBaseline    'Baseline of the host as found
+    Dim Blank       As tCertBaseline    'A baseline that was never captured
+    Dim Rec         As tCertRecord      'Record of the capture
+    Dim ReadRec     As tCertRecord      'Findings of scenario A
+    Dim StageRec    As tCertRecord      'Findings of scenario B
+    Dim BlankRec    As tCertRecord      'Findings of scenario C
+    Dim StoreRec    As tCertRecord      'Record of scenario E
+    Dim PropIdx     As Long             'Cursor over the properties
+    Dim KnownCount  As Long             'Application properties read
+    Dim MinChecks   As Long             'Comparisons a surviving stage run makes
+    Dim Stored      As Boolean          'Result of storing a finding
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim UnitsFailed     As Long     'Composed failed-unit count
+    Dim Complete        As Boolean  'Composed completeness
+    Dim Passed          As Boolean  'Composed verdict
+    Dim Verdict         As String   'Composed RESULT line
+    Dim CleanupDetail   As String   'Composed cleanup detail
+    Dim RecordingDetail As String   'Composed recording failure
+    Dim JsonText        As String   'Composed JSON evidence
+    Dim ReportText      As String   'Composed text evidence
 
-    Const PROC As String = "TST_Case_CertCleanupHelperFailureIsFinding"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a failing cleanup helper is a finding, not a clean verdict"
 
         TST_AssertBooleanEquals True, TST_CertCaptureBaseline(Base, Rec), _
-            PROC & ".Captured"
+            PROC_NAME & ".Captured"
 
 '------------------------------------------------------------------------------
 ' A - A FAILED READ
@@ -7040,20 +7152,20 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
         TST_CertInjectHelperFault TST_CERT_HELPER_FAULT_READ
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, ReadRec), _
-            PROC & ".Read.NotClean"
+            PROC_NAME & ".Read.NotClean"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(ReadRec, TEST_CERT_ENTRY_FINDING), _
                 "|app.DisplayStatusBar.read|", vbBinaryCompare) > 0), _
-            PROC & ".Read.Reported"
+            PROC_NAME & ".Read.Reported"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntrySummary(ReadRec, TEST_CERT_ENTRY_FINDING), _
                 "injected cleanup helper failure", vbBinaryCompare) > 0), _
-            PROC & ".Read.CarriesTheHelperMessage"
+            PROC_NAME & ".Read.CarriesTheHelperMessage"
 
         TST_AssertBooleanEquals False, TST_CertTakeHelperFault(TST_CERT_HELPER_FAULT_READ), _
-            PROC & ".Read.OneShot"
+            PROC_NAME & ".Read.OneShot"
 
 '------------------------------------------------------------------------------
 ' B - A FAILED STAGE
@@ -7061,17 +7173,17 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
         TST_CertInjectHelperFault TST_CERT_HELPER_FAULT_STAGE
 
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, StageRec), _
-            PROC & ".Stage.NotClean"
+            PROC_NAME & ".Stage.NotClean"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(StageRec, TEST_CERT_ENTRY_FINDING), _
                 "|cleanup.windows|", vbBinaryCompare) > 0), _
-            PROC & ".Stage.Reported"
+            PROC_NAME & ".Stage.Reported"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntrySummary(StageRec, TEST_CERT_ENTRY_FINDING), _
                 "injected cleanup stage failure", vbBinaryCompare) > 0), _
-            PROC & ".Stage.CarriesTheErrorText"
+            PROC_NAME & ".Stage.CarriesTheErrorText"
 
     'The stages after the failed one still compared: the snapshot check, both
     'counts, every known application property, and the active window
@@ -7084,18 +7196,18 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
         MinChecks = 3 + KnownCount + IIf(Base.ActiveKnown, 1, 0)
 
         TST_AssertTrue (StageRec.CheckCount >= MinChecks), _
-            PROC & ".Stage.LaterStagesStillRan"
+            PROC_NAME & ".Stage.LaterStagesStillRan"
 
 '------------------------------------------------------------------------------
 ' C - NO BASELINE
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Blank, BlankRec), _
-            PROC & ".NoBaseline.NotClean"
+            PROC_NAME & ".NoBaseline.NotClean"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntryCodes(BlankRec, TEST_CERT_ENTRY_FINDING), _
                 "|baseline.unavailable|", vbBinaryCompare) > 0), _
-            PROC & ".NoBaseline.Reported"
+            PROC_NAME & ".NoBaseline.Reported"
 
 '------------------------------------------------------------------------------
 ' D - THE VERDICT AND BOTH DOCUMENTS
@@ -7113,35 +7225,35 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
             JsonText:=JsonText, _
             ReportText:=ReportText
 
-        TST_AssertBooleanEquals False, Passed, PROC & ".Verdict.NotPassed"
+        TST_AssertBooleanEquals False, Passed, PROC_NAME & ".Verdict.NotPassed"
 
         TST_AssertTrue _
             (InStr(1, Verdict, "RESULT: FAIL | ", vbBinaryCompare) = 1) And _
             (InStr(1, Verdict, " cleanup=FAILED", vbBinaryCompare) > 0), _
-            PROC & ".Verdict.CleanupFailed"
+            PROC_NAME & ".Verdict.CleanupFailed"
 
         TST_AssertTrue _
             (InStr(1, JsonText, """cleanup"":""FAILED""", vbBinaryCompare) > 0), _
-            PROC & ".Json.CleanupFailed"
+            PROC_NAME & ".Json.CleanupFailed"
 
         TST_AssertTrue _
             (InStr(1, JsonText, """code"":""app.DisplayStatusBar.read""", vbBinaryCompare) > 0), _
-            PROC & ".Json.ListsTheFinding"
+            PROC_NAME & ".Json.ListsTheFinding"
 
         TST_AssertTrue _
             (InStr(1, ReportText, vbNewLine & "  CLEANUP  app.DisplayStatusBar.read | ", _
                 vbBinaryCompare) > 0), _
-            PROC & ".Report.ListsTheFinding"
+            PROC_NAME & ".Report.ListsTheFinding"
 
         TST_AssertTrue _
             (InStr(1, CleanupDetail, "injected cleanup helper failure", vbBinaryCompare) > 0), _
-            PROC & ".Verdict.DetailReturnedToTheCaller"
+            PROC_NAME & ".Verdict.DetailReturnedToTheCaller"
 
 '------------------------------------------------------------------------------
 ' E - A FINDING THAT CANNOT BE STORED
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals True, TST_CertResetRecord(StoreRec), _
-            PROC & ".Store.Reset"
+            PROC_NAME & ".Store.Reset"
 
         TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_FIRST, TEST_CERT_BUFFER_ANY
 
@@ -7149,9 +7261,9 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
 
         TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
 
-        TST_AssertBooleanEquals False, Stored, PROC & ".Store.NotStored"
+        TST_AssertBooleanEquals False, Stored, PROC_NAME & ".Store.NotStored"
 
-        TST_AssertBooleanEquals True, StoreRec.RecordFailed, PROC & ".Store.RecordFlagged"
+        TST_AssertBooleanEquals True, StoreRec.RecordFailed, PROC_NAME & ".Store.RecordFlagged"
 
         CleanupDetail = vbNullString
 
@@ -7167,28 +7279,28 @@ Private Sub TST_Case_CertCleanupHelperFailureIsFinding()
             JsonText:=JsonText, _
             ReportText:=ReportText
 
-        TST_AssertBooleanEquals False, Passed, PROC & ".Store.NotPassed"
-        TST_AssertBooleanEquals False, Complete, PROC & ".Store.NotComplete"
+        TST_AssertBooleanEquals False, Passed, PROC_NAME & ".Store.NotPassed"
+        TST_AssertBooleanEquals False, Complete, PROC_NAME & ".Store.NotComplete"
 
         TST_AssertTrue _
             (InStr(1, Verdict, "RESULT: FAIL | INCOMPLETE | ", vbBinaryCompare) = 1), _
-            PROC & ".Store.FailIncomplete"
+            PROC_NAME & ".Store.FailIncomplete"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "A failing helper, a failing stage and an unstorable finding each failed cleanup"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'A fault left armed would fail the next comparison or record of the run
     'executing this case, so both are disarmed on every path
         On Error Resume Next
-            TST_CertInjectHelperFault TST_CERT_HELPER_FAULT_NONE
-            TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
+        TST_CertInjectHelperFault TST_CERT_HELPER_FAULT_NONE
+        TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
         On Error GoTo 0
 
     'Raise the captured failure after cleanup when needed
@@ -7201,22 +7313,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
 
 '
-'==============================================================================
-' TST_Case_CertCleanupReportsQuietUpdateResidue
+'------------------------------------------------------------------------------
+'              TST CASE CERT CLEANUP REPORTS QUIET UPDATE RESIDUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the quiet-update handoff of #26: when the suppression write succeeds
@@ -7231,7 +7342,7 @@ Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
 '   is deliberate, and it is the residue this issue exists to detect (#26, #35).
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   1  begin        the write succeeds and the readback fails:
@@ -7256,44 +7367,47 @@ Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
 '   - TST_CertCaptureBaseline
 '   - TST_CertEvaluateCleanup
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   The seam is one-shot and is disarmed on every path. ScreenUpdating is set
 '   back by the case, never by the scope under test, whose restoration is the
 '   thing proved absent.
 '
-' UPDATED
-'   2026-11-18 - Added (#35).
-'==============================================================================
+' CALLED FROM
+'   - TST_RunRegressionPack
 '
+' HISTORY
+'   2026-11-18 - Added (#35).
+'
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim EntryScreenUpdating As Boolean         'ScreenUpdating as found
-    Dim Base                As tCertBaseline   'Baseline taken before the fault
-    Dim Rec                 As tCertRecord     'Record of the capture
-    Dim ResidueRec          As tCertRecord     'Findings before recovery
-    Dim CleanRec            As tCertRecord     'Findings after recovery
-    Dim OldValue            As Boolean         'Entry value the scope reports
-    Dim Changed             As Boolean         'Ownership the scope claims
-    Dim Codes               As String          'Finding identifiers before recovery
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertCleanupReportsQuietUpdateResidue"
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim EntryScreenUpdating As Boolean          'ScreenUpdating as found
+    Dim Base                As tCertBaseline    'Baseline taken before the fault
+    Dim Rec                 As tCertRecord      'Record of the capture
+    Dim ResidueRec          As tCertRecord      'Findings before recovery
+    Dim CleanRec            As tCertRecord      'Findings after recovery
+    Dim OldValue            As Boolean          'Entry value the scope reports
+    Dim Changed             As Boolean          'Ownership the scope claims
+    Dim Codes               As String           'Finding identifiers before recovery
 
-    Const PROC As String = "TST_Case_CertCleanupReportsQuietUpdateResidue"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a failed quiet-update readback is reported as residue"
 
         EntryScreenUpdating = Application.ScreenUpdating
@@ -7304,11 +7418,11 @@ Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
         Application.ScreenUpdating = True
 
         TST_AssertBooleanEquals True, TST_CertCaptureBaseline(Base, Rec), _
-            PROC & ".Captured"
+            PROC_NAME & ".Captured"
 
         TST_AssertTrue _
             Base.AppKnown(TST_CERT_APP_SCREEN) And Base.AppValue(TST_CERT_APP_SCREEN), _
-            PROC & ".BaselineRecordsAnEnabledHost"
+            PROC_NAME & ".BaselineRecordsAnEnabledHost"
 
 '------------------------------------------------------------------------------
 ' THE WRITE SUCCEEDS AND THE READBACK FAILS
@@ -7320,12 +7434,12 @@ Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
 
         UI_RuntimeBeginQuietUpdate OldValue, Changed
 
-        TST_AssertBooleanEquals True, OldValue, PROC & ".Begin.EntryValue"
+        TST_AssertBooleanEquals True, OldValue, PROC_NAME & ".Begin.EntryValue"
 
-        TST_AssertBooleanEquals False, Changed, PROC & ".Begin.QuietModeChangedStaysFalse"
+        TST_AssertBooleanEquals False, Changed, PROC_NAME & ".Begin.QuietModeChangedStaysFalse"
 
         TST_AssertApplicationProperty _
-            False, "ScreenUpdating", PROC & ".Begin.HostLeftSuppressed"
+            False, "ScreenUpdating", PROC_NAME & ".Begin.HostLeftSuppressed"
 
 '------------------------------------------------------------------------------
 ' END PERFORMS NO RESTORE
@@ -7333,23 +7447,23 @@ Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
         UI_RuntimeEndQuietUpdate OldValue, Changed
 
         TST_AssertApplicationProperty _
-            False, "ScreenUpdating", PROC & ".End.NoRestore"
+            False, "ScreenUpdating", PROC_NAME & ".End.NoRestore"
 
 '------------------------------------------------------------------------------
 ' THE COMPARISON REPORTS THE MISMATCH BEFORE ANY RECOVERY
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals False, TST_CertEvaluateCleanup(Base, ResidueRec), _
-            PROC & ".Residue.NotClean"
+            PROC_NAME & ".Residue.NotClean"
 
         Codes = TST_CertEntryCodes(ResidueRec, TEST_CERT_ENTRY_FINDING)
 
         TST_AssertTrue (InStr(1, Codes, "|app.ScreenUpdating|", vbBinaryCompare) > 0), _
-            PROC & ".Residue.Reported"
+            PROC_NAME & ".Residue.Reported"
 
         TST_AssertTrue _
             (InStr(1, TST_CertEntrySummary(ResidueRec, TEST_CERT_ENTRY_FINDING), _
                 "ScreenUpdating changed from True to False", vbBinaryCompare) > 0), _
-            PROC & ".Residue.NamesBothValues"
+            PROC_NAME & ".Residue.NamesBothValues"
 
 '------------------------------------------------------------------------------
 ' TEST-OWNED RECOVERY
@@ -7358,27 +7472,27 @@ Private Sub TST_Case_CertCleanupReportsQuietUpdateResidue()
         Application.ScreenUpdating = True
 
         TST_AssertBooleanEquals True, TST_CertEvaluateCleanup(Base, CleanRec), _
-            PROC & ".Recovered.Clean"
+            PROC_NAME & ".Recovered.Clean"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "A failed quiet-update readback left the host suppressed, and the comparison reported it before recovery"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disarm the seam and put ScreenUpdating back to the value found, whatever
     'happened above
         On Error Resume Next
-            UI_InternalInjectQuietUpdateFault TST_CERT_QUIET_FAULT_NONE
-            Application.ScreenUpdating = EntryScreenUpdating
+        UI_InternalInjectQuietUpdateFault TST_CERT_QUIET_FAULT_NONE
+        Application.ScreenUpdating = EntryScreenUpdating
         On Error GoTo 0
 
         If Application.ScreenUpdating <> EntryScreenUpdating Then
-            TST_CertNoteHostFailure PROC, _
+            TST_CertNoteHostFailure PROC_NAME, _
                 "ScreenUpdating could not be restored to " & _
                 CStr(EntryScreenUpdating), _
                 HasFailure, FailNumber, FailSource, FailDescription
@@ -7394,22 +7508,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_Case_CertRecordFailsClosed()
 
 '
-'==============================================================================
-' TST_Case_CertRecordFailsClosed
+'------------------------------------------------------------------------------
+'                      TST CASE CERT RECORD FAILS CLOSED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a certification record that cannot store an entry, or whose
@@ -7424,7 +7537,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
 '   fail, never assemble a clean verdict from what is left.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   1  fault shapes      a first allocation with no buffer allocated, the
@@ -7453,53 +7566,56 @@ Private Sub TST_Case_CertRecordFailsClosed()
 '   - TST_CertRecordIsConsistent
 '   - TST_CertComposeEvidence
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   Every record here is a local one. The case drives the helpers that
 '   certification uses on m_CertRecord, and composes evidence through the
 '   same TST_CertComposeEvidence, so what it asserts is what certification
 '   writes, while the run executing it records nothing from it.
 '
-' UPDATED
-'   2026-11-16 - Added (#50).
-'==============================================================================
+' CALLED FROM
+'   - TST_RunRegressionPack
 '
+' HISTORY
+'   2026-11-16 - Added (#50).
+'
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Rec                 As tCertRecord     'Record under test
-    Dim Stored              As Boolean         'Result of an append
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertRecordFailsClosed"
 
-    Dim UnitsFailed         As Long            'Composed failed-unit count
-    Dim Complete            As Boolean         'Composed completeness
-    Dim Passed              As Boolean         'Composed verdict
-    Dim Verdict             As String          'Composed RESULT line
-    Dim RecordingDetail     As String          'Composed recording failure
-    Dim JsonText            As String          'Composed JSON evidence
-    Dim ReportText          As String          'Composed text evidence
+    Dim Rec     As tCertRecord  'Record under test
+    Dim Stored  As Boolean      'Result of an append
 
-    Dim RunEntries          As Long            'Run record: entries on entry
-    Dim RunUnits            As Long            'Run record: units on entry
-    Dim RunSkips            As Long            'Run record: skips on entry
-    Dim RunFailed           As Boolean         'Run record: fatal flag on entry
-    Dim RunFailCount        As Long            'Run record: failures on entry
+    Dim UnitsFailed     As Long     'Composed failed-unit count
+    Dim Complete        As Boolean  'Composed completeness
+    Dim Passed          As Boolean  'Composed verdict
+    Dim Verdict         As String   'Composed RESULT line
+    Dim RecordingDetail As String   'Composed recording failure
+    Dim JsonText        As String   'Composed JSON evidence
+    Dim ReportText      As String   'Composed text evidence
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim RunEntries      As Long     'Run record: entries on entry
+    Dim RunUnits        As Long     'Run record: units on entry
+    Dim RunSkips        As Long     'Run record: skips on entry
+    Dim RunFailed       As Boolean  'Run record: fatal flag on entry
+    Dim RunFailCount    As Long     'Run record: failures on entry
 
-    Const PROC As String = "TST_Case_CertRecordFailsClosed"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a certification record that cannot be stored fails closed"
 
     'The record of the run executing this case, compared again at the end
@@ -7514,7 +7630,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
 '------------------------------------------------------------------------------
     'No buffer allocated yet: the first one fails
         TST_CertCheckRecordFault _
-            Scenario:=PROC & ".FirstAllocation", _
+            Scenario:=PROC_NAME & ".FirstAllocation", _
             Kind:=TEST_CERT_ENTRY_UNIT, _
             PriorUnits:=0, _
             FaultKind:=TEST_CERT_RECORD_FAULT_FIRST, _
@@ -7523,7 +7639,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
 
     'Three buffers allocated, the last one not
         TST_CertCheckRecordFault _
-            Scenario:=PROC & ".FirstAllocationOfOneBuffer", _
+            Scenario:=PROC_NAME & ".FirstAllocationOfOneBuffer", _
             Kind:=TEST_CERT_ENTRY_UNIT, _
             PriorUnits:=0, _
             FaultKind:=TEST_CERT_RECORD_FAULT_FIRST, _
@@ -7532,7 +7648,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
 
     'Every buffer allocated: the first growth fails
         TST_CertCheckRecordFault _
-            Scenario:=PROC & ".LaterGrowth", _
+            Scenario:=PROC_NAME & ".LaterGrowth", _
             Kind:=TEST_CERT_ENTRY_UNIT, _
             PriorUnits:=2, _
             FaultKind:=TEST_CERT_RECORD_FAULT_GROWTH, _
@@ -7541,7 +7657,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
 
     'Two parallel buffers grow and the third does not
         TST_CertCheckRecordFault _
-            Scenario:=PROC & ".GrowthOfOneBuffer", _
+            Scenario:=PROC_NAME & ".GrowthOfOneBuffer", _
             Kind:=TEST_CERT_ENTRY_UNIT, _
             PriorUnits:=2, _
             FaultKind:=TEST_CERT_RECORD_FAULT_GROWTH, _
@@ -7550,7 +7666,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
 
     'A skip takes the same path as a unit
         TST_CertCheckRecordFault _
-            Scenario:=PROC & ".SkipGrowthOfOneBuffer", _
+            Scenario:=PROC_NAME & ".SkipGrowthOfOneBuffer", _
             Kind:=TEST_CERT_ENTRY_SKIP, _
             PriorUnits:=1, _
             FaultKind:=TEST_CERT_RECORD_FAULT_GROWTH, _
@@ -7562,71 +7678,71 @@ Private Sub TST_Case_CertRecordFailsClosed()
 '------------------------------------------------------------------------------
     'A growth fault passes over a first allocation and fails the next growth
         TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
-            PROC & ".Independent.GrowthReset"
+            PROC_NAME & ".Independent.GrowthReset"
 
         TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_GROWTH, TEST_CERT_BUFFER_ANY
 
         Stored = TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "First", True, vbNullString)
 
         TST_AssertBooleanEquals True, Stored, _
-            PROC & ".Independent.GrowthFaultIgnoresFirstAllocation"
+            PROC_NAME & ".Independent.GrowthFaultIgnoresFirstAllocation"
 
         Stored = TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "Second", True, vbNullString)
 
         TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
 
         TST_AssertBooleanEquals False, Stored, _
-            PROC & ".Independent.GrowthFaultFailsGrowth"
+            PROC_NAME & ".Independent.GrowthFaultFailsGrowth"
 
         TST_AssertTrue (Rec.RecordFailStage = TEST_CERT_BUFFER_KIND), _
-            PROC & ".Independent.GrowthFaultStage"
+            PROC_NAME & ".Independent.GrowthFaultStage"
 
     'A first-allocation fault passes over a growth and fails the next first
     'allocation. A record reset does not disarm it; only TST_CertResetCounters
     'and the fault taking effect do.
         TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
-            PROC & ".Independent.FirstReset"
+            PROC_NAME & ".Independent.FirstReset"
 
         TST_AssertBooleanEquals True, _
             TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "First", True, vbNullString), _
-            PROC & ".Independent.FirstStored"
+            PROC_NAME & ".Independent.FirstStored"
 
         TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_FIRST, TEST_CERT_BUFFER_ANY
 
         Stored = TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "Second", True, vbNullString)
 
         TST_AssertBooleanEquals True, Stored, _
-            PROC & ".Independent.FirstFaultIgnoresGrowth"
+            PROC_NAME & ".Independent.FirstFaultIgnoresGrowth"
 
         TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
-            PROC & ".Independent.FirstResetAgain"
+            PROC_NAME & ".Independent.FirstResetAgain"
 
         Stored = TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "Third", True, vbNullString)
 
         TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
 
         TST_AssertBooleanEquals False, Stored, _
-            PROC & ".Independent.FirstFaultFailsFirstAllocation"
+            PROC_NAME & ".Independent.FirstFaultFailsFirstAllocation"
 
         TST_AssertTrue (Rec.RecordFailStage = TEST_CERT_BUFFER_KIND), _
-            PROC & ".Independent.FirstFaultStage"
+            PROC_NAME & ".Independent.FirstFaultStage"
 
 '------------------------------------------------------------------------------
 ' A COUNT BEYOND THE BUFFERS IS NOT INDEXED
 '------------------------------------------------------------------------------
     'Publish a count that no buffer holds, as a partial growth used to
         TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
-            PROC & ".Overcount.Reset"
+            PROC_NAME & ".Overcount.Reset"
 
         TST_AssertBooleanEquals True, _
             TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "Only", True, vbNullString), _
-            PROC & ".Overcount.EntryStored"
+            PROC_NAME & ".Overcount.EntryStored"
 
         Rec.EntryCount = 2
         Rec.UnitCount = 2
 
         TST_AssertBooleanEquals False, TST_CertRecordIsConsistent(Rec), _
-            PROC & ".Overcount.Detected"
+            PROC_NAME & ".Overcount.Detected"
 
         TST_CertComposeEvidence _
             Rec:=Rec, _
@@ -7641,7 +7757,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
             ReportText:=ReportText
 
         TST_CertAssertFailedEvidence _
-            Scenario:=PROC & ".Overcount", _
+            Scenario:=PROC_NAME & ".Overcount", _
             Complete:=Complete, _
             Passed:=Passed, _
             Verdict:=Verdict, _
@@ -7653,29 +7769,29 @@ Private Sub TST_Case_CertRecordFailsClosed()
             (Rec.RecordFailStage = TEST_CERT_RECFAIL_INVARIANT) And _
             (Rec.RecordFailCount = 1) And _
             (Rec.RecordFailError = 0), _
-            PROC & ".Overcount.NoOutOfRangeRead"
+            PROC_NAME & ".Overcount.NoOutOfRangeRead"
 
         TST_AssertTrue _
             (InStr(1, JsonText, """unitResults"":[],""skipDetail"":[]}", vbBinaryCompare) > 0), _
-            PROC & ".Overcount.NothingListed"
+            PROC_NAME & ".Overcount.NothingListed"
 
     'A record in this state is not grown further
         TST_AssertBooleanEquals False, _
             TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "More", True, vbNullString), _
-            PROC & ".Overcount.NotGrown"
+            PROC_NAME & ".Overcount.NotGrown"
 
-        TST_AssertTrue (Rec.EntryCount = 2), PROC & ".Overcount.CountUnchanged"
+        TST_AssertTrue (Rec.EntryCount = 2), PROC_NAME & ".Overcount.CountUnchanged"
 
 '------------------------------------------------------------------------------
 ' KINDS THAT DISAGREE WITH THEIR COUNTS ARE REPORTED
 '------------------------------------------------------------------------------
     'One unit stored, counted as a skip: the totals agree, the kinds do not
         TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
-            PROC & ".KindMismatch.Reset"
+            PROC_NAME & ".KindMismatch.Reset"
 
         TST_AssertBooleanEquals True, _
             TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "Only", True, vbNullString), _
-            PROC & ".KindMismatch.EntryStored"
+            PROC_NAME & ".KindMismatch.EntryStored"
 
         Rec.UnitCount = 0
         Rec.SkipCount = 1
@@ -7693,7 +7809,7 @@ Private Sub TST_Case_CertRecordFailsClosed()
             ReportText:=ReportText
 
         TST_CertAssertFailedEvidence _
-            Scenario:=PROC & ".KindMismatch", _
+            Scenario:=PROC_NAME & ".KindMismatch", _
             Complete:=Complete, _
             Passed:=Passed, _
             Verdict:=Verdict, _
@@ -7701,21 +7817,21 @@ Private Sub TST_Case_CertRecordFailsClosed()
             ReportText:=ReportText
 
         TST_AssertTrue (Rec.RecordFailStage = TEST_CERT_RECFAIL_INVARIANT), _
-            PROC & ".KindMismatch.Stage"
+            PROC_NAME & ".KindMismatch.Stage"
 
 '------------------------------------------------------------------------------
 ' AN UNKNOWN KIND IS REFUSED
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
-            PROC & ".UnknownKind.Reset"
+            PROC_NAME & ".UnknownKind.Reset"
 
         TST_AssertBooleanEquals False, _
             TST_CertTryAppendEntry(Rec, 99, "Unknown", True, vbNullString), _
-            PROC & ".UnknownKind.Refused"
+            PROC_NAME & ".UnknownKind.Refused"
 
         TST_AssertTrue _
             (Rec.RecordFailStage = TEST_CERT_RECFAIL_KIND) And (Rec.EntryCount = 0), _
-            PROC & ".UnknownKind.Flagged"
+            PROC_NAME & ".UnknownKind.Flagged"
 
 '------------------------------------------------------------------------------
 ' THE RUN'S OWN RECORD IS UNCHANGED
@@ -7727,22 +7843,22 @@ Private Sub TST_Case_CertRecordFailsClosed()
             (m_CertRecord.SkipCount = RunSkips) And _
             (m_CertRecord.RecordFailed = RunFailed) And _
             (m_CertRecord.RecordFailCount = RunFailCount), _
-            PROC & ".RunRecordUnchanged"
+            PROC_NAME & ".RunRecordUnchanged"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Every injected recording failure produced FAIL | INCOMPLETE evidence, and a reset started clean"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'A fault left armed would fail the next record of the run executing this
     'case, so it is disarmed on every path
         On Error Resume Next
-            TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
+        TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
         On Error GoTo 0
 
     'Raise the captured failure after cleanup when needed
@@ -7755,16 +7871,15 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertCheckRecordFault( _
     ByVal Scenario As String, _
@@ -7773,10 +7888,9 @@ Private Sub TST_CertCheckRecordFault( _
     ByVal FaultKind As Long, _
     ByVal BufferId As Long, _
     ByVal ExpectedStage As Long)
-
 '
-'==============================================================================
-' TST_CertCheckRecordFault
+'------------------------------------------------------------------------------
+'                         TST CERT CHECK RECORD FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Inject one record allocation failure into a fresh local record and assert
@@ -7804,7 +7918,7 @@ Private Sub TST_CertCheckRecordFault( _
 '     The TEST_CERT_BUFFER_* value the failure must be charged to.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   1  inject        the append fails; nothing is published; the fatal flag,
@@ -7833,25 +7947,29 @@ Private Sub TST_CertCheckRecordFault( _
 ' CALLED FROM
 '   - TST_Case_CertRecordFailsClosed
 '
-' UPDATED
+' HISTORY
 '   2026-11-16 - Added (#50).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Rec                 As tCertRecord     'Fresh record for this scenario
-    Dim Stored              As Boolean         'Result of an append
-    Dim EntryIdx            As Long            'Cursor over the prior units
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCheckRecordFault"
 
-    Dim UnitsFailed         As Long            'Composed failed-unit count
-    Dim Complete            As Boolean         'Composed completeness
-    Dim Passed              As Boolean         'Composed verdict
-    Dim Verdict             As String          'Composed RESULT line
-    Dim RecordingDetail     As String          'Composed recording failure
-    Dim JsonText            As String          'Composed JSON evidence
-    Dim ReportText          As String          'Composed text evidence
+    Dim Rec         As tCertRecord  'Fresh record for this scenario
+    Dim Stored      As Boolean      'Result of an append
+    Dim EntryIdx    As Long         'Cursor over the prior units
+
+    Dim UnitsFailed     As Long     'Composed failed-unit count
+    Dim Complete        As Boolean  'Composed completeness
+    Dim Passed          As Boolean  'Composed verdict
+    Dim Verdict         As String   'Composed RESULT line
+    Dim RecordingDetail As String   'Composed recording failure
+    Dim JsonText        As String   'Composed JSON evidence
+    Dim ReportText      As String   'Composed text evidence
 
 '------------------------------------------------------------------------------
 ' START FROM A CLEAN RECORD
@@ -8026,7 +8144,6 @@ Private Sub TST_CertCheckRecordFault( _
 
 End Sub
 
-
 Private Sub TST_CertAssertFailedEvidence( _
     ByVal Scenario As String, _
     ByVal Complete As Boolean, _
@@ -8034,10 +8151,9 @@ Private Sub TST_CertAssertFailedEvidence( _
     ByVal Verdict As String, _
     ByVal JsonText As String, _
     ByVal ReportText As String)
-
 '
-'==============================================================================
-' TST_CertAssertFailedEvidence
+'------------------------------------------------------------------------------
+'                       TST CERT ASSERT FAILED EVIDENCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that composed certification evidence reports a recording failure
@@ -8055,7 +8171,7 @@ Private Sub TST_CertAssertFailedEvidence( _
 '     Outputs of TST_CertComposeEvidence.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Passed and Complete are FALSE, and the verdict is a complete
@@ -8072,10 +8188,12 @@ Private Sub TST_CertAssertFailedEvidence( _
 '   - TST_Case_CertRecordFailsClosed
 '   - TST_CertCheckRecordFault
 '
-' UPDATED
+' HISTORY
 '   2026-11-16 - Added (#50).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' ASSERT VERDICT
@@ -8119,12 +8237,11 @@ Private Sub TST_CertAssertFailedEvidence( _
 
 End Sub
 
-
 Private Sub TST_Case_CertInventoryDetectsDrift()
 
 '
-'==============================================================================
-' TST_Case_CertInventoryDetectsDrift
+'------------------------------------------------------------------------------
+'                    TST CASE CERT INVENTORY DETECTS DRIFT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a missing, duplicate, unexpected or result-less case, and an
@@ -8140,7 +8257,7 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 '   asserts it.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   Each scenario builds a record of its own with one passing unit, so that
@@ -8168,46 +8285,49 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 '   - TST_CertCarryEntries
 '   - TST_CertResetRecord
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   Every record here is a local one, so the run executing this case records
 '   nothing from it; the case asserts that its own record is unchanged.
 '
-' UPDATED
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' HISTORY
 '   2026-11-28 - Also checks that entries are carried between records (#42).
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Rec                 As tCertRecord     'Record for the invariant scenario
-    Dim SourceRec           As tCertRecord     'Record whose entries are carried
-    Dim TargetRec           As tCertRecord     'Record that receives them
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertInventoryDetectsDrift"
 
-    Dim RunEntries          As Long            'Run record: entries on entry
-    Dim RunUnits            As Long            'Run record: units on entry
-    Dim RunStarts           As Long            'Run record: case starts on entry
-    Dim RunExpected         As Long            'Run record: expected cases on entry
-    Dim RunChecked          As Boolean         'Run record: inventory compared on entry
-    Dim RunFailed           As Boolean         'Run record: fatal flag on entry
+    Dim Rec         As tCertRecord  'Record for the invariant scenario
+    Dim SourceRec   As tCertRecord  'Record whose entries are carried
+    Dim TargetRec   As tCertRecord  'Record that receives them
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim RunEntries  As Long     'Run record: entries on entry
+    Dim RunUnits    As Long     'Run record: units on entry
+    Dim RunStarts   As Long     'Run record: case starts on entry
+    Dim RunExpected As Long     'Run record: expected cases on entry
+    Dim RunChecked  As Boolean  'Run record: inventory compared on entry
+    Dim RunFailed   As Boolean  'Run record: fatal flag on entry
 
-    Const PROC As String = "TST_Case_CertInventoryDetectsDrift"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a case inventory that differs fails the verdict"
 
     'The record of the run executing this case, compared again at the end
@@ -8222,32 +8342,32 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 ' EVERY DIFFERENCE FAILS THE VERDICT
 '------------------------------------------------------------------------------
     'Two expected cases, A and B, under the unit U
-        TST_CertCheckInventoryScenario PROC & ".Exact", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".Exact", _
             "A|B", "A|B", "A|B", vbNullString, True
 
-        TST_CertCheckInventoryScenario PROC & ".Missing", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".Missing", _
             "A|B", "A", "A", "missing:B", True
 
-        TST_CertCheckInventoryScenario PROC & ".DuplicateStart", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".DuplicateStart", _
             "A|B", "A|B|A", "A|B|A", "duplicate:A", True
 
-        TST_CertCheckInventoryScenario PROC & ".DuplicateStatus", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".DuplicateStatus", _
             "A|B", "A|B", "A|B|B", "duplicate:B", True
 
-        TST_CertCheckInventoryScenario PROC & ".Unexpected", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".Unexpected", _
             "A|B", "A|B|X", "A|B|X", "unexpected:X", True
 
-        TST_CertCheckInventoryScenario PROC & ".UnexpectedStatus", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".UnexpectedStatus", _
             "A|B", "A|B", "A|B|X", "unexpected:X", True
 
-        TST_CertCheckInventoryScenario PROC & ".NoResult", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".NoResult", _
             "A|B", "A|B", "A", "noResult:B", True
 
-        TST_CertCheckInventoryScenario PROC & ".NoStart", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".NoStart", _
             "A|B", "A", "A|B", "noStart:B", True
 
     'The same record as the exact one, never compared
-        TST_CertCheckInventoryScenario PROC & ".NotCompared", _
+        TST_CertCheckInventoryScenario PROC_NAME & ".NotCompared", _
             "A|B", "A|B", "A|B", "notCompared", False
 
 '------------------------------------------------------------------------------
@@ -8255,39 +8375,39 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
 '------------------------------------------------------------------------------
     'A comparison of nothing is still a comparison
         TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
-            PROC & ".Empty.Reset"
+            PROC_NAME & ".Empty.Reset"
 
         TST_AssertBooleanEquals True, TST_CertEvaluateInventory(Rec), _
-            PROC & ".Empty.Compared"
+            PROC_NAME & ".Empty.Compared"
 
         TST_AssertBooleanEquals True, Rec.InventoryChecked, _
-            PROC & ".Empty.Checked"
+            PROC_NAME & ".Empty.Checked"
 
     'A reset clears the comparison, so the next run starts clean
         TST_AssertBooleanEquals True, TST_CertResetRecord(Rec), _
-            PROC & ".Reset.AfterComparison"
+            PROC_NAME & ".Reset.AfterComparison"
 
         TST_AssertBooleanEquals False, Rec.InventoryChecked, _
-            PROC & ".Reset.ClearsTheComparison"
+            PROC_NAME & ".Reset.ClearsTheComparison"
 
     'Publish a count that no buffer holds: found by the check, not read
         TST_AssertBooleanEquals True, _
             TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_CASE_START, "A", False, vbNullString), _
-            PROC & ".Overcount.EntryStored"
+            PROC_NAME & ".Overcount.EntryStored"
 
         Rec.EntryCount = 2
         Rec.CaseStartCount = 2
 
         TST_AssertBooleanEquals False, TST_CertEvaluateInventory(Rec), _
-            PROC & ".Overcount.NotClean"
+            PROC_NAME & ".Overcount.NotClean"
 
         TST_AssertBooleanEquals False, Rec.InventoryChecked, _
-            PROC & ".Overcount.NotChecked"
+            PROC_NAME & ".Overcount.NotChecked"
 
         TST_AssertTrue _
             Rec.RecordFailed And _
             (Rec.RecordFailStage = TEST_CERT_RECFAIL_INVARIANT), _
-            PROC & ".Overcount.Flagged"
+            PROC_NAME & ".Overcount.Flagged"
 
 '------------------------------------------------------------------------------
 ' CLEANUP ENTRIES ARE CARRIED BETWEEN RECORDS
@@ -8296,65 +8416,65 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
     'and carried into the live one, and what those units left behind is carried
     'with a prefix that names it
         TST_AssertBooleanEquals True, TST_CertResetRecord(SourceRec), _
-            PROC & ".Carry.ResetSource"
+            PROC_NAME & ".Carry.ResetSource"
 
         TST_AssertBooleanEquals True, _
             TST_CertAddFinding(SourceRec, "app.Example", "Example changed"), _
-            PROC & ".Carry.FindingStored"
+            PROC_NAME & ".Carry.FindingStored"
 
         TST_AssertBooleanEquals True, _
             TST_CertAddUnverified(SourceRec, "ribbon.scope", "not compared"), _
-            PROC & ".Carry.UnverifiedStored"
+            PROC_NAME & ".Carry.UnverifiedStored"
 
         SourceRec.CheckCount = 5
 
         TST_AssertBooleanEquals True, TST_CertResetRecord(TargetRec), _
-            PROC & ".Carry.ResetTarget"
+            PROC_NAME & ".Carry.ResetTarget"
 
         TST_AssertBooleanEquals True, _
             TST_CertCarryEntries(SourceRec, TargetRec, "isolated.", False), _
-            PROC & ".Carry.Prefixed"
+            PROC_NAME & ".Carry.Prefixed"
 
         TST_AssertTrue _
             (TST_CertEntryCodes(TargetRec, TEST_CERT_ENTRY_FINDING) = "|isolated.app.Example|") And _
             (TST_CertEntryCodes(TargetRec, TEST_CERT_ENTRY_UNVERIFIED) = "|") And _
             (TargetRec.CheckCount = 0), _
-            PROC & ".Carry.PrefixedFindingsOnly"
+            PROC_NAME & ".Carry.PrefixedFindingsOnly"
 
         TST_AssertBooleanEquals True, TST_CertResetRecord(TargetRec), _
-            PROC & ".Carry.ResetTargetAgain"
+            PROC_NAME & ".Carry.ResetTargetAgain"
 
         TST_AssertBooleanEquals True, _
             TST_CertCarryEntries(SourceRec, TargetRec, vbNullString, True), _
-            PROC & ".Carry.Whole"
+            PROC_NAME & ".Carry.Whole"
 
         TST_AssertTrue _
             (TST_CertEntryCodes(TargetRec, TEST_CERT_ENTRY_FINDING) = "|app.Example|") And _
             (TST_CertEntryCodes(TargetRec, TEST_CERT_ENTRY_UNVERIFIED) = "|ribbon.scope|") And _
             (TargetRec.CheckCount = 5), _
-            PROC & ".Carry.WholeRecordCarried"
+            PROC_NAME & ".Carry.WholeRecordCarried"
 
     'A source that lost an entry is not carried as if it were whole
         TST_AssertBooleanEquals True, TST_CertResetRecord(SourceRec), _
-            PROC & ".Carry.ResetSourceAgain"
+            PROC_NAME & ".Carry.ResetSourceAgain"
 
         TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_FIRST, TEST_CERT_BUFFER_ANY
 
         TST_AssertBooleanEquals False, _
             TST_CertAddFinding(SourceRec, "app.Lost", "no room"), _
-            PROC & ".Carry.FindingLost"
+            PROC_NAME & ".Carry.FindingLost"
 
         TST_CertInjectRecordFault TEST_CERT_RECORD_FAULT_NONE, TEST_CERT_BUFFER_ANY
 
         TST_AssertBooleanEquals True, TST_CertResetRecord(TargetRec), _
-            PROC & ".Carry.ResetTargetThird"
+            PROC_NAME & ".Carry.ResetTargetThird"
 
         TST_AssertBooleanEquals False, _
             TST_CertCarryEntries(SourceRec, TargetRec, vbNullString, True), _
-            PROC & ".Carry.LostEntryRefused"
+            PROC_NAME & ".Carry.LostEntryRefused"
 
         TST_AssertBooleanEquals True, TargetRec.RecordFailed, _
-            PROC & ".Carry.TargetFlagged"
+            PROC_NAME & ".Carry.TargetFlagged"
 
 '------------------------------------------------------------------------------
 ' THE RUN'S OWN RECORD IS UNCHANGED
@@ -8367,18 +8487,18 @@ Private Sub TST_Case_CertInventoryDetectsDrift()
             (m_CertRecord.ExpectedCount = RunExpected) And _
             (m_CertRecord.InventoryChecked = RunChecked) And _
             (m_CertRecord.RecordFailed = RunFailed), _
-            PROC & ".RunRecordUnchanged"
+            PROC_NAME & ".RunRecordUnchanged"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Every difference in the case inventory failed the verdict although the unit passed"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Raise the captured failure after cleanup when needed
         If HasFailure Then
             Err.Raise FailNumber, FailSource, FailDescription
@@ -8389,16 +8509,15 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_CertCheckInventoryScenario( _
     ByVal Scenario As String, _
@@ -8407,10 +8526,9 @@ Private Sub TST_CertCheckInventoryScenario( _
     ByVal EndIds As String, _
     ByVal ExpectedCode As String, _
     ByVal DoCompare As Boolean)
-
 '
-'==============================================================================
-' TST_CertCheckInventoryScenario
+'------------------------------------------------------------------------------
+'                      TST CERT CHECK INVENTORY SCENARIO
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build one local record with one passing unit, expected cases, case starts
@@ -8440,7 +8558,7 @@ Private Sub TST_CertCheckInventoryScenario( _
 '     verdict is not complete without a comparison.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' ERROR POLICY
 '   - Raises on assertion failure.
@@ -8455,25 +8573,29 @@ Private Sub TST_CertCheckInventoryScenario( _
 ' CALLED FROM
 '   - TST_Case_CertInventoryDetectsDrift
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Rec                 As tCertRecord     'Record for this scenario
-    Dim Clean               As Boolean         'Result of the comparison
-    Dim CasesLine           As String          'Counts line the report must carry
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertCheckInventoryScenario"
 
-    Dim UnitsFailed         As Long            'Composed failed-unit count
-    Dim Complete            As Boolean         'Composed completeness
-    Dim Passed              As Boolean         'Composed verdict
-    Dim Verdict             As String          'Composed RESULT line
-    Dim RecordingDetail     As String          'Composed recording failure
-    Dim JsonText            As String          'Composed JSON evidence
-    Dim ReportText          As String          'Composed text evidence
+    Dim Rec         As tCertRecord  'Record for this scenario
+    Dim Clean       As Boolean      'Result of the comparison
+    Dim CasesLine   As String       'Counts line the report must carry
+
+    Dim UnitsFailed     As Long     'Composed failed-unit count
+    Dim Complete        As Boolean  'Composed completeness
+    Dim Passed          As Boolean  'Composed verdict
+    Dim Verdict         As String   'Composed RESULT line
+    Dim RecordingDetail As String   'Composed recording failure
+    Dim JsonText        As String   'Composed JSON evidence
+    Dim ReportText      As String   'Composed text evidence
 
 '------------------------------------------------------------------------------
 ' BUILD THE RECORD
@@ -8624,16 +8746,14 @@ Private Sub TST_CertCheckInventoryScenario( _
 
 End Sub
 
-
 Private Function TST_CertStoreCaseIds( _
     ByRef Rec As tCertRecord, _
     ByVal Kind As Long, _
     ByVal Ids As String) _
     As Boolean
-
 '
-'==============================================================================
-' TST_CertStoreCaseIds
+'------------------------------------------------------------------------------
+'                           TST CERT STORE CASE IDS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one entry of one kind for each identifier of a "|"-joined list.
@@ -8660,16 +8780,20 @@ Private Function TST_CertStoreCaseIds( _
 ' CALLED FROM
 '   - TST_CertCheckInventoryScenario
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Parts()             As String          'The identifiers
-    Dim PartIdx             As Long            'Cursor over the identifiers
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_CERTIFICATION.TST_CertStoreCaseIds"
+
+    Dim Parts() As String   'The identifiers
+    Dim PartIdx As Long     'Cursor over the identifiers
 
 '------------------------------------------------------------------------------
 ' STORE
@@ -8696,14 +8820,12 @@ Private Function TST_CertStoreCaseIds( _
 
 End Function
 
-
 Private Function TST_CertIdCount( _
     ByVal Ids As String) _
     As Long
-
 '
-'==============================================================================
-' TST_CertIdCount
+'------------------------------------------------------------------------------
+'                              TST CERT ID COUNT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Count the identifiers of a "|"-joined list.
@@ -8722,10 +8844,12 @@ Private Function TST_CertIdCount( _
 ' CALLED FROM
 '   - TST_CertCheckInventoryScenario
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Added (#42).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
         If Len(Ids) = 0 Then
             TST_CertIdCount = 0
@@ -8735,12 +8859,11 @@ Private Function TST_CertIdCount( _
 
 End Function
 
-
 Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
 
 '
-'==============================================================================
-' TST_Case_CertUnitIsolatesCaptureFailure
+'------------------------------------------------------------------------------
+'                 TST CASE CERT UNIT ISOLATES CAPTURE FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a certification unit which fails after a capture reports the
@@ -8755,7 +8878,7 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
 '   left behind. Both later units then refused to run over it.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   1  failing unit      fails; its detail carries the failure count and the
@@ -8773,9 +8896,6 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
 '   - TST_AssertTrue
 '   - TST_AssertSnapshotAvailability
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   The case drives TST_CertExecuteUnit, not TST_CertRunUnit. Recording would
 '   add these two units to the certification run executing this case, and
@@ -8784,24 +8904,28 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
 '   The detail is the text certification writes to its report and its JSON
 '   evidence, so asserting it here asserts what reaches the evidence.
 '
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Passed              As Boolean         'Unit outcome
-    Dim Detail              As String          'Unit failure and release detail
-    Dim LeftSnapshot        As Boolean         'TRUE when the unit left one
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_CertUnitIsolatesCaptureFailure"
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim Passed          As Boolean  'Unit outcome
+    Dim Detail          As String   'Unit failure and release detail
+    Dim LeftSnapshot    As Boolean  'TRUE when the unit left one
 
-    Const PROC As String = "TST_Case_CertUnitIsolatesCaptureFailure"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
+
     Const INJECTED_ENTRY As String = _
         "TitleBar | the active Excel Window is not the active native frame"
 
@@ -8811,14 +8935,14 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
     'Every snapshot below is this case's only if the slot is empty now. This is
     'asserted before the handler is armed, so a failure here cannot reach the
     'release below and clear a snapshot this case never owned.
-        TST_AssertSnapshotAvailability False, PROC & ".NoSnapshotOnEntry"
+        TST_AssertSnapshotAvailability False, PROC_NAME & ".NoSnapshotOnEntry"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a unit failing after a capture is reported and isolated"
 
 '------------------------------------------------------------------------------
@@ -8831,27 +8955,27 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
             LeftSnapshot:=LeftSnapshot
 
     'Logged before it is asserted, so a failing assertion keeps what was seen
-        TST_Log PROC, "OBSERVED", Detail
+        TST_Log PROC_NAME, "OBSERVED", Detail
 
-        TST_AssertBooleanEquals False, Passed, PROC & ".Failing.Failed"
+        TST_AssertBooleanEquals False, Passed, PROC_NAME & ".Failing.Failed"
 
     'The count and the entry that names the element are what the host run lost
         TST_AssertTrue _
             (InStr(1, Detail, "| FailureCount=", vbBinaryCompare) > 0), _
-            PROC & ".Failing.DetailCarriesCount"
+            PROC_NAME & ".Failing.DetailCarriesCount"
 
         TST_AssertTrue _
             (InStr(1, Detail, INJECTED_ENTRY, vbBinaryCompare) > 0), _
-            PROC & ".Failing.DetailCarriesFailureList"
+            PROC_NAME & ".Failing.DetailCarriesFailureList"
 
     'The leak is released, and said to be, rather than hidden
-        TST_AssertBooleanEquals True, LeftSnapshot, PROC & ".Failing.LeakReported"
+        TST_AssertBooleanEquals True, LeftSnapshot, PROC_NAME & ".Failing.LeakReported"
 
         TST_AssertTrue _
             (InStr(1, Detail, "released before the next unit", vbBinaryCompare) > 0), _
-            PROC & ".Failing.ReleaseRecorded"
+            PROC_NAME & ".Failing.ReleaseRecorded"
 
-        TST_AssertSnapshotAvailability False, PROC & ".Failing.SnapshotReleased"
+        TST_AssertSnapshotAvailability False, PROC_NAME & ".Failing.SnapshotReleased"
 
 '------------------------------------------------------------------------------
 ' THE NEXT UNIT STILL RUNS
@@ -8862,27 +8986,27 @@ Private Sub TST_Case_CertUnitIsolatesCaptureFailure()
             Detail:=Detail, _
             LeftSnapshot:=LeftSnapshot
 
-        TST_AssertBooleanEquals True, Passed, PROC & ".Following.Ran"
+        TST_AssertBooleanEquals True, Passed, PROC_NAME & ".Following.Ran"
 
-        TST_AssertTrue (Len(Detail) = 0), PROC & ".Following.NoDetail"
+        TST_AssertTrue (Len(Detail) = 0), PROC_NAME & ".Following.NoDetail"
 
-        TST_AssertBooleanEquals False, LeftSnapshot, PROC & ".Following.NothingLeft"
+        TST_AssertBooleanEquals False, LeftSnapshot, PROC_NAME & ".Following.NothingLeft"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "The failed unit reported its failure list and left nothing for the next unit"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disarm the seam and release anything left. The slot was empty on entry,
     'so any snapshot here was created by this case.
         On Error Resume Next
-            UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
-            UI_ClearExcelUIStateSnapshot
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
+        UI_ClearExcelUIStateSnapshot
         On Error GoTo 0
 
     'Raise the captured failure after cleanup when needed
@@ -8895,22 +9019,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
         HasFailure = True
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 
 '
-'==============================================================================
-' TST_Case_DestructiveRunnersPreserveCallerSnapshot
+'------------------------------------------------------------------------------
+'            TST CASE DESTRUCTIVE RUNNERS PRESERVE CALLER SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that every destructive public runner refuses a caller-owned snapshot
@@ -8930,7 +9053,7 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 '   original state came back.
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   Four independent blocks, one per runner. Each establishes a distinguishable
@@ -8951,9 +9074,6 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 '   - TST_AssertSnapshotAvailability
 '   - TST_AssertApplicationProperty
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'
 ' NOTES
 '   The blocks are independent on purpose. Sharing one snapshot across all four
 '   would mean the first failure invalidated the evidence for the other three,
@@ -8964,52 +9084,58 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 '   creation, Ribbon manipulation, logging or certification-counter reset. The
 '   only host mutation here is this case's own capture, mutate and restore.
 '
-' UPDATED
+' CALLED FROM
+'   - TST_RunRegressionPack
+'
+' HISTORY
 '   2026-11-06
 '   2026-08-29
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim RaisedNumber        As Long            'Error number reaching this case
-    Dim RaisedSource        As String          'Error source reaching this case
-    Dim RaisedDescription   As String          'Error text reaching this case
-
-    Const PROC As String = _
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = _
         "TST_Case_DestructiveRunnersPreserveCallerSnapshot"
+
+    Dim RaisedNumber        As Long     'Error number reaching this case
+    Dim RaisedSource        As String   'Error source reaching this case
+    Dim RaisedDescription   As String   'Error text reaching this case
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that destructive runners preserve a caller snapshot"
 
     'The pack reaches this case only when no explicit snapshot pre-existed, but
     'assert it rather than assume it: every block below depends on owning the
     'slot outright.
-        TST_AssertSnapshotAvailability False, PROC & ".NoSnapshotOnEntry"
+        TST_AssertSnapshotAvailability False, PROC_NAME & ".NoSnapshotOnEntry"
 
 '------------------------------------------------------------------------------
-' BLOCK 1 - Test_EXCEL_UI_RunCertificationSelfTest
+' BLOCK 1 - TEST_EXCEL_UI_RUNCERTIFICATIONSELFTEST
 '------------------------------------------------------------------------------
         UI_SetExcelUI StatusBar:=UI_Hide, FormulaBar:=UI_Show
         TST_WaitUI TEST_WAIT_SECONDS
 
         UI_CaptureExcelUIState
-        TST_AssertSnapshotAvailability True, PROC & ".SelfTest.Captured"
+        TST_AssertSnapshotAvailability True, PROC_NAME & ".SelfTest.Captured"
 
     'Capture immediately, before anything else can clear Err
         On Error Resume Next
 
-            Test_EXCEL_UI_RunCertificationSelfTest
+        Test_EXCEL_UI_RunCertificationSelfTest
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
         On Error GoTo 0
 
@@ -9022,9 +9148,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
-            AssertionName:=PROC & ".SelfTest.Refusal"
+            AssertionName:=PROC_NAME & ".SelfTest.Refusal"
 
-        TST_AssertSnapshotAvailability True, PROC & ".SelfTest.Survived"
+        TST_AssertSnapshotAvailability True, PROC_NAME & ".SelfTest.Survived"
 
     'The flag can survive while the captured content does not, so restore
     'through it and assert the original state came back
@@ -9035,31 +9161,31 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
         TST_WaitUI TEST_WAIT_SECONDS
 
         TST_AssertApplicationProperty _
-            False, "DisplayStatusBar", PROC & ".SelfTest.StatusBarRestored"
+            False, "DisplayStatusBar", PROC_NAME & ".SelfTest.StatusBarRestored"
         TST_AssertApplicationProperty _
-            True, "DisplayFormulaBar", PROC & ".SelfTest.FormulaBarRestored"
+            True, "DisplayFormulaBar", PROC_NAME & ".SelfTest.FormulaBarRestored"
 
         UI_ClearExcelUIStateSnapshot
-        TST_AssertSnapshotAvailability False, PROC & ".SelfTest.Cleared"
+        TST_AssertSnapshotAvailability False, PROC_NAME & ".SelfTest.Cleared"
 
 '------------------------------------------------------------------------------
-' BLOCK 2 - Test_EXCEL_UI_RunRibbonSdiProbe
+' BLOCK 2 - TEST_EXCEL_UI_RUNRIBBONSDIPROBE
 '------------------------------------------------------------------------------
         UI_SetExcelUI StatusBar:=UI_Show, FormulaBar:=UI_Hide
         TST_WaitUI TEST_WAIT_SECONDS
 
         UI_CaptureExcelUIState
-        TST_AssertSnapshotAvailability True, PROC & ".RibbonProbe.Captured"
+        TST_AssertSnapshotAvailability True, PROC_NAME & ".RibbonProbe.Captured"
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunRibbonSdiProbe
+        Test_EXCEL_UI_RunRibbonSdiProbe
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
         On Error GoTo 0
 
@@ -9072,9 +9198,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
-            AssertionName:=PROC & ".RibbonProbe.Refusal"
+            AssertionName:=PROC_NAME & ".RibbonProbe.Refusal"
 
-        TST_AssertSnapshotAvailability True, PROC & ".RibbonProbe.Survived"
+        TST_AssertSnapshotAvailability True, PROC_NAME & ".RibbonProbe.Survived"
 
         UI_SetExcelUI StatusBar:=UI_Hide, FormulaBar:=UI_Show
         TST_WaitUI TEST_WAIT_SECONDS
@@ -9083,31 +9209,31 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
         TST_WaitUI TEST_WAIT_SECONDS
 
         TST_AssertApplicationProperty _
-            True, "DisplayStatusBar", PROC & ".RibbonProbe.StatusBarRestored"
+            True, "DisplayStatusBar", PROC_NAME & ".RibbonProbe.StatusBarRestored"
         TST_AssertApplicationProperty _
-            False, "DisplayFormulaBar", PROC & ".RibbonProbe.FormulaBarRestored"
+            False, "DisplayFormulaBar", PROC_NAME & ".RibbonProbe.FormulaBarRestored"
 
         UI_ClearExcelUIStateSnapshot
-        TST_AssertSnapshotAvailability False, PROC & ".RibbonProbe.Cleared"
+        TST_AssertSnapshotAvailability False, PROC_NAME & ".RibbonProbe.Cleared"
 
 '------------------------------------------------------------------------------
-' BLOCK 3 - Test_EXCEL_UI_RunSnapshotIdentity
+' BLOCK 3 - TEST_EXCEL_UI_RUNSNAPSHOTIDENTITY
 '------------------------------------------------------------------------------
         UI_SetExcelUI StatusBar:=UI_Hide, FormulaBar:=UI_Hide
         TST_WaitUI TEST_WAIT_SECONDS
 
         UI_CaptureExcelUIState
-        TST_AssertSnapshotAvailability True, PROC & ".SnapshotIdentity.Captured"
+        TST_AssertSnapshotAvailability True, PROC_NAME & ".SnapshotIdentity.Captured"
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunSnapshotIdentity
+        Test_EXCEL_UI_RunSnapshotIdentity
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
         On Error GoTo 0
 
@@ -9120,9 +9246,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
-            AssertionName:=PROC & ".SnapshotIdentity.Refusal"
+            AssertionName:=PROC_NAME & ".SnapshotIdentity.Refusal"
 
-        TST_AssertSnapshotAvailability True, PROC & ".SnapshotIdentity.Survived"
+        TST_AssertSnapshotAvailability True, PROC_NAME & ".SnapshotIdentity.Survived"
 
         UI_SetExcelUI StatusBar:=UI_Show, FormulaBar:=UI_Show
         TST_WaitUI TEST_WAIT_SECONDS
@@ -9132,32 +9258,32 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
 
         TST_AssertApplicationProperty _
             False, "DisplayStatusBar", _
-            PROC & ".SnapshotIdentity.StatusBarRestored"
+            PROC_NAME & ".SnapshotIdentity.StatusBarRestored"
         TST_AssertApplicationProperty _
             False, "DisplayFormulaBar", _
-            PROC & ".SnapshotIdentity.FormulaBarRestored"
+            PROC_NAME & ".SnapshotIdentity.FormulaBarRestored"
 
         UI_ClearExcelUIStateSnapshot
-        TST_AssertSnapshotAvailability False, PROC & ".SnapshotIdentity.Cleared"
+        TST_AssertSnapshotAvailability False, PROC_NAME & ".SnapshotIdentity.Cleared"
 
 '------------------------------------------------------------------------------
-' BLOCK 4 - Test_EXCEL_UI_RunTitleBarSdiIdentity
+' BLOCK 4 - TEST_EXCEL_UI_RUNTITLEBARSDIIDENTITY
 '------------------------------------------------------------------------------
         UI_SetExcelUI StatusBar:=UI_Show, FormulaBar:=UI_Show
         TST_WaitUI TEST_WAIT_SECONDS
 
         UI_CaptureExcelUIState
-        TST_AssertSnapshotAvailability True, PROC & ".TitleBarSdi.Captured"
+        TST_AssertSnapshotAvailability True, PROC_NAME & ".TitleBarSdi.Captured"
 
         On Error Resume Next
 
-            Test_EXCEL_UI_RunTitleBarSdiIdentity
+        Test_EXCEL_UI_RunTitleBarSdiIdentity
 
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
 
-            Err.Clear
+        Err.Clear
 
         On Error GoTo 0
 
@@ -9170,9 +9296,9 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
             ActualNumber:=RaisedNumber, _
             ActualSource:=RaisedSource, _
             ActualDescription:=RaisedDescription, _
-            AssertionName:=PROC & ".TitleBarSdi.Refusal"
+            AssertionName:=PROC_NAME & ".TitleBarSdi.Refusal"
 
-        TST_AssertSnapshotAvailability True, PROC & ".TitleBarSdi.Survived"
+        TST_AssertSnapshotAvailability True, PROC_NAME & ".TitleBarSdi.Survived"
 
         UI_SetExcelUI StatusBar:=UI_Hide, FormulaBar:=UI_Hide
         TST_WaitUI TEST_WAIT_SECONDS
@@ -9181,27 +9307,26 @@ Private Sub TST_Case_DestructiveRunnersPreserveCallerSnapshot()
         TST_WaitUI TEST_WAIT_SECONDS
 
         TST_AssertApplicationProperty _
-            True, "DisplayStatusBar", PROC & ".TitleBarSdi.StatusBarRestored"
+            True, "DisplayStatusBar", PROC_NAME & ".TitleBarSdi.StatusBarRestored"
         TST_AssertApplicationProperty _
-            True, "DisplayFormulaBar", PROC & ".TitleBarSdi.FormulaBarRestored"
+            True, "DisplayFormulaBar", PROC_NAME & ".TitleBarSdi.FormulaBarRestored"
 
         UI_ClearExcelUIStateSnapshot
-        TST_AssertSnapshotAvailability False, PROC & ".TitleBarSdi.Cleared"
+        TST_AssertSnapshotAvailability False, PROC_NAME & ".TitleBarSdi.Cleared"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "All four destructive runners refused and preserved the snapshot"
 
 End Sub
 
 Private Sub TST_LogHostWindows( _
     ByVal Tag As String)
-
 '
-'==============================================================================
-' TST_LogHostWindows
+'------------------------------------------------------------------------------
+'                             TST LOG HOST WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Log the windows Excel holds and their state, so a run that fails because a
@@ -9215,10 +9340,13 @@ Private Sub TST_LogHostWindows( _
 '   - Writes one TST_Log line and changes nothing.
 '   - A read that fails is left out of the line; this helper never raises.
 '
-' UPDATED
+' HISTORY
 '   2026-11-19 - Added to diagnose DisplayHeadings refusals after the
 '                self-test cases (#35).
-'==============================================================================
+'
+' UPDATED
+'   2026-11-19
+'------------------------------------------------------------------------------
 
     Dim Index               As Long            'Window index
     Dim StateText                As String          'Text logged

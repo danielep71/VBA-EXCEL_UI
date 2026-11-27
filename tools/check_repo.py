@@ -531,15 +531,18 @@ def check_house_labels() -> None:
 
 
 def check_house_style_rules() -> None:
-    """Prove the rules that rewriting cannot settle, and apply them once the style is on.
+    """Prove the rules that rewriting cannot settle, and apply them to the modules once the style is on.
 
     The fixtures run on every push. The modules are read only while
-    house_style.HOUSE_STYLE_ACTIVE is True, because the tree does not yet carry
-    the header fields, the PROC_NAME constant and the sections they ask for.
+    house_style.HOUSE_STYLE_ACTIVE is True. Findings that are still to be
+    settled by hand are listed in tools/house_style_pending.txt (see
+    vba_house_rules.compare_pending): a finding that is not listed fails, and
+    so does a listed line that no finding matches any more. With no such file,
+    the tree must have no finding.
     """
     import house_style
     from house_rules_fixtures import rules_selftest
-    from vba_house_rules import findings
+    from vba_house_rules import PENDING_FILE, Finding, compare_pending, findings
     errors, count = rules_selftest()
     for finding in errors:
         fail('house-style-rules', finding)
@@ -547,12 +550,25 @@ def check_house_style_rules() -> None:
     if not house_style.HOUSE_STYLE_ACTIVE:
         print('  rules not applied to the modules: HOUSE_STYLE_ACTIVE is False')
         return
+    found: list[tuple[str, Finding]] = []
+    paths: dict[str, str] = {}
     for rel in ALL_MODULES:
         if not is_standard_module(rel):
             continue
         name = os.path.splitext(os.path.basename(rel))[0]
-        for item in findings(read(rel).decode('ascii'), name):
-            fail('house-style-rules', f'{rel}:{item}')
+        paths[name] = rel
+        found.extend((name, item) for item in findings(read(rel).decode('ascii'), name))
+    pending = read(PENDING_FILE).decode('ascii') if os.path.exists(os.path.join(REPO, PENDING_FILE)) else ''
+    result = compare_pending(found, pending)
+    for name, item in result.unlisted:
+        fail('house-style-rules', f'{paths[name]}:{item}; the finding is not listed in {PENDING_FILE}')
+    for entry in result.stale:
+        fail('house-style-rules',
+             f'{PENDING_FILE}:{entry.number}: stale line "{entry.key}": no such finding any more; delete the line')
+    for number, problem in result.problems:
+        fail('house-style-rules', f'{PENDING_FILE}:{number}: {problem}')
+    if pending:
+        print(f'  {len(found) - len(result.unlisted)} findings still listed in {PENDING_FILE}')
 
 
 def check_vba_analyzer() -> None:

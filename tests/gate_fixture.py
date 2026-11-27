@@ -31,6 +31,8 @@ if str(TOOLS) not in sys.path:
 
 # Imported here, after TOOLS is on sys.path, and re-exported for the tests.
 import check_repo as check_repo  # noqa: E402
+import house_equiv as house_equiv  # noqa: E402
+import house_equiv_fixtures as house_equiv_fixtures  # noqa: E402
 import house_format_fixtures as house_format_fixtures  # noqa: E402
 import house_rules_fixtures as house_rules_fixtures  # noqa: E402
 import house_style as house_style  # noqa: E402

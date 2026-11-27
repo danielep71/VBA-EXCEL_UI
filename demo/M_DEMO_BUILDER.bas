@@ -1,10 +1,12 @@
 Attribute VB_Name = "M_DEMO_BUILDER"
+
 Option Explicit
 Option Private Module
 
+'
 '==============================================================================
-' M_DEMO_BUILDER
-'------------------------------------------------------------------------------
+' MODULE: M_DEMO_BUILDER
+'==============================================================================
 ' PURPOSE
 '   Provides reusable helper routines to build, reset, and format DEMO sheets
 '   consistently.
@@ -45,7 +47,13 @@ Option Private Module
 '     until M_DEMO_CLEANUP_TESTS arms them through
 '     DEMO_InternalCleanupProbeBegin.
 '
-' UPDATED
+' AUTHOR
+'   Daniele Penza
+'
+' VERSION
+'   1.1.0
+'
+' HISTORY
 '   2026-11-15 - DEMO_Sheet_BuildTemplate keeps manual page breaks, and both
 '                procedures write DisplayPageBreaks only when it is True, so
 '                a demo build does not wait for the printer driver (#187).
@@ -59,18 +67,14 @@ Option Private Module
 '   2026-11-06 - Cleanup probe and one-shot fault seams for the #71 harness.
 '   2026-09-10 - Single-pass demo cleanup and owned protection restoration.
 '
-' AUTHOR
-'   Daniele Penza
-'
-' VERSION
-'   1.1.0
+' UPDATED
+'   2026-11-15
 '==============================================================================
-
 
 '------------------------------------------------------------------------------
 ' PUBLIC CONSTANTS
 '------------------------------------------------------------------------------
-    Public Const COLOR_TITLE        As Long = 0           'RGB(0, 0, 0)
+    Public Const COLOR_TITLE        As Long = 0 'RGB(0, 0, 0)
     Public Const COLOR_SUBTITLE     As Long = 6568980
     Public Const COLOR_HEADER       As Long = 6568980
     Public Const COLOR_SUBHEADER    As Long = 13145700
@@ -78,15 +82,14 @@ Option Private Module
     Public Const COLOR_LABEL_BACK   As Long = 15787740
     Public Const COLOR_LABEL_FONT   As Long = 0
     'Public Const COLOR_BUTTON       As Long = &HFF660A
-    Public Const COLOR_BUTTON       As Long = 13145700
-    Public Const COLOR_TABLE        As Long = 16774635
-    Public Const COLOR_HELP         As Long = 6697728
+    Public Const COLOR_BUTTON   As Long = 13145700
+    Public Const COLOR_TABLE    As Long = 16774635
+    Public Const COLOR_HELP     As Long = 6697728
     'Buttons color tokens
-    Public Const BTN_PRIMARY_N      As Long = &HFF660A  ' #0A66FF (BGR in VBA)
-    Public Const BTN_PRIMARY_H      As Long = &HB34700  ' #0047B3
-    Public Const BTN_PRIMARY_P      As Long = &H853000  ' #003085
-    Public Const WHITE              As Long = &HFFFFFF
-
+    Public Const BTN_PRIMARY_N  As Long = &HFF660A  ' #0A66FF (BGR in VBA)
+    Public Const BTN_PRIMARY_H  As Long = &HB34700  ' #0047B3
+    Public Const BTN_PRIMARY_P  As Long = &H853000  ' #003085
+    Public Const WHITE          As Long = &HFFFFFF
 
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
@@ -95,50 +98,50 @@ Option Private Module
     Private Const DEFAULT_BOOLLIST_NAME As String = "BoolList"
 
     'Cleanup probe sites; mirrored by M_DEMO_CLEANUP_TESTS
-    Private Const DEMO_PROBE_RESET_HANDLER   As Long = 1    'Reset Clean_Fail entries
-    Private Const DEMO_PROBE_RESET_CLEANUP   As Long = 2    'Reset Clean_Exit passes
-    Private Const DEMO_PROBE_RESET_PROTECT   As Long = 3    'Reset Protect statements reached
-    Private Const DEMO_PROBE_RESET_SELECTION As Long = 4    'Reset EnableSelection restores reached
-    Private Const DEMO_PROBE_BUILD_HANDLER   As Long = 5    'BuildTemplate Clean_Fail entries
-    Private Const DEMO_PROBE_BUILD_CLEANUP   As Long = 6    'BuildTemplate Clean_Exit passes
-    Private Const DEMO_PROBE_FM_ENTRY        As Long = 7    'Fast-mode entry writes reached
-    Private Const DEMO_PROBE_FM_RESTORE      As Long = 8    'Fast-mode restoration writes reached
-    Private Const DEMO_PROBE_PAGE_BREAKS     As Long = 9    'ResetAllPageBreaks calls reached
-    Private Const DEMO_PROBE_DISPLAY_BREAKS  As Long = 10   'DisplayPageBreaks writes reached
-    Private Const DEMO_PROBE_SITE_COUNT      As Long = 10   'Highest probe site
+    Private Const DEMO_PROBE_RESET_HANDLER      As Long = 1     'Reset Clean_Fail entries
+    Private Const DEMO_PROBE_RESET_CLEANUP      As Long = 2     'Reset Clean_Exit passes
+    Private Const DEMO_PROBE_RESET_PROTECT      As Long = 3     'Reset Protect statements reached
+    Private Const DEMO_PROBE_RESET_SELECTION    As Long = 4     'Reset EnableSelection restores reached
+    Private Const DEMO_PROBE_BUILD_HANDLER      As Long = 5     'BuildTemplate Clean_Fail entries
+    Private Const DEMO_PROBE_BUILD_CLEANUP      As Long = 6     'BuildTemplate Clean_Exit passes
+    Private Const DEMO_PROBE_FM_ENTRY           As Long = 7     'Fast-mode entry writes reached
+    Private Const DEMO_PROBE_FM_RESTORE         As Long = 8     'Fast-mode restoration writes reached
+    Private Const DEMO_PROBE_PAGE_BREAKS        As Long = 9     'ResetAllPageBreaks calls reached
+    Private Const DEMO_PROBE_DISPLAY_BREAKS     As Long = 10    'DisplayPageBreaks writes reached
+    Private Const DEMO_PROBE_SITE_COUNT         As Long = 10    'Highest probe site
 
     'One-shot cleanup fault bits; mirrored by M_DEMO_CLEANUP_TESTS
-    Private Const DEMO_FAULT_RESET_BODY      As Long = 1    'Operation error after unprotect
-    Private Const DEMO_FAULT_RESET_PROTECT   As Long = 2    'Reprotect statement fails
-    Private Const DEMO_FAULT_RESET_SELECTION As Long = 4    'EnableSelection restore fails
-    Private Const DEMO_FAULT_BUILD_FORMULABAR As Long = 8   'BuildTemplate DisplayFormulaBar write fails
-    Private Const DEMO_FAULT_SHEET_NAME      As Long = 16   'GetOrCreate naming of a new sheet fails
-    Private Const DEMO_FAULT_FM_ENTRY_UNIT   As Long = 256  'Times a DEMO_FM_* bit: its entry write fails
-    Private Const DEMO_FAULT_FM_RESTORE_UNIT As Long = 8192 'Times a DEMO_FM_* bit: its restoration fails
+    Private Const DEMO_FAULT_RESET_BODY         As Long = 1     'Operation error after unprotect
+    Private Const DEMO_FAULT_RESET_PROTECT      As Long = 2     'Reprotect statement fails
+    Private Const DEMO_FAULT_RESET_SELECTION    As Long = 4     'EnableSelection restore fails
+    Private Const DEMO_FAULT_BUILD_FORMULABAR   As Long = 8     'BuildTemplate DisplayFormulaBar write fails
+    Private Const DEMO_FAULT_SHEET_NAME         As Long = 16    'GetOrCreate naming of a new sheet fails
+    Private Const DEMO_FAULT_FM_ENTRY_UNIT      As Long = 256   'Times a DEMO_FM_* bit: its entry write fails
+    Private Const DEMO_FAULT_FM_RESTORE_UNIT    As Long = 8192  'Times a DEMO_FM_* bit: its restoration fails
 
     'Fast-mode settings, one bit each; mirrored by M_DEMO_CLEANUP_TESTS
-    Private Const DEMO_FM_SCREENUPDATING     As Long = 1    'Application.ScreenUpdating
-    Private Const DEMO_FM_ENABLEEVENTS       As Long = 2    'Application.EnableEvents
-    Private Const DEMO_FM_DISPLAYALERTS      As Long = 4    'Application.DisplayAlerts
-    Private Const DEMO_FM_CALCULATION        As Long = 8    'Application.Calculation
-    Private Const DEMO_FM_CURSOR             As Long = 16   'Application.Cursor
+    Private Const DEMO_FM_SCREENUPDATING    As Long = 1     'Application.ScreenUpdating
+    Private Const DEMO_FM_ENABLEEVENTS      As Long = 2     'Application.EnableEvents
+    Private Const DEMO_FM_DISPLAYALERTS     As Long = 4     'Application.DisplayAlerts
+    Private Const DEMO_FM_CALCULATION       As Long = 8     'Application.Calculation
+    Private Const DEMO_FM_CURSOR            As Long = 16    'Application.Cursor
 
     'Check-box kinds resolved by DEMO_CB_ResolveControl
-    Private Const DEMO_CB_KIND_NONE          As Long = 0    'Missing or refused
-    Private Const DEMO_CB_KIND_FORMS         As Long = 1    'Forms check box
-    Private Const DEMO_CB_KIND_ACTIVEX       As Long = 2    'ActiveX check box
-    Private Const DEMO_CB_MIXED_STATE        As String = "check box state is mixed: neither checked nor unchecked"
+    Private Const DEMO_CB_KIND_NONE     As Long = 0 'Missing or refused
+    Private Const DEMO_CB_KIND_FORMS    As Long = 1 'Forms check box
+    Private Const DEMO_CB_KIND_ACTIVEX  As Long = 2 'ActiveX check box
+    Private Const DEMO_CB_MIXED_STATE   As String = "check box state is mixed: neither checked nor unchecked"
 
 '------------------------------------------------------------------------------
 ' PRIVATE VARIABLES
 '------------------------------------------------------------------------------
-    Private mResetWorkbookName As String
-    Private mResetSheetName    As String
-    Private mResetShapeName    As String
+    Private mResetWorkbookName  As String
+    Private mResetSheetName     As String
+    Private mResetShapeName     As String
 
-    Private mCleanupProbeArmed As Boolean                              'Count probe sites
-    Private mCleanupProbeCounts(1 To DEMO_PROBE_SITE_COUNT) As Long    'Hits per probe site
-    Private mCleanupFaults     As Long                                 'Armed one-shot fault bits
+    Private mCleanupProbeArmed                              As Boolean  'Count probe sites
+    Private mCleanupProbeCounts(1 To DEMO_PROBE_SITE_COUNT) As Long     'Hits per probe site
+    Private mCleanupFaults                                  As Long     'Armed one-shot fault bits
 
 '------------------------------------------------------------------------------
 ' PUBLIC TYPES
@@ -222,8 +225,8 @@ Public Sub DEMO_Sheet_BuildTemplate( _
     Optional ByVal ShowFormulaBar As Boolean = True, Optional ByVal ShowHorizontalScrollBar As Boolean = True, _
     Optional ByVal ShowVerticalScrollBar As Boolean = True, Optional ByVal ZoomPercent As Long = 0)
 '
-'==============================================================================
-' BUILD DEMO TEMPLATE
+'------------------------------------------------------------------------------
+'                             BUILD DEMO TEMPLATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates or rebuilds a DEMO worksheet with a standard title/subtitle layout
@@ -285,7 +288,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '     View settings applied only when the target workbook is active
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Validates every layout input first: the worksheet name, the content and
@@ -307,23 +310,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '   fails, it deletes that worksheet before re-raising; a failed deletion is
 '   appended to the description as a "Cleanup failure: " line.
 '
-' DESTRUCTIVE SCOPE
-'   A rebuild of an existing worksheet is destructive by design: once the
-'   inputs are valid, DEMO_Sheet_Reset deletes its shapes and tables and
-'   clears its cells, formats, validation, comments, sizes, hidden rows and
-'   columns and tab colour. A failure after that point is reported, but
-'   nothing is rolled back; only a worksheet this call created is removed.
-'
-' PAGE BREAKS
-'   The template adds no manual page breaks, so it does not remove any: it
-'   resets the sheet with RemovePageBreaks:=False and keeps manual breaks
-'   that were already there. ResetAllPageBreaks makes Excel lay the sheet out
-'   through the default printer driver, which stalls the build on a slow,
-'   offline or network printer. Checking for manual breaks first would not
-'   avoid it: HPageBreaks, VPageBreaks and Range.PageBreak also report
-'   automatic breaks, which Excel computes from that layout. Page-break
-'   indicators are hidden only when they are shown (DEMO_Sheet_HidePageBreaks).
-'
 ' DEPENDENCIES
 '   - DEMO_Sheet_FindWorksheet
 '   - DEMO_Sheet_GetOrCreate
@@ -344,55 +330,77 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '     M_DEMO_CLEANUP_TESTS has armed it; an armed one-shot fault can fail the
 '     DisplayFormulaBar write
 '
+' DESTRUCTIVE SCOPE
+'   A rebuild of an existing worksheet is destructive by design: once the
+'   inputs are valid, DEMO_Sheet_Reset deletes its shapes and tables and
+'   clears its cells, formats, validation, comments, sizes, hidden rows and
+'   columns and tab colour. A failure after that point is reported, but
+'   nothing is rolled back; only a worksheet this call created is removed.
+'
+' PAGE BREAKS
+'   The template adds no manual page breaks, so it does not remove any: it
+'   resets the sheet with RemovePageBreaks:=False and keeps manual breaks
+'   that were already there. ResetAllPageBreaks makes Excel lay the sheet out
+'   through the default printer driver, which stalls the build on a slow,
+'   offline or network printer. Checking for manual breaks first would not
+'   avoid it: HPageBreaks, VPageBreaks and Range.PageBreak also report
+'   automatic breaks, which Excel computes from that layout. Page-break
+'   indicators are hidden only when they are shown (DEMO_Sheet_HidePageBreaks).
+'
 ' VIEW OWNERSHIP
 '   The window settings and DisplayFormulaBar are applied as the requested
 '   demo view and are not restored afterwards. DisplayFormulaBar is
 '   application-wide: it changes every window of this Excel instance. A
 '   DEMO_FastMode_Begin scope around this call does not capture or restore it.
 '
-' UPDATED
+' HISTORY
 '   2026-11-15 - Manual page breaks kept; indicators hidden only when shown
 '                (#187).
 '   2026-11-14 - Layout validated before any reset or creation; a worksheet
 '                created by a failed call is removed (#74).
 '   2026-11-14 - Formula-bar ownership documented; fault seam (#70).
 '   2026-11-06
-'==============================================================================
+'
+' UPDATED
+'   2026-11-15
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WB                  As Workbook        'Target workbook
-    Dim WS                  As Worksheet       'Target worksheet
-    Dim LimitSheet          As Worksheet       'Worksheet the grid limits are read from
-    Dim CreatedSheet        As Boolean         'TRUE when this call created WS
-    Dim NameProblem         As String          'Why WS_Name is not a valid sheet name
-    Dim CleanupFailures     As String          'Failed removal of a created worksheet
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate"
 
-    Dim MaxRow              As Long            'Last worksheet row
-    Dim MaxCol              As Long            'Last worksheet column
+    Dim WB              As Workbook     'Target workbook
+    Dim WS              As Worksheet    'Target worksheet
+    Dim LimitSheet      As Worksheet    'Worksheet the grid limits are read from
+    Dim CreatedSheet    As Boolean      'TRUE when this call created WS
+    Dim NameProblem     As String       'Why WS_Name is not a valid sheet name
+    Dim CleanupFailures As String       'Failed removal of a created worksheet
 
-    Dim ContentText         As String          'Trimmed ContentColumns text
-    Dim ContentFirstColIndex As Long            'Resolved first content-column index
-    Dim ContentLastColIndex As Long            'Resolved last content-column index
-    Dim LeftFirstColIndex   As Long            'Resolved first left-margin column, 0 when blank
-    Dim LeftLastColIndex    As Long            'Resolved last left-margin column, 0 when blank
+    Dim MaxRow  As Long 'Last worksheet row
+    Dim MaxCol  As Long 'Last worksheet column
 
-    Dim EffectiveSeparatorColIndex As Long            'Derived separator-column index
-    Dim EffectiveHideFromColIndex As Long            'Derived first hidden-column index
-    Dim EffectiveSeparatorColumns As String          'Derived separator-column address
-    Dim EffectiveHideColumnsFrom As String          'Derived first hidden-column text
+    Dim ContentText             As String   'Trimmed ContentColumns text
+    Dim ContentFirstColIndex    As Long     'Resolved first content-column index
+    Dim ContentLastColIndex     As Long     'Resolved last content-column index
+    Dim LeftFirstColIndex       As Long     'Resolved first left-margin column, 0 when blank
+    Dim LeftLastColIndex        As Long     'Resolved last left-margin column, 0 when blank
 
-    Dim LastVisibleRow      As Long            'Last visible worksheet row
-    Dim LastVisibleCol      As Long            'Last visible worksheet column
-    Dim ScrollAreaAddress   As String          'Resolved worksheet ScrollArea text
+    Dim EffectiveSeparatorColIndex  As Long     'Derived separator-column index
+    Dim EffectiveHideFromColIndex   As Long     'Derived first hidden-column index
+    Dim EffectiveSeparatorColumns   As String   'Derived separator-column address
+    Dim EffectiveHideColumnsFrom    As String   'Derived first hidden-column text
 
-    Dim TitleBandRange      As Range           'Resolved title-band range
-    Dim SubTitleBandRange   As Range           'Resolved subtitle-band range
+    Dim LastVisibleRow      As Long     'Last visible worksheet row
+    Dim LastVisibleCol      As Long     'Last visible worksheet column
+    Dim ScrollAreaAddress   As String   'Resolved worksheet ScrollArea text
 
-    Dim SavedErrNum         As Long            'Captured error number
-    Dim SavedErrSrc         As String          'Captured error source
-    Dim SavedErrDesc        As String          'Captured error description
+    Dim TitleBandRange      As Range    'Resolved title-band range
+    Dim SubTitleBandRange   As Range    'Resolved subtitle-band range
+
+    Dim SavedErrNum     As Long     'Captured error number
+    Dim SavedErrSrc     As String   'Captured error source
+    Dim SavedErrDesc    As String   'Captured error description
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -501,7 +509,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
-        On Error GoTo Clean_Fail
+        On Error GoTo CleanFail
 
     'Use the requested workbook when supplied; otherwise default to ThisWorkbook
         If IsMissing(TargetWorkbook) Or IsEmpty(TargetWorkbook) Then
@@ -729,41 +737,41 @@ Public Sub DEMO_Sheet_BuildTemplate( _
     'Apply window-level view settings only when the target workbook is active
         If WB Is ActiveWorkbook Then
 
-            'Activate the target sheet in the current window
-                WS.Activate
+        'Activate the target sheet in the current window
+            WS.Activate
 
-            'Apply active-window and application-level view settings
-                With ActiveWindow
-                    .DisplayGridlines = Not HideGridlines
-                    .DisplayHeadings = ShowHeadings
-                    .DisplayHorizontalScrollBar = ShowHorizontalScrollBar
-                    .DisplayVerticalScrollBar = ShowVerticalScrollBar
+        'Apply active-window and application-level view settings
+            With ActiveWindow
+                .DisplayGridlines = Not HideGridlines
+                .DisplayHeadings = ShowHeadings
+                .DisplayHorizontalScrollBar = ShowHorizontalScrollBar
+                .DisplayVerticalScrollBar = ShowVerticalScrollBar
 
-                    If ZoomPercent <> 0 Then
-                        .Zoom = ZoomPercent
-                    End If
+                If ZoomPercent <> 0 Then
+                    .Zoom = ZoomPercent
+                End If
 
-                    .FreezePanes = False
-                    .SplitColumn = 0
+                .FreezePanes = False
+                .SplitColumn = 0
 
-                    If IsFrozenPane Then
-                        .SplitRow = FreezeAtRow - 1
-                        WS.Range("A" & CStr(FreezeAtRow)).Select
-                        .FreezePanes = True
-                    Else
-                        .SplitRow = 0
-                    End If
-                End With
+                If IsFrozenPane Then
+                    .SplitRow = FreezeAtRow - 1
+                    WS.Range("A" & CStr(FreezeAtRow)).Select
+                    .FreezePanes = True
+                Else
+                    .SplitRow = 0
+                End If
+            End With
 
-            'Apply formula-bar visibility, an intended demo view change that no
-    'fast-mode scope captures or restores
-                Application.DisplayFormulaBar = DEMO_FormulaBarValue(ShowFormulaBar)
+        'Apply formula-bar visibility, an intended demo view change that no
+        'fast-mode scope captures or restores
+            Application.DisplayFormulaBar = DEMO_FormulaBarValue(ShowFormulaBar)
         End If
 
-Clean_Exit:
 '------------------------------------------------------------------------------
-' RE-RAISE ERROR AFTER CLEANUP
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+CleanExit:
     'Re-raise the captured error after cleanup when needed
         On Error GoTo 0
         DEMO_CleanupProbeHit DEMO_PROBE_BUILD_CLEANUP
@@ -780,12 +788,12 @@ Clean_Exit:
             Err.Raise SavedErrNum, SavedErrSrc, SavedErrDesc
         End If
 
-    Exit Sub
+        Exit Sub
 
-Clean_Fail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+CleanFail:
     'Capture the original error before cleanup
         SavedErrNum = Err.Number
         SavedErrSrc = Err.Source
@@ -795,17 +803,16 @@ Clean_Fail:
         DEMO_CleanupProbeHit DEMO_PROBE_BUILD_HANDLER
 
     'Continue through the centralized cleanup path
-        Resume Clean_Exit
+        Resume CleanExit
 
 End Sub
-
 
 Private Function DEMO_ColumnLetter( _
     ByVal ColIndex As Long) _
     As String
 '
-'==============================================================================
-' COLUMN LETTER
+'------------------------------------------------------------------------------
+'                                COLUMN LETTER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the Excel column letter for a 1-based column index
@@ -827,14 +834,16 @@ Private Function DEMO_ColumnLetter( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim N                   As Long            'Working column index
-    Dim R                   As Long            'Current base-26 remainder
-    Dim S                   As String          'Accumulated column text
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_ColumnLetter"
+
+    Dim N   As Long     'Working column index
+    Dim R   As Long     'Current base-26 remainder
+    Dim S   As String   'Accumulated column text
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -867,12 +876,11 @@ Private Function DEMO_ColumnLetter( _
 
 End Function
 
-
 Public Sub DEMO_FastMode_Begin( _
     ByRef StateOut As tDEMOFastModeState)
 '
-'==============================================================================
-' BEGIN FAST MODE
+'------------------------------------------------------------------------------
+'                               BEGIN FAST MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Captures the current Excel Application state and switches Excel into a
@@ -893,7 +901,7 @@ Public Sub DEMO_FastMode_Begin( _
 '     settings this scope now owns.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Clears StateOut.Captured and StateOut.Applied first
@@ -929,18 +937,23 @@ Public Sub DEMO_FastMode_Begin( _
 '   write and fails it once while M_DEMO_CLEANUP_TESTS has armed a fault for
 '   that setting. Disarmed, the value passes through unchanged.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Rollback of a partial entry and the entry cursor (#70).
 '   2026-04-19
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim RollbackFailures    As String          'Settings the rollback could not restore
-    Dim SavedErrNumber      As Long            'Captured error number
-    Dim SavedErrSource      As String          'Captured error source
-    Dim SavedErrDescription As String          'Captured error description
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_FastMode_Begin"
+
+    Dim RollbackFailures    As String   'Settings the rollback could not restore
+    Dim SavedErrNumber      As Long     'Captured error number
+    Dim SavedErrSource      As String   'Captured error source
+    Dim SavedErrDescription As String   'Captured error description
 
 '------------------------------------------------------------------------------
 ' CAPTURE CURRENT STATE
@@ -958,11 +971,14 @@ Public Sub DEMO_FastMode_Begin( _
         StateOut.Captured = True
 
 '------------------------------------------------------------------------------
-' APPLY FAST MODE
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Roll back a partial entry on failure
-        On Error GoTo Clean_Fail
+        On Error GoTo CleanFail
 
+'------------------------------------------------------------------------------
+' APPLY FAST MODE
+'------------------------------------------------------------------------------
     'Mark each setting before writing it, then reduce UI noise
         StateOut.Applied = StateOut.Applied Or DEMO_FM_SCREENUPDATING
         Application.ScreenUpdating = DEMO_FastModeValue(DEMO_FM_SCREENUPDATING, False, False)
@@ -979,10 +995,10 @@ Public Sub DEMO_FastMode_Begin( _
         StateOut.Applied = StateOut.Applied Or DEMO_FM_CURSOR
         Application.Cursor = DEMO_FastModeValue(DEMO_FM_CURSOR, False, xlWait)
 
-Clean_Exit:
 '------------------------------------------------------------------------------
-' ROLL BACK A PARTIAL ENTRY
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+CleanExit:
     'Restore what was already written, then re-raise the original error
         On Error GoTo 0
         If SavedErrNumber <> 0 Then
@@ -994,27 +1010,26 @@ Clean_Exit:
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
-    Exit Sub
+        Exit Sub
 
-Clean_Fail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+CleanFail:
     'Capture the original error before the rollback
         SavedErrNumber = Err.Number
         SavedErrSource = Err.Source
         SavedErrDescription = Err.Description
 
-        Resume Clean_Exit
+        Resume CleanExit
 
 End Sub
-
 
 Public Sub DEMO_FastMode_End( _
     ByRef StateIn As tDEMOFastModeState)
 '
-'==============================================================================
-' END FAST MODE
+'------------------------------------------------------------------------------
+'                                END FAST MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restores the Application settings a DEMO_FastMode_Begin scope applied.
@@ -1027,7 +1042,7 @@ Public Sub DEMO_FastMode_End( _
 '     The state DEMO_FastMode_Begin filled.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Restores only the settings marked in StateIn.Applied, in reverse order:
@@ -1041,15 +1056,20 @@ Public Sub DEMO_FastMode_End( _
 '   failed. The description names each failed setting with its error number,
 '   source and description.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Every restoration attempted; failures reported (#70).
 '   2026-04-19
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Failures            As String          'Settings that could not be restored
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_FastMode_End"
+
+    Dim Failures    As String   'Settings that could not be restored
 
 '------------------------------------------------------------------------------
 ' RESTORE SAVED STATE
@@ -1065,15 +1085,14 @@ Public Sub DEMO_FastMode_End( _
 
 End Sub
 
-
 Public Sub DEMO_FastMode_EndPreservingError( _
     ByRef StateIn As tDEMOFastModeState, _
     ByRef ErrNumber As Long, _
     ByRef ErrSource As String, _
     ByRef ErrDescription As String)
 '
-'==============================================================================
-' END FAST MODE PRESERVING AN ERROR
+'------------------------------------------------------------------------------
+'                      END FAST MODE PRESERVING AN ERROR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Ends fast mode on a caller's cleanup path and folds a restoration failure
@@ -1097,27 +1116,32 @@ Public Sub DEMO_FastMode_EndPreservingError( _
 '   Does not raise. The caller re-raises the saved error after disabling its
 '   own handler.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CleanupErrNumber    As Long            'Restoration error number
-    Dim CleanupErrSource    As String          'Restoration error source
-    Dim CleanupErrDescription As String        'Restoration error description
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_FastMode_EndPreservingError"
+
+    Dim CleanupErrNumber        As Long     'Restoration error number
+    Dim CleanupErrSource        As String   'Restoration error source
+    Dim CleanupErrDescription   As String   'Restoration error description
 
 '------------------------------------------------------------------------------
 ' END FAST MODE
 '------------------------------------------------------------------------------
     'Attempt the restoration once and capture its failure
         On Error Resume Next
-            DEMO_FastMode_End StateIn
-            CleanupErrNumber = Err.Number
-            CleanupErrSource = Err.Source
-            CleanupErrDescription = Err.Description
-            Err.Clear
+        DEMO_FastMode_End StateIn
+        CleanupErrNumber = Err.Number
+        CleanupErrSource = Err.Source
+        CleanupErrDescription = Err.Description
+        Err.Clear
         On Error GoTo 0
 
 '------------------------------------------------------------------------------
@@ -1138,13 +1162,12 @@ Public Sub DEMO_FastMode_EndPreservingError( _
 
 End Sub
 
-
 Private Function DEMO_FastMode_Restore( _
     ByRef State As tDEMOFastModeState) _
     As String
 '
-'==============================================================================
-' DEMO_FastMode_Restore
+'------------------------------------------------------------------------------
+'                            DEMO FAST MODE RESTORE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes back every setting marked in State.Applied, each in its own guarded
@@ -1166,17 +1189,22 @@ Private Function DEMO_FastMode_Restore( _
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Failures            As String          'Collected failures
-    Dim FailNumber          As Long            'Error number of one attempt
-    Dim FailSource          As String          'Error source of one attempt
-    Dim FailDescription     As String          'Error description of one attempt
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_FastMode_Restore"
+
+    Dim Failures        As String   'Collected failures
+    Dim FailNumber      As Long     'Error number of one attempt
+    Dim FailSource      As String   'Error source of one attempt
+    Dim FailDescription As String   'Error description of one attempt
 
 '------------------------------------------------------------------------------
 ' RESTORE EACH OWNED SETTING
@@ -1244,7 +1272,6 @@ Private Function DEMO_FastMode_Restore( _
 
 End Function
 
-
 Private Function DEMO_FastMode_AddFailure( _
     ByVal Failures As String, _
     ByVal Setting As Long, _
@@ -1253,8 +1280,8 @@ Private Function DEMO_FastMode_AddFailure( _
     ByVal FailDescription As String) _
     As String
 '
-'==============================================================================
-' DEMO_FastMode_AddFailure
+'------------------------------------------------------------------------------
+'                          DEMO FAST MODE ADD FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Appends one failed restoration to the failure list; returns the list
@@ -1263,9 +1290,12 @@ Private Function DEMO_FastMode_AddFailure( _
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         If FailNumber = 0 Then
             DEMO_FastMode_AddFailure = Failures
@@ -1279,20 +1309,22 @@ Private Function DEMO_FastMode_AddFailure( _
 
 End Function
 
-
 Private Function DEMO_FastModeSettingName( _
     ByVal Setting As Long) _
     As String
 '
-'==============================================================================
-' DEMO_FastModeSettingName
+'------------------------------------------------------------------------------
+'                         DEMO FAST MODE SETTING NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the Application property name of one DEMO_FM_* setting bit.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         Select Case Setting
             Case DEMO_FM_SCREENUPDATING
@@ -1311,15 +1343,14 @@ Private Function DEMO_FastModeSettingName( _
 
 End Function
 
-
 Private Function DEMO_FastModeValue( _
     ByVal Setting As Long, _
     ByVal Restoring As Boolean, _
     ByVal Value As Variant) _
     As Variant
 '
-'==============================================================================
-' DEMO_FastModeValue
+'------------------------------------------------------------------------------
+'                             DEMO FAST MODE VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the value of one fast-mode entry or restoration write.
@@ -1348,14 +1379,19 @@ Private Function DEMO_FastModeValue( _
 '   and phase: vbObjectError + 2193 for an entry write, vbObjectError + 2194
 '   for a restoration write
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim FaultBit            As Long            'Fault bit of this setting and phase
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_FastModeValue"
+
+    Dim FaultBit    As Long 'Fault bit of this setting and phase
 
 '------------------------------------------------------------------------------
 ' COUNT AND RAISE ARMED FAULT
@@ -1398,8 +1434,8 @@ Public Sub DEMO_Set_RangeBorder( _
     Optional ByVal IncludeInside As Boolean = True, _
     Optional ByVal InsideColor As Long = vbWhite)
 '
-'==============================================================================
-' SET RANGE BORDER
+'------------------------------------------------------------------------------
+'                               SET RANGE BORDER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a consistent border format to a target range.
@@ -1435,7 +1471,7 @@ Public Sub DEMO_Set_RangeBorder( _
 '     Default = vbWhite
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if Target Is Nothing
@@ -1459,7 +1495,7 @@ Public Sub DEMO_Set_RangeBorder( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -1504,21 +1540,22 @@ Public Sub DEMO_Set_RangeBorder( _
     'Apply inside borders only when requested
         If IncludeInside Then
 
-            'Apply the inside horizontal borders
-                With Target.Borders(xlInsideHorizontal)
-                    .LineStyle = xlContinuous
-                    .Weight = BorderWeight
-                    .Color = InsideColor
-                End With
+        'Apply the inside horizontal borders
+            With Target.Borders(xlInsideHorizontal)
+                .LineStyle = xlContinuous
+                .Weight = BorderWeight
+                .Color = InsideColor
+            End With
 
-            'Apply the inside vertical borders
-                With Target.Borders(xlInsideVertical)
-                    .LineStyle = xlContinuous
-                    .Weight = BorderWeight
-                    .Color = InsideColor
-                End With
+        'Apply the inside vertical borders
+            With Target.Borders(xlInsideVertical)
+                .LineStyle = xlContinuous
+                .Weight = BorderWeight
+                .Color = InsideColor
+            End With
 
         End If
+
 End Sub
 
 Public Function DEMO_Sheet_GetOrCreate( _
@@ -1526,8 +1563,8 @@ Public Function DEMO_Sheet_GetOrCreate( _
     ByVal SheetName As String) _
     As Worksheet
 '
-'==============================================================================
-' GET OR CREATE SHEET
+'------------------------------------------------------------------------------
+'                             GET OR CREATE SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns an existing worksheet by name, or creates it if missing.
@@ -1565,21 +1602,26 @@ Public Function DEMO_Sheet_GetOrCreate( _
 '   The new name passes through DEMO_SheetNameValue, which fails the rename
 '   once while M_DEMO_CLEANUP_TESTS has armed that fault.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Name checked first; a sheet whose rename fails is removed
 '                (#74).
 '   2026-04-19
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Existing or new worksheet
-    Dim NameProblem         As String          'Why SheetName is not a valid sheet name
-    Dim NameErrNumber       As Long            'Rename error number
-    Dim NameErrSource       As String          'Rename error source
-    Dim NameErrDescription  As String          'Rename error description
-    Dim CleanupFailures     As String          'Failed removal of the new sheet
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate"
+
+    Dim WS                  As Worksheet    'Existing or new worksheet
+    Dim NameProblem         As String       'Why SheetName is not a valid sheet name
+    Dim NameErrNumber       As Long         'Rename error number
+    Dim NameErrSource       As String       'Rename error source
+    Dim NameErrDescription  As String       'Rename error description
+    Dim CleanupFailures     As String       'Failed removal of the new sheet
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -1632,11 +1674,11 @@ Public Function DEMO_Sheet_GetOrCreate( _
 '------------------------------------------------------------------------------
     'Assign the requested name; on failure delete the new sheet, then re-raise
         On Error Resume Next
-            WS.Name = DEMO_SheetNameValue(SheetName)
-            NameErrNumber = Err.Number
-            NameErrSource = Err.Source
-            NameErrDescription = Err.Description
-            Err.Clear
+        WS.Name = DEMO_SheetNameValue(SheetName)
+        NameErrNumber = Err.Number
+        NameErrSource = Err.Source
+        NameErrDescription = Err.Description
+        Err.Clear
         On Error GoTo 0
 
         If NameErrNumber <> 0 Then
@@ -1652,8 +1694,8 @@ Public Function DEMO_Sheet_GetOrCreate( _
 '------------------------------------------------------------------------------
     'Return the existing or newly created worksheet
         Set DEMO_Sheet_GetOrCreate = WS
-End Function
 
+End Function
 
 Private Function DEMO_Sheet_FindWorksheet( _
     ByVal WB As Workbook, _
@@ -1661,8 +1703,8 @@ Private Function DEMO_Sheet_FindWorksheet( _
     ByVal ErrSource As String) _
     As Worksheet
 '
-'==============================================================================
-' DEMO_Sheet_FindWorksheet
+'------------------------------------------------------------------------------
+'                          DEMO SHEET FIND WORKSHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the worksheet of WB named SheetName, or Nothing when no sheet has
@@ -1682,14 +1724,19 @@ Private Function DEMO_Sheet_FindWorksheet( _
 '   Raises vbObjectError + 2028 when a chart or other non-worksheet sheet
 '   already has the name
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Sh                  As Object          'Sheet of any type
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Sheet_FindWorksheet"
+
+    Dim Sh  As Object   'Sheet of any type
 
 '------------------------------------------------------------------------------
 ' SEARCH
@@ -1708,44 +1755,48 @@ Private Function DEMO_Sheet_FindWorksheet( _
 
 End Function
 
-
 Private Function DEMO_Sheet_DeleteOwned( _
     ByVal WS As Worksheet) _
     As String
 '
-'==============================================================================
-' DEMO_Sheet_DeleteOwned
+'------------------------------------------------------------------------------
+'                           DEMO SHEET DELETE OWNED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Deletes a worksheet that the calling invocation created, on its failure
 '   path
-'
-' BEHAVIOR
-'   - Turns DisplayAlerts off for the Delete only, so Excel does not ask for
-'     confirmation, and writes back the value it read
-'   - Attempts the Delete once; Excel refuses to delete the last visible sheet
 '
 ' RETURNS
 '   String
 '     Empty on success; otherwise "<number> | <source> | <description>" of the
 '     failed Delete, and of a failed DisplayAlerts write-back after " || "
 '
+' BEHAVIOR
+'   - Turns DisplayAlerts off for the Delete only, so Excel does not ask for
+'     confirmation, and writes back the value it read
+'   - Attempts the Delete once; Excel refuses to delete the last visible sheet
+'
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Failures            As String          'Collected failures
-    Dim AlertsOn            As Boolean         'DisplayAlerts before the Delete
-    Dim AlertsRead          As Boolean         'TRUE when AlertsOn was read
-    Dim FailNumber          As Long            'Error number of one step
-    Dim FailSource          As String          'Error source of one step
-    Dim FailDescription     As String          'Error description of one step
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Sheet_DeleteOwned"
+
+    Dim Failures        As String   'Collected failures
+    Dim AlertsOn        As Boolean  'DisplayAlerts before the Delete
+    Dim AlertsRead      As Boolean  'TRUE when AlertsOn was read
+    Dim FailNumber      As Long     'Error number of one step
+    Dim FailSource      As String   'Error source of one step
+    Dim FailDescription As String   'Error description of one step
 
 '------------------------------------------------------------------------------
 ' DELETE
@@ -1796,13 +1847,12 @@ Private Function DEMO_Sheet_DeleteOwned( _
 
 End Function
 
-
 Private Function DEMO_SheetNameProblem( _
     ByVal SheetName As String) _
     As String
 '
-'==============================================================================
-' DEMO_SheetNameProblem
+'------------------------------------------------------------------------------
+'                           DEMO SHEET NAME PROBLEM
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns why Excel would refuse SheetName as a sheet name, or an empty
@@ -1816,15 +1866,20 @@ Private Function DEMO_SheetNameProblem( _
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Pos                 As Long            'Character position
-    Dim Ch                  As String          'Character at Pos
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_SheetNameProblem"
+
+    Dim Pos As Long     'Character position
+    Dim Ch  As String   'Character at Pos
 
 '------------------------------------------------------------------------------
 ' CHECK
@@ -1859,15 +1914,14 @@ Private Function DEMO_SheetNameProblem( _
 
 End Function
 
-
 Private Function DEMO_ParseColumnSpec( _
     ByVal Spec As String, _
     ByRef FirstCol As Long, _
     ByRef LastCol As Long) _
     As Boolean
 '
-'==============================================================================
-' DEMO_ParseColumnSpec
+'------------------------------------------------------------------------------
+'                            DEMO PARSE COLUMN SPEC
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Parses "C" or "C:M" (letters only, case-insensitive, each part optionally
@@ -1878,22 +1932,27 @@ Private Function DEMO_ParseColumnSpec( _
 '     TRUE with FirstCol <= LastCol, a reversed range being swapped; FALSE
 '     with both set to 0 when Spec is not one column or one column range
 '
+' ERROR POLICY
+'   Does not raise
+'
 ' NOTES
 '   The indexes are not checked against the worksheet's last column here;
 '   the caller does that once it knows the grid.
 '
-' ERROR POLICY
-'   Does not raise
+' HISTORY
+'   2026-11-14 - Added for #74.
 '
 ' UPDATED
-'   2026-11-14 - Added for #74.
-'==============================================================================
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Parts               As Variant         'Spec split on ":"
-    Dim Swap                As Long            'Swap buffer
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_ParseColumnSpec"
+
+    Dim Parts   As Variant  'Spec split on ":"
+    Dim Swap    As Long     'Swap buffer
 
 '------------------------------------------------------------------------------
 ' PARSE
@@ -1930,13 +1989,12 @@ Private Function DEMO_ParseColumnSpec( _
 
 End Function
 
-
 Private Function DEMO_ColumnIndex( _
     ByVal Part As String) _
     As Long
 '
-'==============================================================================
-' DEMO_ColumnIndex
+'------------------------------------------------------------------------------
+'                              DEMO COLUMN INDEX
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Converts one to three column letters, optionally prefixed with $, to a
@@ -1945,17 +2003,22 @@ Private Function DEMO_ColumnIndex( _
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Letters             As String          'Normalized letters
-    Dim Pos                 As Long            'Letter position
-    Dim Code                As Long            'Character code at Pos
-    Dim Index               As Long            'Accumulated index
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_ColumnIndex"
+
+    Dim Letters As String   'Normalized letters
+    Dim Pos     As Long     'Letter position
+    Dim Code    As Long     'Character code at Pos
+    Dim Index   As Long     'Accumulated index
 
 '------------------------------------------------------------------------------
 ' CONVERT
@@ -1977,13 +2040,12 @@ Private Function DEMO_ColumnIndex( _
 
 End Function
 
-
 Private Function DEMO_SheetNameValue( _
     ByVal SheetName As String) _
     As String
 '
-'==============================================================================
-' DEMO_SheetNameValue
+'------------------------------------------------------------------------------
+'                            DEMO SHEET NAME VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the name DEMO_Sheet_GetOrCreate assigns to a sheet it created
@@ -2001,9 +2063,12 @@ Private Function DEMO_SheetNameValue( _
 ' ERROR POLICY
 '   Raises vbObjectError + 2196 once when the naming fault is armed
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RAISE ARMED FAULT
@@ -2042,8 +2107,8 @@ Public Sub DEMO_Sheet_Reset( _
     Optional ByVal ProtectPassword As String = vbNullString, _
     Optional ByVal ReProtectAtEnd As Boolean = False)
 '
-'==============================================================================
-' RESET SHEET
+'------------------------------------------------------------------------------
+'                                 RESET SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clears a worksheet to a clean, reusable state for DEMO-sheet rebuilding
@@ -2130,14 +2195,8 @@ Public Sub DEMO_Sheet_Reset( _
 '     TRUE  => re-protect the sheet at the end when it was successfully unprotected
 '     FALSE => leave the sheet unprotected after reset
 '
-' PROTECTION CONTRACT
-'   Captures Protect options and EnableSelection before unprotecting. Cleanup
-'   attempts each restoration once. This does not roll back deleted contents,
-'   shapes, tables or AllowEditRanges definitions; host verification is required.
-'   The supplied password is reused; no password is read back from Excel.
-'
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Raises errors normally except for explicitly marked best-effort cleanup
@@ -2148,6 +2207,12 @@ Public Sub DEMO_Sheet_Reset( _
 '   a separate cleanup diagnostic is appended. Otherwise cleanup failure is
 '   raised directly. There is no retry or watchdog for a blocked Excel call.
 '
+' PROTECTION CONTRACT
+'   Captures Protect options and EnableSelection before unprotecting. Cleanup
+'   attempts each restoration once. This does not roll back deleted contents,
+'   shapes, tables or AllowEditRanges definitions; host verification is required.
+'   The supplied password is reused; no password is read back from Excel.
+'
 ' REGRESSION SEAMS
 '   While M_DEMO_CLEANUP_TESTS has armed the cleanup probe, handler entries,
 '   cleanup passes and restoration attempts are counted, and an armed one-shot
@@ -2157,35 +2222,40 @@ Public Sub DEMO_Sheet_Reset( _
 '   the password and selection values pass through unchanged. The
 '   ResetAllPageBreaks call and the DisplayPageBreaks write are counted too.
 '
-' UPDATED
+' HISTORY
 '   2026-11-15 - DisplayPageBreaks written only when True; page-break calls
 '                counted by the probe (#187).
 '   2026-11-06
-'==============================================================================
+'
+' UPDATED
+'   2026-11-15
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Resolved worksheet to reset
-    Dim i                   As Long            'Reverse loop index
-    Dim WasProtected        As Boolean         'TRUE when the sheet was protected on entry
-    Dim DidUnprotect        As Boolean         'This invocation owns the unprotect
-    Dim EntryProtection     As tDEMOProtectionState
-    Dim CleanupErrNumber    As Long
-    Dim CleanupErrSource    As String
-    Dim CleanupErrDescription As String
-    Dim SelectionErrNumber  As Long
-    Dim SelectionErrSource  As String
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Sheet_Reset"
+
+    Dim WS                      As Worksheet    'Resolved worksheet to reset
+    Dim i                       As Long         'Reverse loop index
+    Dim WasProtected            As Boolean      'TRUE when the sheet was protected on entry
+    Dim DidUnprotect            As Boolean      'This invocation owns the unprotect
+    Dim EntryProtection         As tDEMOProtectionState
+    Dim CleanupErrNumber        As Long
+    Dim CleanupErrSource        As String
+    Dim CleanupErrDescription   As String
+    Dim SelectionErrNumber      As Long
+    Dim SelectionErrSource      As String
     Dim SelectionErrDescription As String
-    Dim SavedErrNumber      As Long            'Captured error number
-    Dim SavedErrSource      As String          'Captured error source
-    Dim SavedErrDescription As String          'Captured error description
+    Dim SavedErrNumber          As Long         'Captured error number
+    Dim SavedErrSource          As String       'Captured error source
+    Dim SavedErrDescription     As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
-        On Error GoTo Clean_Fail
+        On Error GoTo CleanFail
 
 '------------------------------------------------------------------------------
 ' RESOLVE TARGET WORKSHEET
@@ -2193,9 +2263,24 @@ Public Sub DEMO_Sheet_Reset( _
     'Use ActiveSheet when no worksheet argument was supplied
         If IsMissing(WS_In) Or IsEmpty(WS_In) Then
 
+        'Reject non-worksheet active sheets such as chart sheets
+            If Not TypeOf ActiveSheet Is Worksheet Then
+                Err.Raise vbObjectError + 2101, _
+                          "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
+                          "ActiveSheet is not a worksheet."
+            End If
+
+        'Resolve the active worksheet
+            Set WS = ActiveSheet
+
+        ElseIf IsObject(WS_In) Then
+
+        'Default Nothing object arguments to ActiveSheet as well
+            If WS_In Is Nothing Then
+
             'Reject non-worksheet active sheets such as chart sheets
                 If Not TypeOf ActiveSheet Is Worksheet Then
-                    Err.Raise vbObjectError + 2101, _
+                    Err.Raise vbObjectError + 2102, _
                               "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
                               "ActiveSheet is not a worksheet."
                 End If
@@ -2203,31 +2288,16 @@ Public Sub DEMO_Sheet_Reset( _
             'Resolve the active worksheet
                 Set WS = ActiveSheet
 
-        ElseIf IsObject(WS_In) Then
+            ElseIf TypeOf WS_In Is Worksheet Then
 
-            'Default Nothing object arguments to ActiveSheet as well
-                If WS_In Is Nothing Then
+            'Use the supplied worksheet
+                Set WS = WS_In
 
-                    'Reject non-worksheet active sheets such as chart sheets
-                        If Not TypeOf ActiveSheet Is Worksheet Then
-                            Err.Raise vbObjectError + 2102, _
-                                      "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
-                                      "ActiveSheet is not a worksheet."
-                        End If
-
-                    'Resolve the active worksheet
-                        Set WS = ActiveSheet
-
-                ElseIf TypeOf WS_In Is Worksheet Then
-
-                    'Use the supplied worksheet
-                        Set WS = WS_In
-
-                Else
-                    Err.Raise vbObjectError + 2103, _
-                              "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
-                              "WS_In must be a Worksheet when supplied."
-                End If
+            Else
+                Err.Raise vbObjectError + 2103, _
+                          "M_DEMO_BUILDER.DEMO_Sheet_Reset", _
+                          "WS_In must be a Worksheet when supplied."
+            End If
 
         Else
             Err.Raise vbObjectError + 2104, _
@@ -2313,7 +2383,7 @@ Public Sub DEMO_Sheet_Reset( _
         If ClearValidation Then
             On Error Resume Next
             WS.Cells.Validation.Delete
-            On Error GoTo Clean_Fail
+            On Error GoTo CleanFail
         End If
 
 '------------------------------------------------------------------------------
@@ -2332,7 +2402,7 @@ Public Sub DEMO_Sheet_Reset( _
             On Error Resume Next
             WS.Cells.ClearComments
             WS.Cells.ClearNotes
-            On Error GoTo Clean_Fail
+            On Error GoTo CleanFail
         End If
 
 '------------------------------------------------------------------------------
@@ -2381,15 +2451,15 @@ Public Sub DEMO_Sheet_Reset( _
         If RemovePageBreaks Then
             On Error Resume Next
 
-            'Remove any manual page breaks; Excel lays the sheet out through
-            'the printer driver to do it
-                DEMO_CleanupProbeHit DEMO_PROBE_PAGE_BREAKS
-                WS.ResetAllPageBreaks
+        'Remove any manual page breaks; Excel lays the sheet out through
+        'the printer driver to do it
+            DEMO_CleanupProbeHit DEMO_PROBE_PAGE_BREAKS
+            WS.ResetAllPageBreaks
 
-            On Error GoTo Clean_Fail
+            On Error GoTo CleanFail
 
-            'Hide page-break indicators, writing the property only when shown
-                DEMO_Sheet_HidePageBreaks WS
+        'Hide page-break indicators, writing the property only when shown
+            DEMO_Sheet_HidePageBreaks WS
         End If
 
 '------------------------------------------------------------------------------
@@ -2398,10 +2468,10 @@ Public Sub DEMO_Sheet_Reset( _
     'Raise the armed one-shot operation fault; inert unless a harness armed it
         DEMO_CleanupOperationFault
 
-Clean_Exit:
 '------------------------------------------------------------------------------
-' OPTIONAL RE-PROTECT
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+CleanExit:
     'Cleanup is single-pass and only restores an unprotect owned by this call.
         On Error Resume Next
         DEMO_CleanupProbeHit DEMO_PROBE_RESET_CLEANUP
@@ -2467,12 +2537,12 @@ Clean_Exit:
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
-    Exit Sub
+        Exit Sub
 
-Clean_Fail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+CleanFail:
     'Capture the original error details before cleanup
         SavedErrNumber = Err.Number
         SavedErrSource = Err.Source
@@ -2482,16 +2552,15 @@ Clean_Fail:
         DEMO_CleanupProbeHit DEMO_PROBE_RESET_HANDLER
 
     'Continue through the centralized cleanup path
-        Resume Clean_Exit
+        Resume CleanExit
 
 End Sub
-
 
 Private Sub DEMO_Sheet_HidePageBreaks( _
     ByVal WS As Worksheet)
 '
-'==============================================================================
-' DEMO_Sheet_HidePageBreaks
+'------------------------------------------------------------------------------
+'                         DEMO SHEET HIDE PAGE BREAKS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Hides the page-break indicators of a worksheet when they are shown.
@@ -2508,7 +2577,7 @@ Private Sub DEMO_Sheet_HidePageBreaks( _
 '     Worksheet whose indicators are hidden
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Best effort: does not raise. A read that fails leaves the indicators as
@@ -2518,35 +2587,39 @@ Private Sub DEMO_Sheet_HidePageBreaks( _
 '   While M_DEMO_CLEANUP_TESTS has armed the cleanup probe, each write is
 '   counted before it is attempted.
 '
-' UPDATED
+' HISTORY
 '   2026-11-15 - Added for #187.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-15
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Shown               As Boolean         'Indicators shown on entry
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Sheet_HidePageBreaks"
+
+    Dim Shown   As Boolean  'Indicators shown on entry
 
 '------------------------------------------------------------------------------
 ' HIDE
 '------------------------------------------------------------------------------
     'Read first; a failed read leaves Shown False, so nothing is written
         On Error Resume Next
-            Shown = WS.DisplayPageBreaks
-            If Shown Then
-                DEMO_CleanupProbeHit DEMO_PROBE_DISPLAY_BREAKS
-                WS.DisplayPageBreaks = False
-            End If
+        Shown = WS.DisplayPageBreaks
+        If Shown Then
+            DEMO_CleanupProbeHit DEMO_PROBE_DISPLAY_BREAKS
+            WS.DisplayPageBreaks = False
+        End If
         On Error GoTo 0
 
 End Sub
 
-
 Public Sub DEMO_InternalCleanupProbeBegin( _
     ByVal FaultMask As Long)
 '
-'==============================================================================
-' DEMO_InternalCleanupProbeBegin
+'------------------------------------------------------------------------------
+'                      DEMO INTERNAL CLEANUP PROBE BEGIN
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Zeroes the cleanup probe counters, starts counting and arms one-shot
@@ -2580,7 +2653,7 @@ Public Sub DEMO_InternalCleanupProbeBegin( _
 '     Unrecognised bits are stored and never fire.
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Each armed fault fires once and is then cleared
@@ -2589,22 +2662,24 @@ Public Sub DEMO_InternalCleanupProbeBegin( _
 ' ERROR POLICY
 '   Does not raise
 '
-' CALLED FROM
-'   - M_DEMO_CLEANUP_TESTS
-'
 ' NOTES
 '   - Public only so another module of the demo project can reach it. Option
 '     Private Module keeps it out of other VBA projects. Demo code must never
 '     call it.
 '
+' CALLED FROM
+'   - M_DEMO_CLEANUP_TESTS
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Site                As Long            'Probe-site iterator
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_InternalCleanupProbeBegin"
+
+    Dim Site    As Long 'Probe-site iterator
 
 '------------------------------------------------------------------------------
 ' SET SEAM
@@ -2620,13 +2695,12 @@ Public Sub DEMO_InternalCleanupProbeBegin( _
 
 End Sub
 
-
 Public Function DEMO_InternalCleanupProbeCount( _
     ByVal Site As Long) _
     As Long
 '
-'==============================================================================
-' DEMO_InternalCleanupProbeCount
+'------------------------------------------------------------------------------
+'                      DEMO INTERNAL CLEANUP PROBE COUNT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns how often one cleanup probe site was reached since the last
@@ -2657,7 +2731,7 @@ Public Function DEMO_InternalCleanupProbeCount( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
@@ -2671,11 +2745,11 @@ Public Function DEMO_InternalCleanupProbeCount( _
 
 End Function
 
-
 Public Sub DEMO_InternalCleanupProbeEnd()
+
 '
-'==============================================================================
-' DEMO_InternalCleanupProbeEnd
+'------------------------------------------------------------------------------
+'                       DEMO INTERNAL CLEANUP PROBE END
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Stops counting and disarms every cleanup fault that has not fired.
@@ -2685,7 +2759,7 @@ Public Sub DEMO_InternalCleanupProbeEnd()
 '   same session. The counters are kept so the last run can still be read.
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Does not raise
@@ -2695,7 +2769,7 @@ Public Sub DEMO_InternalCleanupProbeEnd()
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' CLEAR SEAM
@@ -2706,12 +2780,11 @@ Public Sub DEMO_InternalCleanupProbeEnd()
 
 End Sub
 
-
 Private Sub DEMO_CleanupProbeHit( _
     ByVal Site As Long)
 '
-'==============================================================================
-' DEMO_CleanupProbeHit
+'------------------------------------------------------------------------------
+'                            DEMO CLEANUP PROBE HIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Counts one pass through a cleanup probe site while the probe is armed.
@@ -2721,7 +2794,7 @@ Private Sub DEMO_CleanupProbeHit( _
 '     One of the DEMO_PROBE_* sites
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Does not raise and does not touch Err, so it is safe inside handlers and
@@ -2729,7 +2802,7 @@ Private Sub DEMO_CleanupProbeHit( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' COUNT
@@ -2743,11 +2816,11 @@ Private Sub DEMO_CleanupProbeHit( _
 
 End Sub
 
-
 Private Sub DEMO_CleanupOperationFault()
+
 '
-'==============================================================================
-' DEMO_CleanupOperationFault
+'------------------------------------------------------------------------------
+'                         DEMO CLEANUP OPERATION FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raises the armed DEMO_Sheet_Reset operation fault once, and disarms it.
@@ -2758,7 +2831,7 @@ Private Sub DEMO_CleanupOperationFault()
 '   guarded body.
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Raises vbObjectError + 2190 once when the operation fault is armed;
@@ -2767,7 +2840,7 @@ Private Sub DEMO_CleanupOperationFault()
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RAISE ARMED FAULT
@@ -2782,13 +2855,12 @@ Private Sub DEMO_CleanupOperationFault()
 
 End Sub
 
-
 Private Function DEMO_CleanupProtectPassword( _
     ByVal Password As String) _
     As String
 '
-'==============================================================================
-' DEMO_CleanupProtectPassword
+'------------------------------------------------------------------------------
+'                        DEMO CLEANUP PROTECT PASSWORD
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the Password argument of the cleanup Protect statement.
@@ -2812,7 +2884,7 @@ Private Function DEMO_CleanupProtectPassword( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' COUNT AND RAISE ARMED FAULT
@@ -2835,13 +2907,12 @@ Private Function DEMO_CleanupProtectPassword( _
 
 End Function
 
-
 Private Function DEMO_CleanupSelectionValue( _
     ByVal SelectionPolicy As Long) _
     As Long
 '
-'==============================================================================
-' DEMO_CleanupSelectionValue
+'------------------------------------------------------------------------------
+'                         DEMO CLEANUP SELECTION VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the value of the cleanup EnableSelection restoration.
@@ -2863,7 +2934,7 @@ Private Function DEMO_CleanupSelectionValue( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' COUNT AND RAISE ARMED FAULT
@@ -2886,13 +2957,12 @@ Private Function DEMO_CleanupSelectionValue( _
 
 End Function
 
-
 Private Function DEMO_FormulaBarValue( _
     ByVal ShowFormulaBar As Boolean) _
     As Boolean
 '
-'==============================================================================
-' DEMO_FormulaBarValue
+'------------------------------------------------------------------------------
+'                            DEMO FORMULA BAR VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the value of the DisplayFormulaBar write of
@@ -2910,9 +2980,12 @@ Private Function DEMO_FormulaBarValue( _
 ' ERROR POLICY
 '   Raises vbObjectError + 2195 once when the formula-bar fault is armed
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RAISE ARMED FAULT
@@ -2933,12 +3006,11 @@ Private Function DEMO_FormulaBarValue( _
 
 End Function
 
-
 Public Sub DEMO_Format_Labels( _
     ByVal TargetRange As Range)
 '
-'==============================================================================
-' FORMAT LABELS
+'------------------------------------------------------------------------------
+'                                FORMAT LABELS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a standard label format to a target range.
@@ -2952,7 +3024,7 @@ Public Sub DEMO_Format_Labels( _
 '     Range to format as a label block.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if TargetRange Is Nothing
@@ -2964,7 +3036,7 @@ Public Sub DEMO_Format_Labels( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -2989,13 +3061,14 @@ Public Sub DEMO_Format_Labels( _
 '------------------------------------------------------------------------------
     'Apply borders to the label block
         DEMO_Set_RangeBorder TargetRange, RGB(0, 0, 0), xlThin, True
+
 End Sub
 
 Public Sub DEMO_Format_InputCell( _
     ByVal TargetRange As Range)
 '
-'==============================================================================
-' FORMAT INPUT CELL
+'------------------------------------------------------------------------------
+'                              FORMAT INPUT CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats one or more DEMO control-input cells consistently.
@@ -3009,7 +3082,7 @@ Public Sub DEMO_Format_InputCell( _
 '     Range of input cells to format.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if TargetRange Is Nothing
@@ -3022,7 +3095,7 @@ Public Sub DEMO_Format_InputCell( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3045,13 +3118,14 @@ Public Sub DEMO_Format_InputCell( _
 '------------------------------------------------------------------------------
     'Apply borders to the input range
         DEMO_Set_RangeBorder TargetRange, RGB(0, 0, 0), xlThin, True
+
 End Sub
 
 Public Sub DEMO_Format_OutputCell( _
     ByVal TargetRange As Range)
 '
-'==============================================================================
-' FORMAT OUTPUT CELL
+'------------------------------------------------------------------------------
+'                              FORMAT OUTPUT CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats one or more output/result cells consistently.
@@ -3065,7 +3139,7 @@ Public Sub DEMO_Format_OutputCell( _
 '     Range of output cells to format.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if TargetRange Is Nothing
@@ -3077,7 +3151,7 @@ Public Sub DEMO_Format_OutputCell( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3102,6 +3176,7 @@ Public Sub DEMO_Format_OutputCell( _
 '------------------------------------------------------------------------------
     'Apply borders to the output range
         DEMO_Set_RangeBorder TargetRange, RGB(0, 0, 0), xlThin, True
+
 End Sub
 
 Public Sub DEMO_Write_BandHeader( _
@@ -3114,8 +3189,8 @@ Public Sub DEMO_Write_BandHeader( _
     Optional ByVal IsBorder As Boolean = True, _
     Optional ByVal IsCentered As Boolean = True)
 '
-'==============================================================================
-' WRITE BAND HEADER
+'------------------------------------------------------------------------------
+'                              WRITE BAND HEADER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes and formats one left-aligned header band without merged cells.
@@ -3150,7 +3225,7 @@ Public Sub DEMO_Write_BandHeader( _
 '     FALSE => do not apply a border
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if TargetRange Is Nothing
@@ -3166,7 +3241,7 @@ Public Sub DEMO_Write_BandHeader( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3210,14 +3285,15 @@ Public Sub DEMO_Write_BandHeader( _
 '------------------------------------------------------------------------------
     'Apply the border when requested
         If IsBorder Then DEMO_Set_RangeBorder TargetRange, RGB(0, 0, 0), xlThin, False
+
 End Sub
 
 Public Sub DEMO_Apply_ValidationList( _
     ByVal TargetCell As Range, _
     ByVal ListText As String)
 '
-'==============================================================================
-' APPLY VALIDATION LIST
+'------------------------------------------------------------------------------
+'                            APPLY VALIDATION LIST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies an in-cell dropdown validation list to a target cell or range.
@@ -3237,7 +3313,7 @@ Public Sub DEMO_Apply_ValidationList( _
 '       - a formula such as =BoolList
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if TargetCell Is Nothing
@@ -3251,7 +3327,7 @@ Public Sub DEMO_Apply_ValidationList( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3295,6 +3371,7 @@ Public Sub DEMO_Apply_ValidationList( _
 
     'Enable the error alert
         TargetCell.Validation.ShowError = True
+
 End Sub
 
 Public Sub DEMO_Apply_NumericValidation( _
@@ -3303,8 +3380,8 @@ Public Sub DEMO_Apply_NumericValidation( _
     ByVal MaxValue As Double, _
     Optional ByVal AllowDecimals As Boolean = True)
 '
-'==============================================================================
-' APPLY NUMERIC VALIDATION
+'------------------------------------------------------------------------------
+'                           APPLY NUMERIC VALIDATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a Data Validation rule requiring numeric values between MinValue
@@ -3333,7 +3410,7 @@ Public Sub DEMO_Apply_NumericValidation( _
 '     FALSE => allow whole numbers only
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if Target Is Nothing
@@ -3357,14 +3434,16 @@ Public Sub DEMO_Apply_NumericValidation( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Lo                  As Double          'Normalized lower bound
-    Dim Hi                  As Double          'Normalized upper bound
-    Dim ValidationType      As Long            'Validation type to apply
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Apply_NumericValidation"
+
+    Dim Lo              As Double   'Normalized lower bound
+    Dim Hi              As Double   'Normalized upper bound
+    Dim ValidationType  As Long     'Validation type to apply
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3421,13 +3500,14 @@ Public Sub DEMO_Apply_NumericValidation( _
 
     'Enable the error alert
         Target.Validation.ShowError = True
+
 End Sub
 
 Public Sub DEMO_Create_BoolList( _
     Optional ByVal WS_Name As String = DEFAULT_BOOL_WS)
 '
-'==============================================================================
-' CREATE BOOL LIST
+'------------------------------------------------------------------------------
+'                               CREATE BOOL LIST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates a workbook-level named range "BoolList" containing the literal text
@@ -3449,7 +3529,7 @@ Public Sub DEMO_Create_BoolList( _
 '     Name of the worksheet where the helper list should be created.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Uses ThisWorkbook as the target workbook
@@ -3472,13 +3552,15 @@ Public Sub DEMO_Create_BoolList( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WB                  As Workbook        'Target workbook
-    Dim WS                  As Worksheet       'Target worksheet
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Create_BoolList"
+
+    Dim WB  As Workbook     'Target workbook
+    Dim WS  As Worksheet    'Target worksheet
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3519,6 +3601,7 @@ Public Sub DEMO_Create_BoolList( _
 '------------------------------------------------------------------------------
     'Hide the helper columns used to store the list
         DEMO_Hide_HelperColumns WS, "AA:AZ"
+
 End Sub
 
 Public Sub DEMO_Apply_BoolValidation( _
@@ -3526,8 +3609,8 @@ Public Sub DEMO_Apply_BoolValidation( _
     Optional ByVal WS_Name As String = DEFAULT_BOOL_WS, _
     Optional ByVal ListName As String = DEFAULT_BOOLLIST_NAME)
 '
-'==============================================================================
-' APPLY BOOL VALIDATION
+'------------------------------------------------------------------------------
+'                            APPLY BOOL VALIDATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a locale-independent TRUE/FALSE validation list to a target range.
@@ -3548,7 +3631,7 @@ Public Sub DEMO_Apply_BoolValidation( _
 '     Workbook-level list name to use in the validation formula.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Ensures the helper list exists
@@ -3563,7 +3646,7 @@ Public Sub DEMO_Apply_BoolValidation( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3582,6 +3665,7 @@ Public Sub DEMO_Apply_BoolValidation( _
 '------------------------------------------------------------------------------
     'Apply validation using the workbook-level BoolList name
         DEMO_Apply_ValidationList Target, "=" & ListName
+
 End Sub
 
 Public Sub DEMO_Set_WorkbookName( _
@@ -3589,8 +3673,8 @@ Public Sub DEMO_Set_WorkbookName( _
     ByVal NameText As String, _
     ByVal TargetCell As Range)
 '
-'==============================================================================
-' SET WORKBOOK NAME
+'------------------------------------------------------------------------------
+'                              SET WORKBOOK NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates or refreshes a workbook-level defined name pointing to one cell.
@@ -3610,7 +3694,7 @@ Public Sub DEMO_Set_WorkbookName( _
 '     Single target cell that the name should refer to.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Deletes the existing workbook-level name when present
@@ -3621,7 +3705,7 @@ Public Sub DEMO_Set_WorkbookName( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3661,6 +3745,7 @@ Public Sub DEMO_Set_WorkbookName( _
     'Create the workbook-level name so it refers to the requested target cell
         WB.Names.Add Name:=NameText, _
                      RefersTo:="='" & TargetCell.Parent.Name & "'!" & TargetCell.Address
+
 End Sub
 
 Public Sub DEMO_Btn_Add( _
@@ -3674,8 +3759,8 @@ Public Sub DEMO_Btn_Add( _
     Optional ByVal ActionMacro As String = "", _
     Optional ByVal FillColor As Long = COLOR_BUTTON)
 '
-'==============================================================================
-' ADD DEMO BUTTON
+'------------------------------------------------------------------------------
+'                               ADD DEMO BUTTON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates one DEMO button as a worksheet Shape
@@ -3714,7 +3799,7 @@ Public Sub DEMO_Btn_Add( _
 '     Fill color to apply to the button shape
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Creates a rounded-rectangle shape
@@ -3728,16 +3813,21 @@ Public Sub DEMO_Btn_Add( _
 ' ERROR POLICY
 '   Raises errors normally
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - A blank ActionMacro leaves OnAction empty instead of naming
 '                the undeclared DEMO_DEMOButton_NotAssigned (#129).
 '   2026-04-22
-'==============================================================================
+'
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Shp                 As Shape           'Created button shape
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Btn_Add"
+
+    Dim Shp As Shape    'Created button shape
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3792,32 +3882,33 @@ Public Sub DEMO_Btn_Add( _
     'Apply button styling and visible caption text
         With Shp
 
-            'Apply the requested fill color
-                .Fill.ForeColor.RGB = FillColor
-            'Apply the standard line color
-                .Line.ForeColor.RGB = RGB(90, 90, 90)
-            'Write the visible caption text
-                .TextFrame2.TextRange.Text = CaptionText
-            'Apply the standard font size
-                .TextFrame2.TextRange.Font.Size = 10
-            'Apply the standard font color
-                .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
-            'Apply bold font styling
-                .TextFrame2.TextRange.Font.Bold = msoTrue
-            'Center the text vertically
-                .TextFrame2.VerticalAnchor = msoAnchorMiddle
-            'Center the text horizontally
-                .TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
+        'Apply the requested fill color
+            .Fill.ForeColor.RGB = FillColor
+        'Apply the standard line color
+            .Line.ForeColor.RGB = RGB(90, 90, 90)
+        'Write the visible caption text
+            .TextFrame2.TextRange.Text = CaptionText
+        'Apply the standard font size
+            .TextFrame2.TextRange.Font.Size = 10
+        'Apply the standard font color
+            .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        'Apply bold font styling
+            .TextFrame2.TextRange.Font.Bold = msoTrue
+        'Center the text vertically
+            .TextFrame2.VerticalAnchor = msoAnchorMiddle
+        'Center the text horizontally
+            .TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
 
         End With
 
 End Sub
+
 Public Sub DEMO_Hide_HelperColumns( _
     ByVal WS As Worksheet, _
     ByVal ColumnAddress As String)
 '
-'==============================================================================
-' HIDE HELPER COLUMNS
+'------------------------------------------------------------------------------
+'                             HIDE HELPER COLUMNS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Hides one or more helper columns used to store internal lists or support
@@ -3841,7 +3932,7 @@ Public Sub DEMO_Hide_HelperColumns( _
 '       - "XFD:XFD"
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if WS Is Nothing
@@ -3853,7 +3944,7 @@ Public Sub DEMO_Hide_HelperColumns( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3869,6 +3960,7 @@ Public Sub DEMO_Hide_HelperColumns( _
 '------------------------------------------------------------------------------
     'Hide the requested helper columns
         WS.Columns(ColumnAddress).Hidden = True
+
 End Sub
 
 Public Function DEMO_Create_Table( _
@@ -3877,8 +3969,8 @@ Public Function DEMO_Create_Table( _
     Optional ByVal TableStyleName As String = "TableStyleMedium2") _
     As ListObject
 '
-'==============================================================================
-' CREATE TABLE
+'------------------------------------------------------------------------------
+'                                 CREATE TABLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates or recreates an Excel ListObject on a target range.
@@ -3912,12 +4004,14 @@ Public Function DEMO_Create_Table( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Lo                  As ListObject      'Created or replaced table
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Create_Table"
+
+    Dim Lo  As ListObject   'Created or replaced table
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -3964,13 +4058,14 @@ Public Function DEMO_Create_Table( _
 '------------------------------------------------------------------------------
     'Return the created table
         Set DEMO_Create_Table = Lo
+
 End Function
 
 Public Sub DEMO_Clear_TableBody( _
     ByVal TableObject As ListObject)
 '
-'==============================================================================
-' CLEAR TABLE BODY
+'------------------------------------------------------------------------------
+'                               CLEAR TABLE BODY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clears the data body of a table while preserving its header row and
@@ -3985,7 +4080,7 @@ Public Sub DEMO_Clear_TableBody( _
 '     Table to clear.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if TableObject Is Nothing
@@ -3996,7 +4091,7 @@ Public Sub DEMO_Clear_TableBody( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -4011,14 +4106,15 @@ Public Sub DEMO_Clear_TableBody( _
         If Not TableObject.DataBodyRange Is Nothing Then
             TableObject.DataBodyRange.Delete
         End If
+
 End Sub
 
 Public Sub DEMO_Append_TableRow( _
     ByVal TableObject As ListObject, _
     ByVal RowValues As Variant)
 '
-'==============================================================================
-' APPEND TABLE ROW
+'------------------------------------------------------------------------------
+'                               APPEND TABLE ROW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Appends one row of values to an Excel table.
@@ -4037,7 +4133,7 @@ Public Sub DEMO_Append_TableRow( _
 '       Array(Value1, Value2, Value3, ...)
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Exits quietly if TableObject Is Nothing
@@ -4052,16 +4148,18 @@ Public Sub DEMO_Append_TableRow( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LR                  As ListRow         'Newly appended row
-    Dim i                   As Long            'Column/value index
-    Dim LoBound             As Long            'Lower bound of the values array
-    Dim HiBound             As Long            'Upper bound of the values array
-    Dim MaxWrite            As Long            'Maximum number of values to write
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Append_TableRow"
+
+    Dim LR          As ListRow  'Newly appended row
+    Dim i           As Long     'Column/value index
+    Dim LoBound     As Long     'Lower bound of the values array
+    Dim HiBound     As Long     'Upper bound of the values array
+    Dim MaxWrite    As Long     'Maximum number of values to write
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -4096,8 +4194,8 @@ Public Sub DEMO_Append_TableRow( _
         For i = 1 To MaxWrite
             LR.Range.Cells(1, i).Value = RowValues(LoBound + i - 1)
         Next i
-End Sub
 
+End Sub
 
 Public Sub DEMO_Prepare_LabeledInputSection( _
     ByVal WS As Worksheet, _
@@ -4106,8 +4204,8 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
     ByVal LabelRange As Range, _
     ByVal ValueRange As Range)
 '
-'==============================================================================
-' PREPARE LABELED INPUT SECTION
+'------------------------------------------------------------------------------
+'                        PREPARE LABELED INPUT SECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the standard setup for a vertical label/value input section
@@ -4137,7 +4235,7 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
 '     Vertical range containing the user-editable values
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Writes the section header
@@ -4154,7 +4252,7 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY STANDARD SECTION FORMATTING
@@ -4167,7 +4265,6 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
         DEMO_Format_InputCell ValueRange
 
 End Sub
-
 
 Public Sub DEMO_Write_NamedInputRow( _
     ByVal WB As Workbook, _
@@ -4184,8 +4281,8 @@ Public Sub DEMO_Write_NamedInputRow( _
     Optional ByVal AllowDecimal As Boolean = True, _
     Optional ByVal NumberFormatText As String = "")
 '
-'==============================================================================
-' WRITE NAMED INPUT ROW
+'------------------------------------------------------------------------------
+'                            WRITE NAMED INPUT ROW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes one standard label/value row for a DEMO sheet control panel
@@ -4241,7 +4338,7 @@ Public Sub DEMO_Write_NamedInputRow( _
 '     Optional number format to apply to ValueCell
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Writes the label and default value
@@ -4260,7 +4357,7 @@ Public Sub DEMO_Write_NamedInputRow( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' WRITE LABEL AND DEFAULT VALUE
@@ -4273,21 +4370,23 @@ Public Sub DEMO_Write_NamedInputRow( _
 '------------------------------------------------------------------------------
 ' APPLY VALIDATION
 '------------------------------------------------------------------------------
-    Select Case ValidationKind
-        Case DEMOInputValidationNone
+        Select Case ValidationKind
+            Case DEMOInputValidationNone
             'Leave the cell without validation
-        Case DEMOInputValidationList
+            Case DEMOInputValidationList
             'Apply a standard list validation
                 DEMO_Apply_ValidationList ValueCell, ValidationSource
-        Case DEMOInputValidationNumeric
+            Case DEMOInputValidationNumeric
             'Apply numeric validation with the requested numeric policy
                 DEMO_Apply_NumericValidation ValueCell, ValidationMin, ValidationMax, AllowDecimal
-        Case DEMOInputValidationBoolean
+            Case DEMOInputValidationBoolean
             'Ensure the workbook-level boolean list exists for this sheet context
                 DEMO_Create_BoolList WS.Name
             'Apply the shared boolean dropdown
                 DEMO_Apply_ValidationList ValueCell, "=BoolList"
-    End Select
+            Case Else
+            'Add no validation for any other kind
+        End Select
 
 '------------------------------------------------------------------------------
 ' APPLY OPTIONAL NUMBER FORMAT
@@ -4307,7 +4406,6 @@ Public Sub DEMO_Write_NamedInputRow( _
 
 End Sub
 
-
 Public Sub DEMO_Btn_AddGrid( _
     ByVal WS As Worksheet, _
     ByVal AnchorCell As Range, _
@@ -4320,8 +4418,8 @@ Public Sub DEMO_Btn_AddGrid( _
     Optional ByVal OffsetLeft As Double = 4, _
     Optional ByVal OffsetTop As Double = 8)
 '
-'==============================================================================
-' ADD BUTTON GRID
+'------------------------------------------------------------------------------
+'                               ADD BUTTON GRID
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Creates a regular grid of DEMO buttons from a compact button specification
@@ -4378,7 +4476,7 @@ Public Sub DEMO_Btn_AddGrid( _
 '     Top offset from AnchorCell
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Computes a regular button grid from AnchorCell
@@ -4392,23 +4490,28 @@ Public Sub DEMO_Btn_AddGrid( _
 ' DEPENDENCIES
 '   - DEMO_Btn_Add
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - A button without an ActionMacro gets no macro (#129).
 '   2026-04-22
-'==============================================================================
+'
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long            'Loop index
-    Dim GridRow             As Long            'Zero-based button row
-    Dim GridCol             As Long            'Zero-based button column
-    Dim ButtonLeft          As Double          'Computed button left position
-    Dim ButtonTop           As Double          'Computed button top position
-    Dim ActionMacro         As String          'Resolved button action macro
-    Dim FillColor           As Long            'Resolved button fill color
-    Dim SpecItem            As Variant         'Current button specification item
-    Dim SpecUBound          As Long            'Upper bound of the current spec item
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Btn_AddGrid"
+
+    Dim i           As Long     'Loop index
+    Dim GridRow     As Long     'Zero-based button row
+    Dim GridCol     As Long     'Zero-based button column
+    Dim ButtonLeft  As Double   'Computed button left position
+    Dim ButtonTop   As Double   'Computed button top position
+    Dim ActionMacro As String   'Resolved button action macro
+    Dim FillColor   As Long     'Resolved button fill color
+    Dim SpecItem    As Variant  'Current button specification item
+    Dim SpecUBound  As Long     'Upper bound of the current spec item
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -4454,87 +4557,88 @@ Public Sub DEMO_Btn_AddGrid( _
     'Create each button from the supplied grid specification
         For i = LBound(ButtonSpecs) To UBound(ButtonSpecs)
 
-            'Read the current button specification item
-                SpecItem = ButtonSpecs(i)
+        'Read the current button specification item
+            SpecItem = ButtonSpecs(i)
 
-            'Reject a non-array button specification item
-                If Not IsArray(SpecItem) Then
-                    Err.Raise vbObjectError + 2136, _
-                              "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
-                              "Each ButtonSpecs item must be an array."
-                End If
+        'Reject a non-array button specification item
+            If Not IsArray(SpecItem) Then
+                Err.Raise vbObjectError + 2136, _
+                          "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                          "Each ButtonSpecs item must be an array."
+            End If
 
-            'Capture the upper bound of the current specification item
-                SpecUBound = UBound(SpecItem)
+        'Capture the upper bound of the current specification item
+            SpecUBound = UBound(SpecItem)
 
-            'Reject a specification item with fewer than name + caption
-                If SpecUBound < 1 Then
-                    Err.Raise vbObjectError + 2137, _
-                              "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
-                              "Each ButtonSpecs item must contain at least ButtonName and ButtonCaption."
-                End If
+        'Reject a specification item with fewer than name + caption
+            If SpecUBound < 1 Then
+                Err.Raise vbObjectError + 2137, _
+                          "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                          "Each ButtonSpecs item must contain at least ButtonName and ButtonCaption."
+            End If
 
-            'Compute the zero-based grid row
-                GridRow = (i - LBound(ButtonSpecs)) \ ButtonsPerRow
+        'Compute the zero-based grid row
+            GridRow = (i - LBound(ButtonSpecs)) \ ButtonsPerRow
 
-            'Compute the zero-based grid column
-                GridCol = (i - LBound(ButtonSpecs)) Mod ButtonsPerRow
+        'Compute the zero-based grid column
+            GridCol = (i - LBound(ButtonSpecs)) Mod ButtonsPerRow
 
-            'Compute the left position of the current button
-                ButtonLeft = AnchorCell.Left + OffsetLeft + (GridCol * (ButtonWidth + GapX))
+        'Compute the left position of the current button
+            ButtonLeft = AnchorCell.Left + OffsetLeft + (GridCol * (ButtonWidth + GapX))
 
-            'Compute the top position of the current button
-                ButtonTop = AnchorCell.Top + OffsetTop + (GridRow * (ButtonHeight + GapY))
+        'Compute the top position of the current button
+            ButtonTop = AnchorCell.Top + OffsetTop + (GridRow * (ButtonHeight + GapY))
 
 '------------------------------------------------------------------------------
 ' RESOLVE OPTIONAL ACTION MACRO / FILL COLOR
 '------------------------------------------------------------------------------
-            'Initialize the default action macro: none
-                ActionMacro = vbNullString
+        'Initialize the default action macro: none
+            ActionMacro = vbNullString
 
-            'Initialize the default fill color
-                FillColor = COLOR_BUTTON
+        'Initialize the default fill color
+            FillColor = COLOR_BUTTON
 
-            'Resolve the optional 3rd element
-                If SpecUBound >= 2 Then
+        'Resolve the optional 3rd element
+            If SpecUBound >= 2 Then
 
-                    'Treat text as ActionMacro
-                        If VarType(SpecItem(2)) = vbString Then
-                            ActionMacro = CStr(SpecItem(2))
+            'Treat text as ActionMacro
+                If VarType(SpecItem(2)) = vbString Then
+                    ActionMacro = CStr(SpecItem(2))
 
-                    'Treat numeric values as FillColor
-                        ElseIf IsNumeric(SpecItem(2)) Then
-                            FillColor = CLng(SpecItem(2))
-
-                        End If
+                'Treat numeric values as FillColor
+                ElseIf IsNumeric(SpecItem(2)) Then
+                    FillColor = CLng(SpecItem(2))
 
                 End If
 
-            'Resolve the optional 4th element as FillColor
-                If SpecUBound >= 3 Then
-                    If IsNumeric(SpecItem(3)) Then
-                        FillColor = CLng(SpecItem(3))
-                    End If
+            End If
+
+        'Resolve the optional 4th element as FillColor
+            If SpecUBound >= 3 Then
+                If IsNumeric(SpecItem(3)) Then
+                    FillColor = CLng(SpecItem(3))
                 End If
+            End If
 
 '------------------------------------------------------------------------------
 ' CREATE CURRENT BUTTON
 '------------------------------------------------------------------------------
-            'Create the current button with the resolved action macro and fill color
-                DEMO_Btn_Add _
-                    WS, _
-                    CStr(SpecItem(0)), _
-                    CStr(SpecItem(1)), _
-                    ButtonLeft, _
-                    ButtonTop, _
-                    ButtonWidth, _
-                    ButtonHeight, _
-                    ActionMacro, _
-                    FillColor
+        'Create the current button with the resolved action macro and fill color
+            DEMO_Btn_Add _
+                WS, _
+                CStr(SpecItem(0)), _
+                CStr(SpecItem(1)), _
+                ButtonLeft, _
+                ButtonTop, _
+                ButtonWidth, _
+                ButtonHeight, _
+                ActionMacro, _
+                FillColor
 
         Next i
 
 End Sub
+
 Public Function DEMO_Create_TableSection( _
     ByVal WS As Worksheet, _
     ByVal SectionHeaderRange As Range, _
@@ -4544,8 +4648,8 @@ Public Function DEMO_Create_TableSection( _
     ByVal TableName As String, _
     Optional ByVal TableStyleName As String = "TableStyleMedium6") As ListObject
 '
-'==============================================================================
-' CREATE TABLE SECTION
+'------------------------------------------------------------------------------
+'                             CREATE TABLE SECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Builds a standard titled section containing a formatted ListObject table
@@ -4607,16 +4711,18 @@ Public Function DEMO_Create_TableSection( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim HeaderCount         As Long            'Number of table columns
-    Dim i                   As Long            'Loop index
-    Dim HeaderRange         As Range           'Formatted header row
-    Dim TableRange          As Range           'Range used to create the ListObject
-    Dim Lo                  As ListObject      'Created table object
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Create_TableSection"
+
+    Dim HeaderCount As Long         'Number of table columns
+    Dim i           As Long         'Loop index
+    Dim HeaderRange As Range        'Formatted header row
+    Dim TableRange  As Range        'Range used to create the ListObject
+    Dim Lo          As ListObject   'Created table object
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -4737,21 +4843,21 @@ Public Function DEMO_Create_TableSection( _
         Set DEMO_Create_TableSection = Lo
 
 End Function
-'
-'------------------------------------------------------------------------------
-'
-'                               BUTTON STATES
-'
-'------------------------------------------------------------------------------
-'
 
+'
+'------------------------------------------------------------------------------
+'
+'                                BUTTON STATES
+'
+'------------------------------------------------------------------------------
+'
 
 Public Sub DEMO_Btn_ApplyState( _
     ByVal Shp As Shape, _
     ByVal StateName As String)
 '
-'==============================================================================
-' APPLY BUTTON STATE
+'------------------------------------------------------------------------------
+'                              APPLY BUTTON STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies one named visual state to a shape-based button
@@ -4772,7 +4878,7 @@ Public Sub DEMO_Btn_ApplyState( _
 '     Requested state name
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   Applies the corresponding fill/text styling for the requested state
@@ -4782,51 +4888,52 @@ Public Sub DEMO_Btn_ApplyState( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Col                 As Long            'Resolved fill color for the requested state
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Btn_ApplyState"
+
+    Dim Col As Long 'Resolved fill color for the requested state
 
 '------------------------------------------------------------------------------
 ' RESOLVE STATE COLOR
 '------------------------------------------------------------------------------
-    Select Case UCase$(Trim$(StateName))
-        Case "NORMAL"
-            Col = BTN_PRIMARY_N
+        Select Case UCase$(Trim$(StateName))
+            Case "NORMAL"
+                Col = BTN_PRIMARY_N
 
-        Case "HOVER"
-            Col = BTN_PRIMARY_H
+            Case "HOVER"
+                Col = BTN_PRIMARY_H
 
-        Case "PRESSED"
-            Col = BTN_PRIMARY_P
+            Case "PRESSED"
+                Col = BTN_PRIMARY_P
 
-        Case Else
-            Col = BTN_PRIMARY_N
-    End Select
+            Case Else
+                Col = BTN_PRIMARY_N
+        End Select
 
 '------------------------------------------------------------------------------
 ' APPLY STATE
 '------------------------------------------------------------------------------
-    With Shp
-        .Fill.Visible = msoTrue
-        .Fill.ForeColor.RGB = Col
-        .Line.Visible = msoFalse
-        If .TextFrame2.HasText Then
-            .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = WHITE
-        End If
-    End With
+        With Shp
+            .Fill.Visible = msoTrue
+            .Fill.ForeColor.RGB = Col
+            .Line.Visible = msoFalse
+            If .TextFrame2.HasText Then
+                .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = WHITE
+            End If
+        End With
 
 End Sub
-
 
 Private Function DEMO_Btn_CaptureAppearance( _
     ByVal Shp As Shape) _
     As tButtonAppearance
 '
-'==============================================================================
-' CAPTURE BUTTON APPEARANCE
+'------------------------------------------------------------------------------
+'                          CAPTURE BUTTON APPEARANCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Captures the current visual appearance of a shape button
@@ -4851,31 +4958,33 @@ Private Function DEMO_Btn_CaptureAppearance( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim S                   As tButtonAppearance 'Captured appearance snapshot
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Btn_CaptureAppearance"
+
+    Dim S   As tButtonAppearance    'Captured appearance snapshot
 
 '------------------------------------------------------------------------------
 ' CAPTURE SHAPE APPEARANCE
 '------------------------------------------------------------------------------
-    With Shp
+        With Shp
         'Capture fill appearance
             S.FillVisible = .Fill.Visible
             S.FillColor = .Fill.ForeColor.RGB
 
         'Capture line appearance
-           S.LineVisible = .Line.Visible
+            S.LineVisible = .Line.Visible
 
-           If S.LineVisible = msoTrue Then
-               S.LineColor = .Line.ForeColor.RGB
-               S.LineWeight = .Line.Weight
-           Else
-               S.LineColor = 0
-               S.LineWeight = 0!
-           End If
+            If S.LineVisible = msoTrue Then
+                S.LineColor = .Line.ForeColor.RGB
+                S.LineWeight = .Line.Weight
+            Else
+                S.LineColor = 0
+                S.LineWeight = 0!
+            End If
 
         'Capture text appearance when text is present
             If .TextFrame2.HasText Then
@@ -4893,22 +5002,21 @@ Private Function DEMO_Btn_CaptureAppearance( _
         'Capture position
             S.TopPos = .Top
             S.LeftPos = .Left
-    End With
+        End With
 
 '------------------------------------------------------------------------------
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
-    DEMO_Btn_CaptureAppearance = S
+        DEMO_Btn_CaptureAppearance = S
 
 End Function
-
 
 Private Sub DEMO_Btn_RestoreAppearance( _
     ByVal Shp As Shape, _
     ByRef SavedState As tButtonAppearance)
 '
-'==============================================================================
-' RESTORE BUTTON APPEARANCE
+'------------------------------------------------------------------------------
+'                          RESTORE BUTTON APPEARANCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restores a previously captured visual appearance to a shape button
@@ -4925,7 +5033,7 @@ Private Sub DEMO_Btn_RestoreAppearance( _
 '     Previously captured appearance snapshot
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   Restores fill, line, text, shadow, and position attributes
@@ -4935,12 +5043,12 @@ Private Sub DEMO_Btn_RestoreAppearance( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RESTORE SHAPE APPEARANCE
 '------------------------------------------------------------------------------
-    With Shp
+        With Shp
         'Restore fill appearance
             .Fill.Visible = SavedState.FillVisible
             .Fill.ForeColor.RGB = SavedState.FillColor
@@ -4966,15 +5074,15 @@ Private Sub DEMO_Btn_RestoreAppearance( _
         'Restore position
             .Top = SavedState.TopPos
             .Left = SavedState.LeftPos
-    End With
+        End With
 
 End Sub
 
-
 Public Sub DEMO_Btn_Click()
+
 '
-'==============================================================================
-' BUTTON CLICK
+'------------------------------------------------------------------------------
+'                                 BUTTON CLICK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a short pressed-state visual feedback to the calling shape button
@@ -4990,7 +5098,7 @@ Public Sub DEMO_Btn_Click()
 '   None
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Resolves the calling shape from Application.Caller when available
@@ -5013,17 +5121,19 @@ Public Sub DEMO_Btn_Click()
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Caller worksheet
-    Dim Shp                 As Shape           'Clicked shape
-    Dim SavedState          As tButtonAppearance 'Captured original appearance
-    Dim CallerName          As Variant         'Application.Caller value
-    Dim StartS              As Double          'Timer() snapshot at delay start
-    Dim ElapsedS            As Double          'Elapsed seconds during visual feedback
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_Btn_Click"
+
+    Dim WS          As Worksheet            'Caller worksheet
+    Dim Shp         As Shape                'Clicked shape
+    Dim SavedState  As tButtonAppearance    'Captured original appearance
+    Dim CallerName  As Variant              'Application.Caller value
+    Dim StartS      As Double               'Timer() snapshot at delay start
+    Dim ElapsedS    As Double               'Elapsed seconds during visual feedback
 
 '------------------------------------------------------------------------------
 ' RESOLVE CALLER
@@ -5071,18 +5181,18 @@ Public Sub DEMO_Btn_Click()
 
     'Wait briefly while keeping Excel responsive
         Do
-            'Compute elapsed seconds since the delay started
-                ElapsedS = Timer - StartS
-            'Correct midnight rollover when Timer() wraps at 24 hours
-                If ElapsedS < 0# Then
-                    ElapsedS = ElapsedS + 86400#
-                End If
-            'Exit once the short visual delay has elapsed
-                If ElapsedS >= 0.08 Then
-                    Exit Do
-                End If
-            'Yield to Excel/UI during the brief wait
-                DoEvents
+        'Compute elapsed seconds since the delay started
+            ElapsedS = Timer - StartS
+        'Correct midnight rollover when Timer() wraps at 24 hours
+            If ElapsedS < 0# Then
+                ElapsedS = ElapsedS + 86400#
+            End If
+        'Exit once the short visual delay has elapsed
+            If ElapsedS >= 0.08 Then
+                Exit Do
+            End If
+        'Yield to Excel/UI during the brief wait
+            DoEvents
         Loop
 
 '------------------------------------------------------------------------------
@@ -5096,8 +5206,8 @@ End Sub
 Public Sub DEMO_Btn_PlayFeedback()
 
 '
-'==============================================================================
-' DEMO_Btn_PlayFeedback
+'------------------------------------------------------------------------------
+'                            DEMO BTN PLAY FEEDBACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Invoke the shared button-click feedback helper on a best-effort basis
@@ -5107,15 +5217,14 @@ Public Sub DEMO_Btn_PlayFeedback()
 '   without duplicating local error suppression around DEMO_Btn_Click
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Best effort only
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY BEST-EFFORT FEEDBACK
@@ -5127,14 +5236,13 @@ Public Sub DEMO_Btn_PlayFeedback()
 
 End Sub
 
-
 Public Sub DEMO_SB_SetProgress( _
     ByVal CurrentStep As Long, _
     ByVal TotalSteps As Long, _
     ByVal StepText As String)
 '
-'==============================================================================
-' SUITE SET PROGRESS
+'------------------------------------------------------------------------------
+'                              SUITE SET PROGRESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes regression-suite progress to the Excel status bar
@@ -5154,17 +5262,19 @@ Public Sub DEMO_SB_SetProgress( _
 '     Short description of the current step
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Pct                 As Double          'Completion ratio
-    Dim PercentText         As String          'Formatted completion percentage
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_SB_SetProgress"
+
+    Dim Pct         As Double   'Completion ratio
+    Dim PercentText As String   'Formatted completion percentage
 
 '------------------------------------------------------------------------------
 ' NORMALIZE INPUTS
@@ -5204,10 +5314,9 @@ Public Sub DEMO_CB_AddForms( _
     ByVal WS As Worksheet, _
     ByVal AnchorRange As Range, _
     Optional ByVal CheckBoxNames As Variant)
-
 '
-'==============================================================================
-' DEMO_CB_AddForms
+'------------------------------------------------------------------------------
+'                              DEMO CB ADD FORMS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Add one Forms check box for each cell in the supplied anchor range
@@ -5245,7 +5354,7 @@ Public Sub DEMO_CB_AddForms( _
 '         AnchorRange
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Validates the worksheet, anchor range, and optional naming input
@@ -5262,16 +5371,17 @@ Public Sub DEMO_CB_AddForms( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CellCount           As Long            'Number of target cells
-    Dim CellIndex           As Long            '1-based current target-cell index
-    Dim TargetCell          As Range           'Current target cell
-    Dim ResolvedName        As String          'Resolved check-box name for the current cell
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_CB_AddForms"
+
+    Dim CellCount       As Long     'Number of target cells
+    Dim CellIndex       As Long     '1-based current target-cell index
+    Dim TargetCell      As Range    'Current target cell
+    Dim ResolvedName    As String   'Resolved check-box name for the current cell
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -5324,27 +5434,25 @@ Public Sub DEMO_CB_AddForms( _
 
         For Each TargetCell In AnchorRange.Cells
 
-            'Advance the current 1-based cell index
-                CellIndex = CellIndex + 1
+        'Advance the current 1-based cell index
+            CellIndex = CellIndex + 1
 
-            'Resolve the checkbox name for the current target cell
-                ResolvedName = DEMO_CB_ResolveName(TargetCell, CheckBoxNames, CellIndex)
+        'Resolve the checkbox name for the current target cell
+            ResolvedName = DEMO_CB_ResolveName(TargetCell, CheckBoxNames, CellIndex)
 
-            'Create the current Forms check box
-                DEMO_AddOneFormsCheckBox WS, TargetCell, ResolvedName
+        'Create the current Forms check box
+            DEMO_AddOneFormsCheckBox WS, TargetCell, ResolvedName
 
         Next TargetCell
 
 End Sub
 
-
 Private Sub DEMO_CB_ValidateNamesInput( _
     ByVal AnchorRange As Range, _
     ByVal CheckBoxNames As Variant)
-
 '
-'==============================================================================
-' DEMO_CB_ValidateNamesInput
+'------------------------------------------------------------------------------
+'                         DEMO CB VALIDATE NAMES INPUT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validate the optional CheckBoxNames input for DEMO_CB_AddForms
@@ -5361,22 +5469,23 @@ Private Sub DEMO_CB_ValidateNamesInput( _
 '     Optional name input passed by the caller
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Raises errors normally
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CellCount           As Long            'Number of target cells
-    Dim ArrLo               As Long            'Array lower bound
-    Dim ArrHi               As Long            'Array upper bound
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_CB_ValidateNamesInput"
+
+    Dim CellCount   As Long 'Number of target cells
+    Dim ArrLo       As Long 'Array lower bound
+    Dim ArrHi       As Long 'Array upper bound
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -5398,25 +5507,25 @@ Private Sub DEMO_CB_ValidateNamesInput( _
     'For a single-cell anchor, allow either a scalar string or a one-element array
         If CellCount = 1 Then
 
-            'Accept a scalar string
-                If VarType(CheckBoxNames) = vbString Then
+        'Accept a scalar string
+            If VarType(CheckBoxNames) = vbString Then
+                Exit Sub
+            End If
+
+        'Accept a one-element array
+            If IsArray(CheckBoxNames) Then
+                ArrLo = LBound(CheckBoxNames)
+                ArrHi = UBound(CheckBoxNames)
+
+                If ArrHi - ArrLo + 1 = 1 Then
                     Exit Sub
                 End If
+            End If
 
-            'Accept a one-element array
-                If IsArray(CheckBoxNames) Then
-                    ArrLo = LBound(CheckBoxNames)
-                    ArrHi = UBound(CheckBoxNames)
-
-                    If ArrHi - ArrLo + 1 = 1 Then
-                        Exit Sub
-                    End If
-                End If
-
-            'Reject all other input shapes
-                Err.Raise vbObjectError + 2145, _
-                          "M_DEMO_BUILDER.DEMO_CB_ValidateNamesInput", _
-                          "For a single-cell anchor, CheckBoxNames must be omitted, be a String, or be a one-element array"
+        'Reject all other input shapes
+            Err.Raise vbObjectError + 2145, _
+                      "M_DEMO_BUILDER.DEMO_CB_ValidateNamesInput", _
+                      "For a single-cell anchor, CheckBoxNames must be omitted, be a String, or be a one-element array"
 
         End If
 
@@ -5442,16 +5551,14 @@ Private Sub DEMO_CB_ValidateNamesInput( _
 
 End Sub
 
-
 Private Function DEMO_CB_ResolveName( _
     ByVal TargetCell As Range, _
     ByVal CheckBoxNames As Variant, _
     ByVal CellIndex As Long) _
     As String
-
 '
-'==============================================================================
-' DEMO_CB_ResolveName
+'------------------------------------------------------------------------------
+'                             DEMO CB RESOLVE NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolve the effective checkbox name for one target cell
@@ -5483,13 +5590,14 @@ Private Function DEMO_CB_ResolveName( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ArrLo               As Long            'Array lower bound
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_CB_ResolveName"
+
+    Dim ArrLo   As Long 'Array lower bound
 
 '------------------------------------------------------------------------------
 ' RESOLVE OMITTED CASE
@@ -5527,14 +5635,12 @@ Private Function DEMO_CB_ResolveName( _
 
 End Function
 
-
 Private Function DEMO_CB_DefaultName( _
     ByVal TargetCell As Range) _
     As String
-
 '
-'==============================================================================
-' DEMO_CB_DefaultName
+'------------------------------------------------------------------------------
+'                             DEMO CB DEFAULT NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a deterministic default checkbox name from one target cell
@@ -5553,8 +5659,7 @@ Private Function DEMO_CB_DefaultName( _
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RETURN DEFAULT NAME
@@ -5564,15 +5669,13 @@ Private Function DEMO_CB_DefaultName( _
 
 End Function
 
-
 Private Sub DEMO_AddOneFormsCheckBox( _
     ByVal WS As Worksheet, _
     ByVal AnchorCell As Range, _
     ByVal CheckBoxName As String)
-
 '
-'==============================================================================
-' DEMO_AddOneFormsCheckBox
+'------------------------------------------------------------------------------
+'                         DEMO ADD ONE FORMS CHECK BOX
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Create one Forms check box centered inside one anchor cell
@@ -5592,24 +5695,25 @@ Private Sub DEMO_AddOneFormsCheckBox( _
 '     Name assigned to the created Forms check box
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Raises errors normally
 '
 ' UPDATED
 '   2026-04-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Cb                  As CheckBox        'Created Forms check box
-    Dim BoxWidth            As Double          'Check-box width
-    Dim BoxHeight           As Double          'Check-box height
-    Dim BoxLeft             As Double          'Resolved left position
-    Dim BoxTop              As Double          'Resolved top position
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_AddOneFormsCheckBox"
+
+    Dim Cb          As CheckBox 'Created Forms check box
+    Dim BoxWidth    As Double   'Check-box width
+    Dim BoxHeight   As Double   'Check-box height
+    Dim BoxLeft     As Double   'Resolved left position
+    Dim BoxTop      As Double   'Resolved top position
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -5633,7 +5737,7 @@ Private Sub DEMO_AddOneFormsCheckBox( _
 '------------------------------------------------------------------------------
     'Delete an existing same-sheet Forms check box with the same name when present
         On Error Resume Next
-            WS.CheckBoxes(CheckBoxName).Delete
+        WS.CheckBoxes(CheckBoxName).Delete
         On Error GoTo 0
 
 '------------------------------------------------------------------------------
@@ -5677,7 +5781,6 @@ Private Sub DEMO_AddOneFormsCheckBox( _
 
 End Sub
 
-
 Public Function DEMO_CB_TryGetState( _
     ByVal WS As Worksheet, _
     ByVal ControlName As String, _
@@ -5685,8 +5788,8 @@ Public Function DEMO_CB_TryGetState( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' DEMO_CB_TryGetState
+'------------------------------------------------------------------------------
+'                            DEMO CB TRY GET STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads the checked state of a Forms or ActiveX check box on a worksheet
@@ -5720,22 +5823,27 @@ Public Function DEMO_CB_TryGetState( _
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Moved from M_EXCEL_UI_DEMO; ActiveX dispatch and mixed
 '                state (#73).
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Shp                 As Shape           'Resolved Forms control
-    Dim CheckBoxOle         As OLEObject       'Resolved ActiveX control
-    Dim ValueOut            As Variant         'Control value
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_CB_TryGetState"
+
+    Dim Shp         As Shape        'Resolved Forms control
+    Dim CheckBoxOle As OLEObject    'Resolved ActiveX control
+    Dim ValueOut    As Variant      'Control value
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         DEMO_CB_TryGetState = False
         IsChecked = False
@@ -5750,7 +5858,7 @@ Public Function DEMO_CB_TryGetState( _
             Case DEMO_CB_KIND_ACTIVEX
                 ValueOut = CallByName(CheckBoxOle.Object, "Value", VbGet)
             Case Else
-                GoTo Safe_Exit
+                GoTo SafeExit
         End Select
 
 '------------------------------------------------------------------------------
@@ -5772,16 +5880,21 @@ Public Function DEMO_CB_TryGetState( _
             FailMsg = DEMO_CB_MIXED_STATE
         End If
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         Exit Function
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         FailMsg = DEMO_CB_ErrorText(Err.Number, Err.Source, Err.Description)
         IsChecked = False
         DEMO_CB_TryGetState = False
 
 End Function
-
 
 Public Function DEMO_CB_TrySetState( _
     ByVal WS As Worksheet, _
@@ -5790,8 +5903,8 @@ Public Function DEMO_CB_TrySetState( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' DEMO_CB_TrySetState
+'------------------------------------------------------------------------------
+'                            DEMO CB TRY SET STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes the checked state of a Forms or ActiveX check box on a worksheet
@@ -5823,20 +5936,25 @@ Public Function DEMO_CB_TrySetState( _
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Moved from M_EXCEL_UI_DEMO; ActiveX dispatch (#73).
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Shp                 As Shape           'Resolved Forms control
-    Dim CheckBoxOle         As OLEObject       'Resolved ActiveX control
+    Const PROC_NAME As String = "M_DEMO_BUILDER.DEMO_CB_TrySetState"
+
+    Dim Shp         As Shape        'Resolved Forms control
+    Dim CheckBoxOle As OLEObject    'Resolved ActiveX control
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         DEMO_CB_TrySetState = False
         FailMsg = vbNullString
@@ -5855,17 +5973,24 @@ Public Function DEMO_CB_TrySetState( _
             Case DEMO_CB_KIND_ACTIVEX
                 CallByName CheckBoxOle.Object, "Value", VbLet, IsChecked
                 DEMO_CB_TrySetState = True
+            Case Else
+            'Leave the result False for any other control kind
         End Select
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         Exit Function
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         FailMsg = DEMO_CB_ErrorText(Err.Number, Err.Source, Err.Description)
         DEMO_CB_TrySetState = False
 
 End Function
-
 
 Private Function DEMO_CB_ResolveControl( _
     ByVal WS As Worksheet, _
@@ -5875,8 +6000,8 @@ Private Function DEMO_CB_ResolveControl( _
     ByRef FailMsg As String) _
     As Long
 '
-'==============================================================================
-' DEMO_CB_ResolveControl
+'------------------------------------------------------------------------------
+'                           DEMO CB RESOLVE CONTROL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Finds a check box by name and reports whether it is a Forms or an ActiveX
@@ -5904,9 +6029,12 @@ Private Function DEMO_CB_ResolveControl( _
 '   Raises only when Excel fails while reading a control it found; the
 '   callers turn that into FailMsg
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -5930,7 +6058,7 @@ Private Function DEMO_CB_ResolveControl( _
 '------------------------------------------------------------------------------
     'A missing name is an expected outcome, not an error
         On Error Resume Next
-            Set Shp = WS.Shapes(ControlName)
+        Set Shp = WS.Shapes(ControlName)
         On Error GoTo 0
 
 '------------------------------------------------------------------------------
@@ -5961,7 +6089,7 @@ Private Function DEMO_CB_ResolveControl( _
 ' RESOLVE THE ACTIVEX CONTROL
 '------------------------------------------------------------------------------
         On Error Resume Next
-            Set CheckBoxOle = WS.OLEObjects(ControlName)
+        Set CheckBoxOle = WS.OLEObjects(ControlName)
         On Error GoTo 0
 
         If CheckBoxOle Is Nothing Then
@@ -5979,22 +6107,24 @@ Private Function DEMO_CB_ResolveControl( _
 
 End Function
 
-
 Private Function DEMO_CB_ErrorText( _
     ByVal Number As Long, _
     ByVal Source As String, _
     ByVal Description As String) _
     As String
 '
-'==============================================================================
-' DEMO_CB_ErrorText
+'------------------------------------------------------------------------------
+'                              DEMO CB ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats a runtime error for a check-box FailMsg
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         DEMO_CB_ErrorText = CStr(Number) & ": " & Description & _
             IIf(Len(Source) > 0, " | Source: " & Source, vbNullString)

@@ -394,9 +394,11 @@ their commands, and `--only` and `--skip` take check names. Without `--ci`, a
 check whose tool is missing (Node.js, Ruff or mypy) is reported as `SKIPPED`,
 which is not a pass; with `--ci` it fails. Fix formatting drift with
 `python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas`, then
-re-import the affected modules into the VBE. The layout it writes, and the
-switch that moves the whole tree to the new house style, are defined in
-[docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md#house-style-210).
+re-import the affected modules into the VBE. The layout it writes is the house
+style, defined in
+[docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md#house-style-210). Findings of
+the style that are still to be settled by hand are listed in
+`tools/house_style_pending.txt`; new code is never added to it.
 
 The gate's *VBA syntax* check catches mistakes that Excel would otherwise
 report only when it compiles the project on a Windows host: an unbalanced

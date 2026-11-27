@@ -6,7 +6,9 @@ Two normal forms exist. ``house`` is the style of docs/VBA_HOUSE_STYLE.md and is
 built by vba_house.py. ``legacy`` is the previous normal form, described below,
 which the tree keeps while house_style.HOUSE_STYLE_ACTIVE is False. ``--style``
 picks one; without it the switch decides, so ``--check`` accepts the tree that
-exists and ``--style house`` shows what the style will change.
+the switch names. ``--equivalent`` proves that two trees differ only as the
+style allows (house_equiv.py), and ``--write-pending`` writes the list of
+findings still to be settled by hand (tools/house_style_pending.txt).
 
 The legacy form applies a bounded set of mechanical formatting transformations.
 They are intended to be behaviour-neutral, and the named lexical rules below are
@@ -47,6 +49,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import house_equiv
 import house_style
 import vba_house
 import vba_house_rules
@@ -445,6 +448,43 @@ def hand_edits(path: str | Path, name: str, style: str) -> str:
     return ", ".join(f"{rule} {count}" for rule, count in counts.items() if count)
 
 
+def write_pending(paths: Sequence[str | Path], target: str | Path | None = None) -> int:
+    """Write the list of findings that are still to be settled by hand (tools/house_style_pending.txt).
+
+    The list is what the house-style rules check allows while the modules are
+    brought to the style. Once it exists this only removes lines: a finding
+    that is not already listed is refused, so the list cannot grow to hide new
+    code. With no findings left, the file is removed.
+    """
+    path = Path(target) if target else Path(__file__).resolve().parent.parent / vba_house_rules.PENDING_FILE
+    found: list[tuple[str, vba_house_rules.Finding]] = []
+    try:
+        for source in paths:
+            name = module_name_of(source)
+            if name is None:
+                raise LexicalError(f"{source}: no Attribute VB_Name")
+            text = Path(source).read_text(encoding="ascii")
+            found.extend((name, item) for item in vba_house_rules.findings(text, name))
+        existing = path.read_text(encoding="ascii") if path.exists() else None
+        if existing is not None:
+            added = vba_house_rules.additions(found, existing)
+            if added:
+                print(f"FAIL {path}: refusing to add {len(added)} line(s); settle the finding or list it by hand: "
+                      + "; ".join(added[:5]) + (" ..." if len(added) > 5 else ""))
+                return 1
+        if not found:
+            if existing is not None:
+                path.unlink()
+            print(f"ok   no finding left; {path} removed" if existing is not None else "ok   no finding")
+            return 0
+        atomic_write(path, vba_house_rules.pending_text(found).encode("ascii"))
+    except (ValueError, OSError) as exc:
+        print(f"FAIL {exc}")
+        return 1
+    print(f"ok   {path}: {len(found)} finding(s) listed")
+    return 0
+
+
 def check(paths: Sequence[str | Path], style: str | None = None) -> int:
     """Report which files are not already in the formatter's normal form.
 
@@ -605,10 +645,12 @@ def selftest() -> list[str]:
         if again != "\r\n".join(produced):
             failures.append(f"{label}\n      not idempotent on a second pass")
 
+    from house_equiv_fixtures import equiv_selftest
     from house_format_fixtures import house_selftest
     from reformat_fixtures import extended_selftest
     failures.extend(extended_selftest())
     failures.extend(house_selftest())
+    failures.extend(equiv_selftest())
     return failures
 
 
@@ -628,6 +670,8 @@ USAGE = """usage:
   reformat.py --selftest                         verify the rules themselves
   reformat.py [--style S] --check <file.bas> ...  report drift, exit 1 if any
   reformat.py [--style S] --write <file.bas> ...  normalise in place
+  reformat.py --write-pending <file.bas> ...      write tools/house_style_pending.txt (never adds a line)
+  reformat.py --equivalent BASE_DIR NEW_DIR       prove two trees differ only as the style allows
   reformat.py [--style S] <src> <dst> <module_name>   explicit form
 S is "house" (the style in docs/VBA_HOUSE_STYLE.md) or "legacy" (the previous
 normal form). Without --style the switch HOUSE_STYLE_ACTIVE in
@@ -651,6 +695,10 @@ def main(argv: list[str]) -> int:
         return check(args[1:], style)
     if args and args[0] == "--write":
         return write(args[1:], style)
+    if args and args[0] == "--write-pending":
+        return write_pending(args[1:])
+    if args and args[0] == "--equivalent" and len(args) == 3:
+        return house_equiv.run(args[1], args[2])
     if len(args) == 3:
         src, dst, name = args
         atomic_write(dst, reformat(src, name, style).encode("ascii"))

@@ -1,10 +1,12 @@
 Attribute VB_Name = "M_EXCEL_UI_SNAPSHOT"
+
 Option Explicit
 Option Private Module
 
+'
 '==============================================================================
-' M_EXCEL_UI_SNAPSHOT
-'------------------------------------------------------------------------------
+' MODULE: M_EXCEL_UI_SNAPSHOT
+'==============================================================================
 ' PURPOSE
 '   Owns the in-memory Excel UI snapshot: its state, the retained Window object
 '   identities, and the best-effort capture and restoration passes.
@@ -17,6 +19,25 @@ Option Private Module
 '   Isolating that subsystem keeps M_EXCEL_UI focused on API compatibility and
 '   general UI application logic, and keeps all the mutable state that survives
 '   between calls in one module where its lifetime can be reasoned about.
+'
+' ERROR POLICY
+'   - Internal entry points are fail-soft and do not raise.
+'   - Capture and restoration continue after element-level failure.
+'   - An unexpected capture failure clears the partial snapshot, so a caller
+'     never restores from a half-built baseline.
+'   - An unexpected restoration failure leaves the snapshot in place.
+'   - No user-interface message is displayed.
+'
+' DEPENDENCIES
+'   - M_EXCEL_UI_RUNTIME  shared host operations, result buffers, diagnostics
+'   - M_EXCEL_UI_TITLEBAR title-bar capture and restoration
+'
+' NOTES
+'   - The parallel label array is diagnostic only and never participates in
+'     identity matching. The same is true of the title-bar label.
+'   - Restoration order is title bar, Ribbon, application-level properties,
+'     then window-level properties, which is the reverse of the order in which
+'     they visibly settle.
 '
 ' INTERNAL SURFACE
 '   - UI_SnapshotCaptureCore
@@ -114,26 +135,13 @@ Option Private Module
 '   captured title-bar frame. Callers that open and close many workbooks should
 '   clear the snapshot when it is no longer needed.
 '
-' ERROR POLICY
-'   - Internal entry points are fail-soft and do not raise.
-'   - Capture and restoration continue after element-level failure.
-'   - An unexpected capture failure clears the partial snapshot, so a caller
-'     never restores from a half-built baseline.
-'   - An unexpected restoration failure leaves the snapshot in place.
-'   - No user-interface message is displayed.
+' AUTHOR
+'   Daniele Penza
 '
-' DEPENDENCIES
-'   - M_EXCEL_UI_RUNTIME  shared host operations, result buffers, diagnostics
-'   - M_EXCEL_UI_TITLEBAR title-bar capture and restoration
+' VERSION
+'   1.1.1
 '
-' NOTES
-'   - The parallel label array is diagnostic only and never participates in
-'     identity matching. The same is true of the title-bar label.
-'   - Restoration order is title bar, Ribbon, application-level properties,
-'     then window-level properties, which is the reverse of the order in which
-'     they visibly settle.
-'
-' UPDATED
+' HISTORY
 '   2026-11-06 - Header and comments aligned with the code (#114).
 '   2026-11-03 - Ribbon captured with the Window it was read from; restore
 '                refuses, without activating anything, unless that Window is
@@ -148,81 +156,77 @@ Option Private Module
 '   2026-08-18 - Application-level capture made fail-soft; Known flags added
 '                for Status Bar, Scroll Bars and Formula Bar.
 '
-' AUTHOR
-'   Daniele Penza
-'
-' VERSION
-'   1.1.1
+' UPDATED
+'   2026-11-06
 '==============================================================================
 
-'==============================================================================
+'------------------------------------------------------------------------------
 ' PRIVATE MODULE STATE
-'==============================================================================
+'------------------------------------------------------------------------------
+    'True once a capture pass has completed, whether or not it was complete.
+    Private m_HasExcelUIStateSnapshot   As Boolean
 
-'True once a capture pass has completed, whether or not it was complete.
-Private m_HasExcelUIStateSnapshot       As Boolean
+    'Application-level captured values. Every one carries a Known flag so that a
+    'read the host refused is never replayed as a False value on restore.
+    Private m_SnapshotRibbonKnown   As Boolean
+    Private m_SnapshotRibbonVisible As Boolean
 
-'Application-level captured values. Every one carries a Known flag so that a
-'read the host refused is never replayed as a False value on restore.
-Private m_SnapshotRibbonKnown           As Boolean
-Private m_SnapshotRibbonVisible         As Boolean
-
-'Window the Ribbon value was read from, and its frame handle at capture.
-'Every Ribbon mechanism acts on the active window, so restore applies the value
-'only while the active window's handle is this one and the retained Window
-'still reports it. The label is diagnostic only.
-Private m_SnapshotRibbonWindow          As Object
-Private m_SnapshotRibbonLabel           As String
+    'Window the Ribbon value was read from, and its frame handle at capture.
+    'Every Ribbon mechanism acts on the active window, so restore applies the value
+    'only while the active window's handle is this one and the retained Window
+    'still reports it. The label is diagnostic only.
+    Private m_SnapshotRibbonWindow  As Object
+    Private m_SnapshotRibbonLabel   As String
 
 #If VBA7 Then
-    Private m_SnapshotRibbonHwnd        As LongPtr
+    Private m_SnapshotRibbonHwnd    As LongPtr
 #Else
-    Private m_SnapshotRibbonHwnd        As Long
+    Private m_SnapshotRibbonHwnd    As Long
 #End If
 
-Private m_SnapshotStatusBarKnown        As Boolean
-Private m_SnapshotStatusBarVisible      As Boolean
+    Private m_SnapshotStatusBarKnown    As Boolean
+    Private m_SnapshotStatusBarVisible  As Boolean
 
-Private m_SnapshotScrollBarsKnown       As Boolean
-Private m_SnapshotScrollBarsVisible     As Boolean
+    Private m_SnapshotScrollBarsKnown   As Boolean
+    Private m_SnapshotScrollBarsVisible As Boolean
 
-Private m_SnapshotFormulaBarKnown       As Boolean
-Private m_SnapshotFormulaBarVisible     As Boolean
+    Private m_SnapshotFormulaBarKnown   As Boolean
+    Private m_SnapshotFormulaBarVisible As Boolean
 
-'Number of windows captured, and the upper bound of every parallel array below.
-Private m_SnapshotWindowCount           As Long
+    'Number of windows captured, and the upper bound of every parallel array below.
+    Private m_SnapshotWindowCount   As Long
 
-'Object references provide identity-safe in-memory matching. Parallel labels
-'are diagnostic only and never participate in matching.
-Private m_SnapshotWindows()             As Object
-Private m_SnapshotWindowLabels()        As String
+    'Object references provide identity-safe in-memory matching. Parallel labels
+    'are diagnostic only and never participate in matching.
+    Private m_SnapshotWindows()         As Object
+    Private m_SnapshotWindowLabels()    As String
 
-'Per-window managed properties, each with a Known flag so a failed read is
-'never replayed as a False value on restore.
-Private m_SnapshotHeadingsKnown()       As Boolean
-Private m_SnapshotHeadingsVisible()     As Boolean
+    'Per-window managed properties, each with a Known flag so a failed read is
+    'never replayed as a False value on restore.
+    Private m_SnapshotHeadingsKnown()   As Boolean
+    Private m_SnapshotHeadingsVisible() As Boolean
 
-Private m_SnapshotWorkbookTabsKnown()   As Boolean
-Private m_SnapshotWorkbookTabsVisible() As Boolean
+    Private m_SnapshotWorkbookTabsKnown()   As Boolean
+    Private m_SnapshotWorkbookTabsVisible() As Boolean
 
-Private m_SnapshotGridlinesKnown()      As Boolean
-Private m_SnapshotGridlinesVisible()    As Boolean
+    Private m_SnapshotGridlinesKnown()      As Boolean
+    Private m_SnapshotGridlinesVisible()    As Boolean
 
-'Captured top-level frame state.
-Private m_SnapshotTitleBarKnown         As Boolean
-Private m_SnapshotTitleBarVisible       As Boolean
+    'Captured top-level frame state.
+    Private m_SnapshotTitleBarKnown     As Boolean
+    Private m_SnapshotTitleBarVisible   As Boolean
 
-'Identity of the frame the title-bar value was read from. The handle addresses
-'the frame; the Window object proves the frame is still the captured one, since
-'a handle value alone can be reused by Windows after its window is destroyed.
+    'Identity of the frame the title-bar value was read from. The handle addresses
+    'the frame; the Window object proves the frame is still the captured one, since
+    'a handle value alone can be reused by Windows after its window is destroyed.
 #If VBA7 Then
-    Private m_SnapshotTitleBarHwnd      As LongPtr
+    Private m_SnapshotTitleBarHwnd  As LongPtr
 #Else
-    Private m_SnapshotTitleBarHwnd      As Long
+    Private m_SnapshotTitleBarHwnd  As Long
 #End If
 
-Private m_SnapshotTitleBarWindow        As Object
-Private m_SnapshotTitleBarLabel         As String
+    Private m_SnapshotTitleBarWindow    As Object
+    Private m_SnapshotTitleBarLabel     As String
 
 
 Public Function UI_SnapshotCaptureCore( _
@@ -233,8 +237,8 @@ Public Function UI_SnapshotCaptureCore( _
     ByVal CaptureFailureList As Boolean) _
     As Boolean
 '
-'==============================================================================
-' UI_SnapshotCaptureCore
+'------------------------------------------------------------------------------
+'                           UI SNAPSHOT CAPTURE CORE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Executes the shared snapshot-capture pass for both the fire-and-forget
@@ -300,23 +304,27 @@ Public Function UI_SnapshotCaptureCore( _
 ' CALLED FROM
 '   - M_EXCEL_UI
 '
-' UPDATED
+' HISTORY
 '   2026-09-03 - Title-bar Window and handle resolved as one pair through
 '                UI_TryGetActiveFramePair; a failed resolution records a
 '                TitleBar failure and leaves the identity cleared.
 '   2026-08-19 - Title bar captured with its own window identity.
 '   2026-08-18
-'==============================================================================
 '
+' UPDATED
+'   2026-09-03
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long            'Parallel-array write position
-    Dim W                   As Window          'Window being captured
-    Dim Msg                 As String          'Per-element failure reason
-    Dim UnexpectedDetail    As String          'Unexpected-error diagnostic
-    Dim Succeeded           As Boolean         'Pass-level success flag
+    Const PROC_NAME As String = "M_EXCEL_UI_SNAPSHOT.UI_SnapshotCaptureCore"
+
+    Dim i                   As Long     'Parallel-array write position
+    Dim W                   As Window   'Window being captured
+    Dim Msg                 As String   'Per-element failure reason
+    Dim UnexpectedDetail    As String   'Unexpected-error diagnostic
+    Dim Succeeded           As Boolean  'Pass-level success flag
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -331,7 +339,7 @@ Public Function UI_SnapshotCaptureCore( _
         Succeeded = True
 
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Replace any prior snapshot; snapshots never merge
         UI_SnapshotClear
@@ -413,22 +421,22 @@ Public Function UI_SnapshotCaptureCore( _
                 CaptureFailureList, "TitleBar", Msg
         Else
 
-            'The pair is resolved, agreed with the host and proven live by the
-            'title-bar module, so nothing is re-checked here.
-                m_SnapshotTitleBarLabel = _
-                    UI_RuntimeBuildWindowLabel(m_SnapshotTitleBarWindow)
+        'The pair is resolved, agreed with the host and proven live by the
+        'title-bar module, so nothing is re-checked here.
+            m_SnapshotTitleBarLabel = _
+                UI_RuntimeBuildWindowLabel(m_SnapshotTitleBarWindow)
 
-                m_SnapshotTitleBarKnown = _
-                    UI_TryGetTitleBarVisibleForHwnd( _
-                        TargetHwnd:=m_SnapshotTitleBarHwnd, _
-                        IsVisible:=m_SnapshotTitleBarVisible, _
-                        FailMsg:=Msg)
+            m_SnapshotTitleBarKnown = _
+                UI_TryGetTitleBarVisibleForHwnd( _
+                    TargetHwnd:=m_SnapshotTitleBarHwnd, _
+                    IsVisible:=m_SnapshotTitleBarVisible, _
+                    FailMsg:=Msg)
 
-                If Not m_SnapshotTitleBarKnown Then
-                    UI_RuntimeHandleFailure _
-                        ProcName, LogFailures, Succeeded, FailureCount, _
-                        FailureList, CaptureFailureList, "TitleBar", Msg
-                End If
+            If Not m_SnapshotTitleBarKnown Then
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, _
+                    FailureList, CaptureFailureList, "TitleBar", Msg
+            End If
 
         End If
 
@@ -452,67 +460,67 @@ Public Function UI_SnapshotCaptureCore( _
             ReDim m_SnapshotGridlinesKnown(1 To m_SnapshotWindowCount)
             ReDim m_SnapshotGridlinesVisible(1 To m_SnapshotWindowCount)
 
-            'Start before the first parallel-array slot
-                i = 0
+        'Start before the first parallel-array slot
+            i = 0
 
-            'Capture each window's identity and managed properties in order
-                For Each W In Application.Windows
+        'Capture each window's identity and managed properties in order
+            For Each W In Application.Windows
 
-                    i = i + 1
+                i = i + 1
 
-                    'Retain the exact object; this is the restore key
-                        Set m_SnapshotWindows(i) = W
+            'Retain the exact object; this is the restore key
+                Set m_SnapshotWindows(i) = W
 
-                    'Build the diagnostic label once, for use by both passes
-                        m_SnapshotWindowLabels(i) = _
-                            UI_RuntimeBuildWindowLabel(W)
+            'Build the diagnostic label once, for use by both passes
+                m_SnapshotWindowLabels(i) = _
+                    UI_RuntimeBuildWindowLabel(W)
 
-                    'Capture Headings
-                        m_SnapshotHeadingsKnown(i) = _
-                            UI_RuntimeTryGetBooleanProperty( _
-                                Target:=W, _
-                                PropertyName:="DisplayHeadings", _
-                                ValueOut:=m_SnapshotHeadingsVisible(i), _
-                                FailMsg:=Msg)
+            'Capture Headings
+                m_SnapshotHeadingsKnown(i) = _
+                    UI_RuntimeTryGetBooleanProperty( _
+                        Target:=W, _
+                        PropertyName:="DisplayHeadings", _
+                        ValueOut:=m_SnapshotHeadingsVisible(i), _
+                        FailMsg:=Msg)
 
-                        If Not m_SnapshotHeadingsKnown(i) Then
-                            UI_RuntimeHandleFailure _
-                                ProcName, LogFailures, Succeeded, FailureCount, _
-                                FailureList, CaptureFailureList, _
-                                "Headings [" & m_SnapshotWindowLabels(i) & "]", Msg
-                        End If
+                If Not m_SnapshotHeadingsKnown(i) Then
+                    UI_RuntimeHandleFailure _
+                        ProcName, LogFailures, Succeeded, FailureCount, _
+                        FailureList, CaptureFailureList, _
+                        "Headings [" & m_SnapshotWindowLabels(i) & "]", Msg
+                End If
 
-                    'Capture Workbook Tabs
-                        m_SnapshotWorkbookTabsKnown(i) = _
-                            UI_RuntimeTryGetBooleanProperty( _
-                                Target:=W, _
-                                PropertyName:="DisplayWorkbookTabs", _
-                                ValueOut:=m_SnapshotWorkbookTabsVisible(i), _
-                                FailMsg:=Msg)
+            'Capture Workbook Tabs
+                m_SnapshotWorkbookTabsKnown(i) = _
+                    UI_RuntimeTryGetBooleanProperty( _
+                        Target:=W, _
+                        PropertyName:="DisplayWorkbookTabs", _
+                        ValueOut:=m_SnapshotWorkbookTabsVisible(i), _
+                        FailMsg:=Msg)
 
-                        If Not m_SnapshotWorkbookTabsKnown(i) Then
-                            UI_RuntimeHandleFailure _
-                                ProcName, LogFailures, Succeeded, FailureCount, _
-                                FailureList, CaptureFailureList, _
-                                "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", Msg
-                        End If
+                If Not m_SnapshotWorkbookTabsKnown(i) Then
+                    UI_RuntimeHandleFailure _
+                        ProcName, LogFailures, Succeeded, FailureCount, _
+                        FailureList, CaptureFailureList, _
+                        "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", Msg
+                End If
 
-                    'Capture Gridlines
-                        m_SnapshotGridlinesKnown(i) = _
-                            UI_RuntimeTryGetBooleanProperty( _
-                                Target:=W, _
-                                PropertyName:="DisplayGridlines", _
-                                ValueOut:=m_SnapshotGridlinesVisible(i), _
-                                FailMsg:=Msg)
+            'Capture Gridlines
+                m_SnapshotGridlinesKnown(i) = _
+                    UI_RuntimeTryGetBooleanProperty( _
+                        Target:=W, _
+                        PropertyName:="DisplayGridlines", _
+                        ValueOut:=m_SnapshotGridlinesVisible(i), _
+                        FailMsg:=Msg)
 
-                        If Not m_SnapshotGridlinesKnown(i) Then
-                            UI_RuntimeHandleFailure _
-                                ProcName, LogFailures, Succeeded, FailureCount, _
-                                FailureList, CaptureFailureList, _
-                                "Gridlines [" & m_SnapshotWindowLabels(i) & "]", Msg
-                        End If
+                If Not m_SnapshotGridlinesKnown(i) Then
+                    UI_RuntimeHandleFailure _
+                        ProcName, LogFailures, Succeeded, FailureCount, _
+                        FailureList, CaptureFailureList, _
+                        "Gridlines [" & m_SnapshotWindowLabels(i) & "]", Msg
+                End If
 
-                Next W
+            Next W
 
         End If
 
@@ -523,9 +531,9 @@ Public Function UI_SnapshotCaptureCore( _
         m_HasExcelUIStateSnapshot = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Publish the pass-level result and exit before the error handler
         UI_SnapshotCaptureCore = Succeeded
         Exit Function
@@ -533,7 +541,7 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture the diagnostic before the clear disturbs anything
         UnexpectedDetail = UI_RuntimeBuildErrorText
 
@@ -545,16 +553,15 @@ Err_Handler:
             ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
             CaptureFailureList, "Unexpected", UnexpectedDetail
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Public Function UI_SnapshotHasState() _
     As Boolean
 '
-'==============================================================================
-' UI_SnapshotHasState
+'------------------------------------------------------------------------------
+'                            UI SNAPSHOT HAS STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns whether an explicit in-memory Excel UI snapshot is available.
@@ -579,8 +586,7 @@ Public Function UI_SnapshotHasState() _
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RETURN AVAILABILITY
@@ -590,7 +596,6 @@ Public Function UI_SnapshotHasState() _
 
 End Function
 
-
 Public Function UI_SnapshotRestoreCore( _
     ByVal ProcName As String, _
     ByVal LogFailures As Boolean, _
@@ -599,8 +604,8 @@ Public Function UI_SnapshotRestoreCore( _
     ByVal CaptureFailureList As Boolean) _
     As Boolean
 '
-'==============================================================================
-' UI_SnapshotRestoreCore
+'------------------------------------------------------------------------------
+'                           UI SNAPSHOT RESTORE CORE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Executes the shared snapshot-restoration pass for both the fire-and-forget
@@ -665,28 +670,29 @@ Public Function UI_SnapshotRestoreCore( _
 '   - UI_SnapshotTryResolveTitleBarFrame
 '   - UI_TrySetTitleBarVisibleForHwndIfNeeded
 '
-' CALLED FROM
-'   - M_EXCEL_UI
-'
 ' NOTES
 '   The quiet-update scope is entered only after the NoSnapshot check, and the
 '   matching End is safe on that path because QuietModeChanged is still False.
 '
+' CALLED FROM
+'   - M_EXCEL_UI
+'
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim i                   As Long            'Snapshot slot being restored
-    Dim MatchedWindow       As Object          'Resolved captured Window
-    Dim Msg                 As String          'Per-element failure reason
-    Dim UnexpectedDetail    As String          'Unexpected-error diagnostic
-    Dim OldScreenUpdating   As Boolean         'ScreenUpdating value on entry
-    Dim QuietModeChanged    As Boolean         'True when this pass suppressed it
-    Dim Succeeded           As Boolean         'Pass-level success flag
+    Const PROC_NAME As String = "M_EXCEL_UI_SNAPSHOT.UI_SnapshotRestoreCore"
+
+    Dim i                   As Long     'Snapshot slot being restored
+    Dim MatchedWindow       As Object   'Resolved captured Window
+    Dim Msg                 As String   'Per-element failure reason
+    Dim UnexpectedDetail    As String   'Unexpected-error diagnostic
+    Dim OldScreenUpdating   As Boolean  'ScreenUpdating value on entry
+    Dim QuietModeChanged    As Boolean  'True when this pass suppressed it
+    Dim Succeeded           As Boolean  'Pass-level success flag
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -701,7 +707,7 @@ Public Function UI_SnapshotRestoreCore( _
         Succeeded = True
 
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' VALIDATE SNAPSHOT AVAILABILITY
@@ -713,7 +719,7 @@ Public Function UI_SnapshotRestoreCore( _
                 CaptureFailureList, "NoSnapshot", _
                 "no captured Excel UI snapshot is available"
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -730,30 +736,30 @@ Public Function UI_SnapshotRestoreCore( _
     'Restore the frame only when its captured state was readable
         If m_SnapshotTitleBarKnown Then
 
-            'Prove the captured frame is still the captured frame before writing
-            'anything. Falling back to whatever Application.Hwnd reports now is
-            'exactly the defect this path exists to prevent: it would apply one
-            'window's state to another and report success for it.
-                If Not UI_SnapshotTryResolveTitleBarFrame(Msg) Then
+        'Prove the captured frame is still the captured frame before writing
+        'anything. Falling back to whatever Application.Hwnd reports now is
+        'exactly the defect this path exists to prevent: it would apply one
+        'window's state to another and report success for it.
+            If Not UI_SnapshotTryResolveTitleBarFrame(Msg) Then
+
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, _
+                    FailureList, CaptureFailureList, "TitleBar", Msg
+            Else
+
+            'Write through the retained handle, never through the active
+            'window
+                If Not UI_TrySetTitleBarVisibleForHwndIfNeeded( _
+                    TargetHwnd:=m_SnapshotTitleBarHwnd, _
+                    IsVisible:=m_SnapshotTitleBarVisible, _
+                    FailMsg:=Msg) Then
 
                     UI_RuntimeHandleFailure _
                         ProcName, LogFailures, Succeeded, FailureCount, _
                         FailureList, CaptureFailureList, "TitleBar", Msg
-                Else
-
-                    'Write through the retained handle, never through the active
-                    'window
-                        If Not UI_TrySetTitleBarVisibleForHwndIfNeeded( _
-                            TargetHwnd:=m_SnapshotTitleBarHwnd, _
-                            IsVisible:=m_SnapshotTitleBarVisible, _
-                            FailMsg:=Msg) Then
-
-                            UI_RuntimeHandleFailure _
-                                ProcName, LogFailures, Succeeded, FailureCount, _
-                                FailureList, CaptureFailureList, "TitleBar", Msg
-                        End If
-
                 End If
+
+            End If
 
         End If
 
@@ -832,77 +838,77 @@ Public Function UI_SnapshotRestoreCore( _
     'Walk the captured slots; never the live Application.Windows ordering
         For i = 1 To m_SnapshotWindowCount
 
-            'Release any window resolved on the previous iteration
-                Set MatchedWindow = Nothing
+        'Release any window resolved on the previous iteration
+            Set MatchedWindow = Nothing
 
-            'Resolve the retained object, or report why it is unusable
-                If UI_SnapshotTryResolveWindow( _
-                    SnapshotIndex:=i, _
-                    WindowOut:=MatchedWindow, _
-                    FailMsg:=Msg) Then
+        'Resolve the retained object, or report why it is unusable
+            If UI_SnapshotTryResolveWindow( _
+                SnapshotIndex:=i, _
+                WindowOut:=MatchedWindow, _
+                FailMsg:=Msg) Then
 
-                    'Restore Headings when the captured value is meaningful
-                        If m_SnapshotHeadingsKnown(i) Then
-                            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-                                Target:=MatchedWindow, _
-                                PropertyName:="DisplayHeadings", _
-                                NewValue:=m_SnapshotHeadingsVisible(i), _
-                                FailMsg:=Msg) Then
+            'Restore Headings when the captured value is meaningful
+                If m_SnapshotHeadingsKnown(i) Then
+                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                        Target:=MatchedWindow, _
+                        PropertyName:="DisplayHeadings", _
+                        NewValue:=m_SnapshotHeadingsVisible(i), _
+                        FailMsg:=Msg) Then
 
-                                UI_RuntimeHandleFailure _
-                                    ProcName, LogFailures, Succeeded, FailureCount, _
-                                    FailureList, CaptureFailureList, _
-                                    "Headings [" & m_SnapshotWindowLabels(i) & "]", Msg
-                            End If
-                        End If
-
-                    'Restore Workbook Tabs when the captured value is meaningful
-                        If m_SnapshotWorkbookTabsKnown(i) Then
-                            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-                                Target:=MatchedWindow, _
-                                PropertyName:="DisplayWorkbookTabs", _
-                                NewValue:=m_SnapshotWorkbookTabsVisible(i), _
-                                FailMsg:=Msg) Then
-
-                                UI_RuntimeHandleFailure _
-                                    ProcName, LogFailures, Succeeded, FailureCount, _
-                                    FailureList, CaptureFailureList, _
-                                    "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", Msg
-                            End If
-                        End If
-
-                    'Restore Gridlines when the captured value is meaningful
-                        If m_SnapshotGridlinesKnown(i) Then
-                            If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
-                                Target:=MatchedWindow, _
-                                PropertyName:="DisplayGridlines", _
-                                NewValue:=m_SnapshotGridlinesVisible(i), _
-                                FailMsg:=Msg) Then
-
-                                UI_RuntimeHandleFailure _
-                                    ProcName, LogFailures, Succeeded, FailureCount, _
-                                    FailureList, CaptureFailureList, _
-                                    "Gridlines [" & m_SnapshotWindowLabels(i) & "]", Msg
-                            End If
-                        End If
-
-                Else
-
-                    'The captured window is gone; report it rather than
-                    'redirecting its state to a replacement window
                         UI_RuntimeHandleFailure _
-                            ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
-                            CaptureFailureList, _
-                            "WindowIdentity [" & m_SnapshotWindowLabels(i) & "]", Msg
-
+                            ProcName, LogFailures, Succeeded, FailureCount, _
+                            FailureList, CaptureFailureList, _
+                            "Headings [" & m_SnapshotWindowLabels(i) & "]", Msg
+                    End If
                 End If
+
+            'Restore Workbook Tabs when the captured value is meaningful
+                If m_SnapshotWorkbookTabsKnown(i) Then
+                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                        Target:=MatchedWindow, _
+                        PropertyName:="DisplayWorkbookTabs", _
+                        NewValue:=m_SnapshotWorkbookTabsVisible(i), _
+                        FailMsg:=Msg) Then
+
+                        UI_RuntimeHandleFailure _
+                            ProcName, LogFailures, Succeeded, FailureCount, _
+                            FailureList, CaptureFailureList, _
+                            "WorkbookTabs [" & m_SnapshotWindowLabels(i) & "]", Msg
+                    End If
+                End If
+
+            'Restore Gridlines when the captured value is meaningful
+                If m_SnapshotGridlinesKnown(i) Then
+                    If Not UI_RuntimeTrySetBooleanPropertyIfNeeded( _
+                        Target:=MatchedWindow, _
+                        PropertyName:="DisplayGridlines", _
+                        NewValue:=m_SnapshotGridlinesVisible(i), _
+                        FailMsg:=Msg) Then
+
+                        UI_RuntimeHandleFailure _
+                            ProcName, LogFailures, Succeeded, FailureCount, _
+                            FailureList, CaptureFailureList, _
+                            "Gridlines [" & m_SnapshotWindowLabels(i) & "]", Msg
+                    End If
+                End If
+
+            Else
+
+            'The captured window is gone; report it rather than
+            'redirecting its state to a replacement window
+                UI_RuntimeHandleFailure _
+                    ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
+                    CaptureFailureList, _
+                    "WindowIdentity [" & m_SnapshotWindowLabels(i) & "]", Msg
+
+            End If
 
         Next i
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Leave the quiet scope exactly as it was entered
         UI_RuntimeEndQuietUpdate _
             OldScreenUpdating:=OldScreenUpdating, _
@@ -915,7 +921,7 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Record the unexpected failure; the snapshot is deliberately retained
         UnexpectedDetail = UI_RuntimeBuildErrorText
 
@@ -923,15 +929,15 @@ Err_Handler:
             ProcName, LogFailures, Succeeded, FailureCount, FailureList, _
             CaptureFailureList, "Unexpected", UnexpectedDetail
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
 
-
 Public Sub UI_SnapshotClear()
+
 '
-'==============================================================================
-' UI_SnapshotClear
+'------------------------------------------------------------------------------
+'                              UI SNAPSHOT CLEAR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes all captured state and releases every retained Window reference.
@@ -942,7 +948,7 @@ Public Sub UI_SnapshotClear()
 '   matters when many workbooks are opened and closed in one session.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Resets the availability flag and every element Known flag.
@@ -955,18 +961,17 @@ Public Sub UI_SnapshotClear()
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - UI_SnapshotCaptureCore
-'   - M_EXCEL_UI
-'
 ' NOTES
 '   Erase on a dynamic array that was never sized is legal, so this procedure
 '   is safe to call before any capture has occurred.
 '
+' CALLED FROM
+'   - UI_SnapshotCaptureCore
+'   - M_EXCEL_UI
+'
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RESET FLAGS
@@ -1026,13 +1031,12 @@ Public Sub UI_SnapshotClear()
 
 End Sub
 
-
 Private Function UI_SnapshotTryResolveTitleBarFrame( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_SnapshotTryResolveTitleBarFrame
+'------------------------------------------------------------------------------
+'                   UI SNAPSHOT TRY RESOLVE TITLE BAR FRAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Confirms that the captured title-bar frame is still the frame that was
@@ -1078,38 +1082,42 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
 '   - UI_RuntimeTryGetBooleanProperty
 '   - UI_RuntimeBuildErrorText
 '
-' CALLED FROM
-'   - UI_SnapshotRestoreCore
-'
 ' NOTES
 '   The liveness probe reads DisplayHeadings, matching the per-window resolver:
 '   it exists on every Window, has no side effect, and raises on a dead
 '   wrapper, which is exactly the signal required.
 '
-' UPDATED
+' CALLED FROM
+'   - UI_SnapshotRestoreCore
+'
+' HISTORY
 '   2026-09-03 - Rejected a handle without its Window and required the
 '                retained Window.hWnd to equal the captured handle.
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-09-03
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ProbeValue          As Boolean         'Non-mutating probe output
-    Dim ProbeMsg            As String          'Diagnostic returned by the probe
-    Dim FrameLabel          As String          'Captured window, for diagnostics
+    Const PROC_NAME As String = "M_EXCEL_UI_SNAPSHOT.UI_SnapshotTryResolveTitleBarFrame"
+
+    Dim ProbeValue  As Boolean  'Non-mutating probe output
+    Dim ProbeMsg    As String   'Diagnostic returned by the probe
+    Dim FrameLabel  As String   'Captured window, for diagnostics
 #If VBA7 Then
-    Dim CurrentHwnd         As LongPtr         'Handle still owned by retained Window
+    Dim CurrentHwnd As LongPtr  'Handle still owned by retained Window
 #Else
-    Dim CurrentHwnd         As Long            'Handle still owned by retained Window
+    Dim CurrentHwnd As Long 'Handle still owned by retained Window
 #End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume the frame is unusable until both checks have passed
         UI_SnapshotTryResolveTitleBarFrame = False
@@ -1132,7 +1140,7 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
             FailMsg = _
                 "no captured title-bar frame identity; no state was applied"
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1144,7 +1152,7 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
                 "captured title-bar window is no longer open; no state was " & _
                 "applied | " & FrameLabel
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1155,7 +1163,7 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
             FailMsg = _
                 "captured title-bar Window identity is unavailable; no state " & _
                 "was applied | " & FrameLabel
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Confirm the retained object still works using a non-mutating read of an
@@ -1170,12 +1178,12 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
                 "captured title-bar window is no longer open or usable; no " & _
                 "state was applied | " & FrameLabel
 
-            'Append the underlying probe reason when one is available
-                If Len(ProbeMsg) > 0 Then
-                    FailMsg = FailMsg & " | " & ProbeMsg
-                End If
+        'Append the underlying probe reason when one is available
+            If Len(ProbeMsg) > 0 Then
+                FailMsg = FailMsg & " | " & ProbeMsg
+            End If
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Prove the retained Window still owns the exact native handle captured with
@@ -1186,7 +1194,7 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
             FailMsg = _
                 "captured title-bar Window/hWnd identity no longer matches; " & _
                 "no state was applied | " & FrameLabel
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1196,33 +1204,32 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
         UI_SnapshotTryResolveTitleBarFrame = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'An unverifiable frame must never be written to
         UI_SnapshotTryResolveTitleBarFrame = False
         FailMsg = _
             "captured title-bar frame could not be verified; no state was " & _
             "applied | " & UI_RuntimeBuildErrorText
 
-    Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function UI_SnapshotTryCaptureRibbon( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_SnapshotTryCaptureRibbon
+'------------------------------------------------------------------------------
+'                        UI SNAPSHOT TRY CAPTURE RIBBON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Captures Ribbon visibility together with the Excel Window it was read from.
@@ -1266,31 +1273,35 @@ Private Function UI_SnapshotTryCaptureRibbon( _
 ' CALLED FROM
 '   - UI_SnapshotCaptureCore
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Windows compared by Window.hWnd: Is rejects the same
 '                window on a real host.
 '   2026-11-03
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OwnerWindow         As Object          'Active window before the read
-    Dim ActiveAfterRead     As Object          'Active window after the read
-    Dim RibbonVisible       As Boolean         'Value read from the host
-    Dim ReadMsg             As String          'Diagnostic returned by the read
+    Const PROC_NAME As String = "M_EXCEL_UI_SNAPSHOT.UI_SnapshotTryCaptureRibbon"
+
+    Dim OwnerWindow     As Object   'Active window before the read
+    Dim ActiveAfterRead As Object   'Active window after the read
+    Dim RibbonVisible   As Boolean  'Value read from the host
+    Dim ReadMsg         As String   'Diagnostic returned by the read
 #If VBA7 Then
-    Dim OwnerHwnd           As LongPtr         'Frame of the owner before the read
+    Dim OwnerHwnd   As LongPtr  'Frame of the owner before the read
 #Else
-    Dim OwnerHwnd           As Long            'Frame of the owner before the read
+    Dim OwnerHwnd   As Long 'Frame of the owner before the read
 #End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until both the value and its owner are captured
         UI_SnapshotTryCaptureRibbon = False
@@ -1314,7 +1325,7 @@ Private Function UI_SnapshotTryCaptureRibbon( _
             FailMsg = _
                 "no active Excel Window owns the Ribbon; its state was not " & _
                 "captured"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'The handle identifies the owner; a later wrapper of the same window is a
@@ -1325,7 +1336,7 @@ Private Function UI_SnapshotTryCaptureRibbon( _
             FailMsg = _
                 "the active Excel Window reported no frame handle; the " & _
                 "Ribbon state was not captured"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         If Not UI_RuntimeTryGetRibbonVisible( _
@@ -1333,7 +1344,7 @@ Private Function UI_SnapshotTryCaptureRibbon( _
             FailMsg:=ReadMsg) Then
 
             FailMsg = ReadMsg
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'A window activated during the read would make the value describe a
@@ -1344,14 +1355,14 @@ Private Function UI_SnapshotTryCaptureRibbon( _
             FailMsg = _
                 "the active Excel Window changed while the Ribbon was read; " & _
                 "its state was not captured"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         If ActiveAfterRead.hWnd <> OwnerHwnd Then
             FailMsg = _
                 "the active Excel Window changed while the Ribbon was read; " & _
                 "its state was not captured"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1367,16 +1378,16 @@ Private Function UI_SnapshotTryCaptureRibbon( _
         UI_SnapshotTryCaptureRibbon = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'An owner that could not be proven means the value is not kept
         m_SnapshotRibbonKnown = False
         m_SnapshotRibbonVisible = False
@@ -1387,17 +1398,16 @@ Err_Handler:
         UI_SnapshotTryCaptureRibbon = False
         FailMsg = UI_RuntimeBuildErrorText
 
-    Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function UI_SnapshotTryResolveRibbonWindow( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_SnapshotTryResolveRibbonWindow
+'------------------------------------------------------------------------------
+'                    UI SNAPSHOT TRY RESOLVE RIBBON WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Confirms that the Window the Ribbon value was captured from is still open
@@ -1440,40 +1450,44 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
 '   - UI_RuntimeTryGetBooleanProperty
 '   - UI_RuntimeBuildErrorText
 '
-' CALLED FROM
-'   - UI_SnapshotRestoreCore
-'
 ' NOTES
 '   Excel returns a new COM wrapper from every read of
 '   Application.ActiveWindow, so Is rejects even the same window; the handle
 '   is the comparison that holds. The liveness probe reads DisplayHeadings,
 '   matching the other resolvers in this module.
 '
-' UPDATED
+' CALLED FROM
+'   - UI_SnapshotRestoreCore
+'
+' HISTORY
 '   2026-11-06 - Windows compared by Window.hWnd: Is rejects the same
 '                window on a real host.
 '   2026-11-03
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ActiveNow           As Object          'Active window at restore time
-    Dim ProbeValue          As Boolean         'Non-mutating probe output
-    Dim ProbeMsg            As String          'Diagnostic returned by the probe
-    Dim OwnerLabel          As String          'Captured window, for diagnostics
+    Const PROC_NAME As String = "M_EXCEL_UI_SNAPSHOT.UI_SnapshotTryResolveRibbonWindow"
+
+    Dim ActiveNow   As Object   'Active window at restore time
+    Dim ProbeValue  As Boolean  'Non-mutating probe output
+    Dim ProbeMsg    As String   'Diagnostic returned by the probe
+    Dim OwnerLabel  As String   'Captured window, for diagnostics
 #If VBA7 Then
-    Dim CurrentHwnd         As LongPtr         'Handle the retained Window reports
+    Dim CurrentHwnd As LongPtr  'Handle the retained Window reports
 #Else
-    Dim CurrentHwnd         As Long            'Handle the retained Window reports
+    Dim CurrentHwnd As Long 'Handle the retained Window reports
 #End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume the owner is unusable until every check has passed
         UI_SnapshotTryResolveRibbonWindow = False
@@ -1494,7 +1508,7 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
             FailMsg = _
                 "captured Ribbon Window identity is unavailable; no state " & _
                 "was applied | " & OwnerLabel
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Confirm the retained object still works using a non-mutating read of an
@@ -1509,12 +1523,12 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
                 "captured Ribbon window is no longer open or usable; no " & _
                 "state was applied | " & OwnerLabel
 
-            'Append the underlying probe reason when one is available
-                If Len(ProbeMsg) > 0 Then
-                    FailMsg = FailMsg & " | " & ProbeMsg
-                End If
+        'Append the underlying probe reason when one is available
+            If Len(ProbeMsg) > 0 Then
+                FailMsg = FailMsg & " | " & ProbeMsg
+            End If
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'The retained Window must still own the captured frame, so a handle that
@@ -1525,7 +1539,7 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
             FailMsg = _
                 "captured Ribbon window is no longer open or usable; its " & _
                 "frame handle changed, so no state was applied | " & OwnerLabel
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1540,7 +1554,7 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
             FailMsg = _
                 "no Excel Window is active; the Ribbon was not restored and " & _
                 "no window was activated | " & OwnerLabel
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         If ActiveNow.hWnd <> m_SnapshotRibbonHwnd Then
@@ -1548,33 +1562,32 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
                 "captured Ribbon window is not the active window; the " & _
                 "Ribbon acts only on the active window, so no state was " & _
                 "applied and no window was activated | " & OwnerLabel
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'The captured owner is open and active
         UI_SnapshotTryResolveRibbonWindow = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'An unverifiable owner must never receive the captured value
         UI_SnapshotTryResolveRibbonWindow = False
         FailMsg = _
             "captured Ribbon window could not be verified; no state was " & _
             "applied | " & UI_RuntimeBuildErrorText
 
-    Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Function UI_SnapshotTryResolveWindow( _
     ByVal SnapshotIndex As Long, _
@@ -1582,8 +1595,8 @@ Private Function UI_SnapshotTryResolveWindow( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_SnapshotTryResolveWindow
+'------------------------------------------------------------------------------
+'                        UI SNAPSHOT TRY RESOLVE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolves one captured Excel Window by validating and returning the retained
@@ -1629,31 +1642,32 @@ Private Function UI_SnapshotTryResolveWindow( _
 '   - UI_RuntimeTryGetBooleanProperty
 '   - UI_RuntimeBuildErrorText
 '
-' CALLED FROM
-'   - UI_SnapshotRestoreCore
-'
 ' NOTES
 '   The liveness probe reads DisplayHeadings because it is a managed property
 '   that exists on every Window and has no side effect. A dead COM wrapper
 '   raises on that read, which is exactly the signal required.
 '
+' CALLED FROM
+'   - UI_SnapshotRestoreCore
+'
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CapturedWindow      As Object          'Exact object retained at capture
-    Dim ProbeValue          As Boolean         'Non-mutating probe output
-    Dim ProbeMsg            As String          'Diagnostic returned by the probe
+    Const PROC_NAME As String = "M_EXCEL_UI_SNAPSHOT.UI_SnapshotTryResolveWindow"
+
+    Dim CapturedWindow  As Object   'Exact object retained at capture
+    Dim ProbeValue      As Boolean  'Non-mutating probe output
+    Dim ProbeMsg        As String   'Diagnostic returned by the probe
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the retained reference is proven usable
         UI_SnapshotTryResolveWindow = False
@@ -1668,7 +1682,7 @@ Private Function UI_SnapshotTryResolveWindow( _
     'Reject an index outside the captured range
         If SnapshotIndex < 1 Or SnapshotIndex > m_SnapshotWindowCount Then
             FailMsg = "snapshot index is outside the captured window range"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1679,7 +1693,7 @@ Private Function UI_SnapshotTryResolveWindow( _
 
         If CapturedWindow Is Nothing Then
             FailMsg = "captured window reference is unavailable"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1696,12 +1710,12 @@ Private Function UI_SnapshotTryResolveWindow( _
             FailMsg = _
                 "captured window is no longer open or usable; no state was applied"
 
-            'Append the underlying probe reason when one is available
-                If Len(ProbeMsg) > 0 Then
-                    FailMsg = FailMsg & " | " & ProbeMsg
-                End If
+        'Append the underlying probe reason when one is available
+            If Len(ProbeMsg) > 0 Then
+                FailMsg = FailMsg & " | " & ProbeMsg
+            End If
 
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1712,20 +1726,20 @@ Private Function UI_SnapshotTryResolveWindow( _
         UI_SnapshotTryResolveWindow = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error and publish no window
         FailMsg = UI_RuntimeBuildErrorText
         Set WindowOut = Nothing
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function

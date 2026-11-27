@@ -1,18 +1,19 @@
 """The VBA house style in one place: its vocabulary and the switch that turns it on.
 
 ``HOUSE_STYLE_ACTIVE`` is the single switch for the style described in
-docs/VBA_HOUSE_STYLE.md. While it is False the repository's modules are held to
-the previous normal form: the formatter's ``--check`` and the checks that name
-error-handling labels read the previous spellings, and the checks that need
-the new header fields and sections do not scan the tree. They still run their
-own fixtures, which force the switch on, so every rule stays proved. Reformat
-the modules with ``python3 tools/reformat.py --style house --write`` and set
-the constant to True in the same change to move the repository to the style.
+docs/VBA_HOUSE_STYLE.md. While it is True the repository's modules are held to
+the style: the formatter's ``--check`` and the checks that name error-handling
+labels read the house spellings, and the rules check reads the modules, with
+the findings still to be settled by hand listed in tools/house_style_pending.txt.
+While it is False the modules are held to the previous normal form (``--style
+legacy``) and the checks that need the new header fields and sections do not
+scan the tree. The fixtures of the formatter and of each rule force the switch
+either way, so every rule stays proved whatever the constant says.
 """
 import re
 from typing import NamedTuple
 
-HOUSE_STYLE_ACTIVE = False
+HOUSE_STYLE_ACTIVE = True
 
 # Every banner line is an apostrophe and 78 dashes.
 RULE_WIDTH = 79

@@ -15,9 +15,10 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
-from gate_fixture import GateTestCase, check_repo, house_style, reformat, vba_api, wiki_badges
+from gate_fixture import GateTestCase, check_repo, house_style, reformat, vba_api, vba_house_rules, wiki_badges
 
 RUNTIME = "src/M_EXCEL_UI_RUNTIME.bas"
+UI = "src/M_EXCEL_UI.bas"
 TESTS = "test/M_EXCEL_UI_TEST_HARNESS.bas"
 TITLEBAR_TESTS = "test/M_EXCEL_UI_TEST_TITLEBAR.bas"
 CERTIFICATION_TESTS = "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"
@@ -1195,14 +1196,39 @@ class HouseStyleRules(GateTestCase):
         self.assertPasses()
 
     def test_fails_when_a_rule_stops_detecting_its_defect(self) -> None:
-        import vba_house_rules
         with patch.object(vba_house_rules, "COMPARE_CALL_RE", NEVER):
             self.assertFails("InStr with two arguments")
 
-    def test_fails_on_the_modules_once_the_style_is_on(self) -> None:
-        # The tree is not yet in the style, so switching it on must report it.
-        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", True):
-            self.assertFails(f"{RUNTIME}:", "header lacks")
+    def test_fails_on_a_finding_that_is_not_listed(self) -> None:
+        self.repo.replace(vba_house_rules.PENDING_FILE, "M_EXCEL_UI: header\n", "")
+        self.assertFails("src/M_EXCEL_UI.bas:", "header lacks", f"is not listed in {vba_house_rules.PENDING_FILE}")
+
+    def test_fails_on_a_stale_line(self) -> None:
+        self.repo.append(vba_house_rules.PENDING_FILE, "M_EXCEL_UI.UI_HideExcelUI: select-case\n")
+        self.assertFails(f"{vba_house_rules.PENDING_FILE}:", "stale line", "M_EXCEL_UI.UI_HideExcelUI: select-case")
+
+    def test_fails_on_a_second_finding_that_a_line_does_not_cover(self) -> None:
+        # UI_HideExcelUI is listed once for its header; a second header finding is not covered.
+        text = self.repo.read_text(UI)
+        start = text.index("Public Sub UI_HideExcelUI")
+        at = text.index("' UPDATED\r\n'   ", start) + len("' UPDATED\r\n'   ")
+        end = text.index("\r\n", at)
+        self.repo.write(UI, text[:end] + " - Added." + text[end:])
+        found = self.assertFails("UI_HideExcelUI: ", f"is not listed in {vba_house_rules.PENDING_FILE}")
+        self.assertEqual(len(found), 1, found)
+
+    def test_fails_on_a_line_that_is_not_an_entry(self) -> None:
+        self.repo.append(vba_house_rules.PENDING_FILE, "settled in the next change\n")
+        self.assertFails(f"{vba_house_rules.PENDING_FILE}:", "not a")
+
+    def test_without_the_pending_list_every_finding_fails(self) -> None:
+        self.repo.remove(vba_house_rules.PENDING_FILE)
+        self.assertFails(f"{RUNTIME}:", "header lacks", "is not listed")
+
+    def test_does_not_read_the_modules_while_the_style_is_off(self) -> None:
+        self.repo.remove(vba_house_rules.PENDING_FILE)
+        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", False):
+            self.assertEqual(self.findings(), [])
 
     def test_applies_to_an_added_module_only_when_the_style_is_on(self) -> None:
         extra = 'Attribute VB_Name = "M_EXCEL_UI_EXTRA"\r\nOption Explicit\r\n\r\nPrivate Sub P()\r\nEnd Sub\r\n'
