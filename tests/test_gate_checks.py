@@ -15,9 +15,22 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
-from gate_fixture import GateTestCase, check_repo, house_style, reformat, vba_api, wiki_badges
+from gate_fixture import (
+    PLANT,
+    PLANT_PATH,
+    GateTestCase,
+    check_repo,
+    house_rules_fixtures,
+    house_style,
+    planted_module,
+    reformat,
+    vba_api,
+    vba_house_rules,
+    wiki_badges,
+)
 
 RUNTIME = "src/M_EXCEL_UI_RUNTIME.bas"
+UI = "src/M_EXCEL_UI.bas"
 TESTS = "test/M_EXCEL_UI_TEST_HARNESS.bas"
 TITLEBAR_TESTS = "test/M_EXCEL_UI_TEST_TITLEBAR.bas"
 CERTIFICATION_TESTS = "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"
@@ -1195,14 +1208,51 @@ class HouseStyleRules(GateTestCase):
         self.assertPasses()
 
     def test_fails_when_a_rule_stops_detecting_its_defect(self) -> None:
-        import vba_house_rules
         with patch.object(vba_house_rules, "COMPARE_CALL_RE", NEVER):
             self.assertFails("InStr with two arguments")
 
-    def test_fails_on_the_modules_once_the_style_is_on(self) -> None:
-        # The tree is not yet in the style, so switching it on must report it.
-        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", True):
-            self.assertFails(f"{RUNTIME}:", "header lacks")
+    def planted(self) -> list[str]:
+        """The findings that name the planted module."""
+        return [f for f in self.findings() if PLANT_PATH in f]
+
+    def test_fails_on_a_finding(self) -> None:
+        self.repo.write(PLANT_PATH, planted_module())
+        self.assertFails(f"{PLANT_PATH}:", "header lacks NOTES")
+
+    def test_passes_on_a_module_that_breaks_no_rule(self) -> None:
+        self.repo.write(PLANT_PATH, planted_module(procedure_notes=True, module_notes=True))
+        self.assertEqual(self.planted(), [])
+
+    def test_fails_on_every_finding_of_a_module(self) -> None:
+        text = planted_module(module_notes=True)
+        text = text.replace("' UPDATED\r\n'   2026-11-02\r\n'---", "' UPDATED\r\n'   2026-11-02 - Added.\r\n'---", 1)
+        self.repo.write(PLANT_PATH, text)
+        found = self.assertFails("Probe_Describe: ", "header lacks NOTES", "UPDATED is not a single")
+        self.assertEqual(len([f for f in found if PLANT_PATH in f]), 2, found)
+
+    def plant_with_constant(self, replacement: str) -> None:
+        text = planted_module(procedure_notes=True, module_notes=True)
+        qualified = house_rules_fixtures.QUALIFIED_CONST.replace("M_PROBE", PLANT)
+        self.assertIn(qualified, text)
+        self.repo.write(PLANT_PATH, text.replace(qualified, replacement, 1))
+
+    def test_passes_on_a_bare_proc_name_under_its_comment(self) -> None:
+        self.plant_with_constant(house_rules_fixtures.DELIBERATE + house_rules_fixtures.BARE_CONST)
+        self.assertEqual(self.planted(), [])
+
+    def test_fails_on_a_bare_proc_name_without_its_comment(self) -> None:
+        self.plant_with_constant(house_rules_fixtures.BARE_CONST)
+        self.assertFails("Probe_Describe: PROC_NAME is the bare name")
+
+    def test_fails_on_the_deliberate_comment_above_another_literal(self) -> None:
+        self.plant_with_constant(house_rules_fixtures.DELIBERATE
+                                 + house_rules_fixtures.QUALIFIED_CONST.replace("M_PROBE", PLANT))
+        self.assertFails("Probe_Describe: the deliberate-value comment stands above")
+
+    def test_does_not_read_the_modules_while_the_style_is_off(self) -> None:
+        self.repo.write(PLANT_PATH, planted_module())
+        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", False):
+            self.assertEqual(self.findings(), [])
 
     def test_applies_to_an_added_module_only_when_the_style_is_on(self) -> None:
         extra = 'Attribute VB_Name = "M_EXCEL_UI_EXTRA"\r\nOption Explicit\r\n\r\nPrivate Sub P()\r\nEnd Sub\r\n'

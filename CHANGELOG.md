@@ -182,35 +182,35 @@ measured against that baseline.
 
 ### ➕ Added
 
-- Added the tooling for one VBA house style
-  ([#210](https://github.com/danielep71/VBA-EXCEL_UI/issues/210)), stage A: the
-  style, the formatter that writes it, the checks that hold it and their
-  fixtures. `docs/VBA_HOUSE_STYLE.md` now defines the style (layout, banners,
-  the nine header fields, declarations, body sections, statements and names),
-  where the gate used to be its only definition. `tools/reformat.py --style
-  house` writes it with `tools/vba_house.py`: centred procedure titles and
-  `MODULE:` headers, the fields in order with `CALLED FROM` after `NOTES`, the
-  dated `UPDATED` lines moved unchanged into a `HISTORY` section and `UPDATED`
-  reduced to its latest date, `RETURNS` of a `Sub` read `Nothing`, `EXIT
-  PROCEDURE` and `ERROR HANDLER` sections, `INITIALIZE` opened at the handler
-  statement, declarations aligned on multiples of 4, statements at 8 spaces plus
-  4 per block, and the names `PROC_NAME`, `ErrorHandler`, `SafeExit`,
-  `CleanExit` and `CleanFail`. Before it writes, it still compares the ordered
-  executable tokens and statement boundaries and accepts no difference other
-  than those renames. A new *house-style rules* check
-  (`tools/vba_house_rules.py`) reports what rewriting cannot settle: missing or
-  misordered header fields, section order, `Const PROC_NAME`, a `Select Case`
-  without `Case Else`, `InStr` and `StrComp` without a compare mode, a statement
-  separator and `Next` without its counter. One constant,
-  `HOUSE_STYLE_ACTIVE` in `tools/house_style.py`, is `False` for now: the tree
-  keeps its layout, `--check` and the *house labels* check read the previous
-  spellings, and the new rules run their fixtures without reading the modules.
-  The fixtures of the formatter and of each rule run with the switch in either
-  state, the title-bar, WinAPI-capture, demo-cleanup and analyzer fixtures
-  take their label names from it, and the fixtures that plant a defect in a
-  module find its lines by their words (`tools/layout_edit.py`) instead of by
-  their indentation, so they hold in either layout. No VBA module changed; I reformat them and
-  turn the switch on in one later change.
+- Added one VBA house style, the formatter that writes it and the checks that
+  hold it ([#210](https://github.com/danielep71/VBA-EXCEL_UI/issues/210)).
+  `docs/VBA_HOUSE_STYLE.md` defines the style (layout, banners, the nine header
+  fields, declarations, body sections, statements and names), where the gate
+  used to be its only definition. `tools/reformat.py --style house` writes it
+  with `tools/vba_house.py`: centred procedure titles and `MODULE:` headers, the
+  fields in order with `CALLED FROM` after `NOTES`, the dated `UPDATED` lines
+  moved unchanged into a `HISTORY` section and `UPDATED` reduced to its latest
+  date, `RETURNS` of a `Sub` read `Nothing`, `EXIT PROCEDURE` and `ERROR
+  HANDLER` sections, `INITIALIZE` opened at the handler statement, declarations
+  aligned on multiples of 4, statements at 8 spaces plus 4 per block, and the
+  names `PROC_NAME`, `ErrorHandler`, `SafeExit`, `CleanExit` and `CleanFail`.
+  Before it writes, it compares the ordered executable tokens and statement
+  boundaries and accepts no difference other than those renames, and it refuses
+  a module where a rename would be ambiguous or would meet a name in another
+  letter case. `reformat.py --equivalent BASE_DIR NEW_DIR` proves that two trees
+  differ only as the style allows. The *house-style rules* check
+  (`tools/vba_house_rules.py`) fails on what rewriting cannot settle: missing or
+  misordered header fields, section order, `Const PROC_NAME` (`<Module>.<Procedure>`,
+  or the bare name under its deliberate-value comment), a `Select Case` without
+  `Case Else`, `InStr` and `StrComp` without a compare mode, a statement
+  separator and `Next` without its counter, with failing and passing fixtures
+  for each rule. One constant, `HOUSE_STYLE_ACTIVE` in `tools/house_style.py`,
+  chooses the layout the tree is held to; the fixtures of the formatter and of
+  each rule run with it in either state, the title-bar, WinAPI-capture,
+  demo-cleanup and analyzer fixtures take their label names from it, and the
+  fixtures that plant a defect in a module find its lines by their words
+  (`tools/layout_edit.py`) instead of by their indentation. The Changed section
+  records the reformatting of the modules.
 - **Certified on Excel 16.0 build 20527, 64-bit (2026-11-27).** Release certification now verifies the exact mandatory
   case inventory, not only the outcomes of the units it dispatched
   ([#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42),
@@ -699,6 +699,30 @@ measured against that baseline.
   export path.
 
 ### 🔧 Changed
+
+- **Not yet certified.** Moved the twelve VBA modules to the house style
+  ([#210](https://github.com/danielep71/VBA-EXCEL_UI/issues/210)).
+  `HOUSE_STYLE_ACTIVE` in `tools/house_style.py` is `True`, the modules were
+  rewritten with `python3 tools/reformat.py --style house --write` (idempotent,
+  and compared by ordered executable tokens before writing), and the gate, its
+  fixtures and its tests use the new layout and label names. Besides layout,
+  comments and the renames (`PROC` to `PROC_NAME`, `ErrorHandler`, `SafeExit`,
+  `CleanExit`, `CleanFail`), three kinds of edit changed the text. Every
+  procedure now has the header fields the style asks for, written from what the
+  procedure does. `Const PROC_NAME As String` is the first declaration of each
+  procedure that has a `DECLARE` section, added where a procedure declared no
+  constant and moved in front of the variables where it came after them; where
+  the literal stays the bare procedure name rather than `<Module>.<Procedure>`,
+  because the literal is what the procedure logs or raises as its source, a
+  comment above it says the value is deliberate, and the *house-style rules*
+  check accepts a bare name only under exactly that comment. Each `Select
+  Case` that had no `Case Else` gained an empty one with a comment and no
+  statement, so what it does is unchanged. `python3 tools/reformat.py
+  --equivalent BASE_DIR NEW_DIR` proves two trees differ only in comments,
+  layout, those renames, `Const PROC_NAME` and an empty `Case Else`; between
+  `release/v1.1.3` before this change and after it, it reports no other
+  difference. The Excel run of `Test_EXCEL_UI_RunReleaseCertification` is still
+  to do.
 
 - **Certified on Excel 16.0 build 20430, 64-bit (2026-11-17).** Split the
   regression module `test/M_EXCEL_UI_REGRESSION_TESTS.bas` into a harness and

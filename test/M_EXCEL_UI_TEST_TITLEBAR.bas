@@ -1,10 +1,12 @@
 Attribute VB_Name = "M_EXCEL_UI_TEST_TITLEBAR"
+
 Option Explicit
 Option Private Module
 
+'
 '==============================================================================
-' M_EXCEL_UI_TEST_TITLEBAR
-'------------------------------------------------------------------------------
+' MODULE: M_EXCEL_UI_TEST_TITLEBAR
+'==============================================================================
 ' PURPOSE
 '   Hold the title-bar regression cases of EXCEL_UI, the title-bar pack and
 '   the SDI title-bar identity runner
@@ -13,6 +15,37 @@ Option Private Module
 '   Title-bar control writes native window styles. It must change only the
 '   bits EXCEL_UI owns, write only the frame a snapshot was captured from, and
 '   report a WinAPI failure with the error that call left
+'
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Test_EXCEL_UI_RunTitleBarOnly runs the title-bar pack, which
+'     executes the twelve title-bar cases and restores the host
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity runs the SDI identity cases:
+'     four title-bar cases of this module and two Ribbon cases of
+'     M_EXCEL_UI_TEST_SNAPSHOT
+'   - A case that changes a frame reads the frame's entry style first,
+'     drives the title-bar API under test, asserts, and puts the entry
+'     style back through the harness on every exit
+'   - The certification dispatcher runs the Public cases by case
+'     identifier
+'
+' ERROR POLICY
+'   - A case or runner raises its first failure after its cleanup
+'   - A frame that cannot be put back fails the case after any earlier
+'     failure
+'
+' DEPENDENCIES
+'   - M_EXCEL_UI_TEST_HARNESS
+'   - M_EXCEL_UI_TEST_SNAPSHOT, for the Ribbon cases of the SDI identity
+'     runner
+'
+' NOTES
+'   None
 '
 ' PUBLIC SURFACE
 '   - Test_EXCEL_UI_RunTitleBarOnly
@@ -53,12 +86,13 @@ Option Private Module
 '   - Windows only
 '   - Title-bar behavior remains the most OS / Excel-version-sensitive area
 '
-' DEPENDENCIES
-'   - M_EXCEL_UI_TEST_HARNESS
-'   - M_EXCEL_UI_TEST_SNAPSHOT, for the Ribbon cases of the SDI identity
-'     runner
+' AUTHOR
+'   Daniele Penza
 '
-' UPDATED
+' VERSION
+'   1.1.2
+'
+' HISTORY
 '   2026-11-18 - Added the complete-caption cases: the read-side case, the
 '                partial-mask show case and the all-paths show case. The
 '                visibility checks in the SDI cases use the harness's
@@ -81,67 +115,62 @@ Option Private Module
 '   2026-08-19 - Added the SDI title-bar identity pack and the frame-refresh-
 '                debt case.
 '
-' AUTHOR
-'   Daniele Penza
-'
-' VERSION
-'   1.1.2
+' UPDATED
+'   2026-11-18
 '==============================================================================
-
 
 '------------------------------------------------------------------------------
 ' TEST CONFIGURATION
 '------------------------------------------------------------------------------
-    Private Const TEST_STYLE_OP_NONE As Long = 0  'Window-style seam: no operation
-    Private Const TEST_STYLE_OP_READ As Long = 1  'Window-style seam: GWL_STYLE read
-    Private Const TEST_STYLE_OP_WRITE As Long = 2  'Window-style seam: GWL_STYLE write
-    Private Const TEST_STYLE_FAULT_NONE As Long = 0  'Window-style seam: no fault
-    Private Const TEST_STYLE_FAULT_VALID_ZERO As Long = 1  'Zero result, captured error kept
-    Private Const TEST_STYLE_FAULT_DLL_ERROR As Long = 2  'Zero result, armed error captured
-    Private Const TEST_STYLE_FAULT_STALE_ERROR As Long = 3  'Armed error left before the clear
+    Private Const TEST_STYLE_OP_NONE            As Long = 0 'Window-style seam: no operation
+    Private Const TEST_STYLE_OP_READ            As Long = 1 'Window-style seam: GWL_STYLE read
+    Private Const TEST_STYLE_OP_WRITE           As Long = 2 'Window-style seam: GWL_STYLE write
+    Private Const TEST_STYLE_FAULT_NONE         As Long = 0 'Window-style seam: no fault
+    Private Const TEST_STYLE_FAULT_VALID_ZERO   As Long = 1 'Zero result, captured error kept
+    Private Const TEST_STYLE_FAULT_DLL_ERROR    As Long = 2 'Zero result, armed error captured
+    Private Const TEST_STYLE_FAULT_STALE_ERROR  As Long = 3 'Armed error left before the clear
 
 '------------------------------------------------------------------------------
 ' API CONSTANTS FOR TITLE-BAR STYLE TESTS
 '------------------------------------------------------------------------------
-    Private Const TST_SYNTHETIC_UNRELATED_BIT As Long = &H2000000
+    Private Const TST_SYNTHETIC_UNRELATED_BIT   As Long = &H2000000
 
     'A legal caption frame that is not the full owned set. Written behind the
     'component to contradict an entry claiming the frame is hidden, which is
     'the evidence a reissued handle presents to the registry.
-    Private Const TST_TITLEBAR_FOREIGN_FRAME As Long = &HC80000
-    Private Const TST_TITLEBAR_CAPTIONLESS_FRAME As Long = &H40000
+    Private Const TST_TITLEBAR_FOREIGN_FRAME        As Long = &HC80000
+    Private Const TST_TITLEBAR_CAPTIONLESS_FRAME    As Long = &H40000
 
     'Fixtures and public paths of the #6 complete-caption cases
-    Private Const TST_SHOW_SCENARIO_ZERO As Long = 1
-    Private Const TST_SHOW_SCENARIO_CAPTIONLESS As Long = 2
-    Private Const TST_SHOW_SCENARIO_BORDER_ONLY As Long = 3
-    Private Const TST_SHOW_SCENARIO_DLGFRAME_ONLY As Long = 4
-    Private Const TST_SHOW_SCENARIO_VISIBLE As Long = 5
-    Private Const TST_SHOW_SCENARIO_FOREIGN As Long = 6
-    Private Const TST_SHOW_PATH_FIRE_AND_FORGET As Long = 1
-    Private Const TST_SHOW_PATH_WITH_RESULT As Long = 2
+    Private Const TST_SHOW_SCENARIO_ZERO            As Long = 1
+    Private Const TST_SHOW_SCENARIO_CAPTIONLESS     As Long = 2
+    Private Const TST_SHOW_SCENARIO_BORDER_ONLY     As Long = 3
+    Private Const TST_SHOW_SCENARIO_DLGFRAME_ONLY   As Long = 4
+    Private Const TST_SHOW_SCENARIO_VISIBLE         As Long = 5
+    Private Const TST_SHOW_SCENARIO_FOREIGN         As Long = 6
+    Private Const TST_SHOW_PATH_FIRE_AND_FORGET     As Long = 1
+    Private Const TST_SHOW_PATH_WITH_RESULT         As Long = 2
 
     'Win32 error codes the error-capture case injects. Any non-zero value would
     'do; real codes keep the expected failure text recognisable.
-    Private Const TST_ERROR_FILE_NOT_FOUND  As Long = 2
-    Private Const TST_ERROR_ACCESS_DENIED   As Long = 5
-    Private Const TST_ERROR_INVALID_WINDOW_HANDLE As Long = 1400
+    Private Const TST_ERROR_FILE_NOT_FOUND          As Long = 2
+    Private Const TST_ERROR_ACCESS_DENIED           As Long = 5
+    Private Const TST_ERROR_INVALID_WINDOW_HANDLE   As Long = 1400
 
 
 '
 '------------------------------------------------------------------------------
 '
-'                              PUBLIC RUNNERS
+'                                PUBLIC RUNNERS
 '
 '------------------------------------------------------------------------------
 '
-
 
 Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 
 '
-'==============================================================================
-' Test_EXCEL_UI_RunTitleBarOnly
+'------------------------------------------------------------------------------
+'                              RUN TITLE BAR PACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run the dedicated title-bar regression cases
@@ -150,13 +179,17 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '   Title-bar behavior is the most WinAPI-sensitive area and benefits from a
 '   focused runner that can be executed independently
 '
-' RETURNS
+' INPUTS
 '   None
 '
+' RETURNS
+'   Nothing
+'
 ' BEHAVIOR
-'   - Snapshots current state
-'   - Runs the title-bar round-trip and owned-style-bit preservation cases
-'   - Attempts to restore the original state
+'   - Calls TST_RunTitleBarOnlyPack with its own name as the caller
+'     used in log lines and failures
+'   - The pack snapshots the UI state, runs the title-bar cases in
+'     order and restores the UI state and the entry frame style
 '
 ' ERROR POLICY
 '   - Raises on assertion failure after attempting restoration
@@ -170,11 +203,14 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 '   case of the RegressionPack unit that certification runs, and the static
 '   gate fails when a title-bar case exists that the manifest does not list.
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - States that it is not release certification (#42).
 '   2026-07-29
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' APPLY TITLE-BAR-ONLY PACK
 '------------------------------------------------------------------------------
@@ -183,12 +219,11 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 
 End Sub
 
-
 Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 
 '
-'==============================================================================
-' Test_EXCEL_UI_RunTitleBarSdiIdentity
+'------------------------------------------------------------------------------
+'                       RUN SDI TITLE BAR IDENTITY CASES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that title-bar snapshot restoration targets the window the state was
@@ -205,8 +240,11 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '   The two cases below are the ones that would have caught ICR-UI-P1-01 before
 '   release.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Refuses to run when an explicit EXCEL_UI snapshot already exists.
@@ -243,7 +281,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '   nothing and behaves as it always did. The four cases of this module are
 '   Public so that the dispatcher of the certification module can run them.
 '
-' UPDATED
+' HISTORY
 '   2026-11-27 - Runs its cases through TST_CertRunCase, which records them
 '                during certification (#42).
 '   2026-11-06 - Restored the anchor frame through the harness instead of
@@ -251,33 +289,36 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '   2026-11-06 - Registered the pair-refusal and closed-and-reopened-frame
 '                cases (#45).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-27
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow        As Window          'Window active before the run
-    Dim OldScreenUpdating   As Boolean         'Cached ScreenUpdating state
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Test_EXCEL_UI_RunTitleBarSdiIdentity"
+
+    Dim AnchorWindow        As Window   'Window active before the run
+    Dim OldScreenUpdating   As Boolean  'Cached ScreenUpdating state
 
 #If VBA7 Then
-    Dim AnchorHwnd          As LongPtr         'Frame of the anchor window
-    Dim AnchorFrameStyle    As LongPtr         'Its style on entry
+    Dim AnchorHwnd          As LongPtr  'Frame of the anchor window
+    Dim AnchorFrameStyle    As LongPtr  'Its style on entry
 #Else
-    Dim AnchorHwnd          As Long            'Frame of the anchor window
-    Dim AnchorFrameStyle    As Long            'Its style on entry
+    Dim AnchorHwnd          As Long 'Frame of the anchor window
+    Dim AnchorFrameStyle    As Long 'Its style on entry
 #End If
 
-    Dim AnchorFrameCaptured As Boolean         'TRUE once AnchorFrameStyle was read
-    Dim FrameRestored       As Boolean         'TRUE once the style is back
-    Dim FrameRestoreMsg     As String          'Diagnostic from the restoration
+    Dim AnchorFrameCaptured As Boolean  'TRUE once AnchorFrameStyle was read
+    Dim FrameRestored       As Boolean  'TRUE once the style is back
+    Dim FrameRestoreMsg     As String   'Diagnostic from the restoration
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "Test_EXCEL_UI_RunTitleBarSdiIdentity"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -290,13 +331,13 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
         If UI_HasExcelUIStateSnapshot Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 1, _
-                PROC, _
+                PROC_NAME, _
                 "an explicit EXCEL_UI snapshot already exists; clear or restore it before running this destructive test"
         End If
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", "SDI title-bar identity test started"
+        TST_Log PROC_NAME, "START", "SDI title-bar identity test started"
 
     'Hold the window to return to, so the run leaves the host as it found it
         Set AnchorWindow = ActiveWindow
@@ -304,7 +345,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
         If AnchorWindow Is Nothing Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 2, _
-                PROC, _
+                PROC_NAME, _
                 "no active Excel window is available"
         End If
 
@@ -317,7 +358,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
         If Not AnchorFrameCaptured Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 3, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the anchor frame style | " & FrameRestoreMsg
         End If
 
@@ -345,31 +386,31 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
         TST_CertRunCase "TST_Case_TitleBarClosedFrameReopenedIsRefused", True
 
     'Log successful completion before cleanup
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Restoration targeted the captured frame; closed, reopened and " & _
             "unpaired frames were refused and left untouched"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Put the anchor frame back exactly, through the harness. No snapshot is
     'cleared here: this runner never captures one. Its child cases create and
     'release their own, so an outer clear could only ever have destroyed a
     'caller-owned snapshot that reached this label through an early failure.
         On Error Resume Next
-            If Not AnchorWindow Is Nothing Then
-                AnchorWindow.Activate
-            End If
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.Activate
+        End If
 
-            FrameRestored = TST_RestoreTitleBarStyle( _
-                AnchorHwnd, AnchorFrameStyle, AnchorFrameCaptured, FrameRestoreMsg)
-            Application.ScreenUpdating = OldScreenUpdating
+        FrameRestored = TST_RestoreTitleBarStyle( _
+            AnchorHwnd, AnchorFrameStyle, AnchorFrameCaptured, FrameRestoreMsg)
+        Application.ScreenUpdating = OldScreenUpdating
         On Error GoTo 0
 
     'A frame that cannot be put back fails the unit
         TST_RecordCleanupFailure _
-            FrameRestored, FrameRestoreMsg, PROC, _
+            FrameRestored, FrameRestoreMsg, PROC_NAME, _
             FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
@@ -386,31 +427,29 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
-
 '
 '------------------------------------------------------------------------------
 '
-'                          PRIVATE PACK RUNNERS
+'                             PRIVATE PACK RUNNERS
 '
 '------------------------------------------------------------------------------
 '
-
 
 Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 
 '
-'==============================================================================
-' TST_RunTitleBarOnlyPack
+'------------------------------------------------------------------------------
+'                      RUN TITLE BAR CASES AND RESTORE UI
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Execute the dedicated title-bar regression cases and restore the
@@ -425,7 +464,19 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '     Public caller procedure name used for diagnostics
 '
 ' RETURNS
-'   None
+'   Nothing
+'
+' BEHAVIOR
+'   - Arms the handler, caches Application.ScreenUpdating and turns it
+'     off
+'   - Logs START under CallerProc
+'   - Snapshots the UI state through TST_SnapshotState and records the
+'     active frame's style through TST_TryGetWindowStyle; a style that
+'     cannot be read is logged, not raised
+'   - Runs the twelve title-bar cases in order and logs PASS
+'   - On every exit restores the UI state and the frame style,
+'     restores ScreenUpdating, records any restoration failure and
+'     raises the captured failure
 '
 ' ERROR POLICY
 '   - Raises after restoration on assertion failure, unexpected error or an
@@ -449,7 +500,12 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '   - TST_RestoreTitleBarStyle
 '   - TST_RecordCleanupFailure
 '
-' UPDATED
+' NOTES
+'   The UI state restore goes through the API under test, so the entry
+'   frame style is put back separately through the harness: a defect in
+'   that restore cannot then leave the host with a hidden title bar.
+'
+' HISTORY
 '   2026-11-18 - Registered the complete-caption cases after the captionless
 '                baseline case (#6).
 '   2026-11-18 - Failed the pack when the UI state restoration did not
@@ -460,50 +516,55 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
 '                failed the pack when it could not (#66).
 '   2026-11-06 - Registered the WinAPI error-capture case (#27).
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SavedRibbonKnown    As Boolean         'TRUE when pre-test Ribbon state was read successfully
-    Dim SavedRibbonVisible  As Boolean         'Pre-test Ribbon visibility
-    Dim SavedStatusBarVisible As Boolean         'Pre-test StatusBar visibility
-    Dim SavedScrollBarsVisible As Boolean         'Pre-test ScrollBars visibility
-    Dim SavedFormulaBarVisible As Boolean         'Pre-test FormulaBar visibility
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_TITLEBAR.TST_RunTitleBarOnlyPack"
 
-    Dim SavedWindowCount    As Long            'Pre-test Application.Windows.Count
-    Dim SavedHeadingsVisible() As Boolean         'Pre-test per-window Headings visibility
-    Dim SavedWorkbookTabsVisible() As Boolean         'Pre-test per-window WorkbookTabs visibility
-    Dim SavedGridlinesVisible() As Boolean         'Pre-test per-window Gridlines visibility
+    Dim SavedRibbonKnown        As Boolean  'TRUE when pre-test Ribbon state was read successfully
+    Dim SavedRibbonVisible      As Boolean  'Pre-test Ribbon visibility
+    Dim SavedStatusBarVisible   As Boolean  'Pre-test StatusBar visibility
+    Dim SavedScrollBarsVisible  As Boolean  'Pre-test ScrollBars visibility
+    Dim SavedFormulaBarVisible  As Boolean  'Pre-test FormulaBar visibility
 
-    Dim SavedTitleBarKnown  As Boolean         'TRUE when pre-test title-bar state was read successfully
-    Dim SavedTitleBarVisible As Boolean         'Pre-test title-bar visibility
+    Dim SavedWindowCount            As Long     'Pre-test Application.Windows.Count
+    Dim SavedHeadingsVisible()      As Boolean  'Pre-test per-window Headings visibility
+    Dim SavedWorkbookTabsVisible()  As Boolean  'Pre-test per-window WorkbookTabs visibility
+    Dim SavedGridlinesVisible()     As Boolean  'Pre-test per-window Gridlines visibility
+
+    Dim SavedTitleBarKnown      As Boolean  'TRUE when pre-test title-bar state was read successfully
+    Dim SavedTitleBarVisible    As Boolean  'Pre-test title-bar visibility
 
 #If VBA7 Then
-    Dim EntryHwnd           As LongPtr         'Frame active before the run
-    Dim EntryFrameStyle     As LongPtr         'Its style before the run
+    Dim EntryHwnd       As LongPtr  'Frame active before the run
+    Dim EntryFrameStyle As LongPtr  'Its style before the run
 #Else
-    Dim EntryHwnd           As Long            'Frame active before the run
-    Dim EntryFrameStyle     As Long            'Its style before the run
+    Dim EntryHwnd       As Long 'Frame active before the run
+    Dim EntryFrameStyle As Long 'Its style before the run
 #End If
 
-    Dim EntryFrameCaptured  As Boolean         'TRUE once EntryFrameStyle was read
-    Dim FrameRestored       As Boolean         'TRUE once the style is back
-    Dim FrameRestoreMsg     As String          'Diagnostic from the restoration
+    Dim EntryFrameCaptured  As Boolean  'TRUE once EntryFrameStyle was read
+    Dim FrameRestored       As Boolean  'TRUE once the style is back
+    Dim FrameRestoreMsg     As String   'Diagnostic from the restoration
 
-    Dim RestoreOK           As Boolean         'TRUE once every UI state step completed
-    Dim RestoreFindings     As tCertRecord     'Steps the restoration could not complete
+    Dim RestoreOK       As Boolean      'TRUE once every UI state step completed
+    Dim RestoreFindings As tCertRecord  'Steps the restoration could not complete
 
-    Dim OldScreenUpdating   As Boolean         'Cached ScreenUpdating state
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim OldScreenUpdating   As Boolean  'Cached ScreenUpdating state
+    Dim HasFailure          As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber          As Long     'Captured failure number
+    Dim FailSource          As String   'Captured failure source
+    Dim FailDescription     As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Cache and suppress screen updates during the regression run
         OldScreenUpdating = Application.ScreenUpdating
@@ -586,34 +647,34 @@ Private Sub TST_RunTitleBarOnlyPack(ByVal CallerProc As String)
             "Title-bar round-trip, owned-bit preservation, show-recovery, complete-caption, refresh-debt and stale-entry cases passed"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Attempt to restore the original pre-test UI state. Both results start
     'FALSE, so a step that raised past this boundary counts as failed.
         RestoreOK = False
         FrameRestored = False
 
         On Error Resume Next
-            RestoreOK = TST_RestoreState( _
-                RibbonKnown:=SavedRibbonKnown, _
-                RibbonVisible:=SavedRibbonVisible, _
-                StatusBarVisible:=SavedStatusBarVisible, _
-                ScrollBarsVisible:=SavedScrollBarsVisible, _
-                FormulaBarVisible:=SavedFormulaBarVisible, _
-                WindowCount:=SavedWindowCount, _
-                HeadingsVisible:=SavedHeadingsVisible, _
-                WorkbookTabsVisible:=SavedWorkbookTabsVisible, _
-                GridlinesVisible:=SavedGridlinesVisible, _
-                TitleBarKnown:=SavedTitleBarKnown, _
-                TitleBarVisible:=SavedTitleBarVisible, _
-                Findings:=RestoreFindings)
+        RestoreOK = TST_RestoreState( _
+            RibbonKnown:=SavedRibbonKnown, _
+            RibbonVisible:=SavedRibbonVisible, _
+            StatusBarVisible:=SavedStatusBarVisible, _
+            ScrollBarsVisible:=SavedScrollBarsVisible, _
+            FormulaBarVisible:=SavedFormulaBarVisible, _
+            WindowCount:=SavedWindowCount, _
+            HeadingsVisible:=SavedHeadingsVisible, _
+            WorkbookTabsVisible:=SavedWorkbookTabsVisible, _
+            GridlinesVisible:=SavedGridlinesVisible, _
+            TitleBarKnown:=SavedTitleBarKnown, _
+            TitleBarVisible:=SavedTitleBarVisible, _
+            Findings:=RestoreFindings)
 
-        'Put the entry frame's exact style back through the harness. The
-        'restore above goes through the API under test, and a defect there
-        'must not be able to leave the host with a hidden title bar.
-            FrameRestored = TST_RestoreTitleBarStyle( _
-                EntryHwnd, EntryFrameStyle, EntryFrameCaptured, FrameRestoreMsg)
+    'Put the entry frame's exact style back through the harness. The
+    'restore above goes through the API under test, and a defect there
+    'must not be able to leave the host with a hidden title bar.
+        FrameRestored = TST_RestoreTitleBarStyle( _
+            EntryHwnd, EntryFrameStyle, EntryFrameCaptured, FrameRestoreMsg)
         On Error GoTo 0
 
     'Restore ScreenUpdating before leaving the harness
@@ -644,7 +705,7 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture failure information so it can be re-raised after restoration
         HasFailure = True
         FailNumber = Err.Number
@@ -657,28 +718,53 @@ Err_Handler:
             CStr(FailNumber) & ": " & FailDescription & _
             IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
-
 '
 '------------------------------------------------------------------------------
 '
-'                           REGRESSION CASES
+'                               REGRESSION CASES
 '
 '------------------------------------------------------------------------------
 '
-
 
 Public Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
+
 '
-'==============================================================================
-' TST_Case_TitleBarShowRejectsCaptionlessBaseline
+'------------------------------------------------------------------------------
+'                     REJECT CAPTIONLESS BASELINE ON SHOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Prove that show cannot adopt a non-zero owned-bit baseline without
 '   WS_CAPTION or report success while the caption remains absent.
+'
+' WHY THIS EXISTS
+'   A frame can hold a non-zero owned-bit set that lacks WS_CAPTION. A
+'   show must not adopt that set as its baseline and must not report
+'   success while the caption is absent (#6). This case covers the
+'   non-zero baseline; TST_Case_TitleBarShowRecoversWithoutBaseline
+'   covers the all-zero one.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Reads the entry style of the active window's frame through the
+'     harness and keeps it
+'   - Writes a style whose owned bits are the captionless fixture,
+'     refreshes the frame and reads the style back
+'   - Raises at .Precondition when the owned bits read back as zero or
+'     as a complete caption
+'   - Discards the module baseline, then requests a visible title bar
+'     through UI_TrySetTitleBarVisibleForHwndIfNeeded
+'   - Requires that the call reports success, that the caption is
+'     visible and that no unrelated style bit changed
+'   - Puts the entry style back through the harness on every exit
 '
 ' ERROR POLICY
 '   - Restores the entry style through the harness on every exit, with the
@@ -688,6 +774,14 @@ Public Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
 '   - Fails at .Precondition when Windows does not keep the captionless
 '     owned-bit set, because the case could not then detect the defect.
 '
+' DEPENDENCIES
+'   - TST_TryGetWindowStyle, TST_TrySetWindowStyle
+'   - TST_TryRefreshWindowFrame, TST_StyleHasCompleteCaption
+'   - TST_AssertBooleanEquals, TST_AssertTitleBarVisible
+'   - TST_RestoreTitleBarStyle, TST_RecordCleanupFailure
+'   - UI_InternalResetTitleBarBaseline
+'   - UI_TrySetTitleBarVisibleForHwndIfNeeded
+'
 ' NOTES
 '   This is the case the #6 negative control must fail. With the v1.1.2
 '   fallback condition the show worker keeps the captionless baseline, finds
@@ -696,164 +790,198 @@ Public Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline()
 '   tools/make_titlebar_mutant.py produces that control; CONTRIBUTING.md
 '   describes the run.
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Verified and reported the entry-style restoration, disabled
 '                the handler before cleanup, and asserted the captionless
 '                precondition (#66).
 '   2026-09-10
-'==============================================================================
+'
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarShowRejectsCaptionlessBaseline"
 
 #If VBA7 Then
-    Dim TargetHwnd          As LongPtr
-    Dim EntryStyle          As LongPtr
-    Dim CaptionlessStyle    As LongPtr
-    Dim ResultStyle         As LongPtr
+    Dim TargetHwnd          As LongPtr  'Frame under test
+    Dim EntryStyle          As LongPtr  'Style to restore on the way out
+    Dim CaptionlessStyle    As LongPtr  'Entry style with the captionless owned bits
+    Dim ResultStyle         As LongPtr  'Style read back
 #Else
-    Dim TargetHwnd          As Long
-    Dim EntryStyle          As Long
-    Dim CaptionlessStyle    As Long
-    Dim ResultStyle         As Long
+    Dim TargetHwnd          As Long 'Frame under test
+    Dim EntryStyle          As Long 'Style to restore on the way out
+    Dim CaptionlessStyle    As Long 'Entry style with the captionless owned bits
+    Dim ResultStyle         As Long 'Style read back
 #End If
 
-    Dim StyleCaptured       As Boolean
-    Dim OK                  As Boolean
-    Dim Msg                 As String
-    Dim RestoreOK           As Boolean
-    Dim RestoreMsg          As String
-    Dim FailNumber          As Long
-    Dim FailSource          As String
-    Dim FailDescription     As String
+    Dim StyleCaptured   As Boolean  'TRUE once EntryStyle was read
+    Dim OK              As Boolean  'Result of the show worker
+    Dim Msg             As String   'Diagnostic from a helper
+    Dim RestoreOK       As Boolean  'TRUE once the style is back
+    Dim RestoreMsg      As String   'Diagnostic from the restoration
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
-    Const PROC As String = _
-        "TST_Case_TitleBarShowRejectsCaptionlessBaseline"
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
-        On Error GoTo Err_Handler
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating recovery from a non-zero captionless baseline"
 
+'------------------------------------------------------------------------------
+' CAPTURE ENTRY STYLE
+'------------------------------------------------------------------------------
+    'Retain the entry style, so the frame can be put back on every exit
         TargetHwnd = ActiveWindow.hWnd
         If TargetHwnd = 0 Then
-            Err.Raise TEST_ERR_BASE + 75, PROC, _
+            Err.Raise TEST_ERR_BASE + 75, PROC_NAME, _
                 "invalid Excel Window hWnd"
         End If
 
         If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
-            Err.Raise TEST_ERR_BASE + 76, PROC, _
+            Err.Raise TEST_ERR_BASE + 76, PROC_NAME, _
                 "could not read the entry style | " & Msg
         End If
         StyleCaptured = True
 
-        TST_Log PROC, "TRACE", _
+        TST_Log PROC_NAME, "TRACE", _
             "entry captured | hwnd=" & CStr(TargetHwnd) & _
             " | style=" & CStr(EntryStyle)
 
+'------------------------------------------------------------------------------
+' WRITE THE CAPTIONLESS BASELINE
+'------------------------------------------------------------------------------
     'Leave one non-zero owned bit but deliberately remove WS_CAPTION.
         CaptionlessStyle = _
             (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or _
             TST_TITLEBAR_CAPTIONLESS_FRAME
 
-        TST_Log PROC, "TRACE", "captionless style write: enter"
+        TST_Log PROC_NAME, "TRACE", "captionless style write: enter"
         If Not TST_TrySetWindowStyle( _
             TargetHwnd, CaptionlessStyle, Msg) Then
 
-            Err.Raise TEST_ERR_BASE + 77, PROC, _
+            Err.Raise TEST_ERR_BASE + 77, PROC_NAME, _
                 "could not write the captionless style | " & Msg
         End If
 
-        TST_Log PROC, "TRACE", "style write returned; frame refresh: enter"
+        TST_Log PROC_NAME, "TRACE", "style write returned; frame refresh: enter"
         If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
-            Err.Raise TEST_ERR_BASE + 78, PROC, _
+            Err.Raise TEST_ERR_BASE + 78, PROC_NAME, _
                 "could not refresh the captionless frame | " & Msg
         End If
 
+'------------------------------------------------------------------------------
+' CONFIRM THE PRECONDITION
+'------------------------------------------------------------------------------
     'The case means something only while Windows keeps a non-zero owned-bit
     'set without WS_CAPTION. A host that normalised it to zero would let the
     'v1.1.2 condition pass here, so say so instead of passing.
         If Not TST_TryGetWindowStyle(TargetHwnd, ResultStyle, Msg) Then
-            Err.Raise TEST_ERR_BASE + 83, PROC, _
+            Err.Raise TEST_ERR_BASE + 83, PROC_NAME, _
                 "could not read the captionless style back | " & Msg
         End If
 
-        TST_Log PROC, "TRACE", _
+        TST_Log PROC_NAME, "TRACE", _
             "captionless style read back | style=" & CStr(ResultStyle)
 
         If (ResultStyle And TST_TITLEBAR_OWNED_MASK) = 0 Or _
             TST_StyleHasCompleteCaption(ResultStyle) Then
 
-            Err.Raise TEST_ERR_BASE + 84, PROC & ".Precondition", _
+            Err.Raise TEST_ERR_BASE + 84, PROC_NAME & ".Precondition", _
                 "the frame did not keep a non-zero captionless owned-bit " & _
                 "set; style=" & CStr(ResultStyle) & "; the case cannot " & _
                 "tell the current condition from the v1.1.2 one"
         End If
 
-        TST_Log PROC, "TRACE", "frame refresh returned; baseline reset: enter"
+'------------------------------------------------------------------------------
+' REQUEST A SHOW
+'------------------------------------------------------------------------------
+    'Discard any baseline captured earlier, so the show reaches the branch
+    'under test whatever ran before
+        TST_Log PROC_NAME, "TRACE", "frame refresh returned; baseline reset: enter"
         UI_InternalResetTitleBarBaseline
 
-        TST_Log PROC, "TRACE", "baseline reset returned; show worker: enter"
+        TST_Log PROC_NAME, "TRACE", "baseline reset returned; show worker: enter"
         OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
             TargetHwnd:=TargetHwnd, _
             IsVisible:=True, _
             FailMsg:=Msg)
 
-        TST_Log PROC, "TRACE", "show worker returned; assertions: enter"
+        TST_Log PROC_NAME, "TRACE", "show worker returned; assertions: enter"
         TST_AssertBooleanEquals True, OK, _
             "CaptionlessBaseline.ShowReportsSuccess"
         TST_AssertTitleBarVisible True, _
             "CaptionlessBaseline.CaptionVisible"
 
+'------------------------------------------------------------------------------
+' ASSERT UNRELATED BITS UNCHANGED
+'------------------------------------------------------------------------------
         If Not TST_TryGetWindowStyle(TargetHwnd, ResultStyle, Msg) Then
-            Err.Raise TEST_ERR_BASE + 79, PROC, _
+            Err.Raise TEST_ERR_BASE + 79, PROC_NAME, _
                 "could not read the resulting style | " & Msg
         End If
 
         If (ResultStyle And Not TST_TITLEBAR_OWNED_MASK) <> _
             (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Then
 
-            Err.Raise TEST_ERR_BASE + 80, PROC, _
+            Err.Raise TEST_ERR_BASE + 80, PROC_NAME, _
                 "show changed unrelated window-style bits"
         End If
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
     'Resume ends active handling but leaves the local handler enabled.
     'Disable it before cleanup and before re-raising.
     'Otherwise the saved failure re-enters Err_Handler and repeats cleanup.
         On Error GoTo 0
 
-        TST_Log PROC, "TRACE", "entry style restoration: enter"
+        TST_Log PROC_NAME, "TRACE", "entry style restoration: enter"
         RestoreOK = TST_RestoreTitleBarStyle( _
             TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
 
     'The helper writes, refreshes and reads the owned bits back. A failure at
     'any step is this case's failure too, after the one it follows.
-        TST_Log PROC, "TRACE", _
+        TST_Log PROC_NAME, "TRACE", _
             "restoration helper returned | owned bits read back=" & _
             CStr(RestoreOK)
 
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
-            TST_Log PROC, "FAIL", FailSource & " | " & FailDescription
+            TST_Log PROC_NAME, "FAIL", FailSource & " | " & FailDescription
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Captionless baseline rejected and visible frame recovered"
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
-
 Public Sub TST_Case_TitleBarVisibilityRequiresCompleteCaption()
+
 '
-'==============================================================================
-' TST_Case_TitleBarVisibilityRequiresCompleteCaption
+'------------------------------------------------------------------------------
+'                   REQUIRE COMPLETE CAPTION FOR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Prove that title-bar visibility is read from the complete WS_CAPTION mask,
@@ -866,6 +994,12 @@ Public Sub TST_Case_TitleBarVisibilityRequiresCompleteCaption()
 '   reports a title bar for a frame that has none. The expected value of each
 '   fixture is written down below from the Win32 definition. It is neither read
 '   from the production reader nor derived with its expression.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Writes five fixtures to the entry frame through the harness: no owned
@@ -883,6 +1017,13 @@ Public Sub TST_Case_TitleBarVisibilityRequiresCompleteCaption()
 '     written, refreshed and read back.
 '   - The loop has a fixed bound and the case waits nowhere.
 '
+' DEPENDENCIES
+'   - TST_TryGetWindowStyle, TST_TrySetWindowStyle
+'   - TST_TryRefreshWindowFrame, TST_AssertBooleanEquals
+'   - TST_AssertTitleBarVisible, TST_TitleBarVisibleForHwndOrRaise
+'   - TST_RestoreTitleBarStyle, TST_RecordCleanupFailure
+'   - UI_TryGetTitleBarVisibleForHwnd, UI_TryGetTitleBarVisible
+'
 ' NOTES
 '   Against the any-bit reader in UI_TryGetTitleBarVisibleForHwnd this case
 '   fails at BorderOnly.ProductionReader (expected=False actual=True).
@@ -890,58 +1031,58 @@ Public Sub TST_Case_TitleBarVisibilityRequiresCompleteCaption()
 '
 ' UPDATED
 '   2026-11-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarVisibilityRequiresCompleteCaption"
+
 #If VBA7 Then
-    Dim xlHnd               As LongPtr         'Frame active on entry
-    Dim EntryStyle          As LongPtr         'Its style on entry
-    Dim FixtureStyle        As LongPtr         'Style written for one fixture
-    Dim ResultStyle         As LongPtr         'Style read back for one fixture
-    Dim FixtureOwned        As LongPtr         'Owned bits the fixture writes
+    Dim xlHnd           As LongPtr  'Frame active on entry
+    Dim EntryStyle      As LongPtr  'Its style on entry
+    Dim FixtureStyle    As LongPtr  'Style written for one fixture
+    Dim ResultStyle     As LongPtr  'Style read back for one fixture
+    Dim FixtureOwned    As LongPtr  'Owned bits the fixture writes
 #Else
-    Dim xlHnd               As Long            'Frame active on entry
-    Dim EntryStyle          As Long            'Its style on entry
-    Dim FixtureStyle        As Long            'Style written for one fixture
-    Dim ResultStyle         As Long            'Style read back for one fixture
-    Dim FixtureOwned        As Long            'Owned bits the fixture writes
+    Dim xlHnd           As Long 'Frame active on entry
+    Dim EntryStyle      As Long 'Its style on entry
+    Dim FixtureStyle    As Long 'Style written for one fixture
+    Dim ResultStyle     As Long 'Style read back for one fixture
+    Dim FixtureOwned    As Long 'Owned bits the fixture writes
 #End If
 
-    Dim Fixture             As Long            'Fixture index, 1 to 5
-    Dim ExpectedVisible     As Boolean         'Written expectation for the fixture
-    Dim CaseLabel           As String          'Assertion prefix for the fixture
-    Dim ActualVisible       As Boolean         'Visibility a reader reported
-    Dim ReadOK              As Boolean         'TRUE when a reader succeeded
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
-    Dim Msg                 As String          'Diagnostic from a helper
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
-    Dim FailNumber          As Long            'Saved failure number
-    Dim FailSource          As String          'Saved failure source
-    Dim FailDescription     As String          'Saved failure description
-
-    Const PROC As String = "TST_Case_TitleBarVisibilityRequiresCompleteCaption"
+    Dim Fixture         As Long     'Fixture index, 1 to 5
+    Dim ExpectedVisible As Boolean  'Written expectation for the fixture
+    Dim CaseLabel       As String   'Assertion prefix for the fixture
+    Dim ActualVisible   As Boolean  'Visibility a reader reported
+    Dim ReadOK          As Boolean  'TRUE when a reader succeeded
+    Dim StyleCaptured   As Boolean  'TRUE once EntryStyle is usable
+    Dim Msg             As String   'Diagnostic from a helper
+    Dim RestoreOK       As Boolean  'TRUE once the style is back
+    Dim RestoreMsg      As String   'Diagnostic from the restoration
+    Dim FailNumber      As Long     'Saved failure number
+    Dim FailSource      As String   'Saved failure source
+    Dim FailDescription As String   'Saved failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route assertion and runtime errors to the restoring handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that title-bar visibility needs the complete WS_CAPTION mask"
 
         xlHnd = Application.hWnd
 
         If xlHnd = 0 Then
-            Err.Raise TEST_ERR_BASE + 100, PROC, "invalid Excel window handle"
+            Err.Raise TEST_ERR_BASE + 100, PROC_NAME, "invalid Excel window handle"
         End If
 
         If Not TST_TryGetWindowStyle(xlHnd, EntryStyle, Msg) Then
-            Err.Raise TEST_ERR_BASE + 101, PROC, _
+            Err.Raise TEST_ERR_BASE + 101, PROC_NAME, _
                 "could not read the entry style | " & Msg
         End If
 
@@ -976,29 +1117,29 @@ Public Sub TST_Case_TitleBarVisibilityRequiresCompleteCaption()
                     ExpectedVisible = True
             End Select
 
-            TST_Log PROC, "TRACE", "fixture " & CaseLabel & ": write"
+            TST_Log PROC_NAME, "TRACE", "fixture " & CaseLabel & ": write"
 
             FixtureStyle = _
                 (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or FixtureOwned
 
             If Not TST_TrySetWindowStyle(xlHnd, FixtureStyle, Msg) Then
-                Err.Raise TEST_ERR_BASE + 102, PROC & "." & CaseLabel, _
+                Err.Raise TEST_ERR_BASE + 102, PROC_NAME & "." & CaseLabel, _
                     "could not write the fixture style | " & Msg
             End If
 
             If Not TST_TryRefreshWindowFrame(xlHnd, Msg) Then
-                Err.Raise TEST_ERR_BASE + 103, PROC & "." & CaseLabel, _
+                Err.Raise TEST_ERR_BASE + 103, PROC_NAME & "." & CaseLabel, _
                     "could not refresh the fixture frame | " & Msg
             End If
 
             If Not TST_TryGetWindowStyle(xlHnd, ResultStyle, Msg) Then
-                Err.Raise TEST_ERR_BASE + 104, PROC & "." & CaseLabel, _
+                Err.Raise TEST_ERR_BASE + 104, PROC_NAME & "." & CaseLabel, _
                     "could not read the fixture style back | " & Msg
             End If
 
         'The fixture means something only while Windows keeps it
             If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> FixtureOwned Then
-                Err.Raise TEST_ERR_BASE + 105, PROC & "." & CaseLabel & ".Precondition", _
+                Err.Raise TEST_ERR_BASE + 105, PROC_NAME & "." & CaseLabel & ".Precondition", _
                     "the frame did not keep the fixture owned bits; expected=" & _
                     CStr(FixtureOwned) & " actual=" & _
                     CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK)
@@ -1027,57 +1168,57 @@ Public Sub TST_Case_TitleBarVisibilityRequiresCompleteCaption()
             TST_AssertTitleBarVisible ExpectedVisible, CaseLabel & ".HarnessActiveReader"
 
             TST_AssertBooleanEquals ExpectedVisible, _
-                TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC), _
+                TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC_NAME), _
                 CaseLabel & ".HarnessHwndReader"
 
         Next Fixture
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Resume ends active handling but leaves the local handler enabled. Disable
     'it before cleanup and before re-raising, or the saved failure re-enters
     'Err_Handler and repeats the cleanup.
         On Error GoTo 0
 
-        TST_Log PROC, "TRACE", "entry style restoration: enter"
+        TST_Log PROC_NAME, "TRACE", "entry style restoration: enter"
         RestoreOK = TST_RestoreTitleBarStyle( _
             xlHnd, EntryStyle, StyleCaptured, RestoreMsg)
 
-        TST_Log PROC, "TRACE", _
+        TST_Log PROC_NAME, "TRACE", _
             "restoration helper returned | owned bits read back=" & _
             CStr(RestoreOK)
 
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
-            TST_Log PROC, "FAIL", FailSource & " | " & FailDescription
+            TST_Log PROC_NAME, "FAIL", FailSource & " | " & FailDescription
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Partial caption masks read as not visible; complete masks as visible"
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
-
 Public Sub TST_Case_TitleBarShowRejectsPartialCaptionBaseline()
+
 '
-'==============================================================================
-' TST_Case_TitleBarShowRejectsPartialCaptionBaseline
+'------------------------------------------------------------------------------
+'                   REJECT PARTIAL CAPTION BASELINE ON SHOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Prove that a show cannot adopt a baseline that carries only one of the two
@@ -1089,6 +1230,12 @@ Public Sub TST_Case_TitleBarShowRejectsPartialCaptionBaseline()
 '   non-zero owned-bit set and satisfies an any-bit test of WS_CAPTION, so the
 '   baseline is adopted, the merge changes nothing and the show has to be
 '   judged by its readback.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Runs the WS_BORDER-only and the WS_DLGFRAME-only fixtures through both
@@ -1117,37 +1264,56 @@ Public Sub TST_Case_TitleBarShowRejectsPartialCaptionBaseline()
 '
 ' UPDATED
 '   2026-11-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
-    Dim ShowPath            As Long            'Public show path, 1 or 2
-    Dim Scenario            As Long            'Partial-mask fixture
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarShowRejectsPartialCaptionBaseline"
 
-    Const PROC As String = "TST_Case_TitleBarShowRejectsPartialCaptionBaseline"
+    Dim ShowPath    As Long 'Public show path, 1 or 2
+    Dim Scenario    As Long 'Partial-mask fixture
 
-        TST_Log PROC, "START", _
+'------------------------------------------------------------------------------
+' RUN THE PARTIAL-MASK FIXTURES
+'------------------------------------------------------------------------------
+        TST_Log PROC_NAME, "START", _
             "Validating show against WS_BORDER-only and WS_DLGFRAME-only baselines"
 
+    'Each fixture runs through both public show paths
         For ShowPath = TST_SHOW_PATH_FIRE_AND_FORGET To TST_SHOW_PATH_WITH_RESULT
             For Scenario = TST_SHOW_SCENARIO_BORDER_ONLY To TST_SHOW_SCENARIO_DLGFRAME_ONLY
                 TST_RunCompleteCaptionShow Scenario, ShowPath
             Next Scenario
         Next ShowPath
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Partial caption baselines were rejected and the frame recovered"
 
 End Sub
 
-
 Public Sub TST_Case_TitleBarShowPublicPaths()
+
 '
-'==============================================================================
-' TST_Case_TitleBarShowPublicPaths
+'------------------------------------------------------------------------------
+'                     SHOW TITLE BAR THROUGH PUBLIC PATHS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Prove the show contract of #6 through both public paths for the baselines
 '   other than a partial caption mask.
+'
+' WHY THIS EXISTS
+'   The show contract of #6 has two public entry points,
+'   UI_ShowExcelUI and UI_SetExcelUI_WithResult. This case runs the
+'   zero, captionless, visible and foreign fixtures through both; the
+'   partial-mask case runs the two partial fixtures the same way.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Runs four fixtures through UI_ShowExcelUI and through
@@ -1169,19 +1335,30 @@ Public Sub TST_Case_TitleBarShowPublicPaths()
 ' DEPENDENCIES
 '   - TST_RunCompleteCaptionShow
 '
+' NOTES
+'   Each fixture and path is a separate TST_RunCompleteCaptionShow run,
+'   so a failure names the fixture and the path in its assertion label.
+'
 ' UPDATED
 '   2026-11-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
-    Dim ShowPath            As Long            'Public show path, 1 or 2
-    Dim Scenario            As Long            'Baseline fixture
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarShowPublicPaths"
 
-    Const PROC As String = "TST_Case_TitleBarShowPublicPaths"
+    Dim ShowPath    As Long 'Public show path, 1 or 2
+    Dim Scenario    As Long 'Baseline fixture; not used
 
-        TST_Log PROC, "START", _
+'------------------------------------------------------------------------------
+' RUN THE FIXTURES
+'------------------------------------------------------------------------------
+        TST_Log PROC_NAME, "START", _
             "Validating show through both public paths for zero, captionless, visible and foreign frames"
 
+    'Each fixture runs through both public show paths
         For ShowPath = TST_SHOW_PATH_FIRE_AND_FORGET To TST_SHOW_PATH_WITH_RESULT
             TST_RunCompleteCaptionShow TST_SHOW_SCENARIO_ZERO, ShowPath
             TST_RunCompleteCaptionShow TST_SHOW_SCENARIO_CAPTIONLESS, ShowPath
@@ -1189,22 +1366,27 @@ Public Sub TST_Case_TitleBarShowPublicPaths()
             TST_RunCompleteCaptionShow TST_SHOW_SCENARIO_FOREIGN, ShowPath
         Next ShowPath
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Zero, captionless, visible and foreign frames behaved as expected on both paths"
 
 End Sub
-
 
 Private Sub TST_RunCompleteCaptionShow( _
     ByVal Scenario As Long, _
     ByVal ShowPath As Long)
 '
-'==============================================================================
-' TST_RunCompleteCaptionShow
+'------------------------------------------------------------------------------
+'                             RUN ONE SHOW FIXTURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Run one baseline fixture through one public show path and check the
 '   resulting frame against written expectations.
+'
+' WHY THIS EXISTS
+'   Shared worker of the #6 show cases. One run covers one fixture and
+'   one public path, so TST_Case_TitleBarShowRejectsPartialCaptionBaseline
+'   and TST_Case_TitleBarShowPublicPaths use the same sequence and the
+'   same written expectations.
 '
 ' INPUTS
 '   Scenario
@@ -1213,6 +1395,9 @@ Private Sub TST_RunCompleteCaptionShow( _
 '   ShowPath
 '     TST_SHOW_PATH_FIRE_AND_FORGET (UI_ShowExcelUI) or
 '     TST_SHOW_PATH_WITH_RESULT (UI_SetExcelUI_WithResult).
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Records the entry style, which must itself be a complete caption.
@@ -1225,16 +1410,6 @@ Private Sub TST_RunCompleteCaptionShow( _
 '     component bits, the expected owned bits and every unrelated bit unchanged.
 '   - Puts the entry style back through the harness on every exit path, with
 '     the handler disabled, and raises the saved failure once.
-'
-' EXPECTATIONS
-'   Written from the contract, not from the production code:
-'       fixture               visible before   owned bits after
-'       ZeroBaseline          False            full owned set
-'       CaptionlessBaseline   False            full owned set
-'       BorderOnly            False            full owned set
-'       DlgFrameOnly          False            full owned set
-'       VisibleNoOp           True             unchanged
-'       ForeignCaption        True             unchanged, not the full set
 '
 ' ERROR POLICY
 '   - Raises after restoration. Fails, with the restoration diagnostic, when
@@ -1250,69 +1425,84 @@ Private Sub TST_RunCompleteCaptionShow( _
 '   - UI_InternalResetTitleBarBaseline
 '   - UI_ShowExcelUI, UI_SetExcelUI_WithResult
 '
+' NOTES
+'   A Scenario that is not a TST_SHOW_SCENARIO_* constant raises. Any
+'   ShowPath other than TST_SHOW_PATH_WITH_RESULT takes the
+'   fire-and-forget path.
+'
 ' CALLED FROM
 '   - TST_Case_TitleBarShowRejectsPartialCaptionBaseline
 '   - TST_Case_TitleBarShowPublicPaths
 '
+' EXPECTATIONS
+'   Written from the contract, not from the production code:
+'       fixture               visible before   owned bits after
+'       ZeroBaseline          False            full owned set
+'       CaptionlessBaseline   False            full owned set
+'       BorderOnly            False            full owned set
+'       DlgFrameOnly          False            full owned set
+'       VisibleNoOp           True             unchanged
+'       ForeignCaption        True             unchanged, not the full set
+'
 ' UPDATED
 '   2026-11-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_RunCompleteCaptionShow"
+
 #If VBA7 Then
-    Dim xlHnd               As LongPtr         'Frame active on entry
-    Dim EntryStyle          As LongPtr         'Its style on entry
-    Dim FixtureStyle        As LongPtr         'Style written as the baseline
-    Dim ResultStyle         As LongPtr         'Style read back
-    Dim FixtureOwned        As LongPtr         'Owned bits the fixture writes
-    Dim ExpectedOwnedAfter  As LongPtr         'Owned bits a show must leave
+    Dim xlHnd               As LongPtr  'Frame active on entry
+    Dim EntryStyle          As LongPtr  'Its style on entry
+    Dim FixtureStyle        As LongPtr  'Style written as the baseline
+    Dim ResultStyle         As LongPtr  'Style read back
+    Dim FixtureOwned        As LongPtr  'Owned bits the fixture writes
+    Dim ExpectedOwnedAfter  As LongPtr  'Owned bits a show must leave
 #Else
-    Dim xlHnd               As Long            'Frame active on entry
-    Dim EntryStyle          As Long            'Its style on entry
-    Dim FixtureStyle        As Long            'Style written as the baseline
-    Dim ResultStyle         As Long            'Style read back
-    Dim FixtureOwned        As Long            'Owned bits the fixture writes
-    Dim ExpectedOwnedAfter  As Long            'Owned bits a show must leave
+    Dim xlHnd               As Long 'Frame active on entry
+    Dim EntryStyle          As Long 'Its style on entry
+    Dim FixtureStyle        As Long 'Style written as the baseline
+    Dim ResultStyle         As Long 'Style read back
+    Dim FixtureOwned        As Long 'Owned bits the fixture writes
+    Dim ExpectedOwnedAfter  As Long 'Owned bits a show must leave
 #End If
 
-    Dim ExpectedVisibleBefore As Boolean       'Written expectation before the show
-    Dim WriteFixture        As Boolean         'FALSE for the already-visible frame
-    Dim CaseLabel               As String          'Assertion prefix
-    Dim OK                  As Boolean         'Result of the structured path
-    Dim FailureCount        As Long            'Structured-path failure count
-    Dim FailureList         As Variant         'Structured-path failure list
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
-    Dim Msg                 As String          'Diagnostic from a helper
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
-    Dim FailNumber          As Long            'Saved failure number
-    Dim FailSource          As String          'Saved failure source
-    Dim FailDescription     As String          'Saved failure description
-
-    Const PROC As String = "TST_RunCompleteCaptionShow"
+    Dim ExpectedVisibleBefore   As Boolean  'Written expectation before the show
+    Dim WriteFixture            As Boolean  'FALSE for the already-visible frame
+    Dim CaseLabel               As String   'Assertion prefix
+    Dim OK                      As Boolean  'Result of the structured path
+    Dim FailureCount            As Long     'Structured-path failure count
+    Dim FailureList             As Variant  'Structured-path failure list
+    Dim StyleCaptured           As Boolean  'TRUE once EntryStyle is usable
+    Dim Msg                     As String   'Diagnostic from a helper
+    Dim RestoreOK               As Boolean  'TRUE once the style is back
+    Dim RestoreMsg              As String   'Diagnostic from the restoration
+    Dim FailNumber              As Long     'Saved failure number
+    Dim FailSource              As String   'Saved failure source
+    Dim FailDescription         As String   'Saved failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route assertion and runtime errors to the restoring handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         CaseLabel = TST_ShowScenarioName(Scenario) & "." & TST_ShowPathName(ShowPath)
 
-        TST_Log PROC, "START", "Show fixture " & CaseLabel
+        TST_Log PROC_NAME, "START", "Show fixture " & CaseLabel
 
         xlHnd = Application.hWnd
 
         If xlHnd = 0 Then
-            Err.Raise TEST_ERR_BASE + 110, PROC & "." & CaseLabel, _
+            Err.Raise TEST_ERR_BASE + 110, PROC_NAME & "." & CaseLabel, _
                 "invalid Excel window handle"
         End If
 
         If Not TST_TryGetWindowStyle(xlHnd, EntryStyle, Msg) Then
-            Err.Raise TEST_ERR_BASE + 111, PROC & "." & CaseLabel, _
+            Err.Raise TEST_ERR_BASE + 111, PROC_NAME & "." & CaseLabel, _
                 "could not read the entry style | " & Msg
         End If
 
@@ -1320,7 +1510,7 @@ Private Sub TST_RunCompleteCaptionShow( _
 
     'The run starts from a visible title bar, or it proves nothing
         If Not TST_StyleHasCompleteCaption(EntryStyle) Then
-            Err.Raise TEST_ERR_BASE + 112, PROC & "." & CaseLabel & ".EntryPrecondition", _
+            Err.Raise TEST_ERR_BASE + 112, PROC_NAME & "." & CaseLabel & ".EntryPrecondition", _
                 "the entry frame does not show a complete caption; style=" & _
                 CStr(EntryStyle)
         End If
@@ -1354,7 +1544,7 @@ Private Sub TST_RunCompleteCaptionShow( _
                 ExpectedOwnedAfter = TST_TITLEBAR_FOREIGN_FRAME
                 ExpectedVisibleBefore = True
             Case Else
-                Err.Raise TEST_ERR_BASE + 113, PROC & "." & CaseLabel, _
+                Err.Raise TEST_ERR_BASE + 113, PROC_NAME & "." & CaseLabel, _
                     "unknown show fixture " & CStr(Scenario)
         End Select
 
@@ -1367,14 +1557,14 @@ Private Sub TST_RunCompleteCaptionShow( _
             FixtureStyle = _
                 (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Or FixtureOwned
 
-            TST_Log PROC, "TRACE", "fixture style write: enter"
+            TST_Log PROC_NAME, "TRACE", "fixture style write: enter"
             If Not TST_TrySetWindowStyle(xlHnd, FixtureStyle, Msg) Then
-                Err.Raise TEST_ERR_BASE + 114, PROC & "." & CaseLabel, _
+                Err.Raise TEST_ERR_BASE + 114, PROC_NAME & "." & CaseLabel, _
                     "could not write the fixture style | " & Msg
             End If
 
             If Not TST_TryRefreshWindowFrame(xlHnd, Msg) Then
-                Err.Raise TEST_ERR_BASE + 115, PROC & "." & CaseLabel, _
+                Err.Raise TEST_ERR_BASE + 115, PROC_NAME & "." & CaseLabel, _
                     "could not refresh the fixture frame | " & Msg
             End If
 
@@ -1382,13 +1572,13 @@ Private Sub TST_RunCompleteCaptionShow( _
         End If
 
         If Not TST_TryGetWindowStyle(xlHnd, ResultStyle, Msg) Then
-            Err.Raise TEST_ERR_BASE + 116, PROC & "." & CaseLabel, _
+            Err.Raise TEST_ERR_BASE + 116, PROC_NAME & "." & CaseLabel, _
                 "could not read the fixture style back | " & Msg
         End If
 
     'The run means something only while Windows keeps the fixture
         If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> FixtureOwned Then
-            Err.Raise TEST_ERR_BASE + 117, PROC & "." & CaseLabel & ".Precondition", _
+            Err.Raise TEST_ERR_BASE + 117, PROC_NAME & "." & CaseLabel & ".Precondition", _
                 "the frame did not keep the fixture owned bits; expected=" & _
                 CStr(FixtureOwned) & " actual=" & _
                 CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK) & _
@@ -1398,7 +1588,7 @@ Private Sub TST_RunCompleteCaptionShow( _
     'A frame that was never in the intended state would let the assertions
     'of interest pass for the wrong reason
         TST_AssertBooleanEquals ExpectedVisibleBefore, _
-            TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC), _
+            TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC_NAME), _
             CaseLabel & ".Precondition.Visible"
 
     'Discard any baseline captured earlier in the session, so the show below
@@ -1408,7 +1598,7 @@ Private Sub TST_RunCompleteCaptionShow( _
 '------------------------------------------------------------------------------
 ' SHOW THROUGH THE CHOSEN PUBLIC PATH
 '------------------------------------------------------------------------------
-        TST_Log PROC, "TRACE", "show: enter"
+        TST_Log PROC_NAME, "TRACE", "show: enter"
 
         If ShowPath = TST_SHOW_PATH_WITH_RESULT Then
 
@@ -1425,7 +1615,7 @@ Private Sub TST_RunCompleteCaptionShow( _
             UI_ShowExcelUI
         End If
 
-        TST_Log PROC, "TRACE", "show returned; assertions: enter"
+        TST_Log PROC_NAME, "TRACE", "show returned; assertions: enter"
         TST_WaitUI TEST_WAIT_SECONDS
 
 '------------------------------------------------------------------------------
@@ -1433,16 +1623,16 @@ Private Sub TST_RunCompleteCaptionShow( _
 '------------------------------------------------------------------------------
     'The complete caption mask, decided from its two component bits
         TST_AssertBooleanEquals True, _
-            TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC), _
+            TST_TitleBarVisibleForHwndOrRaise(xlHnd, PROC_NAME), _
             CaseLabel & ".CaptionVisible"
 
         If Not TST_TryGetWindowStyle(xlHnd, ResultStyle, Msg) Then
-            Err.Raise TEST_ERR_BASE + 118, PROC & "." & CaseLabel, _
+            Err.Raise TEST_ERR_BASE + 118, PROC_NAME & "." & CaseLabel, _
                 "could not read the resulting style | " & Msg
         End If
 
         If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> ExpectedOwnedAfter Then
-            Err.Raise TEST_ERR_BASE + 119, PROC & "." & CaseLabel & ".OwnedBits", _
+            Err.Raise TEST_ERR_BASE + 119, PROC_NAME & "." & CaseLabel & ".OwnedBits", _
                 CaseLabel & ".OwnedBits expected=" & CStr(ExpectedOwnedAfter) & _
                 " actual=" & CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK)
         End If
@@ -1450,26 +1640,26 @@ Private Sub TST_RunCompleteCaptionShow( _
         If (ResultStyle And Not TST_TITLEBAR_OWNED_MASK) <> _
             (EntryStyle And Not TST_TITLEBAR_OWNED_MASK) Then
 
-            Err.Raise TEST_ERR_BASE + 120, PROC & "." & CaseLabel & ".UnrelatedBits", _
+            Err.Raise TEST_ERR_BASE + 120, PROC_NAME & "." & CaseLabel & ".UnrelatedBits", _
                 CaseLabel & ".UnrelatedBits changed; entry=" & _
                 CStr(EntryStyle And Not TST_TITLEBAR_OWNED_MASK) & _
                 " actual=" & CStr(ResultStyle And Not TST_TITLEBAR_OWNED_MASK)
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Resume ends active handling but leaves the local handler enabled. Disable
     'it before cleanup and before re-raising, or the saved failure re-enters
     'Err_Handler and repeats the cleanup.
         On Error GoTo 0
 
-        TST_Log PROC, "TRACE", "entry style restoration: enter"
+        TST_Log PROC_NAME, "TRACE", "entry style restoration: enter"
         RestoreOK = TST_RestoreTitleBarStyle( _
             xlHnd, EntryStyle, StyleCaptured, RestoreMsg)
 
-        TST_Log PROC, "TRACE", _
+        TST_Log PROC_NAME, "TRACE", _
             "restoration helper returned | owned bits read back=" & _
             CStr(RestoreOK)
 
@@ -1477,41 +1667,66 @@ Safe_Exit:
         UI_InternalResetTitleBarBaseline
 
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
-            TST_Log PROC, "FAIL", CaseLabel & " | " & FailSource & " | " & FailDescription
+            TST_Log PROC_NAME, "FAIL", CaseLabel & " | " & FailSource & " | " & FailDescription
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-        TST_Log PROC, "PASS", "Show fixture " & CaseLabel & " recovered a complete caption"
+        TST_Log PROC_NAME, "PASS", "Show fixture " & CaseLabel & " recovered a complete caption"
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
-
 Private Function TST_ShowScenarioName(ByVal Scenario As Long) As String
+
 '
-'==============================================================================
-' TST_ShowScenarioName
+'------------------------------------------------------------------------------
+'                              NAME SHOW FIXTURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name a show fixture for assertion text.
 '
+' WHY THIS EXISTS
+'   The assertion names of TST_RunCompleteCaptionShow carry the fixture
+'   name. This keeps the mapping in one place.
+'
+' INPUTS
+'   Scenario
+'     One of the TST_SHOW_SCENARIO_* constants.
+'
+' RETURNS
+'   ZeroBaseline, CaptionlessBaseline, BorderOnly, DlgFrameOnly,
+'   VisibleNoOp or ForeignCaption; "Scenario" followed by the number
+'   for any other value.
+'
+' BEHAVIOR
+'   - Selects the name from Scenario
+'   - Builds the "Scenario" plus number form in Case Else
+'
+' ERROR POLICY
+'   None
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
         Select Case Scenario
             Case TST_SHOW_SCENARIO_ZERO
@@ -1532,19 +1747,18 @@ Private Function TST_ShowScenarioName(ByVal Scenario As Long) As String
 
 End Function
 
-
 Private Function TST_ShowPathName(ByVal ShowPath As Long) As String
+
 '
-'==============================================================================
-' TST_ShowPathName
+'------------------------------------------------------------------------------
+'                                NAME SHOW PATH
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name a public show path for assertion text.
 '
 ' UPDATED
 '   2026-11-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
         If ShowPath = TST_SHOW_PATH_WITH_RESULT Then
             TST_ShowPathName = "WithResult"
@@ -1554,12 +1768,11 @@ Private Function TST_ShowPathName(ByVal ShowPath As Long) As String
 
 End Function
 
-
 Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
 '
-'==============================================================================
-' TST_Case_TitleBarSameHwndGenerationReuse
+'------------------------------------------------------------------------------
+'                    KEEP FRAME STATE PER WINDOW GENERATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that frame state recorded for one window generation never crosses
@@ -1582,8 +1795,11 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 '   one of another generation. Neither the numeric scan nor the owned bits
 '   can then reject the slot; only the generation check can.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Opens a target workbook whose frame is under test, and a second
@@ -1629,76 +1845,79 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 '   The anchor window only stands in for another live owner. The case never
 '   writes its frame.
 '
-' UPDATED
+' HISTORY
 '   2026-11-16 - Replaced TST_Case_TitleBarSameStyleHandleReuse, whose seam
 '                also changed the stored hWnd (#32).
-'==============================================================================
 '
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow        As Window          'Window active on entry
-    Dim TargetBook          As Workbook        'Workbook whose frame is tested
-    Dim ClosedBook          As Workbook        'Workbook closed at once
-    Dim ClosedWindow        As Object          'Wrapper of the closed generation
-    Dim PriorOwner          As Object          'Generation the slot is given
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarSameHwndGenerationReuse"
+
+    Dim AnchorWindow    As Window   'Window active on entry
+    Dim TargetBook      As Workbook 'Workbook whose frame is tested
+    Dim ClosedBook      As Workbook 'Workbook closed at once
+    Dim ClosedWindow    As Object   'Wrapper of the closed generation
+    Dim PriorOwner      As Object   'Generation the slot is given
 
 #If VBA7 Then
-    Dim TargetHwnd          As LongPtr         'Frame under test
-    Dim AnchorHwnd          As LongPtr         'Frame of the anchor window
-    Dim ClosedProbeHwnd     As LongPtr         'hWnd the closed wrapper reports
-    Dim EntryStyle          As LongPtr         'Target style on entry
-    Dim ArrangeStyle        As LongPtr         'Distinctive visible style
-    Dim ResultStyle         As LongPtr         'Style read back
-    Dim VisibleOwned        As LongPtr         'Owned bits of that visible style
-    Dim LiveOwned           As LongPtr         'Owned bits at the collision
-    Dim ExpectedOwned       As LongPtr         'Owned bits a correct show leaves
-    Dim SlotOwned           As LongPtr         'Slot OwnedStyleBits
-    Dim SlotLastWritten     As LongPtr         'Slot LastWrittenBits
+    Dim TargetHwnd      As LongPtr  'Frame under test
+    Dim AnchorHwnd      As LongPtr  'Frame of the anchor window
+    Dim ClosedProbeHwnd As LongPtr  'hWnd the closed wrapper reports
+    Dim EntryStyle      As LongPtr  'Target style on entry
+    Dim ArrangeStyle    As LongPtr  'Distinctive visible style
+    Dim ResultStyle     As LongPtr  'Style read back
+    Dim VisibleOwned    As LongPtr  'Owned bits of that visible style
+    Dim LiveOwned       As LongPtr  'Owned bits at the collision
+    Dim ExpectedOwned   As LongPtr  'Owned bits a correct show leaves
+    Dim SlotOwned       As LongPtr  'Slot OwnedStyleBits
+    Dim SlotLastWritten As LongPtr  'Slot LastWrittenBits
 #Else
-    Dim TargetHwnd          As Long            'Frame under test
-    Dim AnchorHwnd          As Long            'Frame of the anchor window
-    Dim ClosedProbeHwnd     As Long            'hWnd the closed wrapper reports
-    Dim EntryStyle          As Long            'Target style on entry
-    Dim ArrangeStyle        As Long            'Distinctive visible style
-    Dim ResultStyle         As Long            'Style read back
-    Dim VisibleOwned        As Long            'Owned bits of that visible style
-    Dim LiveOwned           As Long            'Owned bits at the collision
-    Dim ExpectedOwned       As Long            'Owned bits a correct show leaves
-    Dim SlotOwned           As Long            'Slot OwnedStyleBits
-    Dim SlotLastWritten     As Long            'Slot LastWrittenBits
+    Dim TargetHwnd      As Long 'Frame under test
+    Dim AnchorHwnd      As Long 'Frame of the anchor window
+    Dim ClosedProbeHwnd As Long 'hWnd the closed wrapper reports
+    Dim EntryStyle      As Long 'Target style on entry
+    Dim ArrangeStyle    As Long 'Distinctive visible style
+    Dim ResultStyle     As Long 'Style read back
+    Dim VisibleOwned    As Long 'Owned bits of that visible style
+    Dim LiveOwned       As Long 'Owned bits at the collision
+    Dim ExpectedOwned   As Long 'Owned bits a correct show leaves
+    Dim SlotOwned       As Long 'Slot OwnedStyleBits
+    Dim SlotLastWritten As Long 'Slot LastWrittenBits
 #End If
 
-    Dim CollisionIndex      As Long            '0 equal-zero, 1 equal-nonzero
-    Dim OwnerIndex          As Long            '0 closed generation, 1 live window
-    Dim PassLabel           As String          'Pass name for diagnostics
-    Dim ExpectHidden        As Boolean         'ComponentHidden the pass records
-    Dim ClosedProbeError    As Long            'Error the closed wrapper raised
-    Dim SlotFound           As Boolean         'TRUE when a slot holds TargetHwnd
-    Dim SlotHasBaseline     As Boolean         'Slot HasBaseline
-    Dim SlotHidden          As Boolean         'Slot ComponentHidden
-    Dim SlotPending         As Boolean         'Slot RefreshPending
-    Dim PendingReported     As Boolean         'Debt the production lookup saw
-    Dim OK                  As Boolean         'Result of a call under test
-    Dim Msg                 As String          'Diagnostic buffer
+    Dim CollisionIndex      As Long     '0 equal-zero, 1 equal-nonzero
+    Dim OwnerIndex          As Long     '0 closed generation, 1 live window
+    Dim PassLabel           As String   'Pass name for diagnostics
+    Dim ExpectHidden        As Boolean  'ComponentHidden the pass records
+    Dim ClosedProbeError    As Long     'Error the closed wrapper raised
+    Dim SlotFound           As Boolean  'TRUE when a slot holds TargetHwnd
+    Dim SlotHasBaseline     As Boolean  'Slot HasBaseline
+    Dim SlotHidden          As Boolean  'Slot ComponentHidden
+    Dim SlotPending         As Boolean  'Slot RefreshPending
+    Dim PendingReported     As Boolean  'Debt the production lookup saw
+    Dim OK                  As Boolean  'Result of a call under test
+    Dim Msg                 As String   'Diagnostic buffer
 
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle was read
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
+    Dim StyleCaptured   As Boolean  'TRUE once EntryStyle was read
+    Dim RestoreOK       As Boolean  'TRUE once the style is back
+    Dim RestoreMsg      As String   'Diagnostic from the restoration
 
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "TST_Case_TitleBarSameHwndGenerationReuse"
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that frame state never crosses to a new generation " & _
             "of the same hWnd"
 
@@ -1711,7 +1930,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
         If AnchorWindow Is Nothing Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 90, _
-                PROC, _
+                PROC_NAME, _
                 "no anchor Excel Window is available"
         End If
 
@@ -1724,7 +1943,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
         If TargetHwnd = 0 Or TargetHwnd = AnchorHwnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 91, _
-                PROC & ".Precondition", _
+                PROC_NAME & ".Precondition", _
                 "the host did not provide distinct SDI window handles"
         End If
 
@@ -1732,7 +1951,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
         If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 92, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the target entry style | " & Msg
         End If
 
@@ -1749,14 +1968,14 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
     'handle, or it would not be another generation.
         On Error Resume Next
 
-            ClosedProbeHwnd = ClosedWindow.hWnd
-            ClosedProbeError = Err.Number
+        ClosedProbeHwnd = ClosedWindow.hWnd
+        ClosedProbeError = Err.Number
 
-            Err.Clear
+        Err.Clear
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "OBSERVED", _
+        TST_Log PROC_NAME, "OBSERVED", _
             "closed generation | hWnd read raised=" & _
             CStr(ClosedProbeError <> 0) & _
             " | error=" & CStr(ClosedProbeError) & _
@@ -1765,7 +1984,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
         If ClosedProbeError = 0 And ClosedProbeHwnd = TargetHwnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 93, _
-                PROC & ".Precondition", _
+                PROC_NAME & ".Precondition", _
                 "the closed generation's Window reports the target hWnd; " & _
                 "the case cannot attribute the slot to another generation"
         End If
@@ -1805,14 +2024,14 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 94, _
-                        PROC, _
+                        PROC_NAME, _
                         PassLabel & " | unable to write the visible style | " & Msg
                 End If
 
                 If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 95, _
-                        PROC, _
+                        PROC_NAME, _
                         PassLabel & " | unable to refresh the visible frame | " & Msg
                 End If
 
@@ -1821,7 +2040,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 96, _
-                        PROC, _
+                        PROC_NAME, _
                         PassLabel & " | unable to read the visible style | " & Msg
                 End If
 
@@ -1832,7 +2051,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 97, _
-                        PROC & ".Precondition", _
+                        PROC_NAME & ".Precondition", _
                         PassLabel & " | Windows did not keep a distinctive " & _
                         "visible frame; owned=" & CStr(VisibleOwned) & _
                         "; a crossed baseline could not be told from the " & _
@@ -1886,7 +2105,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
                 If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 98, _
-                        PROC, _
+                        PROC_NAME, _
                         PassLabel & " | unable to repaint the frame | " & Msg
                 End If
 
@@ -1898,7 +2117,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 99, _
-                        PROC, _
+                        PROC_NAME, _
                         PassLabel & " | unable to give the slot to another " & _
                         "generation"
                 End If
@@ -1915,7 +2134,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 101, _
-                        PROC & ".Precondition", _
+                        PROC_NAME & ".Precondition", _
                         PassLabel & " | the rebound slot does not hold the " & _
                         "recorded state | " & _
                         TST_DescribeFrameSlot(SlotFound, SlotOwned, _
@@ -1930,7 +2149,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 102, _
-                        PROC, _
+                        PROC_NAME, _
                         PassLabel & " | unable to read the collision style | " & Msg
                 End If
 
@@ -1941,14 +2160,14 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 103, _
-                        PROC & ".Precondition", _
+                        PROC_NAME & ".Precondition", _
                         PassLabel & " | the live owned bits " & _
                         CStr(LiveOwned) & " do not form this pass's " & _
                         "collision with LastWrittenBits " & _
                         CStr(SlotLastWritten)
                 End If
 
-                TST_Log PROC, "TRACE", _
+                TST_Log PROC_NAME, "TRACE", _
                     PassLabel & " | slot given to another generation | hWnd=" & _
                     CStr(TargetHwnd) & " | live owned=" & CStr(LiveOwned) & _
                     " | " & _
@@ -1967,7 +2186,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
                 If PendingReported Or SlotFound Then
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 100, _
-                        PROC & ".Crossed", _
+                        PROC_NAME & ".Crossed", _
                         "stale frame state crossed to the replacement " & _
                         "generation | pass=" & PassLabel & _
                         " | debt reported=" & CStr(PendingReported) & _
@@ -1988,7 +2207,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
                 If Not OK Then
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 104, _
-                        PROC & ".Show", _
+                        PROC_NAME & ".Show", _
                         PassLabel & " | show on the replacement generation " & _
                         "reported failure | " & Msg
                 End If
@@ -1998,7 +2217,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 105, _
-                        PROC, _
+                        PROC_NAME, _
                         PassLabel & " | unable to read the shown style | " & Msg
                 End If
 
@@ -2013,7 +2232,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 106, _
-                        PROC & ".Show", _
+                        PROC_NAME & ".Show", _
                         PassLabel & " | the show applied state the " & _
                         "replacement generation never had | expected owned=" & _
                         CStr(ExpectedOwned) & " | actual owned=" & _
@@ -2031,7 +2250,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
 
                     Err.Raise _
                         TEST_TITLEBAR_SDI_ERR_BASE + 107, _
-                        PROC & ".Show", _
+                        PROC_NAME & ".Show", _
                         PassLabel & " | the replacement generation's slot " & _
                         "is not new | " & _
                         TST_DescribeFrameSlot(SlotFound, SlotOwned, _
@@ -2039,7 +2258,7 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
                             SlotLastWritten)
                 End If
 
-                TST_Log PROC, "TRACE", _
+                TST_Log PROC_NAME, "TRACE", _
                     PassLabel & " | slot discarded; show left owned=" & _
                     CStr(ResultStyle And TST_TITLEBAR_OWNED_MASK)
 
@@ -2048,36 +2267,36 @@ Public Sub TST_Case_TitleBarSameHwndGenerationReuse()
         Next CollisionIndex
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Discard the registry, put the target frame back through the harness and
     'close the temporary workbooks, whatever happened above. The API under
     'test takes no part.
         On Error Resume Next
-            UI_InternalResetTitleBarBaseline
-            RestoreOK = TST_RestoreTitleBarStyle( _
-                TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
-            Set PriorOwner = Nothing
-            Set ClosedWindow = Nothing
-            TST_SafeCloseWorkbook ClosedBook
-            TST_SafeCloseWorkbook TargetBook
+        UI_InternalResetTitleBarBaseline
+        RestoreOK = TST_RestoreTitleBarStyle( _
+            TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
+        Set PriorOwner = Nothing
+        Set ClosedWindow = Nothing
+        TST_SafeCloseWorkbook ClosedBook
+        TST_SafeCloseWorkbook TargetBook
 
-            If Not AnchorWindow Is Nothing Then
-                AnchorWindow.Activate
-            End If
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.Activate
+        End If
         On Error GoTo 0
 
     'A frame that cannot be put back fails the case, after any earlier failure
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
-            TST_Log PROC, "FAIL", FailSource & " | " & FailDescription
+            TST_Log PROC_NAME, "FAIL", FailSource & " | " & FailDescription
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Equal-zero and equal-nonzero state under an unchanged hWnd " & _
             "stayed with its own generation"
         Exit Sub
@@ -2085,15 +2304,14 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 #If VBA7 Then
 Private Function TST_DescribeFrameSlot( _
@@ -2114,14 +2332,32 @@ Private Function TST_DescribeFrameSlot( _
     ByVal LastWrittenBits As Long) _
     As String
 #End If
-
 '
-'==============================================================================
-' TST_DescribeFrameSlot
+'------------------------------------------------------------------------------
+'                             DESCRIBE FRAME SLOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Format the fields UI_InternalTryReadFrameState returned, for a failure
 '   message or a trace line.
+'
+' INPUTS
+'   SlotFound
+'     TRUE when UI_InternalTryReadFrameState found a slot.
+'
+'   OwnedStyleBits
+'     Owned style bits the slot holds; read only when SlotFound.
+'
+'   HasBaseline
+'     TRUE when the slot holds a captured baseline.
+'
+'   ComponentHidden
+'     TRUE when the slot claims the title bar is hidden.
+'
+'   RefreshPending
+'     TRUE when the slot owes a frame refresh.
+'
+'   LastWrittenBits
+'     Owned style bits the component last wrote to the frame.
 '
 ' RETURNS
 '   "slot kept=False" when no slot was found; otherwise every field.
@@ -2132,10 +2368,12 @@ Private Function TST_DescribeFrameSlot( _
 ' CALLED FROM
 '   - TST_Case_TitleBarSameHwndGenerationReuse
 '
-' UPDATED
+' HISTORY
 '   2026-11-16 (#32)
-'==============================================================================
 '
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' FORMAT FIELDS
@@ -2156,12 +2394,11 @@ Private Function TST_DescribeFrameSlot( _
 
 End Function
 
-
 Public Sub TST_Case_TitleBarRoundTrip()
 
 '
-'==============================================================================
-' TST_Case_TitleBarRoundTrip
+'------------------------------------------------------------------------------
+'                           HIDE AND SHOW TITLE BAR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the title bar can be hidden and then shown again through the
@@ -2171,8 +2408,19 @@ Public Sub TST_Case_TitleBarRoundTrip()
 '   Title-bar control is the most WinAPI-sensitive part of the module and
 '   benefits from a dedicated regression case
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Reads and keeps the entry style of the Excel frame through the
+'     harness
+'   - Hides the title bar with UI_SetExcelUI, waits and asserts that it
+'     is not visible
+'   - Shows it with UI_SetExcelUI, waits and asserts that it is visible
+'   - Puts the entry style back through the harness on every exit
 '
 ' ERROR POLICY
 '   - Restores the entry style through the harness on every exit, never
@@ -2180,40 +2428,54 @@ Public Sub TST_Case_TitleBarRoundTrip()
 '   - Fails, with the restoration diagnostic, when the entry style cannot be
 '     written, refreshed and read back.
 '
-' UPDATED
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - TST_TryGetWindowStyle, TST_WaitUI, TST_AssertTitleBarVisible
+'   - TST_RestoreTitleBarStyle, TST_RecordCleanupFailure
+'
+' NOTES
+'   It exercises the live WinAPI hide and show path.
+'   TST_Case_TitleBarOwnedBitPreservation covers the merge policy with
+'   synthetic values.
+'
+' HISTORY
 '   2026-11-06 - Restored the entry style through the harness on every exit
 '                and failed when it could not (#66).
 '   2026-07-25
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
+
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarRoundTrip"
+
 #If VBA7 Then
-    Dim xlHnd               As LongPtr         'Frame active on entry
-    Dim EntryStyle          As LongPtr         'Style observed on entry
+    Dim xlHnd       As LongPtr  'Frame active on entry
+    Dim EntryStyle  As LongPtr  'Style observed on entry
 #Else
-    Dim xlHnd               As Long            'Frame active on entry
-    Dim EntryStyle          As Long            'Style observed on entry
+    Dim xlHnd       As Long 'Frame active on entry
+    Dim EntryStyle  As Long 'Style observed on entry
 #End If
 
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
-    Dim Msg                 As String          'Diagnostic from a harness helper
+    Dim StyleCaptured   As Boolean  'TRUE once EntryStyle is usable
+    Dim RestoreOK       As Boolean  'TRUE once the style is back
+    Dim RestoreMsg      As String   'Diagnostic from the restoration
+    Dim Msg             As String   'Diagnostic from a harness helper
 
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "TST_Case_TitleBarRoundTrip"
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", "Validating title-bar hide and show round-trip"
+        TST_Log PROC_NAME, "START", "Validating title-bar hide and show round-trip"
 
 '------------------------------------------------------------------------------
 ' CAPTURE ENTRY STYLE
@@ -2222,7 +2484,7 @@ Public Sub TST_Case_TitleBarRoundTrip()
         xlHnd = Application.hWnd
 
         If Not TST_TryGetWindowStyle(xlHnd, EntryStyle, Msg) Then
-            Err.Raise TEST_ERR_BASE + 82, PROC, _
+            Err.Raise TEST_ERR_BASE + 82, PROC_NAME, _
                 "could not read the entry window style | " & Msg
         End If
 
@@ -2253,9 +2515,9 @@ Public Sub TST_Case_TitleBarRoundTrip()
         TST_AssertTitleBarVisible True, "TitleBarRoundTrip.Show"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disable the handler first: Resume ended active handling but left it
     'enabled, and a re-raise through it would repeat this cleanup
         On Error GoTo 0
@@ -2265,35 +2527,34 @@ Safe_Exit:
             xlHnd, EntryStyle, StyleCaptured, RestoreMsg)
 
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
-            TST_Log PROC, "FAIL", FailSource & " | " & FailDescription
+            TST_Log PROC_NAME, "FAIL", FailSource & " | " & FailDescription
             Err.Raise FailNumber, FailSource, FailDescription
         End If
 
-        TST_Log PROC, "PASS", "Title-bar round-trip behaved as expected"
+        TST_Log PROC_NAME, "PASS", "Title-bar round-trip behaved as expected"
 
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TitleBarOwnedBitPreservation()
 
 '
-'==============================================================================
-' TST_Case_TitleBarOwnedBitPreservation
+'------------------------------------------------------------------------------
+'                        PRESERVE UNRELATED STYLE BITS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify deterministically that the production title-bar merge policy changes
@@ -2309,8 +2570,11 @@ Public Sub TST_Case_TitleBarOwnedBitPreservation()
 '   values, while TST_Case_TitleBarRoundTrip continues to exercise the live
 '   WinAPI hide/show path.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Verifies a show merge preserves every unrelated current-style bit.
@@ -2324,40 +2588,44 @@ Public Sub TST_Case_TitleBarOwnedBitPreservation()
 ' DEPENDENCIES
 '   - UI_InternalMergeTitleBarStyleBits
 '
+' NOTES
+'   It works on synthetic style values and writes no window style, so a
+'   host that normalises style bits cannot fail it.
+'
 ' UPDATED
 '   2026-07-29
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarOwnedBitPreservation"
+
 #If VBA7 Then
-    Dim CurrentStyle        As LongPtr
-    Dim RequestedOwned      As LongPtr
-    Dim ExpectedStyle       As LongPtr
-    Dim ActualStyle         As LongPtr
-    Dim UnrelatedMask       As LongPtr
+    Dim CurrentStyle    As LongPtr
+    Dim RequestedOwned  As LongPtr
+    Dim ExpectedStyle   As LongPtr
+    Dim ActualStyle     As LongPtr
+    Dim UnrelatedMask   As LongPtr
 #Else
-    Dim CurrentStyle        As Long
-    Dim RequestedOwned      As Long
-    Dim ExpectedStyle       As Long
-    Dim ActualStyle         As Long
-    Dim UnrelatedMask       As Long
+    Dim CurrentStyle    As Long
+    Dim RequestedOwned  As Long
+    Dim ExpectedStyle   As Long
+    Dim ActualStyle     As Long
+    Dim UnrelatedMask   As Long
 #End If
 
-    Dim FailNumber          As Long
-    Dim FailSource          As String
-    Dim FailDescription     As String
-
-    Const PROC As String = "TST_Case_TitleBarOwnedBitPreservation"
+    Dim FailNumber      As Long
+    Dim FailSource      As String
+    Dim FailDescription As String
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating deterministic title-bar style ownership"
 
         CurrentStyle = &H10345678
@@ -2378,7 +2646,7 @@ Public Sub TST_Case_TitleBarOwnedBitPreservation()
         If ActualStyle <> ExpectedStyle Then
             Err.Raise _
                 TEST_ERR_BASE + 50, _
-                PROC, _
+                PROC_NAME, _
                 "show merge returned an unexpected style"
         End If
 
@@ -2387,7 +2655,7 @@ Public Sub TST_Case_TitleBarOwnedBitPreservation()
 
             Err.Raise _
                 TEST_ERR_BASE + 51, _
-                PROC, _
+                PROC_NAME, _
                 "show merge changed unrelated current-style bits"
         End If
 
@@ -2401,7 +2669,7 @@ Public Sub TST_Case_TitleBarOwnedBitPreservation()
         If (ActualStyle And TST_TITLEBAR_OWNED_MASK) <> 0 Then
             Err.Raise _
                 TEST_ERR_BASE + 52, _
-                PROC, _
+                PROC_NAME, _
                 "hide merge did not clear every owned style bit"
         End If
 
@@ -2410,7 +2678,7 @@ Public Sub TST_Case_TitleBarOwnedBitPreservation()
 
             Err.Raise _
                 TEST_ERR_BASE + 53, _
-                PROC, _
+                PROC_NAME, _
                 "hide merge changed unrelated current-style bits"
         End If
 
@@ -2431,25 +2699,28 @@ Public Sub TST_Case_TitleBarOwnedBitPreservation()
 
             Err.Raise _
                 TEST_ERR_BASE + 54, _
-                PROC, _
+                PROC_NAME, _
                 "unrelated bits from OwnedStyleBits were not ignored"
         End If
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Unrelated bits preserved and owned bits merged correctly"
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description & _
             IIf(Erl <> 0, " | Line: " & CStr(Erl), vbNullString)
 
-        TST_Log PROC, "FAIL", _
+        TST_Log PROC_NAME, "FAIL", _
             CStr(FailNumber) & ": " & FailDescription & _
             IIf(Len(FailSource) > 0, " | Source: " & FailSource, vbNullString)
 
@@ -2460,11 +2731,11 @@ Err_Handler:
 
 End Sub
 
-
 Public Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
+
 '
-'==============================================================================
-' TST_Case_TitleBarShowRecoversWithoutBaseline
+'------------------------------------------------------------------------------
+'                        RECOVER SHOW WITHOUT BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a show request restores the title bar even when the title-bar
@@ -2492,7 +2763,7 @@ Public Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
 '   None.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Reads and retains the entry style so the frame can be restored exactly.
@@ -2521,9 +2792,6 @@ Public Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
 '   - UI_InternalResetTitleBarBaseline
 '   - UI_ShowExcelUI
 '
-' CALLED FROM
-'   - TST_RunTitleBarOnlyPack
-'
 ' NOTES
 '   Both halves of the precondition are established explicitly. The frame is
 '   hidden through the harness WinAPI helpers, which M_EXCEL_UI_TITLEBAR never
@@ -2536,51 +2804,57 @@ Public Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
 '   from a visible frame. The case is now deterministic regardless of ordering
 '   or of what ran earlier in the session.
 '
-' UPDATED
+' CALLED FROM
+'   - TST_RunTitleBarOnlyPack
+'
+' HISTORY
 '   2026-11-06 - Restored the entry style in one cleanup path with the
 '                handler disabled, and failed when it could not (#66).
 '   2026-08-18
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarShowRecoversWithoutBaseline"
+
 #If VBA7 Then
-    Dim xlHnd               As LongPtr         'Excel main-window handle
-    Dim EntryStyle          As LongPtr         'Style observed on entry
-    Dim HiddenStyle         As LongPtr         'Style with owned bits cleared
+    Dim xlHnd       As LongPtr  'Excel main-window handle
+    Dim EntryStyle  As LongPtr  'Style observed on entry
+    Dim HiddenStyle As LongPtr  'Style with owned bits cleared
 #Else
-    Dim xlHnd               As Long            'Excel main-window handle
-    Dim EntryStyle          As Long            'Style observed on entry
-    Dim HiddenStyle         As Long            'Style with owned bits cleared
+    Dim xlHnd       As Long 'Excel main-window handle
+    Dim EntryStyle  As Long 'Style observed on entry
+    Dim HiddenStyle As Long 'Style with owned bits cleared
 #End If
 
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
-    Dim FailMsg             As String          'Diagnostic from a WinAPI helper
-    Dim SavedErrNumber      As Long            'Captured assertion error number
-    Dim SavedErrSource      As String          'Captured assertion error source
-    Dim SavedErrDescription As String          'Captured assertion description
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
-
-    Const PROC As String = "TST_Case_TitleBarShowRecoversWithoutBaseline"
+    Dim StyleCaptured       As Boolean  'TRUE once EntryStyle is usable
+    Dim FailMsg             As String   'Diagnostic from a WinAPI helper
+    Dim SavedErrNumber      As Long     'Captured assertion error number
+    Dim SavedErrSource      As String   'Captured assertion error source
+    Dim SavedErrDescription As String   'Captured assertion description
+    Dim RestoreOK           As Boolean  'TRUE once the style is back
+    Dim RestoreMsg          As String   'Diagnostic from the restoration
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route assertion and runtime errors to the restoring handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Announce the case
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating title-bar show recovery without a captured baseline"
 
     'Resolve the Excel main-window handle
         xlHnd = Application.hWnd
 
         If xlHnd = 0 Then
-            Err.Raise TEST_ERR_BASE + 55, PROC, _
+            Err.Raise TEST_ERR_BASE + 55, PROC_NAME, _
                 "invalid Excel window handle"
         End If
 
@@ -2589,7 +2863,7 @@ Public Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
 '------------------------------------------------------------------------------
     'Retain the entry style so the frame can be restored exactly afterwards
         If Not TST_TryGetWindowStyle(xlHnd, EntryStyle, FailMsg) Then
-            Err.Raise TEST_ERR_BASE + 56, PROC, _
+            Err.Raise TEST_ERR_BASE + 56, PROC_NAME, _
                 "could not read the entry window style | " & FailMsg
         End If
 
@@ -2604,13 +2878,13 @@ Public Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
         HiddenStyle = EntryStyle And Not TST_TITLEBAR_OWNED_MASK
 
         If Not TST_TrySetWindowStyle(xlHnd, HiddenStyle, FailMsg) Then
-            Err.Raise TEST_ERR_BASE + 57, PROC, _
+            Err.Raise TEST_ERR_BASE + 57, PROC_NAME, _
                 "could not clear the owned title-bar style bits | " & FailMsg
         End If
 
     'Recalculate the non-client frame so the change is observable
         If Not TST_TryRefreshWindowFrame(xlHnd, FailMsg) Then
-            Err.Raise TEST_ERR_BASE + 58, PROC, _
+            Err.Raise TEST_ERR_BASE + 58, PROC_NAME, _
                 "could not refresh the non-client frame | " & FailMsg
         End If
 
@@ -2642,9 +2916,9 @@ Public Sub TST_Case_TitleBarShowRecoversWithoutBaseline()
         TST_AssertTitleBarVisible True, "TitleBarShowRecovery.Show"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disable the handler first: Resume ended active handling but left it
     'enabled, and a re-raise through it would repeat this cleanup
         On Error GoTo 0
@@ -2655,16 +2929,16 @@ Safe_Exit:
             xlHnd, EntryStyle, StyleCaptured, RestoreMsg)
 
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, _
+            RestoreOK, RestoreMsg, PROC_NAME, _
             SavedErrNumber, SavedErrSource, SavedErrDescription
 
     'Hand the failure, if any, to the pack handler
         If SavedErrNumber <> 0 Then
-            TST_Log PROC, "FAIL", SavedErrSource & " | " & SavedErrDescription
+            TST_Log PROC_NAME, "FAIL", SavedErrSource & " | " & SavedErrDescription
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Show restored the title bar with no captured baseline"
 
         Exit Sub
@@ -2672,22 +2946,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Retain the failure so it can be re-raised after the host is restored
         SavedErrNumber = Err.Number
         SavedErrSource = Err.Source
         SavedErrDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 
 '
-'==============================================================================
-' TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+'------------------------------------------------------------------------------
+'                       RESTORE CAPTURED FRAME UNDER SDI
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that restoring a snapshot writes the captured title-bar state to the
@@ -2703,8 +2976,11 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 '   untouched. A test that only checked the anchor window would have passed
 '   against the defective build.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Creates a second workbook window.
@@ -2722,65 +2998,87 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 '   - Fails, with the restoration diagnostic, when either entry style cannot
 '     be written, refreshed and read back.
 '
-' UPDATED
+' DEPENDENCIES
+'   - UI_SetExcelUI, UI_CaptureExcelUIState_WithResult
+'   - UI_ResetExcelUIToSnapshot_WithResult, UI_ClearExcelUIStateSnapshot
+'   - TST_TryGetWindowStyle, TST_TrySetWindowStyle
+'   - TST_TryRefreshWindowFrame, TST_FrameStyleOrRaise
+'   - TST_TitleBarVisibleForHwndOrRaise, TST_WaitUI
+'   - TST_AssertResultSuccess, TST_AssertSingleFailurePrefix
+'   - TST_AssertBooleanEquals, TST_AssertFrameUntouched
+'   - TST_RestoreTitleBarStyle, TST_RecordCleanupFailure
+'   - TST_SafeCloseWorkbook
+'
+' NOTES
+'   Raises at TEST_TITLEBAR_SDI_ERR_BASE + 11 when both workbook windows
+'   report the same top-level handle: a host that is not running the
+'   Single Document Interface cannot evaluate the case.
+'
+'   The Ribbon is not restored while the second window is active, so the
+'   restore is expected to report exactly one Ribbon failure (#23).
+'
+' HISTORY
 '   2026-11-06 - Restored both frames' entry styles through the harness and
 '                failed when it could not (#66).
 '   2026-11-06 - Hid the active frame before restore and compared its
 '                complete style (#45).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow        As Window          'Window whose frame is captured
-    Dim SecondWorkbook      As Workbook        'Temporary second workbook
-    Dim SecondWindow        As Window          'Window of the second workbook
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarSdiRestoreTargetsCapturedFrame"
+
+    Dim AnchorWindow    As Window   'Window whose frame is captured
+    Dim SecondWorkbook  As Workbook 'Temporary second workbook
+    Dim SecondWindow    As Window   'Window of the second workbook
 
 #If VBA7 Then
-    Dim AnchorHwnd          As LongPtr         'Top-level frame of the anchor
-    Dim SecondHwnd          As LongPtr         'Top-level frame of the second
-    Dim SecondEntryStyle    As LongPtr         'Second frame style on entry
-    Dim SecondFrameBefore   As LongPtr         'Second frame style before restore
-    Dim AnchorEntryStyle    As LongPtr         'Anchor frame style on entry
+    Dim AnchorHwnd          As LongPtr  'Top-level frame of the anchor
+    Dim SecondHwnd          As LongPtr  'Top-level frame of the second
+    Dim SecondEntryStyle    As LongPtr  'Second frame style on entry
+    Dim SecondFrameBefore   As LongPtr  'Second frame style before restore
+    Dim AnchorEntryStyle    As LongPtr  'Anchor frame style on entry
 #Else
-    Dim AnchorHwnd          As Long            'Top-level frame of the anchor
-    Dim SecondHwnd          As Long            'Top-level frame of the second
-    Dim SecondEntryStyle    As Long            'Second frame style on entry
-    Dim SecondFrameBefore   As Long            'Second frame style before restore
-    Dim AnchorEntryStyle    As Long            'Anchor frame style on entry
+    Dim AnchorHwnd          As Long 'Top-level frame of the anchor
+    Dim SecondHwnd          As Long 'Top-level frame of the second
+    Dim SecondEntryStyle    As Long 'Second frame style on entry
+    Dim SecondFrameBefore   As Long 'Second frame style before restore
+    Dim AnchorEntryStyle    As Long 'Anchor frame style on entry
 #End If
 
-    Dim SecondCaptured      As Boolean         'TRUE once SecondEntryStyle was read
-    Dim AnchorCaptured      As Boolean         'TRUE once AnchorEntryStyle was read
-    Dim SecondRestored      As Boolean         'TRUE once the second frame is back
-    Dim AnchorRestored      As Boolean         'TRUE once the anchor frame is back
-    Dim SecondRestoreMsg    As String          'Diagnostic from its restoration
-    Dim AnchorRestoreMsg    As String          'Diagnostic from its restoration
-    Dim Msg                 As String          'Diagnostic from a harness helper
+    Dim SecondCaptured      As Boolean  'TRUE once SecondEntryStyle was read
+    Dim AnchorCaptured      As Boolean  'TRUE once AnchorEntryStyle was read
+    Dim SecondRestored      As Boolean  'TRUE once the second frame is back
+    Dim AnchorRestored      As Boolean  'TRUE once the anchor frame is back
+    Dim SecondRestoreMsg    As String   'Diagnostic from its restoration
+    Dim AnchorRestoreMsg    As String   'Diagnostic from its restoration
+    Dim Msg                 As String   'Diagnostic from a harness helper
 
-    Dim SecondVisibleBefore As Boolean         'Second frame state before restore
-    Dim SecondVisibleAfter  As Boolean         'Second frame state after restore
-    Dim AnchorVisibleAfter  As Boolean         'Anchor frame state after restore
+    Dim SecondVisibleBefore As Boolean  'Second frame state before restore
+    Dim SecondVisibleAfter  As Boolean  'Second frame state after restore
+    Dim AnchorVisibleAfter  As Boolean  'Anchor frame state after restore
 
-    Dim OK                  As Boolean         'Structured result flag
-    Dim FailureCount        As Long            'Structured result failure count
-    Dim FailureList         As Variant         'Structured result failure list
+    Dim OK              As Boolean  'Structured result flag
+    Dim FailureCount    As Long     'Structured result failure count
+    Dim FailureList     As Variant  'Structured result failure list
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "TST_Case_TitleBarSdiRestoreTargetsCapturedFrame"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that restore targets the captured frame under SDI"
 
 '------------------------------------------------------------------------------
@@ -2792,7 +3090,7 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
         If AnchorWindow Is Nothing Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 10, _
-                PROC, _
+                PROC_NAME, _
                 "no active Excel window is available"
         End If
 
@@ -2803,7 +3101,7 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
         If Not TST_TryGetWindowStyle(AnchorHwnd, AnchorEntryStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 15, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the anchor window style | " & Msg
         End If
 
@@ -2816,7 +3114,7 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
         If Application.hWnd <> AnchorHwnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 16, _
-                PROC, _
+                PROC_NAME, _
                 "the anchor Window and Application.hWnd do not agree; the " & _
                 "case cannot be evaluated"
         End If
@@ -2836,7 +3134,7 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
         If SecondHwnd = AnchorHwnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 11, _
-                PROC, _
+                PROC_NAME, _
                 "both workbook windows report the same top-level handle; " & _
                 "this host is not running the Single Document Interface " & _
                 "and the case cannot be evaluated"
@@ -2865,7 +3163,7 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 
         TST_AssertBooleanEquals _
             False, _
-            TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC), _
+            TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC_NAME), _
             "SdiRestoreTargetsCapturedFrame.AnchorHiddenBeforeRestore"
 
 '------------------------------------------------------------------------------
@@ -2881,7 +3179,7 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
         If Not TST_TryGetWindowStyle(SecondHwnd, SecondEntryStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 12, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the second window style | " & Msg
         End If
 
@@ -2894,22 +3192,22 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 13, _
-                PROC, _
+                PROC_NAME, _
                 "unable to hide the second frame | " & Msg
         End If
 
         If Not TST_TryRefreshWindowFrame(SecondHwnd, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 14, _
-                PROC, _
+                PROC_NAME, _
                 "unable to refresh the second frame | " & Msg
         End If
 
         TST_WaitUI TEST_WAIT_SECONDS
 
     'Record the second frame exactly as it stands before restoration
-        SecondFrameBefore = TST_FrameStyleOrRaise(SecondHwnd, PROC)
-        SecondVisibleBefore = TST_TitleBarVisibleForHwndOrRaise(SecondHwnd, PROC)
+        SecondFrameBefore = TST_FrameStyleOrRaise(SecondHwnd, PROC_NAME)
+        SecondVisibleBefore = TST_TitleBarVisibleForHwndOrRaise(SecondHwnd, PROC_NAME)
 
         TST_AssertBooleanEquals _
             False, _
@@ -2941,7 +3239,7 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 ' ASSERT THE CAPTURED FRAME WAS RESTORED
 '------------------------------------------------------------------------------
     'The anchor frame must be visible again, even though it was not active
-        AnchorVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
+        AnchorVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC_NAME)
 
         TST_AssertBooleanEquals _
             True, _
@@ -2953,7 +3251,7 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 '------------------------------------------------------------------------------
     'This is the assertion the defective build failed: the active window must
     'not receive another window's captured state
-        SecondVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(SecondHwnd, PROC)
+        SecondVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(SecondHwnd, PROC_NAME)
 
         TST_AssertBooleanEquals _
             SecondVisibleBefore, _
@@ -2969,35 +3267,35 @@ Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Captured frame restored; the active frame was left unchanged"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Release the snapshot, put both frames back through the harness and close
     'the temporary workbook before leaving
         On Error Resume Next
-            UI_ClearExcelUIStateSnapshot
-            SecondRestored = TST_RestoreTitleBarStyle( _
-                SecondHwnd, SecondEntryStyle, SecondCaptured, SecondRestoreMsg)
-            TST_SafeCloseWorkbook SecondWorkbook
+        UI_ClearExcelUIStateSnapshot
+        SecondRestored = TST_RestoreTitleBarStyle( _
+            SecondHwnd, SecondEntryStyle, SecondCaptured, SecondRestoreMsg)
+        TST_SafeCloseWorkbook SecondWorkbook
 
-            If Not AnchorWindow Is Nothing Then
-                AnchorWindow.Activate
-            End If
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.Activate
+        End If
 
-            AnchorRestored = TST_RestoreTitleBarStyle( _
-                AnchorHwnd, AnchorEntryStyle, AnchorCaptured, AnchorRestoreMsg)
+        AnchorRestored = TST_RestoreTitleBarStyle( _
+            AnchorHwnd, AnchorEntryStyle, AnchorCaptured, AnchorRestoreMsg)
         On Error GoTo 0
 
     'A frame that cannot be put back fails the case, after any earlier failure
         TST_RecordCleanupFailure _
-            AnchorRestored, AnchorRestoreMsg, PROC, _
+            AnchorRestored, AnchorRestoreMsg, PROC_NAME, _
             FailNumber, FailSource, FailDescription
         TST_RecordCleanupFailure _
-            SecondRestored, SecondRestoreMsg, PROC & ".Second", _
+            SecondRestored, SecondRestoreMsg, PROC_NAME & ".Second", _
             FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
@@ -3014,22 +3312,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
 
 '
-'==============================================================================
-' TST_Case_TitleBarCapturedFrameClosedIsReported
+'------------------------------------------------------------------------------
+'                         REPORT CLOSED CAPTURED FRAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that restoring a snapshot whose captured title-bar window has since
@@ -3042,8 +3339,11 @@ Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
 '
 '   The surviving window's frame is asserted unchanged for exactly that reason.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Creates a second workbook and captures with its window active.
@@ -3056,6 +3356,14 @@ Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
 ' ERROR POLICY
 '   - Raises after best-effort cleanup of the temporary workbook.
 '
+' DEPENDENCIES
+'   - UI_SetExcelUI, UI_CaptureExcelUIState_WithResult
+'   - UI_ResetExcelUIToSnapshot_WithResult, UI_ClearExcelUIStateSnapshot
+'   - TST_TitleBarVisibleForHwndOrRaise, TST_FrameStyleOrRaise
+'   - TST_AssertResultSuccess, TST_AssertFailureListContainsPrefix
+'   - TST_AssertBooleanEquals, TST_AssertFrameUntouched
+'   - TST_SafeCloseWorkbook, TST_WaitUI
+'
 ' NOTES
 '   Closing the captured window also invalidates its captured Window entry, so
 '   the structured result legitimately carries more than one failure. The
@@ -3067,48 +3375,51 @@ Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
 '   TST_Case_TitleBarClosedFrameReopenedIsRefused, hides the frame that is
 '   active at restore time to make that write observable.
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Activated the survivor before restore and compared its
 '                complete style (#45).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow        As Window          'Window that survives the case
-    Dim DoomedWorkbook      As Workbook        'Temporary workbook to be closed
-    Dim DoomedWindow        As Window          'Window whose frame is captured
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarCapturedFrameClosedIsReported"
+
+    Dim AnchorWindow    As Window   'Window that survives the case
+    Dim DoomedWorkbook  As Workbook 'Temporary workbook to be closed
+    Dim DoomedWindow    As Window   'Window whose frame is captured
 
 #If VBA7 Then
-    Dim AnchorHwnd          As LongPtr         'Top-level frame of the anchor
-    Dim AnchorFrameBefore   As LongPtr         'Anchor style before restore
+    Dim AnchorHwnd          As LongPtr  'Top-level frame of the anchor
+    Dim AnchorFrameBefore   As LongPtr  'Anchor style before restore
 #Else
-    Dim AnchorHwnd          As Long            'Top-level frame of the anchor
-    Dim AnchorFrameBefore   As Long            'Anchor style before restore
+    Dim AnchorHwnd          As Long 'Top-level frame of the anchor
+    Dim AnchorFrameBefore   As Long 'Anchor style before restore
 #End If
 
-    Dim AnchorVisibleBefore As Boolean         'Anchor frame before restore
-    Dim AnchorVisibleAfter  As Boolean         'Anchor frame after restore
+    Dim AnchorVisibleBefore As Boolean  'Anchor frame before restore
+    Dim AnchorVisibleAfter  As Boolean  'Anchor frame after restore
 
-    Dim OK                  As Boolean         'Structured result flag
-    Dim FailureCount        As Long            'Structured result failure count
-    Dim FailureList         As Variant         'Structured result failure list
+    Dim OK              As Boolean  'Structured result flag
+    Dim FailureCount    As Long     'Structured result failure count
+    Dim FailureList     As Variant  'Structured result failure list
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "TST_Case_TitleBarCapturedFrameClosedIsReported"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a closed captured frame is reported"
 
 '------------------------------------------------------------------------------
@@ -3120,7 +3431,7 @@ Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
         If AnchorWindow Is Nothing Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 20, _
-                PROC, _
+                PROC_NAME, _
                 "no active Excel window is available"
         End If
 
@@ -3161,8 +3472,8 @@ Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
         TST_WaitUI TEST_WAIT_SECONDS
 
     'Record the surviving frame exactly as it stands before restoration
-        AnchorVisibleBefore = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
-        AnchorFrameBefore = TST_FrameStyleOrRaise(AnchorHwnd, PROC)
+        AnchorVisibleBefore = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC_NAME)
+        AnchorFrameBefore = TST_FrameStyleOrRaise(AnchorHwnd, PROC_NAME)
 
 '------------------------------------------------------------------------------
 ' RESTORE
@@ -3189,7 +3500,7 @@ Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
 ' ASSERT THE SURVIVING FRAME WAS NOT TOUCHED
 '------------------------------------------------------------------------------
     'Nothing may be written when the captured frame cannot be proven present
-        AnchorVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC)
+        AnchorVisibleAfter = TST_TitleBarVisibleForHwndOrRaise(AnchorHwnd, PROC_NAME)
 
         TST_AssertBooleanEquals _
             AnchorVisibleBefore, _
@@ -3204,21 +3515,21 @@ Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Closed captured frame was reported and no state was applied"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Release the snapshot and any surviving temporary workbook
         On Error Resume Next
-            UI_ClearExcelUIStateSnapshot
-            TST_SafeCloseWorkbook DoomedWorkbook
+        UI_ClearExcelUIStateSnapshot
+        TST_SafeCloseWorkbook DoomedWorkbook
 
-            If Not AnchorWindow Is Nothing Then
-                AnchorWindow.Activate
-            End If
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.Activate
+        End If
         On Error GoTo 0
 
     'Raise the captured failure after cleanup when needed
@@ -3231,22 +3542,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 
 '
-'==============================================================================
-' TST_Case_TitleBarPairRefusalLeavesFrameUntouched
+'------------------------------------------------------------------------------
+'                          KEEP FRAME ON REFUSED PAIR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a refused active-frame pair leaves the active frame exactly as
@@ -3260,8 +3570,11 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 '   instead, and compares the active frame's complete GWL_STYLE before and
 '   after each refused call (#45).
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   1  UI_SetExcelUI_WithResult      the title-bar request is refused with one
@@ -3296,9 +3609,6 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 '   - TST_AssertSingleFailurePrefix
 '   - TST_RestoreTitleBarStyle
 '
-' CALLED FROM
-'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
-'
 ' NOTES
 '   The seam is consumed by the first pair resolution, so it is armed
 '   immediately before each call and disarmed immediately after it. Nothing in
@@ -3313,54 +3623,58 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 '   assert that neither is written. The restore result is logged, not
 '   asserted: what this case asserts is that nothing reached the frame.
 '
+' CALLED FROM
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow        As Window          'Window active on entry
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarPairRefusalLeavesFrameUntouched"
+
+    Dim AnchorWindow    As Window   'Window active on entry
 
 #If VBA7 Then
-    Dim TargetHwnd          As LongPtr         'Frame of the active window
-    Dim EntryStyle          As LongPtr         'Style observed on entry
-    Dim InvertedStyle       As LongPtr         'Entry style, owned bits inverted
-    Dim FrameBefore         As LongPtr         'Style before each refused call
+    Dim TargetHwnd      As LongPtr  'Frame of the active window
+    Dim EntryStyle      As LongPtr  'Style observed on entry
+    Dim InvertedStyle   As LongPtr  'Entry style, owned bits inverted
+    Dim FrameBefore     As LongPtr  'Style before each refused call
 #Else
-    Dim TargetHwnd          As Long            'Frame of the active window
-    Dim EntryStyle          As Long            'Style observed on entry
-    Dim InvertedStyle       As Long            'Entry style, owned bits inverted
-    Dim FrameBefore         As Long            'Style before each refused call
+    Dim TargetHwnd      As Long 'Frame of the active window
+    Dim EntryStyle      As Long 'Style observed on entry
+    Dim InvertedStyle   As Long 'Entry style, owned bits inverted
+    Dim FrameBefore     As Long 'Style before each refused call
 #End If
 
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
-    Dim WrongfulMode        As UIVisibility    'Request a write would act on
-    Dim CreatedSnapshot     As Boolean         'TRUE once this case owns one
-    Dim Msg                 As String          'Diagnostic from a harness helper
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
+    Dim StyleCaptured   As Boolean      'TRUE once EntryStyle is usable
+    Dim WrongfulMode    As UIVisibility 'Request a write would act on
+    Dim CreatedSnapshot As Boolean      'TRUE once this case owns one
+    Dim Msg             As String       'Diagnostic from a harness helper
+    Dim RestoreOK       As Boolean      'TRUE once the style is back
+    Dim RestoreMsg      As String       'Diagnostic from the restoration
 
-    Dim OK                  As Boolean         'Structured result flag
-    Dim FailureCount        As Long            'Structured result failure count
-    Dim FailureList         As Variant         'Structured result failure list
+    Dim OK              As Boolean  'Structured result flag
+    Dim FailureCount    As Long     'Structured result failure count
+    Dim FailureList     As Variant  'Structured result failure list
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
-    Const PROC As String = "TST_Case_TitleBarPairRefusalLeavesFrameUntouched"
     Const PAIR_REFUSAL As String = _
         "TitleBar | the active Excel Window is not the active native frame"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a refused frame pair writes nothing"
 
         UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
@@ -3373,7 +3687,7 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
         If AnchorWindow Is Nothing Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 130, _
-                PROC, _
+                PROC_NAME, _
                 "no active Excel window is available"
         End If
 
@@ -3384,7 +3698,7 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
         If TargetHwnd = 0 Or TargetHwnd <> Application.hWnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 131, _
-                PROC, _
+                PROC_NAME, _
                 "the active Window and Application.hWnd do not agree before " & _
                 "the seam is armed; the case cannot be evaluated"
         End If
@@ -3393,7 +3707,7 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
         If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 132, _
-                PROC, _
+                PROC_NAME, _
                 "could not read the entry window style | " & Msg
         End If
 
@@ -3409,7 +3723,7 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 '------------------------------------------------------------------------------
 ' BRANCH 1 - THE STRUCTURED SETTER REFUSES AND WRITES NOTHING
 '------------------------------------------------------------------------------
-        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC)
+        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC_NAME)
 
         FailureCount = 99
         FailureList = Array("stale set failure")
@@ -3430,17 +3744,17 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
             FailureCount:=FailureCount, _
             FailureList:=FailureList, _
             ExpectedPrefix:=PAIR_REFUSAL, _
-            AssertionName:=PROC & ".Set.Refused"
+            AssertionName:=PROC_NAME & ".Set.Refused"
 
         TST_AssertFrameUntouched _
             TargetHwnd, _
             FrameBefore, _
-            PROC & ".Set.FrameUntouched"
+            PROC_NAME & ".Set.FrameUntouched"
 
 '------------------------------------------------------------------------------
 ' BRANCH 2 - THE FIRE-AND-FORGET SETTER REFUSES AND WRITES NOTHING
 '------------------------------------------------------------------------------
-        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC)
+        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC_NAME)
 
         UI_InternalInjectFramePairFault TEST_PAIR_FAULT_MISMATCH
 
@@ -3453,12 +3767,12 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
         TST_AssertFrameUntouched _
             TargetHwnd, _
             FrameBefore, _
-            PROC & ".FireAndForget.FrameUntouched"
+            PROC_NAME & ".FireAndForget.FrameUntouched"
 
 '------------------------------------------------------------------------------
 ' BRANCH 3 - CAPTURE REFUSES THE TITLE BAR AND WRITES NOTHING
 '------------------------------------------------------------------------------
-        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC)
+        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC_NAME)
 
         FailureCount = 99
         FailureList = Array("stale capture failure")
@@ -3479,21 +3793,21 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
             FailureCount:=FailureCount, _
             FailureList:=FailureList, _
             ExpectedPrefix:=PAIR_REFUSAL, _
-            AssertionName:=PROC & ".Capture.Refused"
+            AssertionName:=PROC_NAME & ".Capture.Refused"
 
         TST_AssertTrue _
             ActualValue:=CreatedSnapshot, _
-            AssertionName:=PROC & ".Capture.SnapshotAvailable"
+            AssertionName:=PROC_NAME & ".Capture.SnapshotAvailable"
 
         TST_AssertFrameUntouched _
             TargetHwnd, _
             FrameBefore, _
-            PROC & ".Capture.FrameUntouched"
+            PROC_NAME & ".Capture.FrameUntouched"
 
 '------------------------------------------------------------------------------
 ' BRANCH 4 - RESTORE WRITES NOTHING TO THE FRAME AS IT WAS ON ENTRY
 '------------------------------------------------------------------------------
-        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC)
+        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC_NAME)
 
         FailureCount = 99
         FailureList = Array("stale restore failure")
@@ -3504,14 +3818,14 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 
         TST_WaitUI TEST_WAIT_SECONDS
 
-        TST_Log PROC, "OBSERVED", _
+        TST_Log PROC_NAME, "OBSERVED", _
             "Restore.EntryFrame | OK=" & CStr(OK) & _
             " | FailureCount=" & CStr(FailureCount)
 
         TST_AssertFrameUntouched _
             TargetHwnd, _
             FrameBefore, _
-            PROC & ".RestoreEntryFrame.FrameUntouched"
+            PROC_NAME & ".RestoreEntryFrame.FrameUntouched"
 
 '------------------------------------------------------------------------------
 ' BRANCH 5 - RESTORE WRITES NOTHING TO THE FRAME IN THE OPPOSITE STATE
@@ -3530,26 +3844,26 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
         If Not TST_TrySetWindowStyle(TargetHwnd, InvertedStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 133, _
-                PROC, _
+                PROC_NAME, _
                 "could not invert the owned title-bar style bits | " & Msg
         End If
 
         If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 134, _
-                PROC, _
+                PROC_NAME, _
                 "could not refresh the inverted frame | " & Msg
         End If
 
         TST_WaitUI TEST_WAIT_SECONDS
 
-        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC)
+        FrameBefore = TST_FrameStyleOrRaise(TargetHwnd, PROC_NAME)
 
     'A frame Windows refused to invert would make this branch prove nothing
         TST_AssertBooleanEquals _
             Not TST_StyleHasCompleteCaption(EntryStyle), _
             TST_StyleHasCompleteCaption(FrameBefore), _
-            PROC & ".RestoreInvertedFrame.Precondition"
+            PROC_NAME & ".RestoreInvertedFrame.Precondition"
 
         FailureCount = 99
         FailureList = Array("stale restore failure")
@@ -3560,46 +3874,46 @@ Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 
         TST_WaitUI TEST_WAIT_SECONDS
 
-        TST_Log PROC, "OBSERVED", _
+        TST_Log PROC_NAME, "OBSERVED", _
             "Restore.InvertedFrame | OK=" & CStr(OK) & _
             " | FailureCount=" & CStr(FailureCount)
 
         TST_AssertFrameUntouched _
             TargetHwnd, _
             FrameBefore, _
-            PROC & ".RestoreInvertedFrame.FrameUntouched"
+            PROC_NAME & ".RestoreInvertedFrame.FrameUntouched"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "A refused frame pair wrote nothing through the setters, capture " & _
             "or restore"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disarm the seam, release the snapshot this case created and put the frame
     'back through the harness, whatever happened above
         On Error Resume Next
-            UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
+        UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
 
-            If CreatedSnapshot Then
-                UI_ClearExcelUIStateSnapshot
-            End If
+        If CreatedSnapshot Then
+            UI_ClearExcelUIStateSnapshot
+        End If
 
-            RestoreOK = TST_RestoreTitleBarStyle( _
-                TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
+        RestoreOK = TST_RestoreTitleBarStyle( _
+            TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
 
-            If Not AnchorWindow Is Nothing Then
-                AnchorWindow.Activate
-            End If
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.Activate
+        End If
         On Error GoTo 0
 
     'A frame that cannot be put back fails the case, after any earlier failure
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
             HasFailure = True
@@ -3615,22 +3929,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 
 '
-'==============================================================================
-' TST_Case_TitleBarClosedFrameReopenedIsRefused
+'------------------------------------------------------------------------------
+'                        REFUSE REOPENED CAPTURED FRAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that restoring a snapshot whose captured frame was closed, after a
@@ -3648,8 +3961,11 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 '   before restore, so a restore of the captured visible state onto it would
 '   be observable.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Captures with a temporary window active and its frame visible.
@@ -3677,9 +3993,6 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 '   - TST_AssertFailureListContainsPrefix
 '   - TST_RestoreTitleBarStyle
 '
-' CALLED FROM
-'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
-'
 ' NOTES
 '   A reissued handle cannot be forced on demand. When it does not occur, the
 '   restore is refused by the liveness check; when it does, by the retained
@@ -3689,59 +4002,62 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 '   Window entry, so the result carries more than one failure. The assertion
 '   looks for the TitleBar entry within the list.
 '
+' CALLED FROM
+'   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim AnchorWindow        As Window          'Window that survives the case
-    Dim DoomedWorkbook      As Workbook        'Workbook whose frame is captured
-    Dim DoomedWindow        As Window          'Window whose frame is captured
-    Dim ReplacementWorkbook As Workbook        'Workbook opened after the close
-    Dim ReplacementWindow   As Window          'Window active at restore time
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarClosedFrameReopenedIsRefused"
+
+    Dim AnchorWindow        As Window   'Window that survives the case
+    Dim DoomedWorkbook      As Workbook 'Workbook whose frame is captured
+    Dim DoomedWindow        As Window   'Window whose frame is captured
+    Dim ReplacementWorkbook As Workbook 'Workbook opened after the close
+    Dim ReplacementWindow   As Window   'Window active at restore time
 
 #If VBA7 Then
-    Dim AnchorHwnd          As LongPtr         'Frame of the surviving window
-    Dim DoomedHwnd          As LongPtr         'Captured frame, closed later
-    Dim ReplacementHwnd     As LongPtr         'Frame of the replacement
-    Dim ReplacementEntryStyle As LongPtr         'Replacement style on entry
-    Dim ReplacementFrameBefore As LongPtr         'Replacement style before restore
-    Dim AnchorFrameBefore   As LongPtr         'Survivor style before restore
+    Dim AnchorHwnd              As LongPtr  'Frame of the surviving window
+    Dim DoomedHwnd              As LongPtr  'Captured frame, closed later
+    Dim ReplacementHwnd         As LongPtr  'Frame of the replacement
+    Dim ReplacementEntryStyle   As LongPtr  'Replacement style on entry
+    Dim ReplacementFrameBefore  As LongPtr  'Replacement style before restore
+    Dim AnchorFrameBefore       As LongPtr  'Survivor style before restore
 #Else
-    Dim AnchorHwnd          As Long            'Frame of the surviving window
-    Dim DoomedHwnd          As Long            'Captured frame, closed later
-    Dim ReplacementHwnd     As Long            'Frame of the replacement
-    Dim ReplacementEntryStyle As Long            'Replacement style on entry
-    Dim ReplacementFrameBefore As Long            'Replacement style before restore
-    Dim AnchorFrameBefore   As Long            'Survivor style before restore
+    Dim AnchorHwnd              As Long 'Frame of the surviving window
+    Dim DoomedHwnd              As Long 'Captured frame, closed later
+    Dim ReplacementHwnd         As Long 'Frame of the replacement
+    Dim ReplacementEntryStyle   As Long 'Replacement style on entry
+    Dim ReplacementFrameBefore  As Long 'Replacement style before restore
+    Dim AnchorFrameBefore       As Long 'Survivor style before restore
 #End If
 
-    Dim ReplacementCaptured As Boolean         'TRUE once its entry style was read
-    Dim ReplacementRestored As Boolean         'TRUE once its entry style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
-    Dim CreatedSnapshot     As Boolean         'TRUE once this case owns one
-    Dim Msg                 As String          'Diagnostic from a harness helper
+    Dim ReplacementCaptured As Boolean  'TRUE once its entry style was read
+    Dim ReplacementRestored As Boolean  'TRUE once its entry style is back
+    Dim RestoreMsg          As String   'Diagnostic from the restoration
+    Dim CreatedSnapshot     As Boolean  'TRUE once this case owns one
+    Dim Msg                 As String   'Diagnostic from a harness helper
 
-    Dim OK                  As Boolean         'Structured result flag
-    Dim FailureCount        As Long            'Structured result failure count
-    Dim FailureList         As Variant         'Structured result failure list
+    Dim OK              As Boolean  'Structured result flag
+    Dim FailureCount    As Long     'Structured result failure count
+    Dim FailureList     As Variant  'Structured result failure list
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "TST_Case_TitleBarClosedFrameReopenedIsRefused"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a closed and reopened captured frame is refused"
 
 '------------------------------------------------------------------------------
@@ -3752,7 +4068,7 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
         If AnchorWindow Is Nothing Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 140, _
-                PROC, _
+                PROC_NAME, _
                 "no active Excel window is available"
         End If
 
@@ -3771,7 +4087,7 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
         If DoomedHwnd = AnchorHwnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 141, _
-                PROC, _
+                PROC_NAME, _
                 "both workbook windows report the same top-level handle; " & _
                 "this host is not running the Single Document Interface " & _
                 "and the case cannot be evaluated"
@@ -3781,7 +4097,7 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
     'replacement below would be observable
         TST_AssertBooleanEquals _
             True, _
-            TST_TitleBarVisibleForHwndOrRaise(DoomedHwnd, PROC), _
+            TST_TitleBarVisibleForHwndOrRaise(DoomedHwnd, PROC_NAME), _
             "ClosedFrameReopened.CapturedFrameVisible"
 
         FailureCount = 99
@@ -3814,7 +4130,7 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
         ReplacementHwnd = ReplacementWindow.hWnd
 
     'Record which refusal this run can reach; a reused handle cannot be forced
-        TST_Log PROC, "OBSERVED", _
+        TST_Log PROC_NAME, "OBSERVED", _
             "closed hWnd=" & CStr(DoomedHwnd) & _
             " | replacement hWnd=" & CStr(ReplacementHwnd) & _
             " | handle reused=" & CStr(ReplacementHwnd = DoomedHwnd)
@@ -3827,7 +4143,7 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 142, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the replacement window style | " & Msg
         End If
 
@@ -3840,22 +4156,22 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 143, _
-                PROC, _
+                PROC_NAME, _
                 "unable to hide the replacement frame | " & Msg
         End If
 
         If Not TST_TryRefreshWindowFrame(ReplacementHwnd, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 144, _
-                PROC, _
+                PROC_NAME, _
                 "unable to refresh the replacement frame | " & Msg
         End If
 
         TST_WaitUI TEST_WAIT_SECONDS
 
     'Record both frames exactly as they stand before restoration
-        ReplacementFrameBefore = TST_FrameStyleOrRaise(ReplacementHwnd, PROC)
-        AnchorFrameBefore = TST_FrameStyleOrRaise(AnchorHwnd, PROC)
+        ReplacementFrameBefore = TST_FrameStyleOrRaise(ReplacementHwnd, PROC_NAME)
+        AnchorFrameBefore = TST_FrameStyleOrRaise(AnchorHwnd, PROC_NAME)
 
         TST_AssertBooleanEquals _
             False, _
@@ -3898,36 +4214,36 @@ Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "A closed and reopened captured frame was refused and no frame " & _
             "was written"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Release the snapshot this case created, put the replacement frame back
     'and close the temporary workbooks
         On Error Resume Next
-            If CreatedSnapshot Then
-                UI_ClearExcelUIStateSnapshot
-            End If
+        If CreatedSnapshot Then
+            UI_ClearExcelUIStateSnapshot
+        End If
 
-            ReplacementRestored = TST_RestoreTitleBarStyle( _
-                ReplacementHwnd, ReplacementEntryStyle, ReplacementCaptured, _
-                RestoreMsg)
+        ReplacementRestored = TST_RestoreTitleBarStyle( _
+            ReplacementHwnd, ReplacementEntryStyle, ReplacementCaptured, _
+            RestoreMsg)
 
-            TST_SafeCloseWorkbook ReplacementWorkbook
-            TST_SafeCloseWorkbook DoomedWorkbook
+        TST_SafeCloseWorkbook ReplacementWorkbook
+        TST_SafeCloseWorkbook DoomedWorkbook
 
-            If Not AnchorWindow Is Nothing Then
-                AnchorWindow.Activate
-            End If
+        If Not AnchorWindow Is Nothing Then
+            AnchorWindow.Activate
+        End If
         On Error GoTo 0
 
     'A frame that cannot be put back fails the case, after any earlier failure
         TST_RecordCleanupFailure _
-            ReplacementRestored, RestoreMsg, PROC, _
+            ReplacementRestored, RestoreMsg, PROC_NAME, _
             FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
@@ -3944,22 +4260,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TitleBarFrameRefreshDebtRetried()
 
 '
-'==============================================================================
-' TST_Case_TitleBarFrameRefreshDebtRetried
+'------------------------------------------------------------------------------
+'                          RETRY FAILED FRAME REFRESH
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a style write whose frame refresh failed is recorded as owed and
@@ -3973,8 +4288,11 @@ Public Sub TST_Case_TitleBarFrameRefreshDebtRetried()
 '   seam: without it this case could only assert that the second call succeeded,
 '   which it would also do if the debt had simply been forgotten.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Clears the frame-state registry so the case starts from a known state.
@@ -3989,51 +4307,62 @@ Public Sub TST_Case_TitleBarFrameRefreshDebtRetried()
 '   - Fails, with the restoration diagnostic, when the entry style cannot be
 '     written, refreshed and read back.
 '
+' DEPENDENCIES
+'   - UI_SetExcelUI, UI_InternalResetTitleBarBaseline
+'   - UI_InternalInjectFrameRefreshFailure
+'   - UI_TrySetTitleBarVisibleForHwndIfNeeded
+'   - UI_InternalIsFrameRefreshPending
+'   - TST_TryGetWindowStyle, TST_WaitUI, TST_AssertBooleanEquals
+'   - TST_RestoreTitleBarStyle, TST_RecordCleanupFailure
+'
 ' NOTES
 '   Uses the internal seams UI_InternalInjectFrameRefreshFailure and
 '   UI_InternalIsFrameRefreshPending. They are Public only for same-project
 '   regression access; Option Private Module keeps them out of the external
 '   automation namespace.
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Captured the entry style before the case changes anything
 '                and restored it through the harness instead of the API
 '                under test (#66).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarFrameRefreshDebtRetried"
+
 #If VBA7 Then
-    Dim TargetHwnd          As LongPtr         'Frame under test
-    Dim EntryStyle          As LongPtr         'Style to restore on the way out
+    Dim TargetHwnd  As LongPtr  'Frame under test
+    Dim EntryStyle  As LongPtr  'Style to restore on the way out
 #Else
-    Dim TargetHwnd          As Long            'Frame under test
-    Dim EntryStyle          As Long            'Style to restore on the way out
+    Dim TargetHwnd  As Long 'Frame under test
+    Dim EntryStyle  As Long 'Style to restore on the way out
 #End If
 
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle was read
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
-    Dim FirstAttemptOK      As Boolean         'Result of the injected-failure call
-    Dim SecondAttemptOK     As Boolean         'Result of the retry call
-    Dim Msg                 As String          'Diagnostic buffer
+    Dim StyleCaptured   As Boolean  'TRUE once EntryStyle was read
+    Dim RestoreOK       As Boolean  'TRUE once the style is back
+    Dim RestoreMsg      As String   'Diagnostic from the restoration
+    Dim FirstAttemptOK  As Boolean  'Result of the injected-failure call
+    Dim SecondAttemptOK As Boolean  'Result of the retry call
+    Dim Msg             As String   'Diagnostic buffer
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "TST_Case_TitleBarFrameRefreshDebtRetried"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a failed frame refresh is retried"
 
 '------------------------------------------------------------------------------
@@ -4044,7 +4373,7 @@ Public Sub TST_Case_TitleBarFrameRefreshDebtRetried()
         If TargetHwnd = 0 Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 30, _
-                PROC, _
+                PROC_NAME, _
                 "no Excel window handle is available"
         End If
 
@@ -4053,7 +4382,7 @@ Public Sub TST_Case_TitleBarFrameRefreshDebtRetried()
         If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 31, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the entry window style | " & Msg
         End If
 
@@ -4072,7 +4401,7 @@ Public Sub TST_Case_TitleBarFrameRefreshDebtRetried()
         If Application.hWnd <> TargetHwnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 32, _
-                PROC, _
+                PROC_NAME, _
                 "the active frame changed while the case was being prepared"
         End If
 
@@ -4130,25 +4459,25 @@ Public Sub TST_Case_TitleBarFrameRefreshDebtRetried()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Failed refresh was recorded as owed and retried on the next call"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disarm the seam, put the frame back through the harness and discard the
     'registry, whatever happened above. The API under test takes no part.
         On Error Resume Next
-            UI_InternalInjectFrameRefreshFailure False
-            RestoreOK = TST_RestoreTitleBarStyle( _
-                TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
-            UI_InternalResetTitleBarBaseline
+        UI_InternalInjectFrameRefreshFailure False
+        RestoreOK = TST_RestoreTitleBarStyle( _
+            TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
+        UI_InternalResetTitleBarBaseline
         On Error GoTo 0
 
     'A frame that cannot be put back fails the case, after any earlier failure
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
             HasFailure = True
@@ -4164,22 +4493,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 
 '
-'==============================================================================
-' TST_Case_TitleBarStaleFrameEntryNotReused
+'------------------------------------------------------------------------------
+'                          DISCARD STALE FRAME ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the frame-state registry refuses to apply an entry it can no
@@ -4200,8 +4528,11 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 '   same evidence a reissued handle with different owned bits presents, and
 '   it is the evidence the owned-bits check acts on.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Clears the frame-state registry so the case starts from a known state.
@@ -4215,58 +4546,68 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 '   - Fails, with the restoration diagnostic, when the entry style cannot be
 '     written, refreshed and read back.
 '
+' DEPENDENCIES
+'   - UI_SetExcelUI, UI_InternalResetTitleBarBaseline
+'   - UI_TrySetTitleBarVisibleForHwndIfNeeded
+'   - TST_TryGetWindowStyle, TST_TrySetWindowStyle
+'   - TST_TryRefreshWindowFrame, TST_WaitUI
+'   - TST_RestoreTitleBarStyle, TST_RecordCleanupFailure
+'
 ' NOTES
 '   Windows may normalise or reject individual GWL_STYLE bits, so the frame
 '   written here is read back and the case asserts it is distinguishable from
 '   the stale baseline before drawing any conclusion from it.
 '
-' UPDATED
+' HISTORY
 '   2026-11-06 - Captured the entry style before the case changes anything
 '                and restored it through the harness alone (#66).
 '   2026-11-02
 '   2026-08-21
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarStaleFrameEntryNotReused"
+
 #If VBA7 Then
-    Dim TargetHwnd          As LongPtr         'Frame under test
-    Dim EntryStyle          As LongPtr         'Style to restore on the way out
-    Dim VisibleStyle        As LongPtr         'Style once the frame is shown
-    Dim ForeignStyle        As LongPtr         'Style written behind the module
-    Dim ResultStyle         As LongPtr         'Style observed after the show
-    Dim BaselineOwned       As LongPtr         'Owned bits a stale show writes
-    Dim ForeignOwned        As LongPtr         'Owned bits actually accepted
+    Dim TargetHwnd      As LongPtr  'Frame under test
+    Dim EntryStyle      As LongPtr  'Style to restore on the way out
+    Dim VisibleStyle    As LongPtr  'Style once the frame is shown
+    Dim ForeignStyle    As LongPtr  'Style written behind the module
+    Dim ResultStyle     As LongPtr  'Style observed after the show
+    Dim BaselineOwned   As LongPtr  'Owned bits a stale show writes
+    Dim ForeignOwned    As LongPtr  'Owned bits actually accepted
 #Else
-    Dim TargetHwnd          As Long            'Frame under test
-    Dim EntryStyle          As Long            'Style to restore on the way out
-    Dim VisibleStyle        As Long            'Style once the frame is shown
-    Dim ForeignStyle        As Long            'Style written behind the module
-    Dim ResultStyle         As Long            'Style observed after the show
-    Dim BaselineOwned       As Long            'Owned bits a stale show writes
-    Dim ForeignOwned        As Long            'Owned bits actually accepted
+    Dim TargetHwnd      As Long 'Frame under test
+    Dim EntryStyle      As Long 'Style to restore on the way out
+    Dim VisibleStyle    As Long 'Style once the frame is shown
+    Dim ForeignStyle    As Long 'Style written behind the module
+    Dim ResultStyle     As Long 'Style observed after the show
+    Dim BaselineOwned   As Long 'Owned bits a stale show writes
+    Dim ForeignOwned    As Long 'Owned bits actually accepted
 #End If
 
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle was read
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
-    Dim Msg                 As String          'Diagnostic buffer
+    Dim StyleCaptured   As Boolean  'TRUE once EntryStyle was read
+    Dim RestoreOK       As Boolean  'TRUE once the style is back
+    Dim RestoreMsg      As String   'Diagnostic from the restoration
+    Dim Msg             As String   'Diagnostic buffer
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "TST_Case_TitleBarStaleFrameEntryNotReused"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that an unprovable frame entry is not applied"
 
 '------------------------------------------------------------------------------
@@ -4277,7 +4618,7 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
         If TargetHwnd = 0 Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 60, _
-                PROC, _
+                PROC_NAME, _
                 "no Excel window handle is available"
         End If
 
@@ -4286,7 +4627,7 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
         If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 61, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the entry window style | " & Msg
         End If
 
@@ -4305,14 +4646,14 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
         If Application.hWnd <> TargetHwnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 70, _
-                PROC, _
+                PROC_NAME, _
                 "the active frame changed while the case was being prepared"
         End If
 
         If Not TST_TryGetWindowStyle(TargetHwnd, VisibleStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 71, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the visible window style | " & Msg
         End If
 
@@ -4330,7 +4671,7 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 62, _
-                PROC, _
+                PROC_NAME, _
                 "unable to hide the title bar | " & Msg
         End If
 
@@ -4347,14 +4688,14 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
         If Not TST_TrySetWindowStyle(TargetHwnd, ForeignStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 63, _
-                PROC, _
+                PROC_NAME, _
                 "unable to write the contradicting style | " & Msg
         End If
 
         If Not TST_TryRefreshWindowFrame(TargetHwnd, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 64, _
-                PROC, _
+                PROC_NAME, _
                 "unable to refresh the contradicting frame | " & Msg
         End If
 
@@ -4362,7 +4703,7 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
         If Not TST_TryGetWindowStyle(TargetHwnd, ForeignStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 65, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the contradicting style back | " & Msg
         End If
 
@@ -4374,7 +4715,7 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
         If ForeignOwned = BaselineOwned Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 66, _
-                PROC, _
+                PROC_NAME, _
                 "Windows normalised the contradicting frame back to the " & _
                 "baseline; the case cannot distinguish the two outcomes"
         End If
@@ -4392,7 +4733,7 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 67, _
-                PROC, _
+                PROC_NAME, _
                 "show reported failure | " & Msg
         End If
 
@@ -4402,14 +4743,14 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
         If Not TST_TryGetWindowStyle(TargetHwnd, ResultStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 68, _
-                PROC, _
+                PROC_NAME, _
                 "unable to read the resulting window style | " & Msg
         End If
 
         If (ResultStyle And TST_TITLEBAR_OWNED_MASK) <> ForeignOwned Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 69, _
-                PROC, _
+                PROC_NAME, _
                 "the show applied a baseline this window never had; stale " & _
                 "frame state was reused"
         End If
@@ -4417,24 +4758,24 @@ Public Sub TST_Case_TitleBarStaleFrameEntryNotReused()
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "An unprovable frame entry was discarded instead of applied"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Put the frame back through the harness and discard the registry, whatever
     'happened above. The API under test takes no part.
         On Error Resume Next
-            RestoreOK = TST_RestoreTitleBarStyle( _
-                TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
-            UI_InternalResetTitleBarBaseline
+        RestoreOK = TST_RestoreTitleBarStyle( _
+            TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
+        UI_InternalResetTitleBarBaseline
         On Error GoTo 0
 
     'A frame that cannot be put back fails the case, after any earlier failure
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
             HasFailure = True
@@ -4450,22 +4791,21 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub TST_Case_ActiveFramePairRefusesMismatch()
 
 '
-'==============================================================================
-' TST_Case_ActiveFramePairRefusesMismatch
+'------------------------------------------------------------------------------
+'                         REFUSE MISMATCHED FRAME PAIR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the active-frame pair is refused when the host does not agree
@@ -4485,8 +4825,11 @@ Public Sub TST_Case_ActiveFramePairRefusesMismatch()
 '   branch would ship having never executed, which is the shape of the defect
 '   this pairing exists to prevent.
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   1  no fault              the pair resolves, Window and handle both set
@@ -4503,10 +4846,6 @@ Public Sub TST_Case_ActiveFramePairRefusesMismatch()
 '   - UI_TryGetActiveFramePair
 '   - UI_TryGetActiveTitleBarHwnd
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'   - TST_RunTitleBarOnlyPack
-'
 ' NOTES
 '   The snapshot capture path is not asserted separately here. It reaches the
 '   same helper through the same call, so a separate assertion would restate
@@ -4514,31 +4853,35 @@ Public Sub TST_Case_ActiveFramePairRefusesMismatch()
 '   of the snapshot's own failure reporting, which belongs with its structured
 '   result cases.
 '
+' CALLED FROM
+'   - TST_RunRegressionPack
+'   - TST_RunTitleBarOnlyPack
+'
 ' UPDATED
 '   2026-09-03
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ResolvedWindow      As Object          'Window the helper reports
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_ActiveFramePairRefusesMismatch"
+
+    Dim ResolvedWindow  As Object   'Window the helper reports
 
 #If VBA7 Then
-    Dim ResolvedHwnd        As LongPtr         'Handle the helper reports
+    Dim ResolvedHwnd    As LongPtr  'Handle the helper reports
 #Else
-    Dim ResolvedHwnd        As Long            'Handle the helper reports
+    Dim ResolvedHwnd    As Long 'Handle the helper reports
 #End If
 
-    Dim FailMsg             As String          'Failure text the helper reports
-    Dim OK                  As Boolean         'Helper verdict
-
-    Const PROC As String = "TST_Case_ActiveFramePairRefusesMismatch"
+    Dim FailMsg As String   'Failure text the helper reports
+    Dim OK      As Boolean  'Helper verdict
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating that a disagreed active-frame pair is refused"
 
         UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
@@ -4552,13 +4895,13 @@ Public Sub TST_Case_ActiveFramePairRefusesMismatch()
 
         OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
 
-        TST_AssertBooleanEquals True, OK, PROC & ".Agreed.Resolved"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".Agreed.Resolved"
         TST_AssertBooleanEquals _
-            False, (ResolvedWindow Is Nothing), PROC & ".Agreed.WindowSet"
+            False, (ResolvedWindow Is Nothing), PROC_NAME & ".Agreed.WindowSet"
         TST_AssertBooleanEquals _
-            False, (ResolvedHwnd = 0), PROC & ".Agreed.HandleSet"
+            False, (ResolvedHwnd = 0), PROC_NAME & ".Agreed.HandleSet"
         TST_AssertBooleanEquals _
-            True, (Len(FailMsg) = 0), PROC & ".Agreed.NoFailureText"
+            True, (Len(FailMsg) = 0), PROC_NAME & ".Agreed.NoFailureText"
 
 '------------------------------------------------------------------------------
 ' BRANCH 2 - A DISAGREED PAIR IS REFUSED, AND NOTHING IS RETURNED
@@ -4572,15 +4915,15 @@ Public Sub TST_Case_ActiveFramePairRefusesMismatch()
 
         OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
 
-        TST_AssertBooleanEquals False, OK, PROC & ".Disagreed.Refused"
+        TST_AssertBooleanEquals False, OK, PROC_NAME & ".Disagreed.Refused"
         TST_AssertBooleanEquals _
-            True, (ResolvedWindow Is Nothing), PROC & ".Disagreed.WindowCleared"
+            True, (ResolvedWindow Is Nothing), PROC_NAME & ".Disagreed.WindowCleared"
         TST_AssertBooleanEquals _
-            True, (ResolvedHwnd = 0), PROC & ".Disagreed.HandleCleared"
+            True, (ResolvedHwnd = 0), PROC_NAME & ".Disagreed.HandleCleared"
         TST_AssertBooleanEquals _
             True, _
             (FailMsg = "the active Excel Window is not the active native frame"), _
-            PROC & ".Disagreed.FailureText"
+            PROC_NAME & ".Disagreed.FailureText"
 
 '------------------------------------------------------------------------------
 ' BRANCH 3 - THE SEAM IS ONE-SHOT
@@ -4593,7 +4936,7 @@ Public Sub TST_Case_ActiveFramePairRefusesMismatch()
 
         OK = UI_TryGetActiveFramePair(ResolvedWindow, ResolvedHwnd, FailMsg)
 
-        TST_AssertBooleanEquals True, OK, PROC & ".OneShot.SecondResolves"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".OneShot.SecondResolves"
 
 '------------------------------------------------------------------------------
 ' BRANCH 4 - THE HANDLE-ONLY WRAPPER REPORTS THE SAME REFUSAL
@@ -4606,30 +4949,29 @@ Public Sub TST_Case_ActiveFramePairRefusesMismatch()
 
         OK = UI_TryGetActiveTitleBarHwnd(ResolvedHwnd, FailMsg)
 
-        TST_AssertBooleanEquals False, OK, PROC & ".Delegated.Refused"
+        TST_AssertBooleanEquals False, OK, PROC_NAME & ".Delegated.Refused"
         TST_AssertBooleanEquals _
-            True, (ResolvedHwnd = 0), PROC & ".Delegated.HandleCleared"
+            True, (ResolvedHwnd = 0), PROC_NAME & ".Delegated.HandleCleared"
         TST_AssertBooleanEquals _
             True, _
             (FailMsg = "the active Excel Window is not the active native frame"), _
-            PROC & ".Delegated.FailureText"
+            PROC_NAME & ".Delegated.FailureText"
 
 '------------------------------------------------------------------------------
 ' RETURN SUCCESS
 '------------------------------------------------------------------------------
         UI_InternalInjectFramePairFault TEST_PAIR_FAULT_NONE
 
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "A disagreed active-frame pair was refused by both callers"
 
 End Sub
 
-
 Public Sub TST_Case_TitleBarApiErrorCapture()
 
 '
-'==============================================================================
-' TST_Case_TitleBarApiErrorCapture
+'------------------------------------------------------------------------------
+'                         CAPTURE WINAPI STYLE ERRORS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify how the title-bar module reads a zero GWL_STYLE result: a valid
@@ -4644,8 +4986,11 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
 '   #27). Windows produces none of the three branches on demand, so they are
 '   reached through UI_InternalInjectWindowStyleFault.
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   1  read, no fault          succeeds with the caption visible
@@ -4674,10 +5019,6 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
 '   - TST_TitleBarVisibleForHwndOrRaise
 '   - TST_BuildApiFailureText
 '
-' CALLED FROM
-'   - TST_RunRegressionPack
-'   - TST_RunTitleBarOnlyPack
-'
 ' NOTES
 '   The seam replaces only what the capture took, after it took it, so the
 '   real API call still runs. Branch 8 has therefore really hidden the frame
@@ -4690,46 +5031,53 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
 '   constants, so a module that quoted another function, or the wrong
 '   operation, error or handle, fails the exact comparison.
 '
-' UPDATED
+' CALLED FROM
+'   - TST_RunRegressionPack
+'   - TST_RunTitleBarOnlyPack
+'
+' HISTORY
 '   2026-11-06 - Checked both entry-style restorations (#66).
 '   2026-11-06
-'==============================================================================
 '
+' UPDATED
+'   2026-11-06
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "TST_Case_TitleBarApiErrorCapture"
+
 #If VBA7 Then
-    Dim TargetHwnd          As LongPtr         'Frame under test
-    Dim EntryStyle          As LongPtr         'Style observed on entry
-    Dim VisibleStyle        As LongPtr         'Style once the frame is shown
+    Dim TargetHwnd      As LongPtr  'Frame under test
+    Dim EntryStyle      As LongPtr  'Style observed on entry
+    Dim VisibleStyle    As LongPtr  'Style once the frame is shown
 #Else
-    Dim TargetHwnd          As Long            'Frame under test
-    Dim EntryStyle          As Long            'Style observed on entry
-    Dim VisibleStyle        As Long            'Style once the frame is shown
+    Dim TargetHwnd      As Long 'Frame under test
+    Dim EntryStyle      As Long 'Style observed on entry
+    Dim VisibleStyle    As Long 'Style once the frame is shown
 #End If
 
-    Dim StyleCaptured       As Boolean         'TRUE once EntryStyle is usable
-    Dim IsVisible           As Boolean         'Visibility the read reports
-    Dim OK                  As Boolean         'Helper verdict
-    Dim Msg                 As String          'Failure text the helper reports
-    Dim Expected            As String          'Exact failure text expected
-    Dim RestoreOK           As Boolean         'TRUE once the style is back
-    Dim RestoreMsg          As String          'Diagnostic from the restoration
+    Dim StyleCaptured   As Boolean  'TRUE once EntryStyle is usable
+    Dim IsVisible       As Boolean  'Visibility the read reports
+    Dim OK              As Boolean  'Helper verdict
+    Dim Msg             As String   'Failure text the helper reports
+    Dim Expected        As String   'Exact failure text expected
+    Dim RestoreOK       As Boolean  'TRUE once the style is back
+    Dim RestoreMsg      As String   'Diagnostic from the restoration
 
-    Dim HasFailure          As Boolean         'TRUE when a test failure occurred
-    Dim FailNumber          As Long            'Captured failure number
-    Dim FailSource          As String          'Captured failure source
-    Dim FailDescription     As String          'Captured failure description
-
-    Const PROC As String = "TST_Case_TitleBarApiErrorCapture"
+    Dim HasFailure      As Boolean  'TRUE when a test failure occurred
+    Dim FailNumber      As Long     'Captured failure number
+    Dim FailSource      As String   'Captured failure source
+    Dim FailDescription As String   'Captured failure description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
-        TST_Log PROC, "START", _
+        TST_Log PROC_NAME, "START", _
             "Validating WinAPI error capture for the GWL_STYLE read and write"
 
 '------------------------------------------------------------------------------
@@ -4740,7 +5088,7 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
         If TargetHwnd = 0 Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 80, _
-                PROC, _
+                PROC_NAME, _
                 "no Excel window handle is available"
         End If
 
@@ -4749,7 +5097,7 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
         If Not TST_TryGetWindowStyle(TargetHwnd, EntryStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 81, _
-                PROC, _
+                PROC_NAME, _
                 "could not read the entry window style | " & Msg
         End If
 
@@ -4768,7 +5116,7 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
         If Application.hWnd <> TargetHwnd Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 83, _
-                PROC, _
+                PROC_NAME, _
                 "the active frame changed while the case was being prepared"
         End If
 
@@ -4776,7 +5124,7 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
         If Not TST_TryGetWindowStyle(TargetHwnd, VisibleStyle, Msg) Then
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 84, _
-                PROC, _
+                PROC_NAME, _
                 "could not read the visible window style | " & Msg
         End If
 
@@ -4785,10 +5133,10 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
 '------------------------------------------------------------------------------
         OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
 
-        TST_AssertBooleanEquals True, OK, PROC & ".Real.Read"
-        TST_AssertBooleanEquals True, IsVisible, PROC & ".Real.Visible"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".Real.Read"
+        TST_AssertBooleanEquals True, IsVisible, PROC_NAME & ".Real.Visible"
         TST_AssertBooleanEquals _
-            True, (Len(Msg) = 0), PROC & ".Real.NoFailureText"
+            True, (Len(Msg) = 0), PROC_NAME & ".Real.NoFailureText"
 
 '------------------------------------------------------------------------------
 ' BRANCH 2 - A ZERO STYLE WITH NO CAPTURED ERROR IS VALID
@@ -4799,11 +5147,11 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
 
         OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
 
-        TST_AssertBooleanEquals True, OK, PROC & ".ValidZero.Read"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".ValidZero.Read"
         TST_AssertBooleanEquals _
-            False, IsVisible, PROC & ".ValidZero.NoCaption"
+            False, IsVisible, PROC_NAME & ".ValidZero.NoCaption"
         TST_AssertBooleanEquals _
-            True, (Len(Msg) = 0), PROC & ".ValidZero.NoFailureText"
+            True, (Len(Msg) = 0), PROC_NAME & ".ValidZero.NoFailureText"
 
 '------------------------------------------------------------------------------
 ' BRANCH 3 - THE SEAM IS ONE-SHOT
@@ -4811,8 +5159,8 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
     'A fault that survived would fail every later read in the session
         OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
 
-        TST_AssertBooleanEquals True, OK, PROC & ".OneShot.Read"
-        TST_AssertBooleanEquals True, IsVisible, PROC & ".OneShot.Visible"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".OneShot.Read"
+        TST_AssertBooleanEquals True, IsVisible, PROC_NAME & ".OneShot.Visible"
 
 '------------------------------------------------------------------------------
 ' BRANCH 4 - A ZERO STYLE WITH A CAPTURED ERROR IS A FAILURE
@@ -4832,10 +5180,10 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
             TST_ERROR_INVALID_WINDOW_HANDLE, _
             TargetHwnd)
 
-        TST_Log PROC, "OBSERVED", "DllError.Read | " & Msg
+        TST_Log PROC_NAME, "OBSERVED", "DllError.Read | " & Msg
 
-        TST_AssertBooleanEquals False, OK, PROC & ".DllError.Refused"
-        TST_AssertTrue (Msg = Expected), PROC & ".DllError.FailureText"
+        TST_AssertBooleanEquals False, OK, PROC_NAME & ".DllError.Refused"
+        TST_AssertTrue (Msg = Expected), PROC_NAME & ".DllError.FailureText"
 
 '------------------------------------------------------------------------------
 ' BRANCH 5 - AN ERROR LEFT BY AN EARLIER CALL IS CLEARED, NOT REPORTED
@@ -4849,13 +5197,13 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
 
         OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
 
-        TST_Log PROC, "OBSERVED", "StaleError.Read | " & Msg
+        TST_Log PROC_NAME, "OBSERVED", "StaleError.Read | " & Msg
 
-        TST_AssertBooleanEquals True, OK, PROC & ".StaleError.Read"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".StaleError.Read"
         TST_AssertBooleanEquals _
-            False, IsVisible, PROC & ".StaleError.NoCaption"
+            False, IsVisible, PROC_NAME & ".StaleError.NoCaption"
         TST_AssertBooleanEquals _
-            True, (Len(Msg) = 0), PROC & ".StaleError.NoFailureText"
+            True, (Len(Msg) = 0), PROC_NAME & ".StaleError.NoFailureText"
 
 '------------------------------------------------------------------------------
 ' BRANCH 6 - A LATER FAILURE REPORTS ITS OWN ERROR
@@ -4863,9 +5211,9 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
     'A real, non-zero read first: it must succeed and report nothing
         OK = UI_TryGetTitleBarVisibleForHwnd(TargetHwnd, IsVisible, Msg)
 
-        TST_AssertBooleanEquals True, OK, PROC & ".LaterFailure.RealRead"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".LaterFailure.RealRead"
         TST_AssertBooleanEquals _
-            True, (Len(Msg) = 0), PROC & ".LaterFailure.NoFailureText"
+            True, (Len(Msg) = 0), PROC_NAME & ".LaterFailure.NoFailureText"
 
     'Then a failure with a different error. The exact comparison excludes the
     'errors earlier branches supplied.
@@ -4882,10 +5230,10 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
             TST_ERROR_ACCESS_DENIED, _
             TargetHwnd)
 
-        TST_Log PROC, "OBSERVED", "LaterFailure.Read | " & Msg
+        TST_Log PROC_NAME, "OBSERVED", "LaterFailure.Read | " & Msg
 
-        TST_AssertBooleanEquals False, OK, PROC & ".LaterFailure.Refused"
-        TST_AssertTrue (Msg = Expected), PROC & ".LaterFailure.FailureText"
+        TST_AssertBooleanEquals False, OK, PROC_NAME & ".LaterFailure.Refused"
+        TST_AssertTrue (Msg = Expected), PROC_NAME & ".LaterFailure.FailureText"
 
 '------------------------------------------------------------------------------
 ' BRANCH 7 - A ZERO PREVIOUS STYLE FROM A WRITE IS VALID
@@ -4900,18 +5248,18 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
             IsVisible:=False, _
             FailMsg:=Msg)
 
-        TST_Log PROC, "OBSERVED", "ValidZero.Write | " & Msg
+        TST_Log PROC_NAME, "OBSERVED", "ValidZero.Write | " & Msg
 
-        TST_AssertBooleanEquals True, OK, PROC & ".WriteValidZero.Hide"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".WriteValidZero.Hide"
         TST_AssertBooleanEquals _
-            True, (Len(Msg) = 0), PROC & ".WriteValidZero.NoFailureText"
+            True, (Len(Msg) = 0), PROC_NAME & ".WriteValidZero.NoFailureText"
 
         TST_WaitUI TEST_WAIT_SECONDS
 
         TST_AssertBooleanEquals _
             False, _
-            TST_TitleBarVisibleForHwndOrRaise(TargetHwnd, PROC), _
-            PROC & ".WriteValidZero.Hidden"
+            TST_TitleBarVisibleForHwndOrRaise(TargetHwnd, PROC_NAME), _
+            PROC_NAME & ".WriteValidZero.Hidden"
 
     'Show again unfaulted, so branch 8 starts from a visible frame
         OK = UI_TrySetTitleBarVisibleForHwndIfNeeded( _
@@ -4919,7 +5267,7 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
             IsVisible:=True, _
             FailMsg:=Msg)
 
-        TST_AssertBooleanEquals True, OK, PROC & ".WriteValidZero.Show"
+        TST_AssertBooleanEquals True, OK, PROC_NAME & ".WriteValidZero.Show"
 
         TST_WaitUI TEST_WAIT_SECONDS
 
@@ -4942,10 +5290,10 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
             TST_ERROR_INVALID_WINDOW_HANDLE, _
             TargetHwnd)
 
-        TST_Log PROC, "OBSERVED", "DllError.Write | " & Msg
+        TST_Log PROC_NAME, "OBSERVED", "DllError.Write | " & Msg
 
-        TST_AssertBooleanEquals False, OK, PROC & ".WriteDllError.Refused"
-        TST_AssertTrue (Msg = Expected), PROC & ".WriteDllError.FailureText"
+        TST_AssertBooleanEquals False, OK, PROC_NAME & ".WriteDllError.Refused"
+        TST_AssertTrue (Msg = Expected), PROC_NAME & ".WriteDllError.FailureText"
 
 '------------------------------------------------------------------------------
 ' RESTORE ENTRY STYLE
@@ -4957,7 +5305,7 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
 
             Err.Raise _
                 TEST_TITLEBAR_SDI_ERR_BASE + 82, _
-                PROC, _
+                PROC_NAME, _
                 "could not restore the visible window style | " & Msg
         End If
 
@@ -4967,32 +5315,32 @@ Public Sub TST_Case_TitleBarApiErrorCapture()
 
         TST_AssertBooleanEquals _
             True, _
-            TST_TitleBarVisibleForHwndOrRaise(TargetHwnd, PROC), _
-            PROC & ".Restored.Visible"
+            TST_TitleBarVisibleForHwndOrRaise(TargetHwnd, PROC_NAME), _
+            PROC_NAME & ".Restored.Visible"
 
 '------------------------------------------------------------------------------
 ' LOG PASS
 '------------------------------------------------------------------------------
-        TST_Log PROC, "PASS", _
+        TST_Log PROC_NAME, "PASS", _
             "Valid zero, captured DLL error and stale error were each read correctly"
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Disarm the seam, put the frame back and forget the registry, whatever
     'happened above
         On Error Resume Next
-            UI_InternalInjectWindowStyleFault _
-                TEST_STYLE_OP_NONE, TEST_STYLE_FAULT_NONE, 0
-            RestoreOK = TST_RestoreTitleBarStyle( _
-                TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
-            UI_InternalResetTitleBarBaseline
+        UI_InternalInjectWindowStyleFault _
+            TEST_STYLE_OP_NONE, TEST_STYLE_FAULT_NONE, 0
+        RestoreOK = TST_RestoreTitleBarStyle( _
+            TargetHwnd, EntryStyle, StyleCaptured, RestoreMsg)
+        UI_InternalResetTitleBarBaseline
         On Error GoTo 0
 
     'A frame that cannot be put back fails the case, after any earlier failure
         TST_RecordCleanupFailure _
-            RestoreOK, RestoreMsg, PROC, FailNumber, FailSource, FailDescription
+            RestoreOK, RestoreMsg, PROC_NAME, FailNumber, FailSource, FailDescription
 
         If FailNumber <> 0 Then
             HasFailure = True
@@ -5008,12 +5356,12 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         HasFailure = True
         FailNumber = Err.Number
         FailSource = Err.Source
         FailDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub

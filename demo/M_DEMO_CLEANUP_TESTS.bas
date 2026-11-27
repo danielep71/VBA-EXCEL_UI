@@ -1,9 +1,11 @@
 Attribute VB_Name = "M_DEMO_CLEANUP_TESTS"
+
 Option Explicit
 
+'
 '==============================================================================
-' M_DEMO_CLEANUP_TESTS
-'------------------------------------------------------------------------------
+' MODULE: M_DEMO_CLEANUP_TESTS
+'==============================================================================
 ' PURPOSE
 '   Bounded Excel harness for the single-pass cleanup of DEMO_Sheet_Reset and
 '   DEMO_Sheet_BuildTemplate (#71), for the fast-mode Application-state
@@ -21,6 +23,50 @@ Option Explicit
 '   Application settings Excel holds afterwards, reads and writes real
 '   Forms and ActiveX controls, and checks that an invalid template request
 '   leaves an existing sheet and the sheet count as they were.
+'
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Demo_Test_RunCleanupChecks creates a temporary workbook and runs
+'     scenarios S01 to S48 in order, each in its own DEMO_CT_ procedure
+'   - A scenario arms the M_DEMO_BUILDER cleanup probe or fault seam it needs,
+'     makes one call and records its checks through DEMO_CT_Check
+'   - DEMO_CT_Print sends every line to the Immediate window and, while
+'     Demo_Test_RunLogged runs, to its log file
+'   - Demo_Test_RunLogged runs one demo macro and returns a one-line verdict;
+'     Demo_Test_TitleBarState returns the title-bar state as text
+'
+' ERROR POLICY
+'   - Demo_Test_RunCleanupChecks raises vbObjectError + 2199 after cleanup when
+'     any check failed, and re-raises an error that stopped the run
+'   - A scenario records an unexpected error as a failed check and does not
+'     raise
+'   - Demo_Test_RunLogged and Demo_Test_TitleBarState return text instead of
+'     raising
+'   - The log sink never raises; a failed write ends writing and is reported in
+'     the verdict
+'
+' DEPENDENCIES
+'   - M_DEMO_BUILDER: DEMO_Sheet_Reset, DEMO_Sheet_BuildTemplate,
+'     DEMO_FastMode_Begin, DEMO_FastMode_End, DEMO_FastMode_EndPreservingError,
+'     DEMO_CB_TryGetState, DEMO_CB_TrySetState, the DEMO_InternalCleanupProbe*
+'     seams and the tDEMOFastModeState type
+'   - M_EXCEL_UI_DEMO: Demo_CreateDemoSheet, Demo_ClearAllUI,
+'     Demo_HideSelectedUI and Demo_ShowSelectedUI, which Demo_Test_RunLogged
+'     runs on request
+'   - M_EXCEL_UI_TITLEBAR: UI_TryGetTitleBarVisible
+'   - Excel object model: Application settings, Workbooks, worksheet
+'     protection, Shapes, OLEObjects and page breaks
+'   - VBA file statements (Open, Put, Close) for the log sink
+'
+' NOTES
+'   Needs a real Excel host; no static check replaces a run. The scenario
+'   numbers S01-S48 in SCENARIOS are the order in which
+'   Demo_Test_RunCleanupChecks calls the scenario procedures.
 '
 ' PUBLIC SURFACE
 '   - Demo_Test_RunCleanupChecks
@@ -128,7 +174,10 @@ Option Explicit
 '     it. The probe counts the page-break calls the demo code reaches; it
 '     cannot see whether Excel queried the printer
 '
-' UPDATED
+' AUTHOR
+'   Daniele Penza
+'
+' HISTORY
 '   2026-11-16 - Log sink, Demo_Test_RunLogged and Demo_Test_TitleBarState
 '                for the scripted Excel checks (#197).
 '   2026-11-15 - Page-break scenarios S45-S48 (#187).
@@ -138,28 +187,27 @@ Option Explicit
 '   2026-11-14 - Fast-mode and formula-bar scenarios S15-S30 (#70).
 '   2026-11-06 - Added for #71.
 '
-' AUTHOR
-'   Daniele Penza
+' UPDATED
+'   2026-11-16
 '==============================================================================
-
 
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
 '------------------------------------------------------------------------------
-    Private Const PROTECT_PASSWORD As String = "ct-71-pass"     'Password the harness protects with
-    Private Const WRONG_PASSWORD   As String = "ct-71-wrong"    'Password that must be refused
-    Private Const BODY_MARKER      As String = "ct-71 marker"   'A1 text cleared by the reset body
+    Private Const PROTECT_PASSWORD  As String = "ct-71-pass"    'Password the harness protects with
+    Private Const WRONG_PASSWORD    As String = "ct-71-wrong"   'Password that must be refused
+    Private Const BODY_MARKER       As String = "ct-71 marker"  'A1 text cleared by the reset body
 
     'Fifteen Protect options in Worksheet.Protect order after Password:
     'DrawingObjects, Contents, Scenarios, UserInterfaceOnly, then the eleven
     'Allow* options. "1" means True. Set B is the complement of set A.
-    Private Const OPTIONS_A        As String = "010101010101010"
-    Private Const OPTIONS_B        As String = "101010101010101"
+    Private Const OPTIONS_A As String = "010101010101010"
+    Private Const OPTIONS_B As String = "101010101010101"
     Private Const OPTION_NAMES     As String = "DrawingObjects,Contents,Scenarios,UserInterfaceOnly," & _
         "AllowFormattingCells,AllowFormattingColumns,AllowFormattingRows,AllowInsertingColumns," & _
         "AllowInsertingRows,AllowInsertingHyperlinks,AllowDeletingColumns,AllowDeletingRows," & _
         "AllowSorting,AllowFiltering,AllowUsingPivotTables"
-    Private Const OPTION_COUNT     As Long = 15
+    Private Const OPTION_COUNT  As Long = 15
 
     'Cleanup probe sites; mirror M_DEMO_BUILDER
     Private Const PROBE_RESET_HANDLER   As Long = 1
@@ -172,21 +220,21 @@ Option Explicit
     Private Const PROBE_DISPLAY_BREAKS  As Long = 10
 
     'One-shot cleanup fault bits; mirror M_DEMO_BUILDER
-    Private Const FAULT_NONE            As Long = 0
-    Private Const FAULT_BODY            As Long = 1
-    Private Const FAULT_PROTECT         As Long = 2
-    Private Const FAULT_SELECTION       As Long = 4
+    Private Const FAULT_NONE        As Long = 0
+    Private Const FAULT_BODY        As Long = 1
+    Private Const FAULT_PROTECT     As Long = 2
+    Private Const FAULT_SELECTION   As Long = 4
 
     'Injected faults; mirror M_DEMO_BUILDER
-    Private Const ERR_BODY              As Long = vbObjectError + 2190
-    Private Const SRC_BODY              As String = "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedOperationFault"
-    Private Const DESC_BODY             As String = "Injected operation fault after the protection steps."
-    Private Const ERR_PROTECT           As Long = vbObjectError + 2191
-    Private Const SRC_PROTECT           As String = "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedProtectFault"
-    Private Const DESC_PROTECT          As String = "Injected reprotection fault."
-    Private Const ERR_SELECTION         As Long = vbObjectError + 2192
-    Private Const SRC_SELECTION         As String = "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedSelectionFault"
-    Private Const DESC_SELECTION        As String = "Injected EnableSelection restoration fault."
+    Private Const ERR_BODY          As Long = vbObjectError + 2190
+    Private Const SRC_BODY          As String = "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedOperationFault"
+    Private Const DESC_BODY         As String = "Injected operation fault after the protection steps."
+    Private Const ERR_PROTECT       As Long = vbObjectError + 2191
+    Private Const SRC_PROTECT       As String = "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedProtectFault"
+    Private Const DESC_PROTECT      As String = "Injected reprotection fault."
+    Private Const ERR_SELECTION     As Long = vbObjectError + 2192
+    Private Const SRC_SELECTION     As String = "M_DEMO_BUILDER.DEMO_Sheet_Reset.InjectedSelectionFault"
+    Private Const DESC_SELECTION    As String = "Injected EnableSelection restoration fault."
 
     'Real validation errors of M_DEMO_BUILDER
     Private Const SRC_RESET             As String = "M_DEMO_BUILDER.DEMO_Sheet_Reset"
@@ -212,108 +260,109 @@ Option Explicit
     Private Const FAULT_FM_RESTORE_UNIT As Long = 8192
 
     'Fast-mode and formula-bar errors; mirror M_DEMO_BUILDER
-    Private Const ERR_FM_ENTRY          As Long = vbObjectError + 2193
-    Private Const SRC_FM_ENTRY          As String = "M_DEMO_BUILDER.DEMO_FastMode.InjectedEntryFault"
-    Private Const DESC_FM_ENTRY         As String = "Injected fast-mode entry fault: "
-    Private Const ERR_FM_RESTORE        As Long = vbObjectError + 2194
-    Private Const SRC_FM_RESTORE        As String = "M_DEMO_BUILDER.DEMO_FastMode.InjectedRestoreFault"
-    Private Const DESC_FM_RESTORE       As String = "Injected fast-mode restore fault: "
-    Private Const ERR_FM_END            As Long = vbObjectError + 2026
-    Private Const SRC_FM_END            As String = "M_DEMO_BUILDER.DEMO_FastMode_End"
-    Private Const DESC_FM_END           As String = "Fast-mode restore failed: "
-    Private Const ROLLBACK_MARKER       As String = "Cleanup failure: Fast-mode rollback failed: "
-    Private Const ERR_FORMULABAR        As Long = vbObjectError + 2195
-    Private Const SRC_FORMULABAR        As String = "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate.InjectedFormulaBarFault"
-    Private Const DESC_FORMULABAR       As String = "Injected DisplayFormulaBar fault."
+    Private Const ERR_FM_ENTRY      As Long = vbObjectError + 2193
+    Private Const SRC_FM_ENTRY      As String = "M_DEMO_BUILDER.DEMO_FastMode.InjectedEntryFault"
+    Private Const DESC_FM_ENTRY     As String = "Injected fast-mode entry fault: "
+    Private Const ERR_FM_RESTORE    As Long = vbObjectError + 2194
+    Private Const SRC_FM_RESTORE    As String = "M_DEMO_BUILDER.DEMO_FastMode.InjectedRestoreFault"
+    Private Const DESC_FM_RESTORE   As String = "Injected fast-mode restore fault: "
+    Private Const ERR_FM_END        As Long = vbObjectError + 2026
+    Private Const SRC_FM_END        As String = "M_DEMO_BUILDER.DEMO_FastMode_End"
+    Private Const DESC_FM_END       As String = "Fast-mode restore failed: "
+    Private Const ROLLBACK_MARKER   As String = "Cleanup failure: Fast-mode rollback failed: "
+    Private Const ERR_FORMULABAR    As Long = vbObjectError + 2195
+    Private Const SRC_FORMULABAR    As String = "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate.InjectedFormulaBarFault"
+    Private Const DESC_FORMULABAR   As String = "Injected DisplayFormulaBar fault."
 
     'The operation error a caller's handler holds in S27
-    Private Const ERR_OPERATION         As Long = vbObjectError + 2198
-    Private Const SRC_OPERATION         As String = "M_DEMO_CLEANUP_TESTS.SimulatedOperation"
-    Private Const DESC_OPERATION        As String = "Simulated operation error."
+    Private Const ERR_OPERATION     As Long = vbObjectError + 2198
+    Private Const SRC_OPERATION     As String = "M_DEMO_CLEANUP_TESTS.SimulatedOperation"
+    Private Const DESC_OPERATION    As String = "Simulated operation error."
 
     'Baseline cursor: neither xlDefault nor the fast-mode xlWait
-    Private Const BASELINE_CURSOR       As Long = xlNorthwestArrow
+    Private Const BASELINE_CURSOR   As Long = xlNorthwestArrow
 
     'A layout every template call accepts
-    Private Const VALID_CONTENT         As String = "C:M"
-    Private Const VALID_HIDE_ROWS       As Long = 200
+    Private Const VALID_CONTENT     As String = "C:M"
+    Private Const VALID_HIDE_ROWS   As Long = 200
 
     'Manual page-break positions inside the template's visible area
-    Private Const BREAK_ROW             As Long = 20
-    Private Const BREAK_COLUMN          As Long = 6
+    Private Const BREAK_ROW     As Long = 20
+    Private Const BREAK_COLUMN  As Long = 6
 
     'Layout and naming errors and seams; mirror M_DEMO_BUILDER
-    Private Const BUILD_TITLE              As String = "CT Title"
-    Private Const ERR_CONTENT_SHAPE        As Long = vbObjectError + 2022
-    Private Const DESC_CONTENT_SHAPE       As String = "ContentColumns must resolve to one column or one contiguous column range."
-    Private Const ERR_CONTENT_ROOM         As Long = vbObjectError + 2023
-    Private Const DESC_CONTENT_ROOM        As String = "ContentColumns must leave room for a separator column and at least one hidden trailing column."
-    Private Const ERR_HIDE_ROWS            As Long = vbObjectError + 2019
-    Private Const DESC_HIDE_ROWS           As String = "HideRowsFrom must be between 1 and the worksheet last row."
-    Private Const NAME_INVALID             As String = "Bad[Name"
-    Private Const ERR_NAME_INVALID         As Long = vbObjectError + 2027
-    Private Const DESC_NAME_INVALID        As String = "Worksheet name is not valid: it contains the character ["
-    Private Const ERR_NAME_TAKEN           As Long = vbObjectError + 2028
-    Private Const DESC_NAME_TAKEN          As String = "The name is already used by a sheet that is not a worksheet: "
-    Private Const FAULT_SHEET_NAME         As Long = 16
-    Private Const ERR_NAME_FAULT           As Long = vbObjectError + 2196
-    Private Const SRC_NAME_FAULT           As String = "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate.InjectedNameFault"
-    Private Const DESC_NAME_FAULT          As String = "Injected worksheet naming fault."
+    Private Const BUILD_TITLE           As String = "CT Title"
+    Private Const ERR_CONTENT_SHAPE     As Long = vbObjectError + 2022
+    Private Const DESC_CONTENT_SHAPE    As String = "ContentColumns must resolve to one column or one contiguous column range."
+    Private Const ERR_CONTENT_ROOM      As Long = vbObjectError + 2023
+    Private Const DESC_CONTENT_ROOM     As String = "ContentColumns must leave room for a separator column and at least one hidden trailing column."
+    Private Const ERR_HIDE_ROWS         As Long = vbObjectError + 2019
+    Private Const DESC_HIDE_ROWS        As String = "HideRowsFrom must be between 1 and the worksheet last row."
+    Private Const NAME_INVALID          As String = "Bad[Name"
+    Private Const ERR_NAME_INVALID      As Long = vbObjectError + 2027
+    Private Const DESC_NAME_INVALID     As String = "Worksheet name is not valid: it contains the character ["
+    Private Const ERR_NAME_TAKEN        As Long = vbObjectError + 2028
+    Private Const DESC_NAME_TAKEN       As String = "The name is already used by a sheet that is not a worksheet: "
+    Private Const FAULT_SHEET_NAME      As Long = 16
+    Private Const ERR_NAME_FAULT        As Long = vbObjectError + 2196
+    Private Const SRC_NAME_FAULT        As String = "M_DEMO_BUILDER.DEMO_Sheet_GetOrCreate.InjectedNameFault"
+    Private Const DESC_NAME_FAULT       As String = "Injected worksheet naming fault."
 
     'Check-box fixtures and diagnostics; the messages mirror M_DEMO_BUILDER
-    Private Const CB_TARGET                As String = "ctCheckBox"
-    Private Const CB_MISSING               As String = "ctMissing"
-    Private Const CB_FORMS_MIXED           As String = "ctFormsMixed"
-    Private Const CB_ACTIVEX_MIXED         As String = "ctActiveXMixed"
-    Private Const SHAPE_PLAIN              As String = "ctShape"
-    Private Const BUTTON_FORMS             As String = "ctFormsButton"
-    Private Const BUTTON_ACTIVEX           As String = "ctActiveXButton"
-    Private Const PROGID_CHECKBOX          As String = "Forms.CheckBox.1"
-    Private Const PROGID_BUTTON            As String = "Forms.CommandButton.1"
-    Private Const MSG_NOT_CONTROL          As String = "shape exists but is not a Forms or ActiveX control"
-    Private Const MSG_FORMS_NOT_CHECKBOX   As String = "Forms control exists but is not a CheckBox"
-    Private Const MSG_ACTIVEX_NOT_CHECKBOX As String = "ActiveX control exists but is not a CheckBox"
-    Private Const MSG_NOT_FOUND            As String = "check box not found"
-    Private Const MSG_BLANK_NAME           As String = "control name is blank"
-    Private Const MSG_MIXED                As String = "check box state is mixed: neither checked nor unchecked"
-    Private Const ERR_ACTIVEX_SETUP        As Long = vbObjectError + 2197
-    Private Const PROC_ACTIVEX_SETUP       As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_AddActiveX"
+    Private Const CB_TARGET                 As String = "ctCheckBox"
+    Private Const CB_MISSING                As String = "ctMissing"
+    Private Const CB_FORMS_MIXED            As String = "ctFormsMixed"
+    Private Const CB_ACTIVEX_MIXED          As String = "ctActiveXMixed"
+    Private Const SHAPE_PLAIN               As String = "ctShape"
+    Private Const BUTTON_FORMS              As String = "ctFormsButton"
+    Private Const BUTTON_ACTIVEX            As String = "ctActiveXButton"
+    Private Const PROGID_CHECKBOX           As String = "Forms.CheckBox.1"
+    Private Const PROGID_BUTTON             As String = "Forms.CommandButton.1"
+    Private Const MSG_NOT_CONTROL           As String = "shape exists but is not a Forms or ActiveX control"
+    Private Const MSG_FORMS_NOT_CHECKBOX    As String = "Forms control exists but is not a CheckBox"
+    Private Const MSG_ACTIVEX_NOT_CHECKBOX  As String = "ActiveX control exists but is not a CheckBox"
+    Private Const MSG_NOT_FOUND             As String = "check box not found"
+    Private Const MSG_BLANK_NAME            As String = "control name is blank"
+    Private Const MSG_MIXED                 As String = "check box state is mixed: neither checked nor unchecked"
+    Private Const ERR_ACTIVEX_SETUP         As Long = vbObjectError + 2197
+    Private Const PROC_ACTIVEX_SETUP        As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_AddActiveX"
 
     'Cleanup diagnostic markers written by DEMO_Sheet_Reset
-    Private Const CLEANUP_MARKER        As String = "Cleanup failure: "
-    Private Const SELECTION_MARKER      As String = " | EnableSelection: "
+    Private Const CLEANUP_MARKER    As String = "Cleanup failure: "
+    Private Const SELECTION_MARKER  As String = " | EnableSelection: "
 
     'Raised by the runner when any check failed
-    Private Const ERR_RUN_FAILED        As Long = vbObjectError + 2199
+    Private Const ERR_RUN_FAILED    As Long = vbObjectError + 2199
 
     'Raised inside Demo_Test_RunLogged for a macro it does not run
-    Private Const ERR_UNKNOWN_MACRO     As Long = vbObjectError + 2200
+    Private Const ERR_UNKNOWN_MACRO As Long = vbObjectError + 2200
 
 '------------------------------------------------------------------------------
 ' PRIVATE MODULE STATE
 '------------------------------------------------------------------------------
-    Private mChecks           As Long    'Checks evaluated in this run
-    Private mFailures         As Long    'Checks failed in this run
-    Private mScenarios        As Long    'Scenarios started in this run
-    Private mScenarioFailures As Long    'Scenarios with at least one failure
+    Private mChecks             As Long 'Checks evaluated in this run
+    Private mFailures           As Long 'Checks failed in this run
+    Private mScenarios          As Long 'Scenarios started in this run
+    Private mScenarioFailures   As Long 'Scenarios with at least one failure
 
-    Private mSessionCaptured       As Boolean    'Session settings below are valid
-    Private mSessionScreenUpdating As Boolean    'Session Application.ScreenUpdating
-    Private mSessionEnableEvents   As Boolean    'Session Application.EnableEvents
-    Private mSessionDisplayAlerts  As Boolean    'Session Application.DisplayAlerts
-    Private mSessionCalculation    As Long       'Session Application.Calculation
-    Private mSessionCursor         As Long       'Session Application.Cursor
-    Private mSessionFormulaBar     As Boolean    'Session Application.DisplayFormulaBar
-    Private mBaselineCalculation   As Long       'Calculation of the fast-mode baseline
+    Private mSessionCaptured        As Boolean  'Session settings below are valid
+    Private mSessionScreenUpdating  As Boolean  'Session Application.ScreenUpdating
+    Private mSessionEnableEvents    As Boolean  'Session Application.EnableEvents
+    Private mSessionDisplayAlerts   As Boolean  'Session Application.DisplayAlerts
+    Private mSessionCalculation     As Long     'Session Application.Calculation
+    Private mSessionCursor          As Long     'Session Application.Cursor
+    Private mSessionFormulaBar      As Boolean  'Session Application.DisplayFormulaBar
+    Private mBaselineCalculation    As Long     'Calculation of the fast-mode baseline
 
-    Private mLogSinkPath           As String     'Log file of Demo_Test_RunLogged; empty = no sink
-    Private mLogSinkFailure        As String     'First failed write to it; empty = none
+    Private mLogSinkPath    As String   'Log file of Demo_Test_RunLogged; empty = no sink
+    Private mLogSinkFailure As String   'First failed write to it; empty = none
 
 
 Public Sub Demo_Test_RunCleanupChecks()
+
 '
-'==============================================================================
-' Demo_Test_RunCleanupChecks
+'------------------------------------------------------------------------------
+'                          RUN ALL CLEANUP SCENARIOS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Runs every #71 cleanup scenario, every #70 fast-mode scenario, every #73
@@ -321,8 +370,16 @@ Public Sub Demo_Test_RunCleanupChecks()
 '   scenario in a temporary workbook and prints one line per scenario and a
 '   PASS/FAIL summary to the Immediate window.
 '
-' RETURNS
+' WHY THIS EXISTS
+'   The source fixtures in tools/ check the shape of the cleanup code, not what
+'   Excel does with it. This is the entry point that runs the scenarios in
+'   Excel (#71, #70, #73, #74, #187).
+'
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Creates one temporary workbook; each scenario adds its own sheet to it
@@ -342,28 +399,37 @@ Public Sub Demo_Test_RunCleanupChecks()
 '     DEMO_FastMode_* scope, DEMO_CB_TryGetState, DEMO_CB_TrySetState and
 '     the DEMO_InternalCleanupProbe* seams)
 '
+' NOTES
+'   Needs a real Excel host. The Application settings the scenarios change are
+'   recorded first and written back at SafeExit; the temporary workbook is
+'   closed without saving.
+'
 ' CALLED FROM
 '   - Invoked directly, from the Immediate window or the Macros dialog
 '
-' UPDATED
+' HISTORY
 '   2026-11-15 - S45-S48 (#187).
 '   2026-11-14 - S35-S44 (#74).
 '   2026-11-14 - S31-S34 (#73).
 '   2026-11-14 - Session settings captured and written back; S15-S30 (#70).
 '   2026-11-06
-'==============================================================================
+'
+' UPDATED
+'   2026-11-15
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WB                  As Workbook        'Temporary workbook
-    Dim Summary             As String          'Summary line
-    Dim RaisedNumber        As Long            'Error that stopped the run
-    Dim RaisedSource        As String          'Source of that error
-    Dim RaisedDescription   As String          'Text of that error
-    Dim SessionFailures     As String          'Session settings not written back
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Demo_Test_RunCleanupChecks"
 
-    Const PROC As String = "Demo_Test_RunCleanupChecks"
+    Dim WB                  As Workbook 'Temporary workbook
+    Dim Summary             As String   'Summary line
+    Dim RaisedNumber        As Long     'Error that stopped the run
+    Dim RaisedSource        As String   'Source of that error
+    Dim RaisedDescription   As String   'Text of that error
+    Dim SessionFailures     As String   'Session settings not written back
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -374,11 +440,11 @@ Public Sub Demo_Test_RunCleanupChecks()
         mScenarios = 0
         mScenarioFailures = 0
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
         DEMO_InternalCleanupProbeEnd
 
-        DEMO_CT_Print PROC & ": START " & Format$(Now, "yyyy-mm-dd hh:nn:ss")
+        DEMO_CT_Print PROC_NAME & ": START " & Format$(Now, "yyyy-mm-dd hh:nn:ss")
 
     'Record the Application settings the scenarios change
         DEMO_CT_CaptureSession
@@ -463,17 +529,17 @@ Public Sub Demo_Test_RunCleanupChecks()
         DEMO_CT_ResetBreakIndicators WB, "S47_BreaksShown", True
         DEMO_CT_BuildKeepsPageBreaks WB, "S48_BuildKeepsBreaks"
 
-Safe_Exit:
 '------------------------------------------------------------------------------
-' RELEASE AND REPORT
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+SafeExit:
     'Disarm the probe and discard the temporary workbook
         On Error Resume Next
-            DEMO_InternalCleanupProbeEnd
-            If Not WB Is Nothing Then
-                WB.Close SaveChanges:=False
-            End If
-            Set WB = Nothing
+        DEMO_InternalCleanupProbeEnd
+        If Not WB Is Nothing Then
+            WB.Close SaveChanges:=False
+        End If
+        Set WB = Nothing
         On Error GoTo 0
 
     'Write back the session's Application settings; a failure fails the run
@@ -503,32 +569,31 @@ Safe_Exit:
             Err.Raise RaisedNumber, RaisedSource, RaisedDescription
         End If
         If mFailures <> 0 Then
-            Err.Raise ERR_RUN_FAILED, PROC, Summary
+            Err.Raise ERR_RUN_FAILED, PROC_NAME, Summary
         End If
 
         Exit Sub
 
-Err_Handler:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+ErrorHandler:
     'Capture the error that stopped the run, then release and report once
         RaisedNumber = Err.Number
         RaisedSource = Err.Source
         RaisedDescription = Err.Description
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Function Demo_Test_RunLogged( _
     ByVal MacroName As String, _
     ByVal LogPath As String) _
     As String
 '
-'==============================================================================
-' Demo_Test_RunLogged
+'------------------------------------------------------------------------------
+'                       RUN A DEMO MACRO WITH A LOG SINK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Runs one demo macro with the log sink set and returns its verdict as one
@@ -565,25 +630,36 @@ Public Function Demo_Test_RunLogged( _
 '   Does not raise; an unknown macro name gives a FAIL verdict. A log write
 '   failure never changes the macro's PASS or FAIL
 '
+' DEPENDENCIES
+'   - Demo_Test_RunCleanupChecks, Demo_CreateDemoSheet, Demo_ClearAllUI,
+'     Demo_HideSelectedUI and Demo_ShowSelectedUI (M_EXCEL_UI_DEMO), selected
+'     by MacroName
+'   - DEMO_CT_Print, and the module-level log sink mLogSinkPath and
+'     mLogSinkFailure it feeds
+'
 ' NOTES
 '   Only this module prints through the sink. The demo actions report a
 '   failure with Debug.Print in M_EXCEL_UI_DEMO, which stays in the
 '   Immediate window
 '
-' UPDATED
+' HISTORY
 '   2026-11-16 - Added for the scripted Excel checks (#197).
-'==============================================================================
+'
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Verdict             As String          'The verdict line
-    Dim SinkFailure         As String          'First log write failure, if any
-    Dim RaisedNumber        As Long            'Error the macro raised
-    Dim RaisedSource        As String          'Source of that error
-    Dim RaisedDescription   As String          'Text of that error
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Demo_Test_RunLogged"
 
-    Const PROC As String = "Demo_Test_RunLogged"
+    Dim Verdict             As String   'The verdict line
+    Dim SinkFailure         As String   'First log write failure, if any
+    Dim RaisedNumber        As Long     'Error the macro raised
+    Dim RaisedSource        As String   'Source of that error
+    Dim RaisedDescription   As String   'Text of that error
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -592,10 +668,10 @@ Public Function Demo_Test_RunLogged( _
         mLogSinkPath = LogPath
         mLogSinkFailure = vbNullString
 
-        DEMO_CT_Print PROC & ": START " & MacroName & " " & _
+        DEMO_CT_Print PROC_NAME & ": START " & MacroName & " " & _
                       Format$(Now, "yyyy-mm-dd hh:nn:ss")
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' RUN
@@ -618,16 +694,16 @@ Public Function Demo_Test_RunLogged( _
                 Demo_ShowSelectedUI
 
             Case Else
-                Err.Raise ERR_UNKNOWN_MACRO, PROC, "unknown macro: " & MacroName
+                Err.Raise ERR_UNKNOWN_MACRO, PROC_NAME, "unknown macro: " & MacroName
 
         End Select
 
         Verdict = "RESULT: PASS"
 
 '------------------------------------------------------------------------------
-' REPORT VERDICT
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Every path arrives here with the handler disabled or released
         On Error GoTo 0
 
@@ -654,7 +730,7 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture before anything else touches Err
         RaisedNumber = Err.Number
         RaisedSource = Err.Source
@@ -664,15 +740,15 @@ Err_Handler:
                   " | Source: " & RaisedSource & _
                   " | " & RaisedDescription
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
 
-
 Public Function Demo_Test_TitleBarState() As String
+
 '
-'==============================================================================
-' Demo_Test_TitleBarState
+'------------------------------------------------------------------------------
+'                             READ TITLE BAR STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the title-bar state of the frame Excel reports as active:
@@ -685,26 +761,55 @@ Public Function Demo_Test_TitleBarState() As String
 '   then reads the state back. Application.Run returns a function's value but
 '   not its ByRef arguments, so the read is wrapped here.
 '
+' INPUTS
+'   None
+'
+' RETURNS
+'   String:
+'   - "VISIBLE" or "HIDDEN" when UI_TryGetTitleBarVisible succeeds
+'   - "UNKNOWN | <reason>" when it returns False, with the reason it reports
+'   - "UNKNOWN | error <number>: <description>" when an unexpected error occurs
+'
+' BEHAVIOR
+'   - Calls UI_TryGetTitleBarVisible with a Boolean and a message variable
+'   - Maps a True result to VISIBLE or HIDDEN from the Boolean, and a False
+'     result to UNKNOWN plus the message
+'   - Maps an unexpected error to UNKNOWN plus its number and description
+'
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' DEPENDENCIES
+'   UI_TryGetTitleBarVisible (M_EXCEL_UI_TITLEBAR)
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-16 - Added for the scripted Excel checks (#197).
-'==============================================================================
+'
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim IsVisible           As Boolean         'Title-bar visibility read
-    Dim FailMsg             As String          'Reason the read failed
-    Dim RaisedNumber        As Long            'Unexpected error number
-    Dim RaisedDescription   As String          'Unexpected error text
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.Demo_Test_TitleBarState"
+
+    Dim IsVisible           As Boolean  'Title-bar visibility read
+    Dim FailMsg             As String   'Reason the read failed
+    Dim RaisedNumber        As Long     'Unexpected error number
+    Dim RaisedDescription   As String   'Unexpected error text
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' READ STATE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         If UI_TryGetTitleBarVisible(IsVisible, FailMsg) Then
             If IsVisible Then
                 Demo_Test_TitleBarState = "VISIBLE"
@@ -716,25 +821,24 @@ Public Function Demo_Test_TitleBarState() As String
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         RaisedNumber = Err.Number
         RaisedDescription = Err.Description
 
         Demo_Test_TitleBarState = "UNKNOWN | error " & CStr(RaisedNumber) & _
                                   ": " & RaisedDescription
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Function
-
 
 Private Sub DEMO_CT_ResetSuccess( _
     ByVal WB As Workbook, _
@@ -742,12 +846,62 @@ Private Sub DEMO_CT_ResetSuccess( _
     ByVal Options As String, _
     ByVal SelectionPolicy As Long)
 '
-'==============================================================================
-' DEMO_CT_ResetSuccess
+'------------------------------------------------------------------------------
+'                      CHECK RESET SUCCESS WITH REPROTECT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S01/S02: a protected sheet reset with the right password and
 '   ReProtectAtEnd=True ends protected again with every entry option.
+'
+' WHY THIS EXISTS
+'   Shows in Excel that DEMO_Sheet_Reset, given the right password and
+'   ReProtectAtEnd=True, hands the sheet back with the protection it had, which
+'   the source fixtures cannot show (#71). S01 and S02 use complementary option
+'   sets, so every option is seen in both states.
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S01_SuccessA or S02_SuccessB); it names the sheet and
+'     prefixes every check name
+'
+'   Options
+'     Option string for DEMO_CT_Protect: fifteen characters, "1" meaning True,
+'     in Worksheet.Protect order after Password
+'
+'   SelectionPolicy
+'     EnableSelection value the sheet is protected with
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, protects it with Options and SelectionPolicy, reads both
+'     back and checks the host kept them
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with PROTECT_PASSWORD
+'     and ReProtectAtEnd=True
+'   - Checks the outcome listed under CHECKS
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Worksheet.EnableSelection
+'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallReset, DEMO_CT_Check,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckNoError, DEMO_CT_CheckOptions,
+'     DEMO_CT_CheckPasswordReapplied, DEMO_CT_CheckProbe, DEMO_CT_NewSheet,
+'     DEMO_CT_Protect, DEMO_CT_ReadOptions
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
 '
 ' CHECKS
 '   - the host kept the requested options before the reset
@@ -759,24 +913,29 @@ Private Sub DEMO_CT_ResetSuccess( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim EntryOptions        As String          'Options read back on entry
-    Dim EntrySelection      As Long            'EnableSelection read back on entry
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetSuccess"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim EntryOptions        As String       'Options read back on entry
+    Dim EntrySelection      As Long         'EnableSelection read back on entry
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -804,47 +963,96 @@ Private Sub DEMO_CT_ResetSuccess( _
         DEMO_CT_CheckLong Scenario & ".Readback.EnableSelection", EntrySelection, WS.EnableSelection
         DEMO_CT_CheckPasswordReapplied Scenario & ".Readback.Password", WS
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetWithoutReprotect( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_ResetWithoutReprotect
+'------------------------------------------------------------------------------
+'                        CHECK RESET WITHOUT REPROTECT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S03: with the default ReProtectAtEnd=False, a successful reset leaves the
 '   sheet unprotected and never attempts Protect.
 '
+' WHY THIS EXISTS
+'   Covers the default ReProtectAtEnd=False path of DEMO_Sheet_Reset in Excel:
+'   the reset must leave the sheet unprotected and never attempt Protect (#71).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S03_NoReprotect); it names the sheet and prefixes every
+'     check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet and protects it with OPTIONS_A and xlUnlockedCells
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with PROTECT_PASSWORD
+'     and ReProtectAtEnd=False
+'   - Checks no error, one cleanup pass and no Protect or EnableSelection
+'     attempt, that the body ran and that the sheet is unprotected
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallReset, DEMO_CT_Check,
+'     DEMO_CT_CheckNoError, DEMO_CT_CheckProbe, DEMO_CT_IsProtected,
+'     DEMO_CT_NewSheet, DEMO_CT_Protect
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetWithoutReprotect"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -865,47 +1073,97 @@ Private Sub DEMO_CT_ResetWithoutReprotect( _
         DEMO_CT_Check Not DEMO_CT_IsProtected(WS), Scenario & ".Unprotected", _
                       "the sheet is protected although ReProtectAtEnd was False"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetNotWorksheet( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_ResetNotWorksheet
+'------------------------------------------------------------------------------
+'                        CHECK RESET OF A NON-WORKSHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S04: a real ordinary error raised inside the guarded body (WS_In is a
 '   Workbook) reaches the caller once, unchanged, after one handler entry and
 '   one cleanup pass, with no protection attempt.
 '
+' WHY THIS EXISTS
+'   Covers an ordinary error that a real condition raises inside the guarded
+'   body of DEMO_Sheet_Reset, a Workbook passed as WS_In, rather than an
+'   injected fault (#71).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; it is passed
+'     to the reset as the invalid WS_In
+'
+'   Scenario
+'     Scenario name (S04_NotWorksheet); it prefixes every check name and no
+'     sheet is added
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with WB as the sheet,
+'     PROTECT_PASSWORD and ReProtectAtEnd=True, no fault armed
+'   - Checks the error is ERR_NOT_WORKSHEET from SRC_RESET with
+'     DESC_NOT_WORKSHEET
+'   - Checks one handler entry and one cleanup pass, and no Protect or
+'     EnableSelection attempt
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_CheckError,
+'     DEMO_CT_CheckProbe
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetNotWorksheet"
+
+    Dim FailuresBefore      As Long     'Failure count at scenario start
+    Dim RaisedNumber        As Long     'Error reaching the caller
+    Dim RaisedSource        As String   'Its source
+    Dim RaisedDescription   As String   'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ACT
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         DEMO_CT_CallReset WB, FAULT_NONE, PROTECT_PASSWORD, True, _
@@ -918,49 +1176,105 @@ Private Sub DEMO_CT_ResetNotWorksheet( _
                            RaisedNumber, RaisedSource, RaisedDescription
         DEMO_CT_CheckProbe Scenario & ".Probe", 1, 1, 0, 0, 0, 0
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetOperationFault( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_ResetOperationFault
+'------------------------------------------------------------------------------
+'                     CHECK RESET AFTER AN OPERATION FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S05: an ordinary error after this call's own unprotect reaches the caller
 '   once and unchanged, and cleanup still restores the entry protection.
 '
+' WHY THIS EXISTS
+'   Covers an operation error after the reset's own unprotect: cleanup must
+'   still restore the entry protection, and the error must reach the caller
+'   unchanged (#71).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S05_OperationFault); it names the sheet and prefixes every
+'     check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, protects it with OPTIONS_A and xlUnlockedCells and reads
+'     the options and EnableSelection back
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with FAULT_BODY,
+'     PROTECT_PASSWORD and ReProtectAtEnd=True
+'   - Checks the injected body error (ERR_BODY, SRC_BODY, DESC_BODY), one
+'     handler entry, one cleanup pass, one Protect and one EnableSelection
+'     attempt
+'   - Checks the options and EnableSelection read back as on entry and that the
+'     password protects the sheet again
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Worksheet.EnableSelection
+'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_CheckError,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckOptions, DEMO_CT_CheckPasswordReapplied,
+'     DEMO_CT_CheckProbe, DEMO_CT_NewSheet, DEMO_CT_Protect,
+'     DEMO_CT_ReadOptions
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim EntryOptions        As String          'Options read back on entry
-    Dim EntrySelection      As Long            'EnableSelection read back on entry
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetOperationFault"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim EntryOptions        As String       'Options read back on entry
+    Dim EntrySelection      As Long         'EnableSelection read back on entry
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -985,48 +1299,97 @@ Private Sub DEMO_CT_ResetOperationFault( _
         DEMO_CT_CheckLong Scenario & ".Readback.EnableSelection", EntrySelection, WS.EnableSelection
         DEMO_CT_CheckPasswordReapplied Scenario & ".Readback.Password", WS
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetOperationFaultUnprotected( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_ResetOperationFaultUnprotected
+'------------------------------------------------------------------------------
+'                CHECK OPERATION FAULT ON AN UNPROTECTED SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S06: the same ordinary error on a sheet that was not protected reaches the
 '   caller once, and cleanup does not protect a sheet this call never
 '   unprotected, even with a password and ReProtectAtEnd=True.
 '
+' WHY THIS EXISTS
+'   Covers the same operation error on a sheet the reset never unprotected:
+'   cleanup must not protect it (#71).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S06_OperationUnprot); it names the sheet and prefixes
+'     every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds an unprotected sheet
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with FAULT_BODY,
+'     PROTECT_PASSWORD and ReProtectAtEnd=True
+'   - Checks the injected body error, one handler entry, one cleanup pass and
+'     no Protect or EnableSelection attempt
+'   - Checks the sheet is still unprotected
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_Check, DEMO_CT_CheckError,
+'     DEMO_CT_CheckProbe, DEMO_CT_IsProtected, DEMO_CT_NewSheet
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetOperationFaultUnprotected"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -1046,35 +1409,88 @@ Private Sub DEMO_CT_ResetOperationFaultUnprotected( _
         DEMO_CT_Check Not DEMO_CT_IsProtected(WS), Scenario & ".StillUnprotected", _
                       "cleanup protected a sheet this call never unprotected"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetUnprotectFailure( _
     ByVal WB As Workbook, _
     ByVal Scenario As String, _
     ByVal Password As String)
 '
-'==============================================================================
-' DEMO_CT_ResetUnprotectFailure
+'------------------------------------------------------------------------------
+'                        CHECK RESET UNPROTECT FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S07/S08: a wrong or missing password fails the unprotect; the error
 '   reaches the caller once without a cleanup diagnostic, no Protect is
 '   attempted, the body does not run and the entry protection is unchanged.
 '
+' WHY THIS EXISTS
+'   Covers the two ways the unprotect inside DEMO_Sheet_Reset can fail, a wrong
+'   password and a missing one, and shows that nothing else happens afterwards
+'   (#71).
+'
 ' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S07_WrongPassword or S08_MissingPassword); it names the
+'     sheet and prefixes every check name
+'
 '   Password
 '     WRONG_PASSWORD, or vbNullString for a missing password (the default of
 '     ProtectPassword)
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, protects it with OPTIONS_A and xlUnlockedCells and reads
+'     the options and EnableSelection back
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with Password and
+'     ReProtectAtEnd=True
+'   - Checks the error: ERR_NO_PASSWORD for an empty Password, otherwise any
+'     error without a cleanup diagnostic
+'   - Checks one handler entry and one cleanup pass, no Protect attempt, that
+'     the body did not run and that the options and EnableSelection are
+'     unchanged
+'   - Unprotects with PROTECT_PASSWORD to prove the protection is still the
+'     original one
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario. The final unprotect runs under On Error Resume Next,
+'   and only its error number is read.
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Worksheet.Unprotect, Worksheet.EnableSelection
+'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallReset, DEMO_CT_Check,
+'     DEMO_CT_CheckError, DEMO_CT_CheckLong, DEMO_CT_CheckOptions,
+'     DEMO_CT_CheckProbe, DEMO_CT_CountText, DEMO_CT_IsProtected,
+'     DEMO_CT_NewSheet, DEMO_CT_Protect, DEMO_CT_ReadOptions
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
 '
 ' CHECKS
 '   - missing password: the exact vbObjectError + 2100 validation error
@@ -1084,25 +1500,30 @@ Private Sub DEMO_CT_ResetUnprotectFailure( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim EntryOptions        As String          'Options read back on entry
-    Dim EntrySelection      As Long            'EnableSelection read back on entry
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
-    Dim UnprotectNumber     As Long            'Error of the final original-password unprotect
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetUnprotectFailure"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim EntryOptions        As String       'Options read back on entry
+    Dim EntrySelection      As Long         'EnableSelection read back on entry
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+    Dim UnprotectNumber     As Long         'Error of the final original-password unprotect
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -1138,37 +1559,92 @@ Private Sub DEMO_CT_ResetUnprotectFailure( _
 
     'The protection must still be the original one, not a reprotection
         On Error Resume Next
-            WS.Unprotect Password:=PROTECT_PASSWORD
-            UnprotectNumber = Err.Number
-            Err.Clear
-        On Error GoTo Err_Handler
+        WS.Unprotect Password:=PROTECT_PASSWORD
+        UnprotectNumber = Err.Number
+        Err.Clear
+        On Error GoTo ErrorHandler
 
         DEMO_CT_Check UnprotectNumber = 0 And Not DEMO_CT_IsProtected(WS), _
                       Scenario & ".OriginalPassword", _
                       "the original password no longer unprotects the sheet"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetProtectFault( _
     ByVal WB As Workbook, _
     ByVal Scenario As String, _
     ByVal WithOperationFault As Boolean)
 '
-'==============================================================================
-' DEMO_CT_ResetProtectFault
+'------------------------------------------------------------------------------
+'                          CHECK RESET PROTECT FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S09/S10: the cleanup Protect statement fails once.
+'
+' WHY THIS EXISTS
+'   Covers a failure of the cleanup Protect statement, alone (S09) and after an
+'   operation error (S10), so that the caller gets the right error either way
+'   (#71).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S09_ProtectFault or S10_ProtectAfterOp); it names the
+'     sheet and prefixes every check name
+'
+'   WithOperationFault
+'     False: only the Protect statement fails (S09). True: an operation error
+'     comes first (S10)
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, protects it with OPTIONS_A and xlUnlockedCells and reads
+'     EnableSelection back
+'   - With WithOperationFault, calls DEMO_Sheet_Reset through DEMO_CT_CallReset
+'     with FAULT_BODY + FAULT_PROTECT and expects the body error carrying the
+'     Protect failure in one cleanup diagnostic
+'   - Without it, calls with FAULT_PROTECT and expects the Protect failure
+'     itself
+'   - Checks the probe counters of that branch, the number of cleanup
+'     diagnostics, that the body ran, that the sheet is unprotected and that
+'     EnableSelection is restored
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Worksheet.EnableSelection
+'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallReset, DEMO_CT_Check,
+'     DEMO_CT_CheckError, DEMO_CT_CheckLong, DEMO_CT_CheckProbe,
+'     DEMO_CT_CountText, DEMO_CT_IsProtected, DEMO_CT_NewSheet, DEMO_CT_Protect
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
 '
 ' CHECKS
 '   - without an operation error, the Protect failure itself reaches the
@@ -1180,23 +1656,28 @@ Private Sub DEMO_CT_ResetProtectFault( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim EntrySelection      As Long            'EnableSelection read back on entry
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetProtectFault"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim EntrySelection      As Long         'EnableSelection read back on entry
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -1232,49 +1713,102 @@ Private Sub DEMO_CT_ResetProtectFault( _
                       "the sheet is protected although the only Protect attempt failed"
         DEMO_CT_CheckLong Scenario & ".EnableSelectionRestored", EntrySelection, WS.EnableSelection
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetSelectionFault( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_ResetSelectionFault
+'------------------------------------------------------------------------------
+'                         CHECK RESET SELECTION FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S11: Protect succeeds and the EnableSelection restoration fails; that
 '   failure reaches the caller directly, once, and the fifteen options are
 '   still restored with the supplied password.
 '
+' WHY THIS EXISTS
+'   Covers a failure of the EnableSelection restoration after a successful
+'   Protect (#71).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S11_SelectionFault); it names the sheet and prefixes every
+'     check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, protects it with OPTIONS_A and xlUnlockedCells and reads
+'     the options back
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with FAULT_SELECTION,
+'     PROTECT_PASSWORD and ReProtectAtEnd=True
+'   - Checks the injected selection error (ERR_SELECTION, SRC_SELECTION,
+'     DESC_SELECTION), no handler entry, one cleanup pass, one Protect and one
+'     EnableSelection attempt
+'   - Checks the options read back as on entry and that the password protects
+'     the sheet again
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_CheckError,
+'     DEMO_CT_CheckOptions, DEMO_CT_CheckPasswordReapplied, DEMO_CT_CheckProbe,
+'     DEMO_CT_NewSheet, DEMO_CT_Protect, DEMO_CT_ReadOptions
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim EntryOptions        As String          'Options read back on entry
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetSelectionFault"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim EntryOptions        As String       'Options read back on entry
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -1297,48 +1831,101 @@ Private Sub DEMO_CT_ResetSelectionFault( _
         DEMO_CT_CheckOptions Scenario & ".Readback.Options", EntryOptions, DEMO_CT_ReadOptions(WS)
         DEMO_CT_CheckPasswordReapplied Scenario & ".Readback.Password", WS
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetAllCleanupFaults( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_ResetAllCleanupFaults
+'------------------------------------------------------------------------------
+'                     CHECK RESET WITH ALL CLEANUP FAULTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S12: an operation error followed by Protect and EnableSelection failures.
 '   The operation error keeps its number and source; one cleanup diagnostic
 '   carries the Protect failure and then the EnableSelection failure.
 '
+' WHY THIS EXISTS
+'   Covers an operation error followed by both cleanup failures, to show that
+'   one diagnostic carries both and that the operation error keeps its number
+'   and source (#71).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S12_AllFaults); it names the sheet and prefixes every
+'     check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet and protects it with OPTIONS_A and xlUnlockedCells
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with FAULT_BODY +
+'     FAULT_PROTECT + FAULT_SELECTION
+'   - Checks the description is the body error, then CLEANUP_MARKER and the
+'     Protect failure, then SELECTION_MARKER and the EnableSelection failure,
+'     with exactly one cleanup diagnostic
+'   - Checks one handler entry, one cleanup pass, one Protect and one
+'     EnableSelection attempt, and that the sheet is unprotected
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_Check, DEMO_CT_CheckError,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckProbe, DEMO_CT_CountText,
+'     DEMO_CT_IsProtected, DEMO_CT_NewSheet, DEMO_CT_Protect
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetAllCleanupFaults"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -1365,24 +1952,29 @@ Private Sub DEMO_CT_ResetAllCleanupFaults( _
         DEMO_CT_Check Not DEMO_CT_IsProtected(WS), Scenario & ".Unprotected", _
                       "the sheet is protected although the only Protect attempt failed"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_BuildOrdinaryError( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_BuildOrdinaryError
+'------------------------------------------------------------------------------
+'                   CHECK BUILD ERROR REMOVES THE NEW SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S13: DEMO_Sheet_BuildTemplate creates a worksheet, resets it, and then
@@ -1390,32 +1982,81 @@ Private Sub DEMO_CT_BuildOrdinaryError( _
 '   The error reaches the caller once and unchanged after one handler entry
 '   and one cleanup pass, and the worksheet this call created is gone.
 '
+' WHY THIS EXISTS
+'   Covers an error inside the guarded body of DEMO_Sheet_BuildTemplate after
+'   it created a worksheet: the error must reach the caller once and unchanged,
+'   and the sheet the call created must be removed (#71, #74).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; it must be the
+'     active workbook
+'
+'   Scenario
+'     Scenario name (S13_BuildError); it is the name of the worksheet the
+'     template creates and removes, and prefixes every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Records the sheet count and checks that WB is the active workbook and has
+'     no sheet named Scenario
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with
+'     VALID_CONTENT, VALID_HIDE_ROWS, the current DisplayFormulaBar and
+'     FAULT_FORMULABAR
+'   - Checks the injected formula-bar error, the probe counters (one cleanup
+'     pass of the nested reset, one handler entry and one cleanup pass of the
+'     template), that the created sheet is gone and that the sheet count is
+'     unchanged
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - Application.DisplayFormulaBar, Workbook.Sheets
+'   - Harness helpers: DEMO_CT_CallBuild, DEMO_CT_Check, DEMO_CT_CheckError,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckProbe, DEMO_CT_SheetExists
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
 ' NOTES
 '   Every deterministic layout check now runs before the reset, so an
 '   injected fault stands in for an error inside the guarded body. The
 '   template applies view settings only to the active workbook, so this
 '   scenario requires the temporary workbook to be active.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Injected body fault on a created sheet; owned-sheet removal
 '                (#74).
 '   2026-11-06
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SheetsBefore        As Long            'Sheet count before the call
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildOrdinaryError"
+
+    Dim SheetsBefore        As Long     'Sheet count before the call
+    Dim FailuresBefore      As Long     'Failure count at scenario start
+    Dim RaisedNumber        As Long     'Error reaching the caller
+    Dim RaisedSource        As String   'Its source
+    Dim RaisedDescription   As String   'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         SheetsBefore = WB.Sheets.Count
@@ -1440,24 +2081,29 @@ Private Sub DEMO_CT_BuildOrdinaryError( _
                       "the worksheet this call created is still there"
         DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_BuildNestedResetError( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_BuildNestedResetError
+'------------------------------------------------------------------------------
+'                   CHECK BUILD PASSES A NESTED RESET ERROR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S14: BuildTemplate on a password-protected sheet. Its nested reset has no
@@ -1465,26 +2111,78 @@ Private Sub DEMO_CT_BuildNestedResetError( _
 '   and the sheet keeps its entry protection. The sheet existed before the
 '   call, so the failed call does not delete it.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers the propagation of a nested DEMO_Sheet_Reset failure through
+'   DEMO_Sheet_BuildTemplate: both pass the error on once, and a sheet that
+'   existed before the call is kept (#71).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S14_BuildNested); it names the sheet and prefixes every
+'     check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, protects it with OPTIONS_A and xlUnlockedCells and reads
+'     the options back
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild for that sheet
+'     with a valid layout and no password, so its nested reset raises
+'   - Checks ERR_NO_PASSWORD from SRC_RESET, the probe counters (one handler
+'     entry and one cleanup pass in the reset and in the template), that the
+'     reset body did not run, that the options are unchanged and that the sheet
+'     still exists
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallBuild, DEMO_CT_Check,
+'     DEMO_CT_CheckError, DEMO_CT_CheckOptions, DEMO_CT_CheckProbe,
+'     DEMO_CT_NewSheet, DEMO_CT_Protect, DEMO_CT_ReadOptions,
+'     DEMO_CT_SheetExists
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Valid layout, so the nested reset is reached (#74).
 '   2026-11-06
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim EntryOptions        As String          'Options read back on entry
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildNestedResetError"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim EntryOptions        As String       'Options read back on entry
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -1510,52 +2208,110 @@ Private Sub DEMO_CT_BuildNestedResetError( _
         DEMO_CT_Check DEMO_CT_SheetExists(WB, Scenario), Scenario & ".SheetKept", _
                       "the failed call deleted a sheet it did not create"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_FastModeSuccess( _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_FastModeSuccess
+'------------------------------------------------------------------------------
+'                        CHECK FAST MODE ENTRY AND EXIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S15: Begin applies the five fast-mode values and End restores the entry
 '   values, the entry cursor included, writing each setting once each way.
 '
+' WHY THIS EXISTS
+'   Covers the normal round trip of the M_DEMO_BUILDER fast-mode scope in
+'   Excel: the five settings change on entry and return to their entry values
+'   on exit (#70).
+'
+' INPUTS
+'   Scenario
+'     Scenario name (S15_FastModeSuccess); it prefixes every check name and no
+'     sheet is added
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Applies the baseline, reads the entry state and arms the probe with
+'     FAULT_NONE
+'   - Calls DEMO_FastMode_Begin through DEMO_CT_CallBegin and checks the state
+'     is FM_ALL at its fast-mode values, State.Captured is set and
+'     State.Applied is FM_ALL
+'   - Calls DEMO_FastMode_End through DEMO_CT_CallEnd and checks the entry
+'     state is back, State.Applied is 0 and five entry and five restoration
+'     writes were reached
+'   - Prints one INFO line with the entry, fast-mode and exit values
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_FastMode_Begin and DEMO_FastMode_End, through DEMO_CT_CallBegin and
+'     DEMO_CT_CallEnd
+'   - DEMO_InternalCleanupProbeBegin, tDEMOFastModeState
+'   - Application settings ScreenUpdating, EnableEvents, DisplayAlerts,
+'     Calculation and Cursor, read through DEMO_CT_AppStateText
+'   - Harness helpers: DEMO_CT_AppStateText, DEMO_CT_ApplyBaseline,
+'     DEMO_CT_CallBegin, DEMO_CT_CallEnd, DEMO_CT_Check,
+'     DEMO_CT_CheckFastModeProbe, DEMO_CT_CheckLong, DEMO_CT_CheckNoError,
+'     DEMO_CT_CheckText, DEMO_CT_ExpectedState, DEMO_CT_Print
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
 ' EVIDENCE
 '   Prints the entry, fast-mode and exit values on one INFO line.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
-    Dim EntryText           As String          'Application state on entry
-    Dim FastText            As String          'Application state inside fast mode
-    Dim ExitText            As String          'Application state after End
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_FastModeSuccess"
+
+    Dim State               As tDEMOFastModeState   'Fast-mode scope under test
+    Dim EntryText           As String               'Application state on entry
+    Dim FastText            As String               'Application state inside fast mode
+    Dim ExitText            As String               'Application state after End
+    Dim FailuresBefore      As Long                 'Failure count at scenario start
+    Dim RaisedNumber        As Long                 'Error reaching the caller
+    Dim RaisedSource        As String               'Its source
+    Dim RaisedDescription   As String               'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         DEMO_CT_ApplyBaseline
@@ -1588,58 +2344,109 @@ Private Sub DEMO_CT_FastModeSuccess( _
         DEMO_CT_Print "    INFO " & Scenario & ": entry [" & EntryText & "] fast [" & FastText & _
                       "] exit [" & ExitText & "]"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_FastModeEntryFault( _
     ByVal Scenario As String, _
     ByVal Setting As Long, _
     ByVal WriteIndex As Long)
 '
-'==============================================================================
-' DEMO_CT_FastModeEntryFault
+'------------------------------------------------------------------------------
+'                         CHECK FAST MODE ENTRY FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S16-S20: the entry write of one setting fails. Begin rolls back every
 '   setting it had marked, the failed one included, raises the entry error
 '   unchanged and leaves nothing owned.
 '
+' WHY THIS EXISTS
+'   Covers the rollback of DEMO_FastMode_Begin when one of its five entry
+'   writes fails; S16 to S20 differ only in which setting fails (#70).
+'
 ' INPUTS
+'   Scenario
+'     Scenario name (S16 to S20); it prefixes every check name and no sheet is
+'     added
+'
 '   Setting
 '     The FM_* bit whose entry write fails
 '
 '   WriteIndex
-'     Its position in the entry order, 1 to 5; also the number of writes
-'     Begin reaches and the number of restorations its rollback attempts
+'     Its position in the entry order, 1 to 5; also the number of writes Begin
+'     reaches and the number of restorations its rollback attempts
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Applies the baseline, reads the entry state and arms the probe with
+'     Setting * FAULT_FM_ENTRY_UNIT
+'   - Calls DEMO_FastMode_Begin through DEMO_CT_CallBegin
+'   - Checks the injected entry error naming the setting (ERR_FM_ENTRY,
+'     SRC_FM_ENTRY, DESC_FM_ENTRY), that the state is the entry state again,
+'     that State.Captured is set and State.Applied is 0, and that WriteIndex
+'     entry and restoration writes were reached
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_FastMode_Begin, through DEMO_CT_CallBegin
+'   - DEMO_InternalCleanupProbeBegin, tDEMOFastModeState
+'   - Harness helpers: DEMO_CT_AppStateText, DEMO_CT_ApplyBaseline,
+'     DEMO_CT_CallBegin, DEMO_CT_Check, DEMO_CT_CheckError,
+'     DEMO_CT_CheckFastModeProbe, DEMO_CT_CheckLong, DEMO_CT_CheckText,
+'     DEMO_CT_SettingName
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
+'   2026-11-14 - Added for #70.
 '
 ' UPDATED
-'   2026-11-14 - Added for #70.
-'==============================================================================
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
-    Dim EntryText           As String          'Application state on entry
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_FastModeEntryFault"
+
+    Dim State               As tDEMOFastModeState   'Fast-mode scope under test
+    Dim EntryText           As String               'Application state on entry
+    Dim FailuresBefore      As Long                 'Failure count at scenario start
+    Dim RaisedNumber        As Long                 'Error reaching the caller
+    Dim RaisedSource        As String               'Its source
+    Dim RaisedDescription   As String               'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         DEMO_CT_ApplyBaseline
@@ -1663,48 +2470,106 @@ Private Sub DEMO_CT_FastModeEntryFault( _
         DEMO_CT_CheckLong Scenario & ".Applied", 0, State.Applied
         DEMO_CT_CheckFastModeProbe Scenario & ".Probe", WriteIndex, WriteIndex
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_FastModeRestoreFault( _
     ByVal Scenario As String, _
     ByVal Setting As Long)
 '
-'==============================================================================
-' DEMO_CT_FastModeRestoreFault
+'------------------------------------------------------------------------------
+'                        CHECK FAST MODE RESTORE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S21-S25: the restoration of one setting fails. End still attempts all
 '   five, restores the other four, and raises one error that names the
 '   failed setting and its error.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers DEMO_FastMode_End when the restoration of one setting fails: it must
+'   still attempt all five and report the failure (#70).
+'
+' INPUTS
+'   Scenario
+'     Scenario name (S21 to S25); it prefixes every check name and no sheet is
+'     added
+'
+'   Setting
+'     The FM_* bit whose restoration write fails
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Applies the baseline and arms the probe with Setting *
+'     FAULT_FM_RESTORE_UNIT
+'   - Calls DEMO_FastMode_Begin through DEMO_CT_CallBegin and checks that it
+'     raised nothing
+'   - Calls DEMO_FastMode_End through DEMO_CT_CallEnd and checks the error
+'     (ERR_FM_END, SRC_FM_END, DESC_FM_END plus the entry for that setting)
+'   - Checks that only Setting still holds its fast-mode value, that
+'     State.Applied is 0 and that five entry and five restoration writes were
+'     reached
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_FastMode_Begin and DEMO_FastMode_End, through DEMO_CT_CallBegin and
+'     DEMO_CT_CallEnd
+'   - DEMO_InternalCleanupProbeBegin, tDEMOFastModeState
+'   - Harness helpers: DEMO_CT_AppStateText, DEMO_CT_ApplyBaseline,
+'     DEMO_CT_CallBegin, DEMO_CT_CallEnd, DEMO_CT_CheckError,
+'     DEMO_CT_CheckFastModeProbe, DEMO_CT_CheckLong, DEMO_CT_CheckNoError,
+'     DEMO_CT_CheckText, DEMO_CT_ExpectedState, DEMO_CT_RestoreFailureText
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_FastModeRestoreFault"
+
+    Dim State               As tDEMOFastModeState   'Fast-mode scope under test
+    Dim FailuresBefore      As Long                 'Failure count at scenario start
+    Dim RaisedNumber        As Long                 'Error reaching the caller
+    Dim RaisedSource        As String               'Its source
+    Dim RaisedDescription   As String               'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         DEMO_CT_ApplyBaseline
@@ -1728,47 +2593,100 @@ Private Sub DEMO_CT_FastModeRestoreFault( _
         DEMO_CT_CheckLong Scenario & ".Applied", 0, State.Applied
         DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_FastModeRollbackFault( _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_FastModeRollbackFault
+'------------------------------------------------------------------------------
+'                        CHECK FAST MODE ROLLBACK FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S26: the Cursor entry write fails and the rollback of ScreenUpdating
 '   fails too. Begin keeps the entry error's number and source, appends one
 '   rollback diagnostic, and still restores the other four settings.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers an entry failure whose rollback fails too: the entry error must keep
+'   its identity and carry the rollback failure in one diagnostic (#70).
+'
+' INPUTS
+'   Scenario
+'     Scenario name (S26_RollbackFault); it prefixes every check name and no
+'     sheet is added
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Applies the baseline and arms the probe with a Cursor entry fault and a
+'     ScreenUpdating restoration fault
+'   - Calls DEMO_FastMode_Begin through DEMO_CT_CallBegin
+'   - Checks the Cursor entry error (ERR_FM_ENTRY, SRC_FM_ENTRY) followed by
+'     ROLLBACK_MARKER and the ScreenUpdating restoration failure
+'   - Checks that only ScreenUpdating still holds its fast-mode value, that
+'     State.Applied is 0 and that five entry and five restoration writes were
+'     reached
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_FastMode_Begin, through DEMO_CT_CallBegin
+'   - DEMO_InternalCleanupProbeBegin, tDEMOFastModeState
+'   - Harness helpers: DEMO_CT_AppStateText, DEMO_CT_ApplyBaseline,
+'     DEMO_CT_CallBegin, DEMO_CT_CheckError, DEMO_CT_CheckFastModeProbe,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckText, DEMO_CT_ExpectedState,
+'     DEMO_CT_RestoreFailureText
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_FastModeRollbackFault"
+
+    Dim State               As tDEMOFastModeState   'Fast-mode scope under test
+    Dim FailuresBefore      As Long                 'Failure count at scenario start
+    Dim RaisedNumber        As Long                 'Error reaching the caller
+    Dim RaisedSource        As String               'Its source
+    Dim RaisedDescription   As String               'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         DEMO_CT_ApplyBaseline
@@ -1791,47 +2709,106 @@ Private Sub DEMO_CT_FastModeRollbackFault( _
         DEMO_CT_CheckLong Scenario & ".Applied", 0, State.Applied
         DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_FastModeCallerMerge( _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_FastModeCallerMerge
+'------------------------------------------------------------------------------
+'                         CHECK FAST MODE ERROR MERGE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S27: a caller's cleanup path holds an operation error and the Calculation
 '   restoration fails. DEMO_FastMode_EndPreservingError keeps the operation
 '   error's number and source and appends the restoration failure once.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers DEMO_FastMode_EndPreservingError for a caller whose cleanup path
+'   already holds an operation error (#70).
+'
+' INPUTS
+'   Scenario
+'     Scenario name (S27_CallerMerge); it prefixes every check name and no
+'     sheet is added
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Applies the baseline and arms the probe with a Calculation restoration
+'     fault
+'   - Calls DEMO_FastMode_Begin through DEMO_CT_CallBegin and checks that it
+'     raised nothing
+'   - Loads the simulated operation error (ERR_OPERATION, SRC_OPERATION,
+'     DESC_OPERATION) into the error variables, as a caller's handler would
+'     hold it
+'   - Calls DEMO_FastMode_EndPreservingError and checks that the operation
+'     error keeps its number and source and gains one cleanup diagnostic with
+'     the Calculation restoration failure
+'   - Checks that only Calculation still holds its fast-mode value, that
+'     State.Applied is 0 and that five entry and five restoration writes were
+'     reached
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_FastMode_Begin, through DEMO_CT_CallBegin
+'   - DEMO_FastMode_EndPreservingError
+'   - DEMO_InternalCleanupProbeBegin, tDEMOFastModeState
+'   - Harness helpers: DEMO_CT_AppStateText, DEMO_CT_ApplyBaseline,
+'     DEMO_CT_CallBegin, DEMO_CT_CheckError, DEMO_CT_CheckFastModeProbe,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckNoError, DEMO_CT_CheckText,
+'     DEMO_CT_ExpectedState, DEMO_CT_RestoreFailureText
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_FastModeCallerMerge"
+
+    Dim State               As tDEMOFastModeState   'Fast-mode scope under test
+    Dim FailuresBefore      As Long                 'Failure count at scenario start
+    Dim RaisedNumber        As Long                 'Error reaching the caller
+    Dim RaisedSource        As String               'Its source
+    Dim RaisedDescription   As String               'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         DEMO_CT_ApplyBaseline
@@ -1862,47 +2839,102 @@ Private Sub DEMO_CT_FastModeCallerMerge( _
         DEMO_CT_CheckLong Scenario & ".Applied", 0, State.Applied
         DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_FastModeCleanupOnly( _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_FastModeCleanupOnly
+'------------------------------------------------------------------------------
+'                   CHECK FAST MODE CLEANUP WITHOUT AN ERROR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S28: without an operation error, a failed Cursor restoration becomes the
 '   caller's error. A second End then restores nothing, because the first one
 '   released ownership.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers DEMO_FastMode_EndPreservingError for a caller with no operation
+'   error, and the release of ownership by the first End (#70).
+'
+' INPUTS
+'   Scenario
+'     Scenario name (S28_CleanupOnly); it prefixes every check name and no
+'     sheet is added
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Applies the baseline and arms the probe with a Cursor restoration fault
+'   - Calls DEMO_FastMode_Begin through DEMO_CT_CallBegin and checks that it
+'     raised nothing
+'   - Clears the error variables and calls DEMO_FastMode_EndPreservingError;
+'     checks that the restoration failure (ERR_FM_END, SRC_FM_END) becomes the
+'     caller's error and that only Cursor still holds its fast-mode value
+'   - Calls DEMO_FastMode_End through DEMO_CT_CallEnd again and checks that it
+'     raises nothing and reaches no further write
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_FastMode_Begin and DEMO_FastMode_End, through DEMO_CT_CallBegin and
+'     DEMO_CT_CallEnd
+'   - DEMO_FastMode_EndPreservingError
+'   - DEMO_InternalCleanupProbeBegin, tDEMOFastModeState
+'   - Harness helpers: DEMO_CT_AppStateText, DEMO_CT_ApplyBaseline,
+'     DEMO_CT_CallBegin, DEMO_CT_CallEnd, DEMO_CT_CheckError,
+'     DEMO_CT_CheckFastModeProbe, DEMO_CT_CheckNoError, DEMO_CT_CheckText,
+'     DEMO_CT_ExpectedState, DEMO_CT_RestoreFailureText
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_FastModeCleanupOnly"
+
+    Dim State               As tDEMOFastModeState   'Fast-mode scope under test
+    Dim FailuresBefore      As Long                 'Failure count at scenario start
+    Dim RaisedNumber        As Long                 'Error reaching the caller
+    Dim RaisedSource        As String               'Its source
+    Dim RaisedDescription   As String               'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         DEMO_CT_ApplyBaseline
@@ -1931,54 +2963,107 @@ Private Sub DEMO_CT_FastModeCleanupOnly( _
         DEMO_CT_CheckNoError Scenario & ".SecondEnd.NoError", RaisedNumber, RaisedSource, RaisedDescription
         DEMO_CT_CheckFastModeProbe Scenario & ".Probe", 5, 5
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_FormulaBarPolicy( _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_FormulaBarPolicy
+'------------------------------------------------------------------------------
+'                        CHECK FORMULA BAR IS NOT OWNED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S29: fast mode does not own DisplayFormulaBar. A change made inside a
 '   fast-mode scope, as the template makes it, survives End, while the five
 '   owned settings are restored.
 '
+' WHY THIS EXISTS
+'   Covers the ownership rule of the fast-mode scope: DisplayFormulaBar is not
+'   one of the five settings it restores, because the template changes it
+'   inside the scope on purpose (#70).
+'
+' INPUTS
+'   Scenario
+'     Scenario name (S29_FormulaBarPolicy); it prefixes every check name and no
+'     sheet is added
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Applies the baseline, reads the entry state and DisplayFormulaBar and
+'     arms the probe with FAULT_NONE
+'   - Calls DEMO_FastMode_Begin through DEMO_CT_CallBegin, then writes the
+'     opposite DisplayFormulaBar value
+'   - Calls DEMO_FastMode_End through DEMO_CT_CallEnd and checks that it raised
+'     nothing, that DisplayFormulaBar kept the changed value and that the five
+'     owned settings are back at their entry values
+'   - On exit, writes DisplayFormulaBar back when it was changed
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario. The write-back of DisplayFormulaBar on exit runs under
+'   On Error Resume Next.
+'
+' DEPENDENCIES
+'   - DEMO_FastMode_Begin and DEMO_FastMode_End, through DEMO_CT_CallBegin and
+'     DEMO_CT_CallEnd
+'   - DEMO_InternalCleanupProbeBegin, tDEMOFastModeState
+'   - Application.DisplayFormulaBar
+'   - Harness helpers: DEMO_CT_AppStateText, DEMO_CT_ApplyBaseline,
+'     DEMO_CT_CallBegin, DEMO_CT_CallEnd, DEMO_CT_Check, DEMO_CT_CheckNoError,
+'     DEMO_CT_CheckText
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
 ' NOTES
 '   The scenario toggles the formula bar of this Excel instance and puts it
 '   back on every exit.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim State               As tDEMOFastModeState 'Fast-mode scope under test
-    Dim EntryText           As String          'Application state on entry
-    Dim EntryFormulaBar     As Boolean         'DisplayFormulaBar on entry
-    Dim Toggled             As Boolean         'TRUE once the formula bar was toggled
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_FormulaBarPolicy"
+
+    Dim State               As tDEMOFastModeState   'Fast-mode scope under test
+    Dim EntryText           As String               'Application state on entry
+    Dim EntryFormulaBar     As Boolean              'DisplayFormulaBar on entry
+    Dim Toggled             As Boolean              'TRUE once the formula bar was toggled
+    Dim FailuresBefore      As Long                 'Failure count at scenario start
+    Dim RaisedNumber        As Long                 'Error reaching the caller
+    Dim RaisedSource        As String               'Its source
+    Dim RaisedDescription   As String               'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         DEMO_CT_ApplyBaseline
@@ -2006,29 +3091,34 @@ Private Sub DEMO_CT_FormulaBarPolicy( _
                       Scenario & ".FormulaBarNotOwned", "End changed DisplayFormulaBar"
         DEMO_CT_CheckText Scenario & ".State", EntryText, DEMO_CT_AppStateText()
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         If Toggled Then
             On Error Resume Next
-                Application.DisplayFormulaBar = EntryFormulaBar
+            Application.DisplayFormulaBar = EntryFormulaBar
             On Error GoTo 0
         End If
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_FormulaBarFault( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_FormulaBarFault
+'------------------------------------------------------------------------------
+'                        CHECK FORMULA BAR WRITE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S30: the DisplayFormulaBar write of the template fails inside its guarded
@@ -2036,29 +3126,77 @@ Private Sub DEMO_CT_FormulaBarFault( _
 '   and the formula bar keeps its entry value although the call asked for the
 '   opposite one.
 '
+' WHY THIS EXISTS
+'   Covers a failed DisplayFormulaBar write inside the guarded body of
+'   DEMO_Sheet_BuildTemplate, after its reset (#70).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; it must be the
+'     active workbook
+'
+'   Scenario
+'     Scenario name (S30_FormulaBarFault); it names the sheet and prefixes
+'     every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, reads DisplayFormulaBar and checks that WB is the active
+'     workbook
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with a valid
+'     layout, ShowFormulaBar set to the opposite of the current value and
+'     FAULT_FORMULABAR
+'   - Checks the injected formula-bar error, the probe counters (one cleanup
+'     pass of the nested reset, one handler entry and one cleanup pass of the
+'     template), that the reset ran and that DisplayFormulaBar kept its entry
+'     value
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - Application.DisplayFormulaBar
+'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallBuild, DEMO_CT_Check,
+'     DEMO_CT_CheckError, DEMO_CT_CheckProbe, DEMO_CT_NewSheet
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
 ' NOTES
 '   The template applies view settings only to the active workbook, so this
 '   scenario requires the temporary workbook to be active.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim EntryFormulaBar     As Boolean         'DisplayFormulaBar on entry
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_FormulaBarFault"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim EntryFormulaBar     As Boolean      'DisplayFormulaBar on entry
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -2083,24 +3221,29 @@ Private Sub DEMO_CT_FormulaBarFault( _
         DEMO_CT_Check Application.DisplayFormulaBar = EntryFormulaBar, _
                       Scenario & ".FormulaBarUnchanged", "the failed write changed DisplayFormulaBar"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_CheckBoxForms( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_CheckBoxForms
+'------------------------------------------------------------------------------
+'                     CHECK FORMS CHECK BOX READ AND WRITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S31: DEMO_CB_TrySetState writes True and False to a Forms check box, and
@@ -2108,22 +3251,71 @@ Private Sub DEMO_CT_CheckBoxForms( _
 '   through the Forms object model and each read follows a direct write, so
 '   neither helper checks the other.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers DEMO_CB_TrySetState and DEMO_CB_TryGetState on a real Forms check
+'   box, each direction checked against the Forms object model rather than
+'   against the other helper (#73).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S31_CheckBoxForms); it names the sheet and prefixes every
+'     check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet with a Forms check box named CB_TARGET, set to xlOff
+'   - Writes True and False through DEMO_CB_TrySetState and reads
+'     ControlFormat.Value back after each
+'   - Writes xlOn and xlOff through ControlFormat.Value and reads each through
+'     DEMO_CB_TryGetState
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_CB_TrySetState and DEMO_CB_TryGetState, through DEMO_CT_CheckSet and
+'     DEMO_CT_CheckGet
+'   - Shape.ControlFormat.Value
+'   - Harness helpers: DEMO_CT_AddFormsControl, DEMO_CT_CheckGet,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckSet, DEMO_CT_NewSheet
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim Shp                 As Shape           'Forms check box
-    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_CheckBoxForms"
+
+    Dim WS              As Worksheet    'Scenario sheet
+    Dim Shp             As Shape        'Forms check box
+    Dim FailuresBefore  As Long         'Failure count at scenario start
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -2145,50 +3337,101 @@ Private Sub DEMO_CT_CheckBoxForms( _
         Shp.ControlFormat.Value = xlOff
         DEMO_CT_CheckGet Scenario & ".Read.False", WS, CB_TARGET, True, False, vbNullString
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_CheckBoxActiveX( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_CheckBoxActiveX
+'------------------------------------------------------------------------------
+'                    CHECK ACTIVEX CHECK BOX READ AND WRITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S32: the same reads and writes on an ActiveX check box. Its worksheet
 '   shape has the same name as its OLEObject; a lookup that refused every
 '   non-Forms shape would never reach the OLEObject.
 '
+' WHY THIS EXISTS
+'   Covers the ActiveX branch of the check-box helpers, whose OLEObject shares
+'   its name with a worksheet shape that is not a Forms control (#73).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S32_CheckBoxActiveX); it names the sheet and prefixes
+'     every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet with an ActiveX check box named CB_TARGET, set to False,
+'     and checks that its worksheet shape is an OLE control object
+'   - Writes True and False through DEMO_CB_TrySetState and reads the control's
+'     Value back after each
+'   - Writes True and False through the control and reads each through
+'     DEMO_CB_TryGetState
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_CB_TrySetState and DEMO_CB_TryGetState, through DEMO_CT_CheckSet and
+'     DEMO_CT_CheckGet
+'   - OLEObject.Object.Value, Shape.Type
+'   - Harness helpers: DEMO_CT_AddActiveX, DEMO_CT_CheckGet, DEMO_CT_CheckLong,
+'     DEMO_CT_CheckSet, DEMO_CT_CheckText, DEMO_CT_NewSheet, DEMO_CT_ValueText
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
 ' NOTES
 '   Creating the control needs ActiveX controls to be enabled in the Trust
 '   Center; when they are not, the scenario fails and says so.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim CheckBoxOle         As OLEObject       'ActiveX check box
-    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_CheckBoxActiveX"
+
+    Dim WS              As Worksheet    'Scenario sheet
+    Dim CheckBoxOle     As OLEObject    'ActiveX check box
+    Dim FailuresBefore  As Long         'Failure count at scenario start
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -2212,45 +3455,100 @@ Private Sub DEMO_CT_CheckBoxActiveX( _
         CheckBoxOle.Object.Value = False
         DEMO_CT_CheckGet Scenario & ".Read.False", WS, CB_TARGET, True, False, vbNullString
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_CheckBoxRefusals( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_CheckBoxRefusals
+'------------------------------------------------------------------------------
+'                CHECK CHECK BOX HELPERS REFUSE OTHER CONTROLS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S33: both helpers refuse, with their diagnostic, a plain shape, a Forms
 '   button, an ActiveX command button, a missing name and a blank name.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers the refusals of the check-box helpers: each must return False with
+'   its diagnostic for anything that is not a check box (#73).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S33_CheckBoxRefusals); it names the sheet and prefixes
+'     every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet with a plain rectangle, a Forms button and an ActiveX
+'     command button
+'   - Calls DEMO_CB_TryGetState and DEMO_CB_TrySetState for each of them, for a
+'     name that does not exist and for a blank name
+'   - Checks that every call returns False with the expected message
+'     (MSG_NOT_CONTROL, MSG_FORMS_NOT_CHECKBOX, MSG_ACTIVEX_NOT_CHECKBOX,
+'     MSG_NOT_FOUND or MSG_BLANK_NAME)
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_CB_TrySetState and DEMO_CB_TryGetState, through DEMO_CT_CheckSet and
+'     DEMO_CT_CheckGet
+'   - Shapes.AddShape
+'   - Harness helpers: DEMO_CT_AddActiveX, DEMO_CT_AddFormsControl,
+'     DEMO_CT_CheckGet, DEMO_CT_CheckSet, DEMO_CT_NewSheet
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim Shp                 As Shape           'Plain shape
-    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_CheckBoxRefusals"
+
+    Dim WS              As Worksheet    'Scenario sheet
+    Dim Shp             As Shape        'Plain shape
+    Dim FailuresBefore  As Long         'Failure count at scenario start
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -2273,47 +3571,102 @@ Private Sub DEMO_CT_CheckBoxRefusals( _
         DEMO_CT_CheckGet Scenario & ".Blank.Get", WS, " ", False, False, MSG_BLANK_NAME
         DEMO_CT_CheckSet Scenario & ".Blank.Set", WS, " ", True, False, MSG_BLANK_NAME
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_CheckBoxMixed( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_CheckBoxMixed
+'------------------------------------------------------------------------------
+'                         CHECK MIXED CHECK BOX STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S34: a mixed Forms check box (xlMixed) and a mixed ActiveX check box
 '   (Value Null) are refused on read with the mixed-state diagnostic, and a
 '   write replaces the mixed state with a definite one.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers the mixed state of both check-box kinds, which the helpers refuse to
+'   read as checked or unchecked (#73).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S34_CheckBoxMixed); it names the sheet and prefixes every
+'     check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet with a Forms check box set to xlMixed and an ActiveX check
+'     box with TripleState on and Value Null, and checks both setups
+'   - Reads both through DEMO_CB_TryGetState and checks that each is refused
+'     with MSG_MIXED
+'   - Writes False to the Forms box and True to the ActiveX box through
+'     DEMO_CB_TrySetState and checks the readback of each
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_CB_TrySetState and DEMO_CB_TryGetState, through DEMO_CT_CheckSet and
+'     DEMO_CT_CheckGet
+'   - Shape.ControlFormat.Value, OLEObject.Object.Value and TripleState
+'   - Harness helpers: DEMO_CT_AddActiveX, DEMO_CT_AddFormsControl,
+'     DEMO_CT_CheckGet, DEMO_CT_CheckLong, DEMO_CT_CheckSet, DEMO_CT_CheckText,
+'     DEMO_CT_NewSheet, DEMO_CT_ValueText
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim Shp                 As Shape           'Forms check box
-    Dim CheckBoxOle         As OLEObject       'ActiveX check box
-    Dim FailuresBefore      As Long            'Failure count at scenario start
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_CheckBoxMixed"
+
+    Dim WS              As Worksheet    'Scenario sheet
+    Dim Shp             As Shape        'Forms check box
+    Dim CheckBoxOle     As OLEObject    'ActiveX check box
+    Dim FailuresBefore  As Long         'Failure count at scenario start
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -2339,17 +3692,22 @@ Private Sub DEMO_CT_CheckBoxMixed( _
         DEMO_CT_CheckSet Scenario & ".ActiveX.Set", WS, CB_ACTIVEX_MIXED, True, True, vbNullString
         DEMO_CT_CheckText Scenario & ".ActiveX.Readback", CStr(True), DEMO_CT_ValueText(CheckBoxOle.Object.Value)
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_BuildInvalidLayout( _
     ByVal WB As Workbook, _
@@ -2360,8 +3718,8 @@ Private Sub DEMO_CT_BuildInvalidLayout( _
     ByVal ExpectedDescription As String, _
     ByVal NeedsGrid As Boolean)
 '
-'==============================================================================
-' DEMO_CT_BuildInvalidLayout
+'------------------------------------------------------------------------------
+'                       CHECK INVALID LAYOUT IS REFUSED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S35-S40: an invalid ContentColumns or HideRowsFrom is refused before the
@@ -2369,33 +3727,96 @@ Private Sub DEMO_CT_BuildInvalidLayout( _
 '   shape, table, column width and hidden row, and the workbook keeps its
 '   sheet count.
 '
+' WHY THIS EXISTS
+'   Covers the layout validation of DEMO_Sheet_BuildTemplate: an invalid
+'   ContentColumns or HideRowsFrom must be refused before the template resets
+'   or creates anything (#74).
+'
 ' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S35 to S40); it names the populated sheet the template is
+'     pointed at and prefixes every check name
+'
+'   ContentColumns
+'     The ContentColumns value under test
+'
+'   HideRowsFrom
+'     The HideRowsFrom value under test
+'
+'   ExpectedNumber
+'     The error number the template must raise
+'
+'   ExpectedDescription
+'     The error description the template must raise
+'
 '   NeedsGrid
-'     FALSE for a check that needs no workbook: it raises before the
-'     template's handler is armed, so no probe site is reached. TRUE for a
-'     check against the worksheet's last row or column: it raises inside the
-'     guarded body, once, before the reset.
+'     FALSE for a check that needs no workbook: it raises before the template's
+'     handler is armed, so no probe site is reached. TRUE for a check against
+'     the worksheet's last row or column: it raises inside the guarded body,
+'     once, before the reset.
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds a populated sheet (DEMO_CT_NewPopulatedSheet), and records its text
+'     and the sheet count
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with
+'     ContentColumns, HideRowsFrom and no fault armed
+'   - Checks the error against ExpectedNumber, SRC_BUILD and
+'     ExpectedDescription, and the probe: one handler entry and one cleanup
+'     pass of the template when NeedsGrid, none otherwise
+'   - Checks the sheet text and the sheet count are unchanged
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - Workbook.Sheets
+'   - Harness helpers: DEMO_CT_CallBuild, DEMO_CT_CheckError,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckProbe, DEMO_CT_CheckText,
+'     DEMO_CT_NewPopulatedSheet, DEMO_CT_SheetText
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
+'   2026-11-14 - Added for #74.
 '
 ' UPDATED
-'   2026-11-14 - Added for #74.
-'==============================================================================
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Existing populated sheet
-    Dim EntryText           As String          'Sheet contents on entry
-    Dim SheetsBefore        As Long            'Sheet count before the call
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildInvalidLayout"
+
+    Dim WS                  As Worksheet    'Existing populated sheet
+    Dim EntryText           As String       'Sheet contents on entry
+    Dim SheetsBefore        As Long         'Sheet count before the call
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewPopulatedSheet(WB, Scenario)
@@ -2421,47 +3842,99 @@ Private Sub DEMO_CT_BuildInvalidLayout( _
         DEMO_CT_CheckText Scenario & ".SheetUntouched", EntryText, DEMO_CT_SheetText(WS)
         DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_BuildInvalidName( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_BuildInvalidName
+'------------------------------------------------------------------------------
+'                     CHECK INVALID SHEET NAME IS REFUSED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S41: a sheet name Excel would refuse is rejected before any sheet is
 '   created, so the workbook keeps its sheet count.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers the sheet-name check of DEMO_Sheet_BuildTemplate: a name Excel would
+'   refuse must be rejected before any sheet is created (#74).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S41_InvalidName); it prefixes every check name. The sheet
+'     name passed to the template is NAME_INVALID, and no sheet is added
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Records the sheet count
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with
+'     NAME_INVALID as the sheet name, a valid layout and no fault armed
+'   - Checks ERR_NAME_INVALID from SRC_BUILD with DESC_NAME_INVALID, that no
+'     probe site was reached and that the sheet count is unchanged
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - Workbook.Sheets
+'   - Harness helpers: DEMO_CT_CallBuild, DEMO_CT_CheckError,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckProbe
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SheetsBefore        As Long            'Sheet count before the call
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildInvalidName"
+
+    Dim SheetsBefore        As Long     'Sheet count before the call
+    Dim FailuresBefore      As Long     'Failure count at scenario start
+    Dim RaisedNumber        As Long     'Error reaching the caller
+    Dim RaisedSource        As String   'Its source
+    Dim RaisedDescription   As String   'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ACT
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         SheetsBefore = WB.Sheets.Count
@@ -2477,48 +3950,101 @@ Private Sub DEMO_CT_BuildInvalidName( _
         DEMO_CT_CheckProbe Scenario & ".Probe", 0, 0, 0, 0, 0, 0
         DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_BuildNameFault( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_BuildNameFault
+'------------------------------------------------------------------------------
+'                           CHECK SHEET RENAME FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S42: the rename of a sheet DEMO_Sheet_GetOrCreate has just created fails.
 '   The new sheet is deleted, the rename error reaches the caller unchanged,
 '   and the workbook keeps its sheet count.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers a failed rename of a worksheet that DEMO_Sheet_GetOrCreate has just
+'   created: the new sheet must not be left behind (#74).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S42_NameFault); it is the sheet name the template is asked
+'     for and prefixes every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Records the sheet count
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with Scenario as
+'     the sheet name, a valid layout and FAULT_SHEET_NAME
+'   - Checks the injected naming error (ERR_NAME_FAULT, SRC_NAME_FAULT,
+'     DESC_NAME_FAULT), one handler entry and one cleanup pass of the template,
+'     an unchanged sheet count and no sheet named Scenario
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - Workbook.Sheets
+'   - Harness helpers: DEMO_CT_CallBuild, DEMO_CT_Check, DEMO_CT_CheckError,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckProbe, DEMO_CT_SheetExists
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim SheetsBefore        As Long            'Sheet count before the call
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildNameFault"
+
+    Dim SheetsBefore        As Long     'Sheet count before the call
+    Dim FailuresBefore      As Long     'Failure count at scenario start
+    Dim RaisedNumber        As Long     'Error reaching the caller
+    Dim RaisedSource        As String   'Its source
+    Dim RaisedDescription   As String   'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ACT
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         SheetsBefore = WB.Sheets.Count
@@ -2536,49 +4062,103 @@ Private Sub DEMO_CT_BuildNameFault( _
         DEMO_CT_Check Not DEMO_CT_SheetExists(WB, Scenario), Scenario & ".NoNamedSheet", _
                       "a sheet with the requested name exists"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_BuildChartCollision( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_BuildChartCollision
+'------------------------------------------------------------------------------
+'                       CHECK CHART SHEET NAME COLLISION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S43: the requested name belongs to a chart sheet. The template refuses it
 '   before creating or resetting anything; the chart sheet stays and the
 '   workbook keeps its sheet count.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   Covers a requested name held by a chart sheet: the template must refuse it
+'   without creating or resetting anything (#74).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S43_ChartCollision); it is the name of the chart sheet the
+'     scenario adds and prefixes every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds a chart sheet named Scenario at the end of WB and records the sheet
+'     count
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with Scenario as
+'     the sheet name, a valid layout and no fault armed
+'   - Checks ERR_NAME_TAKEN from SRC_BUILD with DESC_NAME_TAKEN and the name,
+'     one handler entry and one cleanup pass of the template, an unchanged
+'     sheet count and that the sheet is still the chart sheet
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - Workbook.Charts.Add, Workbook.Sheets
+'   - Harness helpers: DEMO_CT_CallBuild, DEMO_CT_Check, DEMO_CT_CheckError,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckProbe
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ChartSheet          As Chart           'Chart sheet holding the name
-    Dim SheetsBefore        As Long            'Sheet count before the call
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildChartCollision"
+
+    Dim ChartSheet          As Chart    'Chart sheet holding the name
+    Dim SheetsBefore        As Long     'Sheet count before the call
+    Dim FailuresBefore      As Long     'Failure count at scenario start
+    Dim RaisedNumber        As Long     'Error reaching the caller
+    Dim RaisedSource        As String   'Its source
+    Dim RaisedDescription   As String   'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set ChartSheet = WB.Charts.Add(After:=WB.Sheets(WB.Sheets.Count))
@@ -2601,53 +4181,105 @@ Private Sub DEMO_CT_BuildChartCollision( _
         DEMO_CT_Check TypeOf WB.Sheets(Scenario) Is Chart, Scenario & ".ChartKept", _
                       "the sheet with the requested name is no longer the chart sheet"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_BuildValidRebuild( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_BuildValidRebuild
+'------------------------------------------------------------------------------
+'                         CHECK VALID TEMPLATE REBUILD
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S44: a valid request on the same kind of populated sheet rebuilds it:
 '   the reset clears its cells, shape and table, the title band is written,
 '   no error is raised and no sheet is added.
 '
+' WHY THIS EXISTS
+'   Covers the success path of DEMO_Sheet_BuildTemplate on a sheet that already
+'   holds content: a valid request rebuilds it in place (#74).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S44_ValidRebuild); it names the populated sheet and
+'     prefixes every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds a populated sheet (DEMO_CT_NewPopulatedSheet) and records the sheet
+'     count
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with a valid
+'     layout and no fault armed
+'   - Checks no error, one cleanup pass in the reset and in the template and no
+'     handler entry, that the reset ran, that no shape or table is left, that
+'     B1 holds BUILD_TITLE and that the sheet count is unchanged
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - Worksheet.Shapes, ListObjects and Range
+'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallBuild, DEMO_CT_Check,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckNoError, DEMO_CT_CheckProbe,
+'     DEMO_CT_CheckText, DEMO_CT_NewPopulatedSheet
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
 ' NOTES
 '   DisplayFormulaBar is requested at its current value, so the run leaves
 '   the formula bar as it found it.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Existing populated sheet
-    Dim SheetsBefore        As Long            'Sheet count before the call
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildValidRebuild"
+
+    Dim WS                  As Worksheet    'Existing populated sheet
+    Dim SheetsBefore        As Long         'Sheet count before the call
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewPopulatedSheet(WB, Scenario)
@@ -2670,29 +4302,74 @@ Private Sub DEMO_CT_BuildValidRebuild( _
         DEMO_CT_CheckText Scenario & ".Title", BUILD_TITLE, CStr(WS.Range("B1").Value)
         DEMO_CT_CheckLong Scenario & ".SheetCount", SheetsBefore, WB.Sheets.Count
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetManualBreaks( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_ResetManualBreaks
+'------------------------------------------------------------------------------
+'                    CHECK RESET CLEARS MANUAL PAGE BREAKS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S45: a default reset of a sheet with a manual row break and a manual
 '   column break leaves neither, through one ResetAllPageBreaks call, and
 '   leaves the page-break indicators hidden.
+'
+' WHY THIS EXISTS
+'   Covers the page-break handling of DEMO_Sheet_Reset: a default reset must
+'   remove manual breaks with one ResetAllPageBreaks call and keep the
+'   indicators hidden (#187).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S45_ResetManualBreaks); it names the sheet and prefixes
+'     every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, sets a manual row break at BREAK_ROW and a manual column
+'     break at BREAK_COLUMN, and checks the host kept them
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with no password and
+'     ReProtectAtEnd=False
+'   - Checks no error, one cleanup pass and exactly one ResetAllPageBreaks call
+'   - Checks the page-break indicators are hidden, then that both manual breaks
+'     are gone
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - DEMO_InternalCleanupProbeCount
+'   - Range.PageBreak, Worksheet.DisplayPageBreaks
+'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_Check, DEMO_CT_CheckLong,
+'     DEMO_CT_CheckNoError, DEMO_CT_CheckProbe, DEMO_CT_NewSheet
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
 '
 ' NOTES
 '   Setting and reading the breaks makes Excel lay this sheet out through the
@@ -2700,25 +4377,33 @@ Private Sub DEMO_CT_ResetManualBreaks( _
 '   read of Range.PageBreak after ResetAllPageBreaks lays the sheet out again
 '   and shows the indicators, so they are checked before the breaks are read.
 '
-' UPDATED
+' HISTORY
 '   2026-11-15 - Added for #187.
 '   2026-11-17 - Checks the indicators before reading the breaks.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-17
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetManualBreaks"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -2751,25 +4436,30 @@ Private Sub DEMO_CT_ResetManualBreaks( _
         DEMO_CT_Check WS.Columns(BREAK_COLUMN).PageBreak <> xlPageBreakManual, Scenario & ".ColumnBreak", _
                       "the manual column break survived the reset"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_ResetBreakIndicators( _
     ByVal WB As Workbook, _
     ByVal Scenario As String, _
     ByVal Shown As Boolean)
 '
-'==============================================================================
-' DEMO_CT_ResetBreakIndicators
+'------------------------------------------------------------------------------
+'                      CHECK RESET PAGE BREAK INDICATORS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S46: a default reset of a sheet whose page-break indicators are hidden
@@ -2779,30 +4469,79 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
 '   S47: when they are shown, the reset writes DisplayPageBreaks once and
 '   hides them.
 '
+' WHY THIS EXISTS
+'   Covers the DisplayPageBreaks handling of DEMO_Sheet_Reset: hidden
+'   indicators stay hidden, and shown ones are hidden with one write (#187).
+'
 ' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S46_BreaksHidden or S47_BreaksShown); it names the sheet
+'     and prefixes every check name
+'
 '   Shown
 '     Whether the indicators are shown before the reset
 '
-' UPDATED
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet; when Shown, sets DisplayPageBreaks to True and expects
+'     one write; checks the host kept the setting
+'   - Calls DEMO_Sheet_Reset through DEMO_CT_CallReset with no password and
+'     ReProtectAtEnd=False
+'   - Checks no error, one cleanup pass and the number of DisplayPageBreaks
+'     writes: exactly one when Shown, at most one otherwise
+'   - Checks the indicators are hidden afterwards
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_Reset, through DEMO_CT_CallReset
+'   - DEMO_InternalCleanupProbeCount
+'   - Worksheet.DisplayPageBreaks
+'   - Harness helpers: DEMO_CT_CallReset, DEMO_CT_Check, DEMO_CT_CheckLong,
+'     DEMO_CT_CheckNoError, DEMO_CT_CheckProbe, DEMO_CT_NewSheet
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-15 - Added for #187.
 '   2026-11-17 - Allows the write that ResetAllPageBreaks makes necessary.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-17
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Scenario sheet
-    Dim Writes              As Long            'DisplayPageBreaks writes expected
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ResetBreakIndicators"
+
+    Dim WS                  As Worksheet    'Scenario sheet
+    Dim Writes              As Long         'DisplayPageBreaks writes expected
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -2835,55 +4574,109 @@ Private Sub DEMO_CT_ResetBreakIndicators( _
         DEMO_CT_Check Not WS.DisplayPageBreaks, Scenario & ".Hidden", _
                       "the page-break indicators are shown after the reset"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_BuildKeepsPageBreaks( _
     ByVal WB As Workbook, _
     ByVal Scenario As String)
 '
-'==============================================================================
-' DEMO_CT_BuildKeepsPageBreaks
+'------------------------------------------------------------------------------
+'                        CHECK BUILD KEEPS PAGE BREAKS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   S48: a valid rebuild of a sheet with a manual row break and hidden
 '   indicators neither calls ResetAllPageBreaks nor writes
 '   DisplayPageBreaks, keeps the break and leaves the indicators hidden.
 '
+' WHY THIS EXISTS
+'   Covers the page-break handling of DEMO_Sheet_BuildTemplate: a rebuild must
+'   neither call ResetAllPageBreaks nor write DisplayPageBreaks (#187).
+'
+' INPUTS
+'   WB
+'     The temporary workbook Demo_Test_RunCleanupChecks created; the scenario
+'     adds its sheet to it
+'
+'   Scenario
+'     Scenario name (S48_BuildKeepsBreaks); it names the sheet and prefixes
+'     every check name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Adds the sheet, sets a manual row break at BREAK_ROW, checks the host
+'     kept it, hides the page-break indicators and checks that too
+'   - Calls DEMO_Sheet_BuildTemplate through DEMO_CT_CallBuild with a valid
+'     layout and no fault armed
+'   - Checks no error, one cleanup pass in the reset and in the template and no
+'     handler entry, no ResetAllPageBreaks call and no DisplayPageBreaks write
+'   - Checks the reset ran, the indicators are hidden and the manual row break
+'     is still there
+'
+' ERROR POLICY
+'   Does not raise. An unexpected error is recorded as the failed check
+'   "<Scenario>.Unexpected", and the scenario still ends through
+'   DEMO_CT_EndScenario
+'
+' DEPENDENCIES
+'   - DEMO_Sheet_BuildTemplate, through DEMO_CT_CallBuild
+'   - DEMO_InternalCleanupProbeCount
+'   - Range.PageBreak, Worksheet.DisplayPageBreaks
+'   - Harness helpers: DEMO_CT_BodyRan, DEMO_CT_CallBuild, DEMO_CT_Check,
+'     DEMO_CT_CheckLong, DEMO_CT_CheckNoError, DEMO_CT_CheckProbe,
+'     DEMO_CT_NewSheet
+'   - Scenario bookkeeping: DEMO_CT_BeginScenario, DEMO_CT_EndScenario,
+'     DEMO_CT_Fail and DEMO_CT_ErrText
+'
 ' NOTES
 '   Setting and reading the break makes Excel lay this sheet out through the
 '   default printer driver; the template itself must not. DisplayFormulaBar
 '   is requested at its current value, as in S44.
 '
-' UPDATED
+' HISTORY
 '   2026-11-15 - Added for #187.
 '   2026-11-17 - Reads the break before hiding the indicators and checks them
 '                before reading the break again, as S45 does.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-17
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Existing sheet
-    Dim FailuresBefore      As Long            'Failure count at scenario start
-    Dim RaisedNumber        As Long            'Error reaching the caller
-    Dim RaisedSource        As String          'Its source
-    Dim RaisedDescription   As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_BuildKeepsPageBreaks"
+
+    Dim WS                  As Worksheet    'Existing sheet
+    Dim FailuresBefore      As Long         'Failure count at scenario start
+    Dim RaisedNumber        As Long         'Error reaching the caller
+    Dim RaisedSource        As String       'Its source
+    Dim RaisedDescription   As String       'Its description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' ARRANGE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
-
         FailuresBefore = DEMO_CT_BeginScenario()
 
         Set WS = DEMO_CT_NewSheet(WB, Scenario)
@@ -2915,17 +4708,22 @@ Private Sub DEMO_CT_BuildKeepsPageBreaks( _
         DEMO_CT_Check WS.Rows(BREAK_ROW).PageBreak = xlPageBreakManual, Scenario & ".RowBreak", _
                       "the template removed a manual page break"
 
-Safe_Exit:
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
         On Error GoTo 0
         DEMO_CT_EndScenario Scenario, FailuresBefore
         Exit Sub
 
-Err_Handler:
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
         DEMO_CT_Fail Scenario & ".Unexpected", DEMO_CT_ErrText(Err.Number, Err.Source, Err.Description)
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Sub DEMO_CT_CallReset( _
     ByVal Target As Variant, _
@@ -2936,8 +4734,8 @@ Private Sub DEMO_CT_CallReset( _
     ByRef RaisedSource As String, _
     ByRef RaisedDescription As String)
 '
-'==============================================================================
-' DEMO_CT_CallReset
+'------------------------------------------------------------------------------
+'                       CALL RESET WITH THE PROBE ARMED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Calls DEMO_Sheet_Reset once with the probe armed and returns the error
@@ -2953,7 +4751,7 @@ Private Sub DEMO_CT_CallReset( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' CALL
@@ -2961,17 +4759,16 @@ Private Sub DEMO_CT_CallReset( _
         DEMO_InternalCleanupProbeBegin FaultMask
 
         On Error Resume Next
-            DEMO_Sheet_Reset WS_In:=Target, ProtectPassword:=Password, ReProtectAtEnd:=ReProtect
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
-            Err.Clear
+        DEMO_Sheet_Reset WS_In:=Target, ProtectPassword:=Password, ReProtectAtEnd:=ReProtect
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+        Err.Clear
         On Error GoTo 0
 
         DEMO_InternalCleanupProbeEnd
 
 End Sub
-
 
 Private Sub DEMO_CT_CallBuild( _
     ByVal WB As Workbook, _
@@ -2984,8 +4781,8 @@ Private Sub DEMO_CT_CallBuild( _
     ByRef RaisedSource As String, _
     ByRef RaisedDescription As String)
 '
-'==============================================================================
-' DEMO_CT_CallBuild
+'------------------------------------------------------------------------------
+'                   CALL BUILD TEMPLATE WITH THE PROBE ARMED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Calls DEMO_Sheet_BuildTemplate once for SheetName in WB with the probe
@@ -3002,10 +4799,13 @@ Private Sub DEMO_CT_CallBuild( _
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Layout, formula-bar and fault arguments (#70).
 '   2026-11-06
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' CALL
@@ -3013,18 +4813,17 @@ Private Sub DEMO_CT_CallBuild( _
         DEMO_InternalCleanupProbeBegin FaultMask
 
         On Error Resume Next
-            DEMO_Sheet_BuildTemplate WS_Name:=SheetName, Title:=BUILD_TITLE, TargetWorkbook:=WB, _
-                ContentColumns:=ContentColumns, HideRowsFrom:=HideRowsFrom, ShowFormulaBar:=ShowFormulaBar
-            RaisedNumber = Err.Number
-            RaisedSource = Err.Source
-            RaisedDescription = Err.Description
-            Err.Clear
+        DEMO_Sheet_BuildTemplate WS_Name:=SheetName, Title:=BUILD_TITLE, TargetWorkbook:=WB, _
+            ContentColumns:=ContentColumns, HideRowsFrom:=HideRowsFrom, ShowFormulaBar:=ShowFormulaBar
+        RaisedNumber = Err.Number
+        RaisedSource = Err.Source
+        RaisedDescription = Err.Description
+        Err.Clear
         On Error GoTo 0
 
         DEMO_InternalCleanupProbeEnd
 
 End Sub
-
 
 Private Sub DEMO_CT_CallBegin( _
     ByRef State As tDEMOFastModeState, _
@@ -3032,8 +4831,8 @@ Private Sub DEMO_CT_CallBegin( _
     ByRef RaisedSource As String, _
     ByRef RaisedDescription As String)
 '
-'==============================================================================
-' DEMO_CT_CallBegin
+'------------------------------------------------------------------------------
+'                             CALL FAST MODE BEGIN
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Calls DEMO_FastMode_Begin once and returns the error that reached the
@@ -3043,9 +4842,12 @@ Private Sub DEMO_CT_CallBegin( _
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         On Error Resume Next
             DEMO_FastMode_Begin State
@@ -3057,15 +4859,14 @@ Private Sub DEMO_CT_CallBegin( _
 
 End Sub
 
-
 Private Sub DEMO_CT_CallEnd( _
     ByRef State As tDEMOFastModeState, _
     ByRef RaisedNumber As Long, _
     ByRef RaisedSource As String, _
     ByRef RaisedDescription As String)
 '
-'==============================================================================
-' DEMO_CT_CallEnd
+'------------------------------------------------------------------------------
+'                              CALL FAST MODE END
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Calls DEMO_FastMode_End once and returns the error that reached the
@@ -3074,9 +4875,12 @@ Private Sub DEMO_CT_CallEnd( _
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         On Error Resume Next
             DEMO_FastMode_End State
@@ -3088,11 +4892,11 @@ Private Sub DEMO_CT_CallEnd( _
 
 End Sub
 
-
 Private Sub DEMO_CT_CaptureSession()
+
 '
-'==============================================================================
-' DEMO_CT_CaptureSession
+'------------------------------------------------------------------------------
+'                           CAPTURE SESSION SETTINGS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Records the Application settings the fast-mode scenarios change, so the
@@ -3107,9 +4911,12 @@ Private Sub DEMO_CT_CaptureSession()
 ' ERROR POLICY
 '   Raises errors normally
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         mSessionScreenUpdating = Application.ScreenUpdating
         mSessionEnableEvents = Application.EnableEvents
@@ -3128,35 +4935,66 @@ Private Sub DEMO_CT_CaptureSession()
 
 End Sub
 
-
 Private Function DEMO_CT_RestoreSession() As String
+
 '
-'==============================================================================
-' DEMO_CT_RestoreSession
+'------------------------------------------------------------------------------
+'                           RESTORE SESSION SETTINGS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes back the Application settings DEMO_CT_CaptureSession recorded,
 '   each in its own guarded attempt.
+'
+' WHY THIS EXISTS
+'   The runner must put the Application settings back on every exit, and one
+'   failed write must not stop the others. The returned text lets
+'   Demo_Test_RunCleanupChecks report the failure as a failed check (#70).
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   String
 '     Empty when every write succeeded or nothing was captured; otherwise
 '     one "<Setting>: <number> | <source> | <description>" entry per failure
 '
+' BEHAVIOR
+'   - Returns at once with an empty string when nothing was captured
+'   - Writes Cursor, Calculation, DisplayAlerts, EnableEvents,
+'     DisplayFormulaBar and ScreenUpdating back, in that order, each under On
+'     Error Resume Next
+'   - Appends each failed write to the result through DEMO_CT_AddFailure
+'   - Marks the session as not captured
+'
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' DEPENDENCIES
+'   - Application.Cursor, Calculation, DisplayAlerts, EnableEvents,
+'     DisplayFormulaBar and ScreenUpdating
+'   - DEMO_CT_AddFailure, and the mSession* values that DEMO_CT_CaptureSession
+'     recorded
+'
+' NOTES
+'   The Resume Next scope opened for the writes runs to the end of the
+'   function.
+'
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Failures            As String          'Collected failures
-    Dim FailNumber          As Long            'Error number of one write
-    Dim FailSource          As String          'Error source of one write
-    Dim FailDescription     As String          'Error description of one write
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_RestoreSession"
+
+    Dim Failures        As String   'Collected failures
+    Dim FailNumber      As Long     'Error number of one write
+    Dim FailSource      As String   'Error source of one write
+    Dim FailDescription As String   'Error description of one write
 
 '------------------------------------------------------------------------------
 ' RESTORE
@@ -3215,7 +5053,6 @@ Private Function DEMO_CT_RestoreSession() As String
 
 End Function
 
-
 Private Function DEMO_CT_AddFailure( _
     ByVal Failures As String, _
     ByVal Setting As String, _
@@ -3224,16 +5061,19 @@ Private Function DEMO_CT_AddFailure( _
     ByVal FailDescription As String) _
     As String
 '
-'==============================================================================
-' DEMO_CT_AddFailure
+'------------------------------------------------------------------------------
+'                           APPEND ONE FAILED WRITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Appends one failed write to a failure list; returns the list unchanged
 '   when FailNumber is 0.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         If FailNumber = 0 Then
             DEMO_CT_AddFailure = Failures
@@ -3247,11 +5087,11 @@ Private Function DEMO_CT_AddFailure( _
 
 End Function
 
-
 Private Sub DEMO_CT_ApplyBaseline()
+
 '
-'==============================================================================
-' DEMO_CT_ApplyBaseline
+'------------------------------------------------------------------------------
+'                         APPLY THE FAST MODE BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Sets the five fast-mode settings to the baseline every fast-mode scenario
@@ -3262,9 +5102,12 @@ Private Sub DEMO_CT_ApplyBaseline()
 ' ERROR POLICY
 '   Raises errors normally
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         Application.ScreenUpdating = True
         Application.EnableEvents = True
@@ -3274,11 +5117,11 @@ Private Sub DEMO_CT_ApplyBaseline()
 
 End Sub
 
-
 Private Function DEMO_CT_AppStateText() As String
+
 '
-'==============================================================================
-' DEMO_CT_AppStateText
+'------------------------------------------------------------------------------
+'                          READ THE APPLICATION STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads the five fast-mode settings back from Excel as one text.
@@ -3286,9 +5129,12 @@ Private Function DEMO_CT_AppStateText() As String
 ' ERROR POLICY
 '   Raises errors normally
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         DEMO_CT_AppStateText = DEMO_CT_StateText(Application.ScreenUpdating, _
                                                  Application.EnableEvents, _
@@ -3298,30 +5144,65 @@ Private Function DEMO_CT_AppStateText() As String
 
 End Function
 
-
 Private Function DEMO_CT_ExpectedState( _
     ByVal FastSettings As Long) _
     As String
 '
-'==============================================================================
-' DEMO_CT_ExpectedState
+'------------------------------------------------------------------------------
+'                        BUILD THE EXPECTED STATE TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the expected state text: the settings in FastSettings hold their
 '   fast-mode value, every other setting its baseline value.
 '
-' UPDATED
+' WHY THIS EXISTS
+'   A scenario compares the state read from Excel with the state it expects.
+'   Building the expectation from FM_* bits lets each scenario name only the
+'   settings that hold their fast-mode value (#70).
+'
+' INPUTS
+'   FastSettings
+'     FM_* bits of the settings expected at their fast-mode value; 0 for none
+'     and FM_ALL for all five
+'
+' RETURNS
+'   String in the DEMO_CT_StateText format.
+'
+' BEHAVIOR
+'   - For a setting whose bit is set, takes its fast-mode value: False for
+'     ScreenUpdating, EnableEvents and DisplayAlerts, xlCalculationManual for
+'     Calculation and xlWait for Cursor
+'   - For a setting whose bit is clear, takes the baseline value: True,
+'     mBaselineCalculation and BASELINE_CURSOR
+'   - Formats the five values through DEMO_CT_StateText
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   DEMO_CT_StateText; mBaselineCalculation and the FM_* and BASELINE_CURSOR
+'   constants
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WantScreenUpdating  As Boolean         'Expected ScreenUpdating
-    Dim WantEnableEvents    As Boolean         'Expected EnableEvents
-    Dim WantDisplayAlerts   As Boolean         'Expected DisplayAlerts
-    Dim WantCalculation     As Long            'Expected Calculation
-    Dim WantCursor          As Long            'Expected Cursor
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ExpectedState"
+
+    Dim WantScreenUpdating  As Boolean  'Expected ScreenUpdating
+    Dim WantEnableEvents    As Boolean  'Expected EnableEvents
+    Dim WantDisplayAlerts   As Boolean  'Expected DisplayAlerts
+    Dim WantCalculation     As Long     'Expected Calculation
+    Dim WantCursor          As Long     'Expected Cursor
 
 '------------------------------------------------------------------------------
 ' RESOLVE
@@ -3347,7 +5228,6 @@ Private Function DEMO_CT_ExpectedState( _
 
 End Function
 
-
 Private Function DEMO_CT_StateText( _
     ByVal ScreenUpdatingValue As Boolean, _
     ByVal EnableEventsValue As Boolean, _
@@ -3356,15 +5236,18 @@ Private Function DEMO_CT_StateText( _
     ByVal CursorValue As Long) _
     As String
 '
-'==============================================================================
-' DEMO_CT_StateText
+'------------------------------------------------------------------------------
+'                       FORMAT THE FIVE SETTINGS AS TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats the five fast-mode settings for comparison and evidence lines.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         DEMO_CT_StateText = "ScreenUpdating=" & CStr(ScreenUpdatingValue) & _
                             " EnableEvents=" & CStr(EnableEventsValue) & _
@@ -3374,21 +5257,23 @@ Private Function DEMO_CT_StateText( _
 
 End Function
 
-
 Private Function DEMO_CT_SettingName( _
     ByVal Setting As Long) _
     As String
 '
-'==============================================================================
-' DEMO_CT_SettingName
+'------------------------------------------------------------------------------
+'                          NAME ONE FAST MODE SETTING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the Application property name of one FM_* bit, as M_DEMO_BUILDER
 '   writes it into its diagnostics.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         Select Case Setting
             Case FM_SCREENUPDATING
@@ -3407,21 +5292,23 @@ Private Function DEMO_CT_SettingName( _
 
 End Function
 
-
 Private Function DEMO_CT_RestoreFailureText( _
     ByVal Setting As Long) _
     As String
 '
-'==============================================================================
-' DEMO_CT_RestoreFailureText
+'------------------------------------------------------------------------------
+'                       FORMAT ONE RESTORE FAILURE ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the failure entry M_DEMO_BUILDER writes for an injected
 '   restoration fault of one setting.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         DEMO_CT_RestoreFailureText = DEMO_CT_SettingName(Setting) & ": " & _
             DEMO_CT_ErrText(ERR_FM_RESTORE, SRC_FM_RESTORE, _
@@ -3429,22 +5316,24 @@ Private Function DEMO_CT_RestoreFailureText( _
 
 End Function
 
-
 Private Sub DEMO_CT_CheckFastModeProbe( _
     ByVal CheckName As String, _
     ByVal EntryWrites As Long, _
     ByVal RestoreWrites As Long)
 '
-'==============================================================================
-' DEMO_CT_CheckFastModeProbe
+'------------------------------------------------------------------------------
+'                       CHECK THE FAST MODE WRITE COUNTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Checks how many fast-mode entry and restoration writes were reached since
 '   the probe was armed, failed ones included.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #70.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         DEMO_CT_CheckText CheckName, _
             "entry=" & CStr(EntryWrites) & " restore=" & CStr(RestoreWrites), _
@@ -3453,7 +5342,6 @@ Private Sub DEMO_CT_CheckFastModeProbe( _
 
 End Sub
 
-
 Private Function DEMO_CT_AddFormsControl( _
     ByVal WS As Worksheet, _
     ByVal ControlType As XlFormControl, _
@@ -3461,8 +5349,8 @@ Private Function DEMO_CT_AddFormsControl( _
     ByVal TopPos As Double) _
     As Shape
 '
-'==============================================================================
-' DEMO_CT_AddFormsControl
+'------------------------------------------------------------------------------
+'                             ADD A FORMS CONTROL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Adds a named Forms control to a scenario sheet.
@@ -3470,14 +5358,19 @@ Private Function DEMO_CT_AddFormsControl( _
 ' ERROR POLICY
 '   Raises errors normally
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Shp                 As Shape           'New control
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_AddFormsControl"
+
+    Dim Shp As Shape    'New control
 
 '------------------------------------------------------------------------------
 ' CREATE
@@ -3489,7 +5382,6 @@ Private Function DEMO_CT_AddFormsControl( _
 
 End Function
 
-
 Private Function DEMO_CT_AddActiveX( _
     ByVal WS As Worksheet, _
     ByVal ClassName As String, _
@@ -3497,38 +5389,79 @@ Private Function DEMO_CT_AddActiveX( _
     ByVal TopPos As Double) _
     As OLEObject
 '
-'==============================================================================
-' DEMO_CT_AddActiveX
+'------------------------------------------------------------------------------
+'                            ADD AN ACTIVEX CONTROL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Adds a named ActiveX control to a scenario sheet of the temporary
 '   workbook. The control lives in that workbook, not in this VBA project.
+'
+' WHY THIS EXISTS
+'   The ActiveX scenarios S32 to S34 need controls in the temporary workbook.
+'   This gives them one creation path whose failure message names the Trust
+'   Center as the likely cause (#73).
+'
+' INPUTS
+'   WS
+'     The scenario sheet that receives the control
+'
+'   ClassName
+'     ProgID of the control, such as PROGID_CHECKBOX or PROGID_BUTTON
+'
+'   ControlName
+'     Name given to the control and to its worksheet shape
+'
+'   TopPos
+'     Top position in points; Left is 300 and the size is 80 by 18
+'
+' RETURNS
+'   OLEObject: the new control, named ControlName.
+'
+' BEHAVIOR
+'   - Adds the OLE object under On Error Resume Next and keeps the error number
+'     and description of the Add call
+'   - Raises ERR_ACTIVEX_SETUP with PROC_ACTIVEX_SETUP as the source when the
+'     Add call failed or returned nothing
+'   - Names the control and returns it
 '
 ' ERROR POLICY
 '   Raises vbObjectError + 2197 with Excel's error when the control cannot be
 '   created, for example because ActiveX controls are disabled in the Trust
 '   Center
 '
-' UPDATED
+' DEPENDENCIES
+'   - Worksheet.OLEObjects.Add, OLEObject.Name
+'   - ERR_ACTIVEX_SETUP and PROC_ACTIVEX_SETUP
+'
+' NOTES
+'   The Resume Next scope opened for the Add call runs to the end of the
+'   function, so the Err.Raise and the naming statement run inside it.
+'
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim NewOle              As OLEObject       'New control
-    Dim AddNumber           As Long            'Error of the Add call
-    Dim AddDescription      As String          'Its description
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_AddActiveX"
+
+    Dim NewOle          As OLEObject    'New control
+    Dim AddNumber       As Long         'Error of the Add call
+    Dim AddDescription  As String       'Its description
 
 '------------------------------------------------------------------------------
 ' CREATE
 '------------------------------------------------------------------------------
         On Error Resume Next
-            Set NewOle = WS.OLEObjects.Add(ClassType:=ClassName, Left:=300, Top:=TopPos, _
-                                           Width:=80, Height:=18)
-            AddNumber = Err.Number
-            AddDescription = Err.Description
-            Err.Clear
+        Set NewOle = WS.OLEObjects.Add(ClassType:=ClassName, Left:=300, Top:=TopPos, _
+                                       Width:=80, Height:=18)
+        AddNumber = Err.Number
+        AddDescription = Err.Description
+        Err.Clear
         On Error GoTo 0
 
         If AddNumber <> 0 Or NewOle Is Nothing Then
@@ -3543,7 +5476,6 @@ Private Function DEMO_CT_AddActiveX( _
 
 End Function
 
-
 Private Sub DEMO_CT_CheckGet( _
     ByVal CheckName As String, _
     ByVal WS As Worksheet, _
@@ -3552,23 +5484,28 @@ Private Sub DEMO_CT_CheckGet( _
     ByVal ExpectedChecked As Boolean, _
     ByVal ExpectedFailMsg As String)
 '
-'==============================================================================
-' DEMO_CT_CheckGet
+'------------------------------------------------------------------------------
+'                       CHECK THE CHECK BOX READ HELPER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Calls DEMO_CB_TryGetState once and checks its result, the state it
 '   returned and its diagnostic.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Result              As Boolean         'Return value
-    Dim IsChecked           As Boolean         'State returned
-    Dim FailMsg             As String          'Diagnostic returned
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_CheckGet"
+
+    Dim Result      As Boolean  'Return value
+    Dim IsChecked   As Boolean  'State returned
+    Dim FailMsg     As String   'Diagnostic returned
 
 '------------------------------------------------------------------------------
 ' CALL AND CHECK
@@ -3582,7 +5519,6 @@ Private Sub DEMO_CT_CheckGet( _
 
 End Sub
 
-
 Private Sub DEMO_CT_CheckSet( _
     ByVal CheckName As String, _
     ByVal WS As Worksheet, _
@@ -3591,21 +5527,26 @@ Private Sub DEMO_CT_CheckSet( _
     ByVal ExpectedResult As Boolean, _
     ByVal ExpectedFailMsg As String)
 '
-'==============================================================================
-' DEMO_CT_CheckSet
+'------------------------------------------------------------------------------
+'                       CHECK THE CHECK BOX WRITE HELPER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Calls DEMO_CB_TrySetState once and checks its result and diagnostic.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Result              As Boolean         'Return value
-    Dim FailMsg             As String          'Diagnostic returned
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_CheckSet"
+
+    Dim Result  As Boolean  'Return value
+    Dim FailMsg As String   'Diagnostic returned
 
 '------------------------------------------------------------------------------
 ' CALL AND CHECK
@@ -3618,21 +5559,23 @@ Private Sub DEMO_CT_CheckSet( _
 
 End Sub
 
-
 Private Function DEMO_CT_ValueText( _
     ByVal Value As Variant) _
     As String
 '
-'==============================================================================
-' DEMO_CT_ValueText
+'------------------------------------------------------------------------------
+'                            FORMAT A CONTROL VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats a control value for comparison: "Null" for Null, otherwise its
 '   text.
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #73.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         If IsNull(Value) Then
             DEMO_CT_ValueText = "Null"
@@ -3642,14 +5585,13 @@ Private Function DEMO_CT_ValueText( _
 
 End Function
 
-
 Private Function DEMO_CT_NewPopulatedSheet( _
     ByVal WB As Workbook, _
     ByVal SheetName As String) _
     As Worksheet
 '
-'==============================================================================
-' DEMO_CT_NewPopulatedSheet
+'------------------------------------------------------------------------------
+'                        ADD A POPULATED SCENARIO SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Adds a scenario sheet with content a reset would destroy: the A1 marker,
@@ -3659,14 +5601,19 @@ Private Function DEMO_CT_NewPopulatedSheet( _
 ' ERROR POLICY
 '   Raises errors normally
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'New sheet
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_NewPopulatedSheet"
+
+    Dim WS  As Worksheet    'New sheet
 
 '------------------------------------------------------------------------------
 ' CREATE
@@ -3686,13 +5633,12 @@ Private Function DEMO_CT_NewPopulatedSheet( _
 
 End Function
 
-
 Private Function DEMO_CT_SheetText( _
     ByVal WS As Worksheet) _
     As String
 '
-'==============================================================================
-' DEMO_CT_SheetText
+'------------------------------------------------------------------------------
+'                          DESCRIBE A POPULATED SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Describes what DEMO_CT_NewPopulatedSheet put on a sheet, for an
@@ -3701,9 +5647,12 @@ Private Function DEMO_CT_SheetText( _
 ' ERROR POLICY
 '   Raises errors normally
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
         DEMO_CT_SheetText = "A1=" & CStr(WS.Range("A1").Value) & _
                             " D6=" & CStr(WS.Range("D6").Value) & _
@@ -3715,14 +5664,13 @@ Private Function DEMO_CT_SheetText( _
 
 End Function
 
-
 Private Function DEMO_CT_SheetExists( _
     ByVal WB As Workbook, _
     ByVal SheetName As String) _
     As Boolean
 '
-'==============================================================================
-' DEMO_CT_SheetExists
+'------------------------------------------------------------------------------
+'                            TEST FOR A SHEET NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns True when WB has a sheet of any type named SheetName.
@@ -3730,35 +5678,39 @@ Private Function DEMO_CT_SheetExists( _
 ' ERROR POLICY
 '   Does not raise
 '
-' UPDATED
+' HISTORY
 '   2026-11-14 - Added for #74.
-'==============================================================================
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Found               As Object          'Sheet with that name, if any
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_SheetExists"
+
+    Dim Found   As Object   'Sheet with that name, if any
 
 '------------------------------------------------------------------------------
 ' LOOK UP
 '------------------------------------------------------------------------------
         On Error Resume Next
-            Set Found = WB.Sheets(SheetName)
-            Err.Clear
+        Set Found = WB.Sheets(SheetName)
+        Err.Clear
         On Error GoTo 0
 
         DEMO_CT_SheetExists = Not Found Is Nothing
 
 End Function
 
-
 Private Function DEMO_CT_NewSheet( _
     ByVal WB As Workbook, _
     ByVal SheetName As String) _
     As Worksheet
 '
-'==============================================================================
-' DEMO_CT_NewSheet
+'------------------------------------------------------------------------------
+'                             ADD A SCENARIO SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Adds an unprotected scenario sheet to the temporary workbook, with the
@@ -3769,12 +5721,14 @@ Private Function DEMO_CT_NewSheet( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'New sheet
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_NewSheet"
+
+    Dim WS  As Worksheet    'New sheet
 
 '------------------------------------------------------------------------------
 ' CREATE
@@ -3787,25 +5741,54 @@ Private Function DEMO_CT_NewSheet( _
 
 End Function
 
-
 Private Sub DEMO_CT_Protect( _
     ByVal WS As Worksheet, _
     ByVal Options As String, _
     ByVal SelectionPolicy As Long)
 '
-'==============================================================================
-' DEMO_CT_Protect
+'------------------------------------------------------------------------------
+'                           PROTECT A SCENARIO SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Protects WS with PROTECT_PASSWORD, the fifteen options of an option
 '   string, and the given EnableSelection.
 '
+' WHY THIS EXISTS
+'   The reset scenarios need a sheet protected with a known set of fifteen
+'   options and a known EnableSelection, so that the readback after the reset
+'   has something to compare with (#71).
+'
+' INPUTS
+'   WS
+'     The scenario sheet to protect
+'
+'   Options
+'     Fifteen characters, "1" meaning True, in the order of OPTION_NAMES
+'
+'   SelectionPolicy
+'     EnableSelection value to set after Protect
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Calls Worksheet.Protect with PROTECT_PASSWORD and the fifteen options,
+'     each taken from Options by DEMO_CT_Option
+'   - Sets EnableSelection to SelectionPolicy
+'
 ' ERROR POLICY
 '   Raises errors normally
 '
+' DEPENDENCIES
+'   - Worksheet.Protect and Worksheet.EnableSelection
+'   - DEMO_CT_Option and PROTECT_PASSWORD
+'
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' PROTECT
@@ -3831,49 +5814,77 @@ Private Sub DEMO_CT_Protect( _
 
 End Sub
 
-
 Private Function DEMO_CT_Option( _
     ByVal Options As String, _
     ByVal Index As Long) _
     As Boolean
 '
-'==============================================================================
-' DEMO_CT_Option
+'------------------------------------------------------------------------------
+'                             READ ONE OPTION FLAG
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns option Index (1 to 15) of an option string.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_Option = (Mid$(Options, Index, 1) = "1")
 
 End Function
 
-
 Private Function DEMO_CT_ReadOptions( _
     ByVal WS As Worksheet) _
     As String
 '
-'==============================================================================
-' DEMO_CT_ReadOptions
+'------------------------------------------------------------------------------
+'                        READ THE PROTECT OPTIONS BACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads the fifteen Protect options back from Excel as an option string.
 '   UserInterfaceOnly is read through ProtectionMode.
 '
+' WHY THIS EXISTS
+'   The readback after a reset needs the options as Excel holds them, in the
+'   same string form DEMO_CT_Protect takes, so that entry and exit can be
+'   compared as text (#71).
+'
+' INPUTS
+'   WS
+'     The scenario sheet to read
+'
+' RETURNS
+'   String of OPTION_COUNT characters, "1" for True and "0" for False, in the
+'   order of OPTION_NAMES.
+'
+' BEHAVIOR
+'   - Reads ProtectDrawingObjects, ProtectContents, ProtectScenarios and
+'     ProtectionMode
+'   - Reads the eleven Allow* options of Worksheet.Protection
+'   - Appends each as one character through DEMO_CT_Bit
+'
 ' ERROR POLICY
 '   Raises errors normally
 '
+' DEPENDENCIES
+'   - Worksheet.ProtectDrawingObjects, ProtectContents, ProtectScenarios,
+'     ProtectionMode and Protection
+'   - DEMO_CT_Bit
+'
+' NOTES
+'   UserInterfaceOnly is read through ProtectionMode, so it reflects the
+'   current session only.
+'
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OptionText          As String          'Option string being built
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_ReadOptions"
+
+    Dim OptionText  As String   'Option string being built
 
 '------------------------------------------------------------------------------
 ' READ BACK
@@ -3902,32 +5913,30 @@ Private Function DEMO_CT_ReadOptions( _
 
 End Function
 
-
 Private Function DEMO_CT_Bit( _
     ByVal Value As Boolean) _
     As String
 '
-'==============================================================================
-' DEMO_CT_Bit
+'------------------------------------------------------------------------------
+'                         FORMAT A BOOLEAN AS ONE BIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns "1" for True and "0" for False.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_Bit = IIf(Value, "1", "0")
 
 End Function
 
-
 Private Function DEMO_CT_IsProtected( _
     ByVal WS As Worksheet) _
     As Boolean
 '
-'==============================================================================
-' DEMO_CT_IsProtected
+'------------------------------------------------------------------------------
+'                          TEST FOR SHEET PROTECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns True when any of the three protection kinds is active, the test
@@ -3935,51 +5944,48 @@ Private Function DEMO_CT_IsProtected( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_IsProtected = WS.ProtectContents Or WS.ProtectDrawingObjects Or WS.ProtectScenarios
 
 End Function
 
-
 Private Function DEMO_CT_BodyRan( _
     ByVal WS As Worksheet) _
     As Boolean
 '
-'==============================================================================
-' DEMO_CT_BodyRan
+'------------------------------------------------------------------------------
+'                         TEST THAT THE RESET BODY RAN
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns True when the reset body cleared the A1 marker.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_BodyRan = IsEmpty(WS.Range("A1").Value)
 
 End Function
-
 
 Private Function DEMO_CT_CountText( _
     ByVal Haystack As String, _
     ByVal Fragment As String) _
     As Long
 '
-'==============================================================================
-' DEMO_CT_CountText
+'------------------------------------------------------------------------------
+'                         COUNT OCCURRENCES IN A TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Counts the occurrences of Fragment in Haystack, without a loop.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_CountText = (Len(Haystack) - Len(Replace(Haystack, Fragment, vbNullString))) \ Len(Fragment)
 
 End Function
-
 
 Private Function DEMO_CT_ErrText( _
     ByVal Number As Long, _
@@ -3987,8 +5993,8 @@ Private Function DEMO_CT_ErrText( _
     ByVal Description As String) _
     As String
 '
-'==============================================================================
-' DEMO_CT_ErrText
+'------------------------------------------------------------------------------
+'                           FORMAT AN ERROR AS TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats an error as "number | source | description", the form
@@ -3996,47 +6002,46 @@ Private Function DEMO_CT_ErrText( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_ErrText = CStr(Number) & " | " & Source & " | " & Description
 
 End Function
 
-
 Private Function DEMO_CT_BeginScenario() As Long
+
 '
-'==============================================================================
-' DEMO_CT_BeginScenario
+'------------------------------------------------------------------------------
+'                               START A SCENARIO
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Counts a scenario and returns the failure count at its start.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         mScenarios = mScenarios + 1
         DEMO_CT_BeginScenario = mFailures
 
 End Function
 
-
 Private Sub DEMO_CT_EndScenario( _
     ByVal Scenario As String, _
     ByVal FailuresBefore As Long)
 '
-'==============================================================================
-' DEMO_CT_EndScenario
+'------------------------------------------------------------------------------
+'                                END A SCENARIO
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Disarms the probe and prints the scenario result line.
 '
 ' ERROR POLICY
-'   Does not raise, so it is safe at Safe_Exit
+'   Does not raise, so it is safe at SafeExit
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         On Error Resume Next
             DEMO_InternalCleanupProbeEnd
@@ -4051,21 +6056,20 @@ Private Sub DEMO_CT_EndScenario( _
 
 End Sub
 
-
 Private Sub DEMO_CT_Check( _
     ByVal Condition As Boolean, _
     ByVal CheckName As String, _
     ByVal Detail As String)
 '
-'==============================================================================
-' DEMO_CT_Check
+'------------------------------------------------------------------------------
+'                               RECORD ONE CHECK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Records one check and prints its name and detail when it fails.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         mChecks = mChecks + 1
 
@@ -4075,60 +6079,73 @@ Private Sub DEMO_CT_Check( _
 
 End Sub
 
-
 Private Sub DEMO_CT_Fail( _
     ByVal CheckName As String, _
     ByVal Detail As String)
 '
-'==============================================================================
-' DEMO_CT_Fail
+'------------------------------------------------------------------------------
+'                              RECORD ONE FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Records and prints one failure.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         mFailures = mFailures + 1
         DEMO_CT_Print "    FAIL " & CheckName & ": " & Detail
 
 End Sub
 
-
 Private Sub DEMO_CT_Print(ByVal LineText As String)
+
 '
-'==============================================================================
-' DEMO_CT_Print
+'------------------------------------------------------------------------------
+'                                PRINT ONE LINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Prints one line to the Immediate window and appends it to the log sink
 '   when Demo_Test_RunLogged has set one.
 '
+' ERROR POLICY
+'   Does not raise
+'
 ' NOTES
 '   With no sink set, the Immediate window shows exactly what the
 '   Debug.Print this replaces showed.
 '
-' ERROR POLICY
-'   Does not raise
+' HISTORY
+'   2026-11-16 - Added for the scripted Excel checks (#197).
 '
 ' UPDATED
-'   2026-11-16 - Added for the scripted Excel checks (#197).
-'==============================================================================
+'   2026-11-16
+'------------------------------------------------------------------------------
 
         Debug.Print LineText
         DEMO_CT_LogSinkWrite LineText
 
 End Sub
 
-
 Private Sub DEMO_CT_LogSinkWrite(ByVal LineText As String)
+
 '
-'==============================================================================
-' DEMO_CT_LogSinkWrite
+'------------------------------------------------------------------------------
+'                        APPEND A LINE TO THE LOG SINK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Appends one line to the log sink as UTF-8, when a sink is set.
+'
+' WHY THIS EXISTS
+'   tools\Check-EXCEL_UI.ps1 cannot read the Immediate window, so the lines
+'   this module prints are also appended to a log file it can read (#197).
+'
+' INPUTS
+'   LineText
+'     The line to append, without line break
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Does nothing when no sink is set, or after a write to it failed
@@ -4139,18 +6156,32 @@ Private Sub DEMO_CT_LogSinkWrite(ByVal LineText As String)
 '   Does not raise. The first failure is kept for Demo_Test_RunLogged and
 '   ends writing until its next run
 '
-' UPDATED
+' DEPENDENCIES
+'   - DEMO_CT_LogSinkEncode
+'   - VBA file statements FreeFile, Open, Put, LOF and Close
+'   - mLogSinkPath and mLogSinkFailure
+'
+' NOTES
+'   The file is opened in binary mode and each line is written at its end,
+'   behind LOF.
+'
+' HISTORY
 '   2026-11-16 - Added for the scripted Excel checks (#197).
-'==============================================================================
+'
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LineBytes()         As Byte            'UTF-8 bytes of the line and CR LF
-    Dim FileNumber          As Integer         'Free file handle
-    Dim FileOpen            As Boolean         'TRUE while the file is open
-    Dim FailNumber          As Long            'Captured write error number
-    Dim FailDescription     As String          'Captured write error text
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_LogSinkWrite"
+
+    Dim LineBytes()     As Byte     'UTF-8 bytes of the line and CR LF
+    Dim FileNumber      As Integer  'Free file handle
+    Dim FileOpen        As Boolean  'TRUE while the file is open
+    Dim FailNumber      As Long     'Captured write error number
+    Dim FailDescription As String   'Captured write error text
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -4160,7 +6191,7 @@ Private Sub DEMO_CT_LogSinkWrite(ByVal LineText As String)
             Exit Sub
         End If
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' APPEND LINE
@@ -4177,13 +6208,13 @@ Private Sub DEMO_CT_LogSinkWrite(ByVal LineText As String)
         FileOpen = False
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Close a file that a failed write left open
         If FileOpen Then
             On Error Resume Next
-                Close #FileNumber
+            Close #FileNumber
             On Error GoTo 0
         End If
 
@@ -4192,7 +6223,7 @@ Safe_Exit:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Capture before anything else touches Err, and keep the failure
         FailNumber = Err.Number
         FailDescription = Err.Description
@@ -4200,15 +6231,15 @@ Err_Handler:
         mLogSinkFailure = "error " & CStr(FailNumber) & " writing " & _
                           mLogSinkPath & ": " & FailDescription
 
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
-
 Private Function DEMO_CT_LogSinkEncode(ByVal LineText As String) As Byte()
+
 '
-'==============================================================================
-' DEMO_CT_LogSinkEncode
+'------------------------------------------------------------------------------
+'                            ENCODE A LINE AS UTF-8
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns one log line as UTF-8 bytes followed by CR LF.
@@ -4219,28 +6250,50 @@ Private Function DEMO_CT_LogSinkEncode(ByVal LineText As String) As Byte()
 '   demo workbook does not hold the test harness, so this module has its own
 '   copy of the encoder in M_EXCEL_UI_TEST_HARNESS.
 '
+' INPUTS
+'   LineText
+'     The line to encode, as UTF-16 text
+'
 ' RETURNS
 '   The UTF-8 bytes of LineText, then CR LF. A UTF-16 surrogate that is not
 '   part of a pair is written as U+FFFD
+'
+' BEHAVIOR
+'   - Sizes the result at three bytes per UTF-16 code unit plus two for CR LF
+'   - Joins a UTF-16 surrogate pair into one scalar value and replaces an
+'     unpaired surrogate with U+FFFD
+'   - Writes one to four UTF-8 bytes per scalar value, then CR LF, and trims
+'     the array to the bytes written
 '
 ' ERROR POLICY
 '   Raises only when memory runs out; DEMO_CT_LogSinkWrite keeps that as a
 '   write failure
 '
-' UPDATED
+' DEPENDENCIES
+'   VBA AscW, Mid$ and Len
+'
+' NOTES
+'   None
+'
+' HISTORY
 '   2026-11-16 - Added for the scripted Excel checks (#197).
-'==============================================================================
+'
+' UPDATED
+'   2026-11-16
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Bytes()             As Byte            'Encoded line
-    Dim TextLength          As Long            'UTF-16 code units in LineText
-    Dim CharIdx             As Long            'Current code unit, 1-based
-    Dim ByteIdx             As Long            'Next byte to write, 0-based
-    Dim CodeUnit            As Long            'Current UTF-16 code unit
-    Dim NextUnit            As Long            'Following UTF-16 code unit
-    Dim CodePoint           As Long            'Scalar value being encoded
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_LogSinkEncode"
+
+    Dim Bytes()     As Byte 'Encoded line
+    Dim TextLength  As Long 'UTF-16 code units in LineText
+    Dim CharIdx     As Long 'Current code unit, 1-based
+    Dim ByteIdx     As Long 'Next byte to write, 0-based
+    Dim CodeUnit    As Long 'Current UTF-16 code unit
+    Dim NextUnit    As Long 'Following UTF-16 code unit
+    Dim CodePoint   As Long 'Scalar value being encoded
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -4310,48 +6363,45 @@ Private Function DEMO_CT_LogSinkEncode(ByVal LineText As String) As Byte()
 
 End Function
 
-
 Private Sub DEMO_CT_CheckLong( _
     ByVal CheckName As String, _
     ByVal Expected As Long, _
     ByVal Actual As Long)
 '
-'==============================================================================
-' DEMO_CT_CheckLong
+'------------------------------------------------------------------------------
+'                       CHECK THAT TWO NUMBERS ARE EQUAL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Checks that two numbers are equal.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_Check Expected = Actual, CheckName, _
                       "expected " & CStr(Expected) & " but read " & CStr(Actual)
 
 End Sub
 
-
 Private Sub DEMO_CT_CheckText( _
     ByVal CheckName As String, _
     ByVal Expected As String, _
     ByVal Actual As String)
 '
-'==============================================================================
-' DEMO_CT_CheckText
+'------------------------------------------------------------------------------
+'                        CHECK THAT TWO TEXTS ARE EQUAL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Checks that two strings are equal, case included.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_Check StrComp(Expected, Actual, vbBinaryCompare) = 0, CheckName, _
                       "expected [" & Expected & "] but read [" & Actual & "]"
 
 End Sub
-
 
 Private Sub DEMO_CT_CheckNoError( _
     ByVal CheckName As String, _
@@ -4359,21 +6409,20 @@ Private Sub DEMO_CT_CheckNoError( _
     ByVal Source As String, _
     ByVal Description As String)
 '
-'==============================================================================
-' DEMO_CT_CheckNoError
+'------------------------------------------------------------------------------
+'                    CHECK THAT NO ERROR REACHED THE CALLER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Checks that no error reached the caller.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_Check Number = 0, CheckName, _
                       "unexpected error " & DEMO_CT_ErrText(Number, Source, Description)
 
 End Sub
-
 
 Private Sub DEMO_CT_CheckError( _
     ByVal CheckName As String, _
@@ -4384,8 +6433,8 @@ Private Sub DEMO_CT_CheckError( _
     ByVal Source As String, _
     ByVal Description As String)
 '
-'==============================================================================
-' DEMO_CT_CheckError
+'------------------------------------------------------------------------------
+'                   CHECK THE ERROR THAT REACHED THE CALLER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Checks the number, source and full description of the error that reached
@@ -4394,14 +6443,13 @@ Private Sub DEMO_CT_CheckError( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_CheckLong CheckName & ".Number", ExpectedNumber, Number
         DEMO_CT_CheckText CheckName & ".Source", ExpectedSource, Source
         DEMO_CT_CheckText CheckName & ".Description", ExpectedDescription, Description
 
 End Sub
-
 
 Private Sub DEMO_CT_CheckProbe( _
     ByVal CheckName As String, _
@@ -4412,15 +6460,15 @@ Private Sub DEMO_CT_CheckProbe( _
     ByVal BuildHandler As Long, _
     ByVal BuildCleanup As Long)
 '
-'==============================================================================
-' DEMO_CT_CheckProbe
+'------------------------------------------------------------------------------
+'                       CHECK THE CLEANUP PROBE COUNTERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Checks all six cleanup probe counters of the last call at once.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_CheckText CheckName, _
             DEMO_CT_ProbeText(ResetHandler, ResetCleanup, ResetProtect, _
@@ -4434,7 +6482,6 @@ Private Sub DEMO_CT_CheckProbe( _
 
 End Sub
 
-
 Private Function DEMO_CT_ProbeText( _
     ByVal ResetHandler As Long, _
     ByVal ResetCleanup As Long, _
@@ -4444,15 +6491,15 @@ Private Function DEMO_CT_ProbeText( _
     ByVal BuildCleanup As Long) _
     As String
 '
-'==============================================================================
-' DEMO_CT_ProbeText
+'------------------------------------------------------------------------------
+'                          FORMAT THE PROBE COUNTERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats the six probe counters for comparison and failure messages.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
         DEMO_CT_ProbeText = "Reset handler=" & CStr(ResetHandler) & _
                             " cleanup=" & CStr(ResetCleanup) & _
@@ -4463,28 +6510,29 @@ Private Function DEMO_CT_ProbeText( _
 
 End Function
 
-
 Private Sub DEMO_CT_CheckOptions( _
     ByVal CheckName As String, _
     ByVal Expected As String, _
     ByVal Actual As String)
 '
-'==============================================================================
-' DEMO_CT_CheckOptions
+'------------------------------------------------------------------------------
+'                     CHECK THAT TWO OPTION STRINGS MATCH
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Checks two option strings and names every option that differs.
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim OptionNames         As Variant         'The fifteen option names
-    Dim Index               As Long            'Option index
-    Dim Differences         As String          'Differing options
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_CheckOptions"
+
+    Dim OptionNames As Variant  'The fifteen option names
+    Dim Index       As Long     'Option index
+    Dim Differences As String   'Differing options
 
 '------------------------------------------------------------------------------
 ' COMPARE
@@ -4505,13 +6553,12 @@ Private Sub DEMO_CT_CheckOptions( _
 
 End Sub
 
-
 Private Sub DEMO_CT_CheckPasswordReapplied( _
     ByVal CheckName As String, _
     ByVal WS As Worksheet)
 '
-'==============================================================================
-' DEMO_CT_CheckPasswordReapplied
+'------------------------------------------------------------------------------
+'                     CHECK THAT THE PASSWORD IS REAPPLIED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Checks that WS is protected and refuses WRONG_PASSWORD, so the reapplied
@@ -4520,20 +6567,22 @@ Private Sub DEMO_CT_CheckPasswordReapplied( _
 '
 ' UPDATED
 '   2026-11-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WrongNumber         As Long            'Error of the wrong-password unprotect
+    Const PROC_NAME As String = "M_DEMO_CLEANUP_TESTS.DEMO_CT_CheckPasswordReapplied"
+
+    Dim WrongNumber As Long 'Error of the wrong-password unprotect
 
 '------------------------------------------------------------------------------
 ' CHECK
 '------------------------------------------------------------------------------
         On Error Resume Next
-            WS.Unprotect Password:=WRONG_PASSWORD
-            WrongNumber = Err.Number
-            Err.Clear
+        WS.Unprotect Password:=WRONG_PASSWORD
+        WrongNumber = Err.Number
+        Err.Clear
         On Error GoTo 0
 
         DEMO_CT_Check WrongNumber <> 0 And DEMO_CT_IsProtected(WS), CheckName, _

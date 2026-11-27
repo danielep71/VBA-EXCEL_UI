@@ -149,7 +149,7 @@ HOUSE_PREVIOUS = (
 
 
 class HouseStyleCli(unittest.TestCase):
-    """The same command with --style house, which is what stage B of #210 will run."""
+    """The same command with --style house, the form the modules are in."""
 
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory(prefix="excel-ui-reformat-")

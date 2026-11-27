@@ -45,17 +45,12 @@ verification (#52)](#formatter-verification-52) says how `tools/reformat.py`
 produces it and proves that doing so changes nothing the code executes.
 
 **The switch.** `HOUSE_STYLE_ACTIVE` in `tools/house_style.py` says whether the
-tree is held to this form. It is `False` while the twelve modules are still in
-the layout they had before: `tools/reformat.py --check` accepts that layout, the
-*house labels* check accepts its spellings (`Err_Handler`, `Safe_Exit`,
-`Clean_Exit`, `Clean_Fail`), and the *house-style rules* check runs its fixtures
-but does not read the modules. While it is `False`, write to the layout the
-modules have and run `python3 tools/reformat.py --write` as before; the form
-below replaces it for the whole tree in one change. To see what that change does
-to a module, run `python3 tools/reformat.py --style house --write` on a copy, or
-`--style house --check` on the module itself. I reformat the modules and set the
-constant to `True` in the same change, so that no commit holds a tree the gate
-would reject.
+tree is held to this form. It is `True`: the twelve modules are in this layout,
+`tools/reformat.py --check` accepts only it, the *house labels* check accepts
+its spellings (`ErrorHandler`, `SafeExit`, `CleanExit`, `CleanFail`) and the
+*house-style rules* check reads the modules. `--style legacy` still writes the
+layout the modules had before, and the fixtures of the formatter and of each
+rule run in either state, so a rule stays proved whatever the constant says.
 
 ### Files
 
@@ -214,6 +209,21 @@ a task section is a short UPPERCASE verb phrase for one logical step.
 | `EXIT PROCEDURE` | the clean exit: the `SafeExit:` label, the cleanup, then `Exit Sub` or `Exit Function` |
 | `ERROR HANDLER` | the `ErrorHandler:` label, then capture, cleanup and re-raise |
 
+The literal of `PROC_NAME` is `<Module>.<Procedure>`. Where a procedure has
+always logged or raised its bare name as the source (the tests assert it), the
+literal stays the bare procedure name and the line directly above the constant
+is exactly this comment:
+
+```vba
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "UI_HideExcelUI"
+```
+
+The *house-style rules* check accepts either form. It reports a bare name
+without that comment, a literal that is neither form, and the comment above a
+literal that is not the bare procedure name. The comment is not a way to excuse
+a new literal: a new procedure uses `<Module>.<Procedure>`.
+
 A trivial procedure, such as a one-line getter, keeps only the sections it
 needs. `DECLARE`, `INITIALIZE`, `EXIT PROCEDURE` and `ERROR HANDLER` appear only
 when there is something to put in them. The demo's cleanup flow, whose clean
@@ -340,7 +350,7 @@ and refuses a module where the rewrite would be ambiguous.
 |---|---|
 | Blank lines, banners and their characters, centred titles, header field order and spacing, `HISTORY`, `UPDATED` as one date, `RETURNS` of a `Sub` that says none, declaration alignment, section titles for the exit and the handler, `INITIALIZE` opened at the handler statement, label column, statement and comment indentation | `tools/reformat.py` rewrites them; `--check` and the *house-style formatter* check report drift |
 | The renames above | `tools/reformat.py`, which compares the executable tokens before it writes |
-| The nine fields present and in order, `UPDATED` a date, `RETURNS` of a `Sub` is `Nothing`, the section order, `On Error GoTo` in `INITIALIZE`, an `Exit` in `EXIT PROCEDURE`, `Const PROC_NAME` first in `DECLARE` with the procedure's own name, `Select Case` without `Case Else`, `InStr` and `StrComp` without a compare mode, one statement per line, `Next` without its counter, an `=` rule outside a component header | the *house-style rules* check (`tools/vba_house_rules.py`), which proves each rule on failing and passing fixtures (`tools/house_rules_fixtures.py`) |
+| The nine fields present and in order, `UPDATED` a date, `RETURNS` of a `Sub` is `Nothing`, the section order, `On Error GoTo` in `INITIALIZE`, an `Exit` in `EXIT PROCEDURE`, `Const PROC_NAME` first in `DECLARE` with `<Module>.<Procedure>` or the deliberate bare name under its comment, `Select Case` without `Case Else`, `InStr` and `StrComp` without a compare mode, one statement per line, `Next` without its counter, an `=` rule outside a component header | the *house-style rules* check (`tools/vba_house_rules.py`), which proves each rule on failing and passing fixtures (`tools/house_rules_fixtures.py`) |
 | Header text, the content of a field, a title that says what the procedure does rather than spelling its identifier, local variable names, `vbNullString`, line length | I write and review them; no check rewrites them |
 
 A title that repeats the identifier of its procedure becomes the words of that
@@ -350,10 +360,11 @@ it by a verb phrase is part of the review.
 The formatter never invents the text of a missing field and never adds the
 `PROC_NAME` constant, because either would change what a person wrote or what
 the module contains. It prints a `note` for each module that names the rules a
-person still has to settle. The rule fixtures, the formatter fixtures
+person still has to settle, and the *house-style rules* check fails on every one
+of them. The rule fixtures, the formatter fixtures
 (`tools/house_format_fixtures.py`) and the tests under `tests/test_house_style.py`
-run whatever the state of the switch, so each rule stays proved while the tree
-is not yet held to it.
+run whatever the state of the switch, so each rule stays proved whatever the
+constant says.
 
 ## Formatter verification (#52)
 
@@ -401,6 +412,21 @@ relocation is normalized. The house form never moves, adds or removes a
 statement. This bounded equivalence check is not compilation or Excel runtime
 certification. Every fixture is exercised by the existing formatter self-test in
 static CI, whatever the state of the switch.
+
+`python3 tools/reformat.py --equivalent BASE_DIR NEW_DIR` proves the same thing
+between two trees, for a change made by hand or in several steps: it reads every
+`.bas` module under both directories and compares the ordered executable tokens
+of each procedure and of the module outside its procedures, a statement wrapped
+over several lines counting as one. It accepts only these differences: comments,
+whitespace and blank lines; the renames above, which it applies to `BASE_DIR`
+first; `Const PROC_NAME As String = "<Module>.<Procedure>"` added where the base
+has none, or moved within its procedure with the same literal; and an empty
+`Case Else` directly before `End Select`. A changed operator, a changed literal,
+a deleted or an inserted statement, a changed `Option` statement or a different
+order of procedures is reported with the procedure and the first differing
+statement, and the command exits 1. The fixtures are in
+`tools/house_equiv_fixtures.py`. Export a base tree with
+`git archive <ref> src test demo` into an empty directory.
 
 `--write` preflights all inputs and replaces each changed file through a flushed
 same-directory temporary file and `os.replace`. Existing permissions are kept,

@@ -7,15 +7,20 @@ the style without changing what it executes, and that switching the style on
 leaves only the rules that need a person.
 """
 
+import contextlib
+import io
+import re
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from gate_fixture import (
     REPO,
     LexicalError,
-    check_repo,
     executable_signature,
-    fixture,
+    house_equiv,
+    house_equiv_fixtures,
     house_format_fixtures,
     house_rules_fixtures,
     house_style,
@@ -181,31 +186,134 @@ class Tree(unittest.TestCase):
                 self.assertLessEqual(kinds, settled)
 
     def test_the_formatter_names_what_it_leaves(self) -> None:
-        _, name, text = next(m for m in modules() if m[1] == "M_EXCEL_UI_RUNTIME")
-        _, todos = vba_house.format_module(text, name)
-        self.assertTrue(any(message.startswith("header lacks") for _, message in todos))
+        # A module whose procedure header lacks a field: the formatter writes none, and says so.
+        text = house_format_fixtures.LEGACY_MODULE.replace(
+            "' NOTES\r\n'   A text such as \"GoTo Fail\" is data.\r\n'\r\n", "", 1)
+        self.assertNotEqual(text, house_format_fixtures.LEGACY_MODULE)
+        result, todos = vba_house.format_module(text, "M_PROBE")
+        self.assertIn(("Probe_Describe", "header lacks NOTES"), todos)
+        self.assertNotIn("' NOTES", result.split("Probe_Describe")[2])
 
     def test_a_rename_that_is_ambiguous_is_refused_before_anything_is_written(self) -> None:
-        _, name, text = next(m for m in modules() if m[1] == "M_EXCEL_UI_RUNTIME")
         with self.assertRaises(LexicalError):
-            reformat.reformat_text(text + "\r\nFail:\r\n", name, "house")
+            reformat.reformat_text(house_format_fixtures.HOUSE_MODULE + "\r\nFail:\r\n", "M_PROBE", "house")
 
 
 class SwitchedOn(unittest.TestCase):
-    """Stage B in miniature: reformat the tree, switch the style on, run the gate."""
+    """The tree is held to the style."""
 
-    def test_the_formatted_tree_passes_every_check_except_the_rules_a_person_settles(self) -> None:
-        with fixture() as repo:
-            for rel, name, text in modules():
-                repo.write(rel, reformat.reformat_text(text, name, "house").encode("ascii"))
-            with patch.object(house_style, "HOUSE_STYLE_ACTIVE", True):
-                for label, fn in check_repo.CHECKS:
-                    found = repo.run(fn)
-                    if label == "house-style rules":
-                        self.assertTrue(found, "the rules should still have work for a person")
-                        self.assertTrue(all("house-style-rules" in f for f in found), found[:3])
-                    else:
-                        self.assertEqual(found, [], label)
+    def found(self) -> list[tuple[str, vba_house_rules.Finding]]:
+        return [(name, item) for _, name, text in modules() for item in vba_house_rules.findings(text, name)]
+
+    def test_the_switch_is_on_and_every_module_is_in_the_normal_form(self) -> None:
+        self.assertTrue(house_style.HOUSE_STYLE_ACTIVE)
+        for rel, name, text in modules():
+            with self.subTest(module=rel):
+                self.assertEqual(reformat.reformat_text(text, name), text)
+
+    def test_the_tree_has_no_finding(self) -> None:
+        self.assertEqual([f"{name}: {item}" for name, item in self.found()], [])
+
+    def test_a_bare_literal_stands_only_under_the_deliberate_comment(self) -> None:
+        """No total is pinned: the property holds for however many such literals the tree has.
+
+        A constant outside a DECLARE section is a finding still to be settled, and is not read here.
+        """
+        constant = re.compile(r'^\s*Const PROC_NAME As String = "([^"]*)"\s*$')
+        for _, name, text in modules():
+            lines = text.split("\r\n")
+            procedure, section = "", ""
+            for n, line in enumerate(lines):
+                signature = vba_house.SIG_RE.match(line.strip())
+                if signature:
+                    procedure, section = signature.group("name"), ""
+                if vba_house.is_rule(lines[n - 1]) and vba_house.is_rule(lines[(n + 1) % len(lines)]) \
+                        and line.startswith("' "):
+                    section = line[2:].strip()
+                m = constant.match(line)
+                if m and section == house_style.DECLARE:
+                    bare = m.group(1).lower() == procedure.lower()
+                    deliberate = n > 0 and lines[n - 1].strip() == house_style.DELIBERATE_VALUE_COMMENT
+                    self.assertEqual(bare, deliberate, (name, n + 1, procedure, m.group(1)))
+                if line.lstrip().startswith("'The value is deliberate"):
+                    self.assertEqual(line.strip(), house_style.DELIBERATE_VALUE_COMMENT, (name, n + 1))
+                    self.assertTrue(lines[n + 1].startswith("    Const PROC_NAME As String = "), (name, n + 2))
+
+    def test_every_select_case_has_a_case_else(self) -> None:
+        self.assertEqual([item for _, item in self.found() if item.rule == "select-case"], [])
+
+
+class Equivalence(unittest.TestCase):
+    """reformat.py --equivalent proves two trees differ only as the style allows."""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.base = self.root / "base"
+        self.new = self.root / "new"
+        for tree in (self.base, self.new):
+            (tree / "src").mkdir(parents=True)
+        (self.base / "src" / "M_PROBE.bas").write_bytes(house_equiv_fixtures.BASE.encode("ascii"))
+        (self.new / "src" / "M_PROBE.bas").write_bytes(house_equiv_fixtures.STYLED.encode("ascii"))
+
+    def run_it(self) -> tuple[int, str]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = reformat.main(["--equivalent", str(self.base), str(self.new)])
+        return status, out.getvalue()
+
+    def test_the_fixtures_hold(self) -> None:
+        self.assertEqual(house_equiv_fixtures.equiv_selftest(), [])
+
+    def test_the_formatted_fixture_is_accepted(self) -> None:
+        status, out = self.run_it()
+        self.assertEqual(status, 0, out)
+        self.assertIn("ok   src/M_PROBE.bas", out)
+
+    def test_each_executable_change_is_refused_with_its_difference(self) -> None:
+        for name, before, after, part in (
+            ("operator", "Value > PROBE_LIMIT", "Value >= PROBE_LIMIT", "base has `If Value > PROBE_LIMIT Then`"),
+            ("deleted statement", "        Probe_Describe = Text\r\n", "", "a statement was deleted"),
+            ("literal", '"zero"', '"nil"', '"nil"'),
+            ("inserted statement", "        Probe_Describe = Text\r\n",
+             "        Probe_Describe = Text\r\n        mState = 1\r\n", "a statement was inserted"),
+        ):
+            with self.subTest(change=name):
+                text = house_equiv_fixtures.STYLED.replace(before, after, 1)
+                self.assertNotEqual(text, house_equiv_fixtures.STYLED)
+                (self.new / "src" / "M_PROBE.bas").write_bytes(text.encode("ascii"))
+                status, out = self.run_it()
+                self.assertEqual(status, 1)
+                self.assertIn("FAIL M_PROBE: Function Probe_Describe:", out)
+                self.assertIn(part, out)
+
+    def test_a_module_missing_from_either_tree_is_refused(self) -> None:
+        (self.new / "src" / "M_EXTRA.bas").write_bytes(house_equiv_fixtures.STYLED.encode("ascii"))
+        status, out = self.run_it()
+        self.assertEqual(status, 1)
+        self.assertIn("src/M_EXTRA.bas: the module is not in the base tree", out)
+        (self.new / "src" / "M_EXTRA.bas").unlink()
+        (self.new / "src" / "M_PROBE.bas").unlink()
+        status, out = self.run_it()
+        self.assertEqual(status, 1)
+        self.assertIn("the module is missing from the new tree", out)
+
+    def test_an_empty_tree_is_refused_rather_than_accepted(self) -> None:
+        (self.new / "src" / "M_PROBE.bas").unlink()
+        (self.base / "src" / "M_PROBE.bas").unlink()
+        status, out = self.run_it()
+        self.assertEqual(status, 1)
+        self.assertIn("no .bas module", out)
+
+    def test_the_tree_is_equivalent_to_itself(self) -> None:
+        for rel, name, text in modules():
+            with self.subTest(module=rel):
+                self.assertEqual(house_equiv.compare_modules(text, text, name), [])
+
+    def test_a_statement_that_is_wrapped_differently_is_not_a_difference(self) -> None:
+        wrapped = house_equiv.rows_of(["X = 1 + _", "    2"], 0, 1)
+        self.assertEqual(wrapped[0].tokens, house_equiv.rows_of(["X = 1 + 2"], 0, 0)[0].tokens)
 
 
 if __name__ == "__main__":

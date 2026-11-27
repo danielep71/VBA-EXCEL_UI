@@ -531,11 +531,10 @@ def check_house_labels() -> None:
 
 
 def check_house_style_rules() -> None:
-    """Prove the rules that rewriting cannot settle, and apply them once the style is on.
+    """Prove the rules that rewriting cannot settle, and apply them to the modules.
 
-    The fixtures run on every push. The modules are read only while
-    house_style.HOUSE_STYLE_ACTIVE is True, because the tree does not yet carry
-    the header fields, the PROC_NAME constant and the sections they ask for.
+    The fixtures run on every push. The modules are read while
+    house_style.HOUSE_STYLE_ACTIVE is True, and every finding fails the check.
     """
     import house_style
     from house_rules_fixtures import rules_selftest

@@ -6,7 +6,8 @@ Two normal forms exist. ``house`` is the style of docs/VBA_HOUSE_STYLE.md and is
 built by vba_house.py. ``legacy`` is the previous normal form, described below,
 which the tree keeps while house_style.HOUSE_STYLE_ACTIVE is False. ``--style``
 picks one; without it the switch decides, so ``--check`` accepts the tree that
-exists and ``--style house`` shows what the style will change.
+the switch names. ``--equivalent`` proves that two trees differ only as the
+style allows (house_equiv.py).
 
 The legacy form applies a bounded set of mechanical formatting transformations.
 They are intended to be behaviour-neutral, and the named lexical rules below are
@@ -47,6 +48,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import house_equiv
 import house_style
 import vba_house
 import vba_house_rules
@@ -605,10 +607,12 @@ def selftest() -> list[str]:
         if again != "\r\n".join(produced):
             failures.append(f"{label}\n      not idempotent on a second pass")
 
+    from house_equiv_fixtures import equiv_selftest
     from house_format_fixtures import house_selftest
     from reformat_fixtures import extended_selftest
     failures.extend(extended_selftest())
     failures.extend(house_selftest())
+    failures.extend(equiv_selftest())
     return failures
 
 
@@ -628,6 +632,7 @@ USAGE = """usage:
   reformat.py --selftest                         verify the rules themselves
   reformat.py [--style S] --check <file.bas> ...  report drift, exit 1 if any
   reformat.py [--style S] --write <file.bas> ...  normalise in place
+  reformat.py --equivalent BASE_DIR NEW_DIR       prove two trees differ only as the style allows
   reformat.py [--style S] <src> <dst> <module_name>   explicit form
 S is "house" (the style in docs/VBA_HOUSE_STYLE.md) or "legacy" (the previous
 normal form). Without --style the switch HOUSE_STYLE_ACTIVE in
@@ -651,6 +656,8 @@ def main(argv: list[str]) -> int:
         return check(args[1:], style)
     if args and args[0] == "--write":
         return write(args[1:], style)
+    if args and args[0] == "--equivalent" and len(args) == 3:
+        return house_equiv.run(args[1], args[2])
     if len(args) == 3:
         src, dst, name = args
         atomic_write(dst, reformat(src, name, style).encode("ascii"))

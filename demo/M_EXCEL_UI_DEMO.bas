@@ -1,9 +1,11 @@
 Attribute VB_Name = "M_EXCEL_UI_DEMO"
+
 Option Explicit
 
+'
 '==============================================================================
-' M_EXCEL_UI_DEMO
-'------------------------------------------------------------------------------
+' MODULE: M_EXCEL_UI_DEMO
+'==============================================================================
 ' PURPOSE
 '   Provide a worksheet-based showcase for the EXCEL_UI module, including:
 '     - a reproducible demo-sheet builder
@@ -20,6 +22,50 @@ Option Explicit
 '
 '   This module bridges the demo sheet controls to the public EXCEL_UI API and
 '   builds the demo surface in a repeatable, presentation-ready way
+'
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Demo_CreateDemoSheet builds the DEMO_UI sheet with its check boxes and
+'     buttons, each button running one of the public Demo_ macros below
+'   - Demo_ShowSelectedUI and Demo_HideSelectedUI read the check boxes and
+'     apply UI_Show or UI_Hide to the checked elements only, through
+'     UI_SetExcelUI
+'   - Demo_SelectAllUI, Demo_ClearAllUI and the three presets only write the
+'     check boxes
+'   - Demo_SyncCheckBoxesToUI reads the current Excel UI state back into the
+'     check boxes
+'   - Demo_CaptureUIState and Demo_ResetUIToCapturedState call the snapshot
+'     API
+'
+' ERROR POLICY
+'   - Demo_CreateDemoSheet raises: an original error keeps its number and
+'     source after the fast-mode cleanup
+'   - Every other public action does NOT raise to callers; failures are
+'     written to the Immediate Window through Demo_LogFailure
+'
+' DEPENDENCIES
+'   - EXCEL_UI public API: UIVisibility, UI_SetExcelUI,
+'     UI_CaptureExcelUIState, UI_ResetExcelUIToSnapshot and
+'     UI_HasExcelUIStateSnapshot
+'   - M_DEMO_BUILDER: the DEMO_ builder, button, check-box and fast-mode
+'     helpers
+'   - user32 GetWindowLong[Ptr] and kernel32 SetLastError, declared privately
+'     for the title-bar read
+'
+' NOTES
+'   - Window-level sync reads the current ActiveWindow state
+'   - TitleBar SHOW / HIDE acts on the active window's frame: the handle is
+'     read from ActiveWindow.hWnd and used only while Application.Hwnd names
+'     the same frame
+'   - TitleBar sync reads the Excel window represented by Application.Hwnd
+'   - Missing or misnamed controls are logged to the Immediate Window and
+'     treated conservatively
+'   - Demo_CreateDemoSheet is the canonical builder
 '
 ' PUBLIC SURFACE
 '   - Demo_CreateDemoSheet
@@ -71,17 +117,13 @@ Option Explicit
 '       * UI_ResetExcelUIToSnapshot
 '       * UI_HasExcelUIStateSnapshot
 '
-' NOTES
-'   - Window-level sync reads the current ActiveWindow state
-'   - TitleBar SHOW / HIDE acts on the active window's frame: the handle is
-'     read from ActiveWindow.hWnd and used only while Application.Hwnd names
-'     the same frame
-'   - TitleBar sync reads the Excel window represented by Application.Hwnd
-'   - Missing or misnamed controls are logged to the Immediate Window and
-'     treated conservatively
-'   - Demo_CreateDemoSheet is the canonical builder
+' AUTHOR
+'   Daniele Penza
 '
-' UPDATED
+' VERSION
+'   1.1.2
+'
+' HISTORY
 '   2026-11-18 - The title-bar read tests the complete WS_CAPTION mask, so a
 '                style with only WS_BORDER or only WS_DLGFRAME is not reported
 '                as a visible title bar (#6).
@@ -96,29 +138,23 @@ Option Explicit
 '                runtime-error text describes the error it was given.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
-' AUTHOR
-'   Daniele Penza
-'
-' VERSION
-'   1.1.2
-'
+' UPDATED
+'   2026-11-18
 '==============================================================================
-'
-
 
 '------------------------------------------------------------------------------
 ' DEMO CONFIGURATION
 '------------------------------------------------------------------------------
-    Private Const DEMO_SHEET_NAME         As String = "DEMO_UI"                 'Demo worksheet name
+    Private Const DEMO_SHEET_NAME   As String = "DEMO_UI"   'Demo worksheet name
 
-    Private Const CB_RIBBON               As String = "chkRibbon"               'Ribbon check box name
-    Private Const CB_STATUSBAR            As String = "chkStatusBar"            'StatusBar check box name
-    Private Const CB_SCROLLBARS           As String = "chkScrollBars"           'ScrollBars check box name
-    Private Const CB_FORMULABAR           As String = "chkFormulaBar"           'FormulaBar check box name
-    Private Const CB_HEADINGS             As String = "chkHeadings"             'Headings check box name
-    Private Const CB_WORKBOOKTABS         As String = "chkWorkbookTabs"         'WorkbookTabs check box name
-    Private Const CB_GRIDLINES            As String = "chkGridlines"            'Gridlines check box name
-    Private Const CB_TITLEBAR             As String = "chkTitleBar"             'TitleBar check box name
+    Private Const CB_RIBBON         As String = "chkRibbon"         'Ribbon check box name
+    Private Const CB_STATUSBAR      As String = "chkStatusBar"      'StatusBar check box name
+    Private Const CB_SCROLLBARS     As String = "chkScrollBars"     'ScrollBars check box name
+    Private Const CB_FORMULABAR     As String = "chkFormulaBar"     'FormulaBar check box name
+    Private Const CB_HEADINGS       As String = "chkHeadings"       'Headings check box name
+    Private Const CB_WORKBOOKTABS   As String = "chkWorkbookTabs"   'WorkbookTabs check box name
+    Private Const CB_GRIDLINES      As String = "chkGridlines"      'Gridlines check box name
+    Private Const CB_TITLEBAR       As String = "chkTitleBar"       'TitleBar check box name
 
     Private Const NOTE_SCOPE_TEXT As String = "Scope / semantics note:" & vbLf & _
         "- Checked means SELECTED for the next SHOW or HIDE action." & vbLf & _
@@ -159,23 +195,23 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' API CONSTANTS FOR TITLE-BAR STATE READ
 '------------------------------------------------------------------------------
-    Private Const DEMO_GWL_STYLE          As Long = -16       'Window style index
-    Private Const DEMO_WS_CAPTION         As Long = &HC00000  'Caption mask (WS_BORDER Or WS_DLGFRAME)
+    Private Const DEMO_GWL_STYLE    As Long = -16       'Window style index
+    Private Const DEMO_WS_CAPTION   As Long = &HC00000  'Caption mask (WS_BORDER Or WS_DLGFRAME)
 
+    '                               '
+    '------------------------------------------------------------------------------
+    '
+    '                           PUBLIC DEMO BUILDER
+    '
+    '------------------------------------------------------------------------------
+    '
 
-'                               '
-'------------------------------------------------------------------------------
-'
-'                           PUBLIC DEMO BUILDER
-'
-'------------------------------------------------------------------------------
-'
 
 Public Sub Demo_CreateDemoSheet()
 
 '
-'==============================================================================
-' Demo_CreateDemoSheet
+'------------------------------------------------------------------------------
+'                               BUILD DEMO SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build or rebuild the Excel UI demo sheet and its interactive control panel
@@ -191,8 +227,11 @@ Public Sub Demo_CreateDemoSheet()
 '   Centralizing that logic keeps the demo easier to rebuild, maintain, and
 '   present
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Enters a fast-mode scope for smoother rebuild
@@ -229,31 +268,40 @@ Public Sub Demo_CreateDemoSheet()
 '   - DEMO_CB_AddForms
 '   - Demo_SyncCheckBoxesToUI
 '
-' UPDATED
+' NOTES
+'   - The RESET SHEET button it adds runs Demo_CreateDemoSheet again, so the
+'     sheet can rebuild itself
+'   - The check box names written here are the CB_ constants that the sync,
+'     apply and selection-profile procedures read back
+'
+' HISTORY
 '   2026-11-14 - Fast-mode cleanup restores the entry cursor and reports a
 '                failed restoration (#70).
 '   2026-07-25
-'==============================================================================
 '
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WB                  As Workbook        'Target workbook
-    Dim WS                  As Worksheet       'Demo worksheet
-    Dim ButtonSpecs         As Variant         'Button name / caption / macro specification
-    Dim FastModeState       As tDEMOFastModeState 'Saved Application state and owned settings
-    Dim SavedErrNumber      As Long            'Captured error number
-    Dim SavedErrSource      As String          'Captured error source
-    Dim SavedErrDescription As String          'Captured error description
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Demo_CreateDemoSheet"  'Procedure name for diagnostics
 
-    Const PROC As String = "Demo_CreateDemoSheet" 'Procedure name for diagnostics
+    Dim WB                  As Workbook             'Target workbook
+    Dim WS                  As Worksheet            'Demo worksheet
+    Dim ButtonSpecs         As Variant              'Button name / caption / macro specification
+    Dim FastModeState       As tDEMOFastModeState   'Saved Application state and owned settings
+    Dim SavedErrNumber      As Long                 'Captured error number
+    Dim SavedErrSource      As String               'Captured error source
+    Dim SavedErrDescription As String               'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable structured cleanup on failure
-        On Error GoTo Clean_Fail
+        On Error GoTo CleanFail
     'Target the workbook that contains this module
         Set WB = ThisWorkbook
     'Play the standard demo-button click feedback
@@ -406,10 +454,10 @@ Public Sub Demo_CreateDemoSheet()
             WS.Range("H2").Left + 1, WS.Range("H2").Top + 1, 105, 25, _
             "Demo_CreateDemoSheet"
 
-Clean_Exit:
 '------------------------------------------------------------------------------
-' CLEANUP
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+CleanExit:
     'Disable the handler first, so cleanup can never re-enter it
         On Error GoTo 0
     'Restore every fast-mode setting this call applied; a failed restoration
@@ -422,23 +470,22 @@ Clean_Exit:
         End If
         Exit Sub
 
-Clean_Fail:
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
+CleanFail:
     'Capture the original error details before cleanup
         SavedErrNumber = Err.Number
-        SavedErrSource = IIf(Len(Err.Source) > 0, Err.Source, PROC)
+        SavedErrSource = IIf(Len(Err.Source) > 0, Err.Source, PROC_NAME)
         SavedErrDescription = Err.Description
-        Resume Clean_Exit
+        Resume CleanExit
 
 End Sub
-
 
 '
 '------------------------------------------------------------------------------
 '
-'                           PUBLIC DEMO ACTIONS
+'                             PUBLIC DEMO ACTIONS
 '
 '------------------------------------------------------------------------------
 '
@@ -446,8 +493,8 @@ End Sub
 Public Sub Demo_ShowSelectedUI()
 
 '
-'==============================================================================
-' Demo_ShowSelectedUI
+'------------------------------------------------------------------------------
+'                          SHOW SELECTED UI ELEMENTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Show only the UI elements currently selected by the user on the demo sheet
@@ -456,22 +503,34 @@ Public Sub Demo_ShowSelectedUI()
 '   The demo sheet uses check boxes as a user-friendly selector for which UI
 '   elements should be affected by the EXCEL_UI module
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Interprets checked boxes as selected targets
 '   - Applies UI_Show to selected elements
 '   - Leaves unchecked elements unchanged
 '
+' ERROR POLICY
+'   - Has no handler of its own and does NOT raise to callers: the button
+'     feedback is best effort, and Demo_ApplySelectedUI traps unexpected
+'     failures and writes them to the Immediate Window
+'
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_ApplySelectedUI
 '
+' NOTES
+'   Runs from the button that Demo_CreateDemoSheet adds as btn_UI_Show. The
+'   procedure name it passes to Demo_ApplySelectedUI is the one used in
+'   diagnostics
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY ACTION
@@ -484,8 +543,8 @@ End Sub
 Public Sub Demo_HideSelectedUI()
 
 '
-'==============================================================================
-' Demo_HideSelectedUI
+'------------------------------------------------------------------------------
+'                          HIDE SELECTED UI ELEMENTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Hide only the UI elements currently selected by the user on the demo sheet
@@ -494,22 +553,34 @@ Public Sub Demo_HideSelectedUI()
 '   The demo sheet uses check boxes as a user-friendly selector for which UI
 '   elements should be affected by the EXCEL_UI module
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Interprets checked boxes as selected targets
 '   - Applies UI_Hide to selected elements
 '   - Leaves unchecked elements unchanged
 '
+' ERROR POLICY
+'   - Has no handler of its own and does NOT raise to callers: the button
+'     feedback is best effort, and Demo_ApplySelectedUI traps unexpected
+'     failures and writes them to the Immediate Window
+'
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_ApplySelectedUI
 '
+' NOTES
+'   Runs from the button that Demo_CreateDemoSheet adds as btn_UI_Hide. The
+'   procedure name it passes to Demo_ApplySelectedUI is the one used in
+'   diagnostics
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY ACTION
@@ -522,8 +593,8 @@ End Sub
 Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
     True)
 '
-'==============================================================================
-' Demo_SyncCheckBoxesToUI
+'------------------------------------------------------------------------------
+'                         SYNC CHECK BOXES TO UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read the current Excel UI state and synchronize the demo check boxes so
@@ -533,8 +604,14 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '   A demo is more useful when users can see the current state before deciding
 '   what to show or hide next
 '
+' INPUTS
+'   PlayFeedback
+'     Optional ByVal. TRUE (the default) plays the button-click feedback
+'     first. Demo_CreateDemoSheet and Demo_ResetUIToCapturedState pass FALSE;
+'     the SYNC CHECKBOXES button passes nothing
+'
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Reads current application-level state directly from Excel
@@ -559,23 +636,23 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Demo worksheet
-    Dim ActiveWin           As Window          'Active Excel window for window-level reads
-    Dim IsVisible           As Boolean         'Resolved current visibility state
-    Dim FailMsg             As String          'Diagnostic message from reader / writer helpers
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Demo_SyncCheckBoxesToUI"   'Procedure name for diagnostics
 
-    Const PROC As String = "Demo_SyncCheckBoxesToUI" 'Procedure name for diagnostics
+    Dim WS          As Worksheet    'Demo worksheet
+    Dim ActiveWin   As Window       'Active Excel window for window-level reads
+    Dim IsVisible   As Boolean      'Resolved current visibility state
+    Dim FailMsg     As String       'Diagnostic message from reader / writer helpers
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
     'Play the optional button-click visual feedback only when requested
         If PlayFeedback Then
             DEMO_Btn_PlayFeedback
@@ -590,25 +667,25 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
         If Demo_TryGetRibbonVisibility(IsVisible, FailMsg) Then
             If Not DEMO_CB_TrySetState(WS, CB_RIBBON, IsVisible, FailMsg) _
                 Then
-                Demo_LogFailure PROC, CB_RIBBON, FailMsg
+                Demo_LogFailure PROC_NAME, CB_RIBBON, FailMsg
             End If
         Else
-            Demo_LogFailure PROC, "RibbonState", FailMsg
+            Demo_LogFailure PROC_NAME, "RibbonState", FailMsg
         End If
     'Read current StatusBar visibility and update the related check box
         If Not DEMO_CB_TrySetState(WS, CB_STATUSBAR, _
             Application.DisplayStatusBar, FailMsg) Then
-            Demo_LogFailure PROC, CB_STATUSBAR, FailMsg
+            Demo_LogFailure PROC_NAME, CB_STATUSBAR, FailMsg
         End If
     'Read current ScrollBars visibility and update the related check box
         If Not DEMO_CB_TrySetState(WS, CB_SCROLLBARS, _
             Application.DisplayScrollBars, FailMsg) Then
-            Demo_LogFailure PROC, CB_SCROLLBARS, FailMsg
+            Demo_LogFailure PROC_NAME, CB_SCROLLBARS, FailMsg
         End If
     'Read current FormulaBar visibility and update the related check box
         If Not DEMO_CB_TrySetState(WS, CB_FORMULABAR, _
             Application.DisplayFormulaBar, FailMsg) Then
-            Demo_LogFailure PROC, CB_FORMULABAR, FailMsg
+            Demo_LogFailure PROC_NAME, CB_FORMULABAR, FailMsg
         End If
 
 '------------------------------------------------------------------------------
@@ -616,24 +693,24 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
 '------------------------------------------------------------------------------
     'Reject missing ActiveWindow deterministically for window-level sync
         If ActiveWin Is Nothing Then
-                Demo_LogFailure PROC, "ActiveWindow", _
-                    "no active window available for window-level sync"
+            Demo_LogFailure PROC_NAME, "ActiveWindow", _
+                "no active window available for window-level sync"
         Else
-            'Update the Headings check box from ActiveWindow
-                If Not DEMO_CB_TrySetState(WS, CB_HEADINGS, _
-                    ActiveWin.DisplayHeadings, FailMsg) Then
-                    Demo_LogFailure PROC, CB_HEADINGS, FailMsg
-                End If
-            'Update the WorkbookTabs check box from ActiveWindow
-                If Not DEMO_CB_TrySetState(WS, CB_WORKBOOKTABS, _
-                    ActiveWin.DisplayWorkbookTabs, FailMsg) Then
-                    Demo_LogFailure PROC, CB_WORKBOOKTABS, FailMsg
-                End If
-            'Update the Gridlines check box from ActiveWindow
-                If Not DEMO_CB_TrySetState(WS, CB_GRIDLINES, _
-                    ActiveWin.DisplayGridlines, FailMsg) Then
-                    Demo_LogFailure PROC, CB_GRIDLINES, FailMsg
-                End If
+        'Update the Headings check box from ActiveWindow
+            If Not DEMO_CB_TrySetState(WS, CB_HEADINGS, _
+                ActiveWin.DisplayHeadings, FailMsg) Then
+                Demo_LogFailure PROC_NAME, CB_HEADINGS, FailMsg
+            End If
+        'Update the WorkbookTabs check box from ActiveWindow
+            If Not DEMO_CB_TrySetState(WS, CB_WORKBOOKTABS, _
+                ActiveWin.DisplayWorkbookTabs, FailMsg) Then
+                Demo_LogFailure PROC_NAME, CB_WORKBOOKTABS, FailMsg
+            End If
+        'Update the Gridlines check box from ActiveWindow
+            If Not DEMO_CB_TrySetState(WS, CB_GRIDLINES, _
+                ActiveWin.DisplayGridlines, FailMsg) Then
+                Demo_LogFailure PROC_NAME, CB_GRIDLINES, FailMsg
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -643,32 +720,32 @@ Public Sub Demo_SyncCheckBoxesToUI(Optional ByVal PlayFeedback As Boolean = _
         If Demo_TryGetTitleBarVisibility(IsVisible, FailMsg) Then
             If Not DEMO_CB_TrySetState(WS, CB_TITLEBAR, IsVisible, FailMsg) _
                 Then
-                Demo_LogFailure PROC, CB_TITLEBAR, FailMsg
+                Demo_LogFailure PROC_NAME, CB_TITLEBAR, FailMsg
             End If
         Else
-            Demo_LogFailure PROC, "TitleBarState", FailMsg
+            Demo_LogFailure PROC_NAME, "TitleBarState", FailMsg
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
-        Demo_LogFailure PROC, "Unexpected", Demo_GetRuntimeErrorText
-        Resume Safe_Exit
+ErrorHandler:
+        Demo_LogFailure PROC_NAME, "Unexpected", Demo_GetRuntimeErrorText
+        Resume SafeExit
 
 End Sub
 
 Public Sub Demo_SelectAllUI()
 
 '
-'==============================================================================
-' Demo_SelectAllUI
+'------------------------------------------------------------------------------
+'                            SELECT ALL CHECK BOXES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Check all demo check boxes so all managed UI elements are selected for the
@@ -677,17 +754,31 @@ Public Sub Demo_SelectAllUI()
 ' WHY THIS EXISTS
 '   Select All is a useful convenience action during demos and testing
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Calls Demo_SetSelectionProfile with every selection flag TRUE
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
+' NOTES
+'   Only sets the check boxes; it does NOT apply SHOW or HIDE by itself
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
@@ -706,8 +797,8 @@ End Sub
 Public Sub Demo_ClearAllUI()
 
 '
-'==============================================================================
-' Demo_ClearAllUI
+'------------------------------------------------------------------------------
+'                            CLEAR ALL CHECK BOXES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clear all demo check boxes so no UI elements are selected for the next SHOW
@@ -716,17 +807,31 @@ Public Sub Demo_ClearAllUI()
 ' WHY THIS EXISTS
 '   Clear All is a useful convenience action during demos and testing
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Calls Demo_SetSelectionProfile with every selection flag FALSE
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
+' NOTES
+'   Only clears the check boxes; it does NOT apply SHOW or HIDE by itself
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
@@ -744,8 +849,8 @@ End Sub
 Public Sub Demo_PresetKiosk()
 
 '
-'==============================================================================
-' Demo_PresetKiosk
+'------------------------------------------------------------------------------
+'                             SELECT KIOSK PRESET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Pre-select a broad kiosk-style profile covering all managed UI elements
@@ -754,21 +859,34 @@ Public Sub Demo_PresetKiosk()
 '   A kiosk-like presentation typically considers all major Excel chrome and
 '   worksheet aids as candidate targets
 '
-' RETURNS
+' INPUTS
 '   None
 '
-' NOTES
-'   - This preset only sets the check boxes
-'   - It does NOT apply SHOW or HIDE by itself
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Calls Demo_SetSelectionProfile with every selection flag TRUE: Ribbon,
+'     StatusBar, ScrollBars, FormulaBar, Headings, WorkbookTabs, Gridlines
+'     and TitleBar
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
+' NOTES
+'   - This preset only sets the check boxes
+'   - It does NOT apply SHOW or HIDE by itself
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
@@ -786,8 +904,8 @@ End Sub
 Public Sub Demo_PresetAnalyst()
 
 '
-'==============================================================================
-' Demo_PresetAnalyst
+'------------------------------------------------------------------------------
+'                            SELECT ANALYST PRESET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Pre-select a profile focused on worksheet navigation and analysis aids
@@ -796,21 +914,34 @@ Public Sub Demo_PresetAnalyst()
 '   Analytical use cases often care most about sheet aids such as headings,
 '   tabs, gridlines, formula bar, and related navigation cues
 '
-' RETURNS
+' INPUTS
 '   None
 '
-' NOTES
-'   - This preset only sets the check boxes
-'   - It does NOT apply SHOW or HIDE by itself
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Checks StatusBar, ScrollBars, FormulaBar, Headings, WorkbookTabs and
+'     Gridlines through Demo_SetSelectionProfile
+'   - Unchecks Ribbon and TitleBar
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
+' NOTES
+'   - This preset only sets the check boxes
+'   - It does NOT apply SHOW or HIDE by itself
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
@@ -828,8 +959,8 @@ End Sub
 Public Sub Demo_PresetMinimal()
 
 '
-'==============================================================================
-' Demo_PresetMinimal
+'------------------------------------------------------------------------------
+'                            SELECT MINIMAL PRESET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Pre-select a profile focused on major application chrome rather than
@@ -839,21 +970,34 @@ Public Sub Demo_PresetMinimal()
 '   A minimal-shell scenario often focuses on the application frame, bars, and
 '   navigation chrome
 '
-' RETURNS
+' INPUTS
 '   None
 '
-' NOTES
-'   - This preset only sets the check boxes
-'   - It does NOT apply SHOW or HIDE by itself
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Plays the button-click feedback
+'   - Checks Ribbon, StatusBar, ScrollBars, FormulaBar and TitleBar through
+'     Demo_SetSelectionProfile
+'   - Unchecks Headings, WorkbookTabs and Gridlines
+'
+' ERROR POLICY
+'   - Does NOT raise to callers: the button feedback is best effort, and
+'     Demo_SetSelectionProfile logs per-control failures and traps unexpected
+'     ones
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_PlayFeedback
 '   - Demo_SetSelectionProfile
 '
+' NOTES
+'   - This preset only sets the check boxes
+'   - It does NOT apply SHOW or HIDE by itself
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' APPLY PROFILE
@@ -871,8 +1015,8 @@ End Sub
 Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
     True)
 '
-'==============================================================================
-' Demo_CaptureUIState
+'------------------------------------------------------------------------------
+'                               CAPTURE UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Capture the current managed Excel UI state through the core module snapshot
@@ -884,8 +1028,13 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
 '     - experiment with show / hide actions
 '     - restore the captured baseline later
 '
+' INPUTS
+'   ShowConfirmation
+'     Optional ByVal. TRUE (the default) shows a message box after the
+'     capture; FALSE captures without one
+'
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Delegates to UI_CaptureExcelUIState
@@ -900,20 +1049,24 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
 '   - UI_CaptureExcelUIState
 '   - Demo_LogFailure
 '
+' NOTES
+'   Runs from the CAPTURE STATE button (btn_UI_CaptureState), which passes no
+'   argument, so the confirmation is shown
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC As String = "Demo_CaptureUIState" 'Procedure name for diagnostics
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Demo_CaptureUIState"   'Procedure name for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
         DEMO_Btn_PlayFeedback
 
 '------------------------------------------------------------------------------
@@ -931,25 +1084,25 @@ Public Sub Demo_CaptureUIState(Optional ByVal ShowConfirmation As Boolean = _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
-        Demo_LogFailure PROC, "Unexpected", Demo_GetRuntimeErrorText
-        Resume Safe_Exit
+ErrorHandler:
+        Demo_LogFailure PROC_NAME, "Unexpected", Demo_GetRuntimeErrorText
+        Resume SafeExit
 
 End Sub
 
 Public Sub Demo_ResetUIToCapturedState()
 
 '
-'==============================================================================
-' Demo_ResetUIToCapturedState
+'------------------------------------------------------------------------------
+'                          RESET UI TO CAPTURED STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restore the managed Excel UI to the most recently captured explicit
@@ -959,8 +1112,11 @@ Public Sub Demo_ResetUIToCapturedState()
 '   The demo becomes more useful when users can experiment safely and then
 '   return to a captured baseline
 '
-' RETURNS
+' INPUTS
 '   None
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Rejects reset when no snapshot is available
@@ -978,20 +1134,26 @@ Public Sub Demo_ResetUIToCapturedState()
 '   - Demo_SyncCheckBoxesToUI
 '   - Demo_LogFailure
 '
+' NOTES
+'   - Runs from the RESET STATE button (btn_UI_ResetState)
+'   - With no captured state it shows a message box and changes nothing
+'   - Demo_SyncCheckBoxesToUI is called with PlayFeedback FALSE, so the
+'     button feedback plays once, on entry
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC As String = "Demo_ResetUIToCapturedState" 'Procedure name for diagnostics
+    'The value is deliberate: it stays the bare procedure name, without the module prefix
+    Const PROC_NAME As String = "Demo_ResetUIToCapturedState"   'Procedure name for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
         DEMO_Btn_PlayFeedback
 
 '------------------------------------------------------------------------------
@@ -1001,7 +1163,7 @@ Public Sub Demo_ResetUIToCapturedState()
         If Not UI_HasExcelUIStateSnapshot Then
             MsgBox "No captured Excel UI state is available.", vbExclamation, _
                 "Excel UI Demo"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1016,35 +1178,33 @@ Public Sub Demo_ResetUIToCapturedState()
         Demo_SyncCheckBoxesToUI False
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
-        Demo_LogFailure PROC, "Unexpected", Demo_GetRuntimeErrorText
-        Resume Safe_Exit
+ErrorHandler:
+        Demo_LogFailure PROC_NAME, "Unexpected", Demo_GetRuntimeErrorText
+        Resume SafeExit
 
 End Sub
 
 '
 '------------------------------------------------------------------------------
 '
-'                           SHARED PRIVATE ORCHESTRATION
+'                         SHARED PRIVATE ORCHESTRATION
 '
 '------------------------------------------------------------------------------
 '
 
-
 Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal _
     CallerProc As String)
-
 '
-'==============================================================================
-' Demo_ApplySelectedUI
+'------------------------------------------------------------------------------
+'                         APPLY SELECTED UI VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Shared worker for applying SHOW or HIDE to the UI elements selected on the
@@ -1064,7 +1224,7 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
 '     Public caller procedure name used for diagnostics
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' BEHAVIOR
 '   - Reads each demo check box
@@ -1082,28 +1242,36 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
 '   - UI_SetExcelUI
 '   - Demo_LogFailure
 '
+' NOTES
+'   - A check box that cannot be read is logged by
+'     Demo_CheckBoxToUIVisibility and counts as unselected, so one missing
+'     control does not stop the others
+'   - With nothing selected it shows a message box and does not call
+'     UI_SetExcelUI
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Demo worksheet
-    Dim RibbonVis           As UIVisibility    'Resolved Ribbon visibility
-    Dim StatusBarVis        As UIVisibility    'Resolved StatusBar visibility
-    Dim ScrollBarsVis       As UIVisibility    'Resolved ScrollBars visibility
-    Dim FormulaBarVis       As UIVisibility    'Resolved FormulaBar visibility
-    Dim HeadingsVis         As UIVisibility    'Resolved Headings visibility
-    Dim WorkbookTabsVis     As UIVisibility    'Resolved WorkbookTabs visibility
-    Dim GridlinesVis        As UIVisibility    'Resolved Gridlines visibility
-    Dim TitleBarVis         As UIVisibility    'Resolved TitleBar visibility
+    Const PROC_NAME As String = "M_EXCEL_UI_DEMO.Demo_ApplySelectedUI"
+
+    Dim WS              As Worksheet    'Demo worksheet
+    Dim RibbonVis       As UIVisibility 'Resolved Ribbon visibility
+    Dim StatusBarVis    As UIVisibility 'Resolved StatusBar visibility
+    Dim ScrollBarsVis   As UIVisibility 'Resolved ScrollBars visibility
+    Dim FormulaBarVis   As UIVisibility 'Resolved FormulaBar visibility
+    Dim HeadingsVis     As UIVisibility 'Resolved Headings visibility
+    Dim WorkbookTabsVis As UIVisibility 'Resolved WorkbookTabs visibility
+    Dim GridlinesVis    As UIVisibility 'Resolved Gridlines visibility
+    Dim TitleBarVis     As UIVisibility 'Resolved TitleBar visibility
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
         Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
@@ -1141,10 +1309,10 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
         If Not Demo_HasAnySelectedChange(RibbonVis, StatusBarVis, ScrollBarsVis, _
             FormulaBarVis, HeadingsVis, WorkbookTabsVis, GridlinesVis, TitleBarVis) _
             Then
-            'Inform the user that no options were selected
-                MsgBox "No UI elements are selected.", vbInformation, _
-                    "Excel UI Demo"
-                GoTo Safe_Exit
+        'Inform the user that no options were selected
+            MsgBox "No UI elements are selected.", vbInformation, _
+                "Excel UI Demo"
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1157,17 +1325,17 @@ Private Sub Demo_ApplySelectedUI(ByVal SelectedVisibility As UIVisibility, ByVal
             Gridlines:=GridlinesVis, TitleBar:=TitleBarVis
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Demo_LogFailure CallerProc, "Unexpected", Demo_GetRuntimeErrorText
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
@@ -1176,10 +1344,9 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
     ScrollBarsSelected As Boolean, ByVal FormulaBarSelected As Boolean, ByVal _
     HeadingsSelected As Boolean, ByVal WorkbookTabsSelected As Boolean, ByVal _
     GridlinesSelected As Boolean, ByVal TitleBarSelected As Boolean)
-
 '
-'==============================================================================
-' Demo_SetSelectionProfile
+'------------------------------------------------------------------------------
+'                      WRITE CHECK BOX SELECTION PROFILE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Set all demo check boxes in one call according to the supplied Boolean
@@ -1197,11 +1364,40 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 '   CallerProc
 '     Public caller procedure name used for diagnostics
 '
-'   [Boolean selection flags]
-'     Requested checked state for each demo check box
+'   RibbonSelected
+'     Requested checked state of the Ribbon check box
+'
+'   StatusBarSelected
+'     Requested checked state of the StatusBar check box
+'
+'   ScrollBarsSelected
+'     Requested checked state of the ScrollBars check box
+'
+'   FormulaBarSelected
+'     Requested checked state of the FormulaBar check box
+'
+'   HeadingsSelected
+'     Requested checked state of the Headings check box
+'
+'   WorkbookTabsSelected
+'     Requested checked state of the WorkbookTabs check box
+'
+'   GridlinesSelected
+'     Requested checked state of the Gridlines check box
+'
+'   TitleBarSelected
+'     Requested checked state of the TitleBar check box
 '
 ' RETURNS
-'   None
+'   Nothing
+'
+' BEHAVIOR
+'   - Resolves the demo worksheet
+'   - Writes each flag to its check box with DEMO_CB_TrySetState, in the
+'     order Ribbon, StatusBar, ScrollBars, FormulaBar, Headings,
+'     WorkbookTabs, Gridlines, TitleBar
+'   - A control that cannot be written is logged under CallerProc and the
+'     remaining controls are still written
 '
 ' ERROR POLICY
 '   - Does NOT raise to callers
@@ -1211,21 +1407,26 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
 '   - DEMO_CB_TrySetState
 '   - Demo_LogFailure
 '
+' NOTES
+'   CallerProc only names the caller in diagnostics; the check box names are
+'   the CB_ constants
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WS                  As Worksheet       'Demo worksheet
-    Dim FailMsg             As String          'Diagnostic message from the writer helper
+    Const PROC_NAME As String = "M_EXCEL_UI_DEMO.Demo_SetSelectionProfile"
+
+    Dim WS      As Worksheet    'Demo worksheet
+    Dim FailMsg As String       'Diagnostic message from the writer helper
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
         Set WS = ThisWorkbook.Worksheets(DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
@@ -1265,17 +1466,17 @@ Private Sub Demo_SetSelectionProfile(ByVal CallerProc As String, ByVal _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         Demo_LogFailure CallerProc, "Unexpected", Demo_GetRuntimeErrorText
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
 
@@ -1284,10 +1485,9 @@ Private Function Demo_HasAnySelectedChange(ByVal RibbonVis As UIVisibility, _
     FormulaBarVis As UIVisibility, ByVal HeadingsVis As UIVisibility, ByVal _
     WorkbookTabsVis As UIVisibility, ByVal GridlinesVis As UIVisibility, ByVal _
     TitleBarVis As UIVisibility) As Boolean
-
 '
-'==============================================================================
-' Demo_HasAnySelectedChange
+'------------------------------------------------------------------------------
+'                          DETECT ANY SELECTED CHANGE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Determine whether at least one UI element has been selected for change
@@ -1302,8 +1502,7 @@ Private Function Demo_HasAnySelectedChange(ByVal RibbonVis As UIVisibility, _
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RETURN RESULT
@@ -1316,11 +1515,10 @@ Private Function Demo_HasAnySelectedChange(ByVal RibbonVis As UIVisibility, _
 
 End Function
 
-
 '
 '------------------------------------------------------------------------------
 '
-'                   PRIVATE CHECKBOX/STATE TRANSLATION HELPERS
+'                  PRIVATE CHECKBOX/STATE TRANSLATION HELPERS
 '
 '------------------------------------------------------------------------------
 '
@@ -1328,10 +1526,9 @@ End Function
 Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
     CheckBoxName As String, ByVal SelectedVisibility As UIVisibility, ByVal _
     CallerProc As String) As UIVisibility
-
 '
-'==============================================================================
-' Demo_CheckBoxToUIVisibility
+'------------------------------------------------------------------------------
+'                         MAP CHECK BOX TO VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Convert the checked state of a demo worksheet check box into a tri-state
@@ -1372,14 +1569,15 @@ Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim IsChecked           As Boolean         'Resolved check-box state
-    Dim FailMsg             As String          'Diagnostic message from the reader helper
+    Const PROC_NAME As String = "M_EXCEL_UI_DEMO.Demo_CheckBoxToUIVisibility"
+
+    Dim IsChecked   As Boolean  'Resolved check-box state
+    Dim FailMsg     As String   'Diagnostic message from the reader helper
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1392,9 +1590,9 @@ Private Function Demo_CheckBoxToUIVisibility(ByVal WS As Worksheet, ByVal _
 '------------------------------------------------------------------------------
         If Not DEMO_CB_TryGetState(WS, CheckBoxName, IsChecked, FailMsg) _
             Then
-            'Log the control-resolution failure and keep UI_LeaveUnchanged
-                Demo_LogFailure CallerProc, CheckBoxName, FailMsg
-                Exit Function
+        'Log the control-resolution failure and keep UI_LeaveUnchanged
+            Demo_LogFailure CallerProc, CheckBoxName, FailMsg
+            Exit Function
         End If
 
 '------------------------------------------------------------------------------
@@ -1412,17 +1610,16 @@ End Function
 '
 '------------------------------------------------------------------------------
 '
-'                       PRIVATE UI-STATE READ HELPERS
+'                        PRIVATE UI-STATE READ HELPERS
 '
 '------------------------------------------------------------------------------
 '
 
 Private Function Demo_TryGetRibbonVisibility(ByRef IsVisible As Boolean, ByRef _
     FailMsg As String) As Boolean
-
 '
-'==============================================================================
-' Demo_TryGetRibbonVisibility
+'------------------------------------------------------------------------------
+'                            READ RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current Ribbon visibility
@@ -1451,20 +1648,31 @@ Private Function Demo_TryGetRibbonVisibility(ByRef IsVisible As Boolean, ByRef _
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
 '
+' DEPENDENCIES
+'   - Application.CommandBars("Ribbon").Visible
+'   - Application.ExecuteExcel4Macro (Get.ToolBar)
+'   - Demo_GetRuntimeErrorText
+'
+' NOTES
+'   FailMsg carries the error of the Excel4 fallback, the last read tried, as
+'   "<number>: <description>"; an unexpected error is reported through
+'   Demo_GetRuntimeErrorText
+'
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ValueOut            As Variant         'Fallback Excel4 macro result
+    Const PROC_NAME As String = "M_EXCEL_UI_DEMO.Demo_TryGetRibbonVisibility"
+
+    Dim ValueOut    As Variant  'Fallback Excel4 macro result
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
     'Initialize outputs and default result
         Demo_TryGetRibbonVisibility = False
         IsVisible = False
@@ -1475,52 +1683,51 @@ Private Function Demo_TryGetRibbonVisibility(ByRef IsVisible As Boolean, ByRef _
 '------------------------------------------------------------------------------
     'Attempt to read Ribbon visibility from the CommandBars collection
         On Error Resume Next
-            IsVisible = Application.CommandBars("Ribbon").Visible
+        IsVisible = Application.CommandBars("Ribbon").Visible
         If Err.Number = 0 Then
-            On Error GoTo Err_Handler
+            On Error GoTo ErrorHandler
             Demo_TryGetRibbonVisibility = True
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
         Err.Clear
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' TRY EXCEL4 MACRO FALLBACK
 '------------------------------------------------------------------------------
     'Attempt a fallback read using an Excel4 macro
         On Error Resume Next
-            ValueOut = _
-                Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
+        ValueOut = _
+            Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
         If Err.Number = 0 Then
-            On Error GoTo Err_Handler
+            On Error GoTo ErrorHandler
             IsVisible = CBool(ValueOut)
             Demo_TryGetRibbonVisibility = True
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
         FailMsg = CStr(Err.Number) & ": " & Err.Description
         Err.Clear
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailMsg = Demo_GetRuntimeErrorText
 
 End Function
 
 Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef _
     FailMsg As String) As Boolean
-
 '
-'==============================================================================
-' Demo_TryGetTitleBarVisibility
+'------------------------------------------------------------------------------
+'                          READ TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current title-bar visibility for the Excel window
@@ -1542,9 +1749,30 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '   TRUE  => title-bar visibility was read successfully
 '   FALSE => read failed
 '
+' BEHAVIOR
+'   - Reads Application.Hwnd and fails when it is zero
+'   - Clears the thread last-error, reads GWL_STYLE with the API of the
+'     compilation branch and captures Err.LastDllError in the next statement
+'   - A zero style with a non-zero captured error is a failure; a zero style
+'     with a zero error is a valid style
+'   - Sets IsVisible when the complete WS_CAPTION mask is set
+'
 ' ERROR POLICY
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
+'
+' DEPENDENCIES
+'   - Application.Hwnd
+'   - Demo_SetLastError (kernel32 SetLastError)
+'   - Demo_GetWindowLongPtr or Demo_GetWindowLong (user32), by compilation
+'     branch
+'   - Err.LastDllError
+'   - Demo_GetRuntimeErrorText
+'
+' NOTES
+'   The read uses this module's own Declare statements and does not call
+'   M_EXCEL_UI_TITLEBAR. It describes the window Application.Hwnd names at the
+'   instant of the call; no handle is kept
 '
 ' WINAPI ERROR CAPTURE
 '   SetLastError 0, the style read into a local and the Err.LastDllError
@@ -1552,30 +1780,34 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 '   src/. GetWindowLong[Ptr] can return zero legitimately, so only a zero
 '   style with a non-zero captured error is a failure.
 '
-' UPDATED
+' HISTORY
 '   2026-11-18 - Tests the complete WS_CAPTION mask instead of any caption
 '                bit (#6).
 '   2026-11-15 - Err.LastDllError captured right after the call (#144).
 '   2026-07-25
-'==============================================================================
 '
+' UPDATED
+'   2026-11-18
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_DEMO.Demo_TryGetTitleBarVisibility"
+
 #If VBA7 Then
-    Dim xlHnd               As LongPtr         'Excel window handle from Application.Hwnd
-    Dim StyleValue          As LongPtr         'Current window style value
+    Dim xlHnd       As LongPtr  'Excel window handle from Application.Hwnd
+    Dim StyleValue  As LongPtr  'Current window style value
 #Else
-    Dim xlHnd               As Long            'Excel window handle from Application.Hwnd
-    Dim StyleValue          As Long            'Current window style value
+    Dim xlHnd       As Long 'Excel window handle from Application.Hwnd
+    Dim StyleValue  As Long 'Current window style value
 #End If
-    Dim LastErr             As Long            'Last Win32 error after API call
+    Dim LastErr As Long 'Last Win32 error after API call
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
     'Initialize outputs and default result
         Demo_TryGetTitleBarVisibility = False
         IsVisible = False
@@ -1584,7 +1816,7 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
     'Reject invalid window handle deterministically
         If xlHnd = 0 Then
             FailMsg = "invalid Excel window handle"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1595,15 +1827,15 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
 
     #If VBA7 Then
         #If Win64 Then
-            'Read the current window style using the 64-bit API
-                StyleValue = Demo_GetWindowLongPtr(xlHnd, DEMO_GWL_STYLE)
+    'Read the current window style using the 64-bit API
+        StyleValue = Demo_GetWindowLongPtr(xlHnd, DEMO_GWL_STYLE)
         #Else
-            'Read the current window style using the 32-bit API under VBA7
-                StyleValue = Demo_GetWindowLong(xlHnd, DEMO_GWL_STYLE)
+    'Read the current window style using the 32-bit API under VBA7
+        StyleValue = Demo_GetWindowLong(xlHnd, DEMO_GWL_STYLE)
         #End If
     #Else
-            'Read the current window style using the legacy 32-bit API
-                StyleValue = Demo_GetWindowLong(xlHnd, DEMO_GWL_STYLE)
+    'Read the current window style using the legacy 32-bit API
+        StyleValue = Demo_GetWindowLong(xlHnd, DEMO_GWL_STYLE)
     #End If
 
     'Capture the native error in the very next statement, before any other
@@ -1615,7 +1847,7 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
         If StyleValue = 0 And LastErr <> 0 Then
             FailMsg = "GetWindowLong/GetWindowLongPtr failed reading the window style; " & _
                 "Err.LastDllError=" & CStr(LastErr) & "; hWnd=" & CStr(xlHnd)
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1631,15 +1863,15 @@ Private Function Demo_TryGetTitleBarVisibility(ByRef IsVisible As Boolean, ByRef
         Demo_TryGetTitleBarVisibility = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
         FailMsg = Demo_GetRuntimeErrorText
 
 End Function
@@ -1647,7 +1879,7 @@ End Function
 '
 '------------------------------------------------------------------------------
 '
-'                           PRIVATE DIAGNOSTICS
+'                             PRIVATE DIAGNOSTICS
 '
 '------------------------------------------------------------------------------
 '
@@ -1655,8 +1887,8 @@ End Function
 Private Function Demo_GetRuntimeErrorText() As String
 
 '
-'==============================================================================
-' Demo_GetRuntimeErrorText
+'------------------------------------------------------------------------------
+'                           BUILD RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a consistent runtime diagnostic string from the active Err object
@@ -1677,20 +1909,24 @@ Private Function Demo_GetRuntimeErrorText() As String
 '   On Error resets Err, so the obvious ordering silently produces "0:" with an
 '   empty description for every diagnostic this builder is asked to format.
 '
-' UPDATED
+' HISTORY
 '   2026-08-21 - Capture Err before suppressing errors, so diagnostics carry the
 '                failure they were invoked to describe.
 '   2026-07-25
-'==============================================================================
 '
+' UPDATED
+'   2026-08-21
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ErrNumber           As Long            'Err.Number captured on entry
-    Dim ErrDescription      As String          'Err.Description captured on entry
-    Dim ErrSource           As String          'Err.Source captured on entry
-    Dim ErrLine             As Long            'Erl captured on entry
+    Const PROC_NAME As String = "M_EXCEL_UI_DEMO.Demo_GetRuntimeErrorText"
+
+    Dim ErrNumber       As Long     'Err.Number captured on entry
+    Dim ErrDescription  As String   'Err.Description captured on entry
+    Dim ErrSource       As String   'Err.Source captured on entry
+    Dim ErrLine         As Long     'Erl captured on entry
 
 '------------------------------------------------------------------------------
 ' CAPTURE ERROR STATE
@@ -1705,7 +1941,7 @@ Private Function Demo_GetRuntimeErrorText() As String
         ErrLine = Erl
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' SUPPRESS FORMATTING ERRORS
 '------------------------------------------------------------------------------
     'Protect callers from any unexpected issue while formatting the diagnostic
         On Error Resume Next
@@ -1721,10 +1957,9 @@ End Function
 
 Private Sub Demo_LogFailure(ByVal ProcName As String, ByVal Stage As String, _
     ByVal Detail As String)
-
 '
-'==============================================================================
-' Demo_LogFailure
+'------------------------------------------------------------------------------
+'                       LOG FAILURE TO IMMEDIATE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write a consistent diagnostic line to the Immediate Window for the demo
@@ -1745,15 +1980,14 @@ Private Sub Demo_LogFailure(ByVal ProcName As String, ByVal Stage As String, _
 '     Failure detail to append
 '
 ' RETURNS
-'   None
+'   Nothing
 '
 ' ERROR POLICY
 '   Suppresses any unexpected logging failure locally
 '
 ' UPDATED
 '   2026-07-25
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE

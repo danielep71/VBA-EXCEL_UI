@@ -1,10 +1,12 @@
 Attribute VB_Name = "M_EXCEL_UI_RUNTIME"
+
 Option Explicit
 Option Private Module
 
+'
 '==============================================================================
-' M_EXCEL_UI_RUNTIME
-'------------------------------------------------------------------------------
+' MODULE: M_EXCEL_UI_RUNTIME
+'==============================================================================
 ' PURPOSE
 '   Provides the shared fail-soft runtime services used by the public Excel UI
 '   facade and by the snapshot engine: structured result buffering, ordered
@@ -22,6 +24,39 @@ Option Private Module
 '   diagnostic contract, one no-op suppression policy, and one quiet-update
 '   scope, while leaving this module free of any project-module dependency of
 '   its own.
+'
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Records failures into the Boolean / count / list result contract, in
+'     insertion order, and logs them to the Immediate Window on request.
+'   - Reads and writes the Ribbon and Boolean object-model properties without
+'     raising, reading first so that a value already correct is not written.
+'   - Provides the quiet-update scope that suppresses ScreenUpdating and
+'     restores it only when a readback confirmed that this scope suppressed it.
+'   - Builds the shared diagnostic text: the Err description, the window label
+'     and the log line.
+'   - Holds three one-shot regression seams, armed through the
+'     UI_InternalInject... procedures and each consumed by its next use.
+'
+' ERROR POLICY
+'   - Entry points are fail-soft and do not raise to callers.
+'   - Immediate Window logging happens only when LogFailures is True.
+'   - No MsgBox or other user-interface message is raised.
+'
+' DEPENDENCIES
+'   None. This module deliberately has no project-module dependency so that it
+'   can sit underneath both M_EXCEL_UI and M_EXCEL_UI_SNAPSHOT.
+'
+' NOTES
+'   - VBA's And and Or are not short-circuit: both operands are always
+'     evaluated. Guards whose right operand can fault must be nested.
+'   - UI_RuntimeAddFailure grows the failure list with ReDim Preserve. Growth
+'     is attempted, not assumed; see DIAGNOSTIC DURABILITY below.
 '
 ' INTERNAL SURFACE
 '   Diagnostics and result buffers:
@@ -70,15 +105,6 @@ Option Private Module
 '   host error text or an explicit validation reason. Callers that requested a
 '   failure list receive a 1-based String array of those entries.
 '
-' ERROR POLICY
-'   - Entry points are fail-soft and do not raise to callers.
-'   - Immediate Window logging happens only when LogFailures is True.
-'   - No MsgBox or other user-interface message is raised.
-'
-' DEPENDENCIES
-'   None. This module deliberately has no project-module dependency so that it
-'   can sit underneath both M_EXCEL_UI and M_EXCEL_UI_SNAPSHOT.
-'
 ' PLATFORM / COMPATIBILITY
 '   - Windows and macOS safe: this module contains no WinAPI declaration.
 '   - Ribbon control uses Application.ExecuteExcel4Macro and is therefore
@@ -117,13 +143,13 @@ Option Private Module
 '   When list capture was not requested the list is never touched, so an
 '   Empty list then says nothing about allocation.
 '
-' NOTES
-'   - VBA's And and Or are not short-circuit: both operands are always
-'     evaluated. Guards whose right operand can fault must be nested.
-'   - UI_RuntimeAddFailure grows the failure list with ReDim Preserve. Growth
-'     is attempted, not assumed; see DIAGNOSTIC DURABILITY above.
+' AUTHOR
+'   Daniele Penza
 '
-' UPDATED
+' VERSION
+'   1.1.1
+'
+' HISTORY
 '   2026-11-14 - A failed first failure-list allocation leaves the list Empty
 '                instead of a non-array value. Added the
 '                UI_InternalInjectFailureListFirstAllocationFailure seam (#38).
@@ -136,51 +162,46 @@ Option Private Module
 '                ICR-UI-P2-02.
 '   2026-08-18 - Reformatted to the project house style. No behavior change.
 '
-' AUTHOR
-'   Daniele Penza
-'
-' VERSION
-'   1.1.1
+' UPDATED
+'   2026-11-14
 '==============================================================================
 
-
-'==============================================================================
+'------------------------------------------------------------------------------
 ' PRIVATE MODULE STATE
-'==============================================================================
+'------------------------------------------------------------------------------
+    'Regression seam. When True the next failure-list growth reports failure without
+    'allocating, so the diagnostic-degradation path can be exercised without a way
+    'to exhaust memory on demand.
+    Private m_InjectFailureListGrowthFailure    As Boolean
 
-'Regression seam. When True the next failure-list growth reports failure without
-'allocating, so the diagnostic-degradation path can be exercised without a way
-'to exhaust memory on demand.
-Private m_InjectFailureListGrowthFailure As Boolean
+    'Regression seam. When True the next attempt to START a failure list - one made
+    'while the buffer holds no array - reports failure without allocating. Growth
+    'of an existing list neither fails nor consumes it, so a test can target the
+    'first-allocation path exactly.
+    Private m_InjectFailureListFirstAllocationFailure   As Boolean
 
-'Regression seam. When True the next attempt to START a failure list - one made
-'while the buffer holds no array - reports failure without allocating. Growth
-'of an existing list neither fails nor consumes it, so a test can target the
-'first-allocation path exactly.
-Private m_InjectFailureListFirstAllocationFailure As Boolean
+    'Regression seam for the quiet-update scope. The failures it stands in for are
+    'host refusals, which cannot be provoked on demand, so the ownership rule they
+    'exercise would otherwise be unreachable. Kinds are private on purpose: the
+    'seam takes a Long rather than exposing an enumeration, so the project-public
+    'surface gains one procedure and no type.
+    '
+    '   0  no fault
+    '   1  the entry read fails
+    '   2  the write is ineffective - refused or silently ignored, which are
+    '      indistinguishable from inside this procedure
+    '   3  the readback fails, after a real write has already happened
+    'Raised only by the seam, to stand in for a host refusal. The number is never
+    'seen by a caller: both raises happen inside On Error Resume Next and are
+    'consumed by the same procedure.
+    Private Const UI_ERR_INJECTED_QUIET_FAULT   As Long = vbObjectError + 5400
 
-'Regression seam for the quiet-update scope. The failures it stands in for are
-'host refusals, which cannot be provoked on demand, so the ownership rule they
-'exercise would otherwise be unreachable. Kinds are private on purpose: the
-'seam takes a Long rather than exposing an enumeration, so the project-public
-'surface gains one procedure and no type.
-'
-'   0  no fault
-'   1  the entry read fails
-'   2  the write is ineffective - refused or silently ignored, which are
-'      indistinguishable from inside this procedure
-'   3  the readback fails, after a real write has already happened
-'Raised only by the seam, to stand in for a host refusal. The number is never
-'seen by a caller: both raises happen inside On Error Resume Next and are
-'consumed by the same procedure.
-Private Const UI_ERR_INJECTED_QUIET_FAULT As Long = vbObjectError + 5400
+    Private Const QUIET_FAULT_NONE      As Long = 0
+    Private Const QUIET_FAULT_ENTRY     As Long = 1
+    Private Const QUIET_FAULT_WRITE     As Long = 2
+    Private Const QUIET_FAULT_READBACK  As Long = 3
 
-Private Const QUIET_FAULT_NONE      As Long = 0
-Private Const QUIET_FAULT_ENTRY     As Long = 1
-Private Const QUIET_FAULT_WRITE     As Long = 2
-Private Const QUIET_FAULT_READBACK  As Long = 3
-
-Private m_InjectQuietUpdateFault    As Long
+    Private m_InjectQuietUpdateFault    As Long
 
 
 Public Sub UI_RuntimeHandleFailure( _
@@ -193,8 +214,8 @@ Public Sub UI_RuntimeHandleFailure( _
     ByVal Stage As String, _
     ByVal Detail As String)
 '
-'==============================================================================
-' UI_RuntimeHandleFailure
+'------------------------------------------------------------------------------
+'                           RECORD AND LOG A FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Records one best-effort operation failure and optionally logs it.
@@ -230,7 +251,7 @@ Public Sub UI_RuntimeHandleFailure( _
 '     Host error text or explicit validation reason.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Appends the failure to the Boolean / count / list result contract.
@@ -245,19 +266,23 @@ Public Sub UI_RuntimeHandleFailure( _
 '   - UI_RuntimeAddFailure
 '   - UI_RuntimeLogFailure
 '
-' CALLED FROM
-'   - M_EXCEL_UI
-'   - M_EXCEL_UI_SNAPSHOT
-'
 ' NOTES
 '   The procedure name parameter is retained for compatibility with the
 '   established internal apply path; the helper is also used by snapshot
 '   operations.
 '
+' CALLED FROM
+'   - M_EXCEL_UI
+'   - M_EXCEL_UI_SNAPSHOT
+'
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeHandleFailure"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -265,7 +290,7 @@ Public Sub UI_RuntimeHandleFailure( _
     'This procedure runs inside the caller's error handler. Nothing it does may
     'propagate, or the failure being recorded is replaced by the failure to
     'record it.
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Mark the operation unsuccessful FIRST. It is the one output that cannot
     'fail, and the one a caller must never be denied.
@@ -292,31 +317,30 @@ Public Sub UI_RuntimeHandleFailure( _
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'A diagnostic path must never raise into an error handler. The success flag
     'was already cleared above, so the caller still learns that the operation
     'failed even when nothing else could be recorded.
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub UI_RuntimeClearResultBuffer( _
     ByRef FailureCount As Long, _
     ByRef FailureList As Variant, _
     ByVal CaptureFailureList As Boolean)
 '
-'==============================================================================
-' UI_RuntimeClearResultBuffer
+'------------------------------------------------------------------------------
+'                             CLEAR RESULT BUFFERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Initializes the structured result buffers to a known empty state.
@@ -337,7 +361,7 @@ Public Sub UI_RuntimeClearResultBuffer( _
 '     True when FailureList is in use.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Resets the count unconditionally.
@@ -350,14 +374,17 @@ Public Sub UI_RuntimeClearResultBuffer( _
 ' DEPENDENCIES
 '   None.
 '
+' NOTES
+'   A cleared list is Empty, not a zero-length array. Empty is the documented
+'   result for "no failure was recorded" when list capture was requested.
+'
 ' CALLED FROM
 '   - M_EXCEL_UI
 '   - M_EXCEL_UI_SNAPSHOT
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' CLEAR RESULT BUFFERS
@@ -372,7 +399,6 @@ Public Sub UI_RuntimeClearResultBuffer( _
 
 End Sub
 
-
 Private Sub UI_RuntimeAddFailure( _
     ByRef Succeeded As Boolean, _
     ByRef FailureCount As Long, _
@@ -381,8 +407,8 @@ Private Sub UI_RuntimeAddFailure( _
     ByVal Stage As String, _
     ByVal Detail As String)
 '
-'==============================================================================
-' UI_RuntimeAddFailure
+'------------------------------------------------------------------------------
+'                            ADD FAILURE TO RESULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Appends one failure to the standard Boolean / count / list result contract,
@@ -422,7 +448,7 @@ Private Sub UI_RuntimeAddFailure( _
 '     Components of the ordered "Stage | Detail" diagnostic entry.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Marks the operation unsuccessful.
@@ -442,9 +468,6 @@ Private Sub UI_RuntimeAddFailure( _
 '   - UI_RuntimeTryAppendFailureEntry
 '   - UI_RuntimeMarkFailureListTruncated
 '
-' CALLED FROM
-'   - UI_RuntimeHandleFailure
-'
 ' NOTES
 '   FailureCount is authoritative and FailureList is best effort. The list can
 '   therefore hold fewer entries than the count. A truncation marker is written
@@ -453,23 +476,30 @@ Private Sub UI_RuntimeAddFailure( _
 '   recorded after it shows as a count above the number of entries. The buffers
 '   are always cleared together by UI_RuntimeClearResultBuffer.
 '
-' UPDATED
+' CALLED FROM
+'   - UI_RuntimeHandleFailure
+'
+' HISTORY
 '   2026-11-14 - Leaves the list Empty when the first entry cannot be
 '                allocated (#38).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim EntryText           As String          'Composed "Stage | Detail" entry
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeAddFailure"
+
+    Dim EntryText   As String   'Composed "Stage | Detail" entry
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' UPDATE STATUS
@@ -502,7 +532,7 @@ Private Sub UI_RuntimeAddFailure( _
             EntryText = "Unknown | diagnostic text unavailable"
         End If
 
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' APPEND DIAGNOSTIC ENTRY
@@ -510,59 +540,58 @@ Private Sub UI_RuntimeAddFailure( _
     'Grow and write the failure list only when the caller requested one
         If CaptureFailureList Then
 
-            'A list that cannot grow must still say so. Marking an existing
-            'slot needs no allocation, which is what makes the report survive
-            'the very condition that caused the growth to fail.
-                If Not UI_RuntimeTryAppendFailureEntry( _
-                    FailureList:=FailureList, _
-                    EntryText:=EntryText) Then
+        'A list that cannot grow must still say so. Marking an existing
+        'slot needs no allocation, which is what makes the report survive
+        'the very condition that caused the growth to fail.
+            If Not UI_RuntimeTryAppendFailureEntry( _
+                FailureList:=FailureList, _
+                EntryText:=EntryText) Then
 
-                    If IsArray(FailureList) Then
+                If IsArray(FailureList) Then
 
-                        'Growth failed with slots in place: mark one
-                            UI_RuntimeMarkFailureListTruncated _
-                                FailureList:=FailureList, _
-                                FailureCount:=FailureCount
+                'Growth failed with slots in place: mark one
+                    UI_RuntimeMarkFailureListTruncated _
+                        FailureList:=FailureList, _
+                        FailureCount:=FailureCount
 
-                    Else
+                Else
 
-                        'The first entry could not be allocated, so there is
-                        'no slot for a marker. Leave the documented Empty
-                        'state, which allocates nothing, rather than whatever
-                        'non-array value the buffer held.
-                            FailureList = Empty
-
-                    End If
+                'The first entry could not be allocated, so there is
+                'no slot for a marker. Leave the documented Empty
+                'state, which allocates nothing, rather than whatever
+                'non-array value the buffer held.
+                    FailureList = Empty
 
                 End If
+
+            End If
 
         End If
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'The status outputs were already set above, so the caller still learns that
     'the operation failed even when nothing could be recorded about it.
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Private Function UI_RuntimeTryAppendFailureEntry( _
     ByRef FailureList As Variant, _
     ByVal EntryText As String) _
     As Boolean
 '
-'==============================================================================
-' UI_RuntimeTryAppendFailureEntry
+'------------------------------------------------------------------------------
+'                          APPEND FAILURE LIST ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Grows the failure-list buffer by one element and writes one entry into it.
@@ -606,32 +635,36 @@ Private Function UI_RuntimeTryAppendFailureEntry( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - UI_RuntimeAddFailure
-'
 ' NOTES
 '   Two regression seams can force this to report failure without
 '   allocating: UI_InternalInjectFailureListGrowthFailure for the next
 '   attempt of any kind, and UI_InternalInjectFailureListFirstAllocationFailure
 '   for the next attempt that would start a new list.
 '
-' UPDATED
+' CALLED FROM
+'   - UI_RuntimeAddFailure
+'
+' HISTORY
 '   2026-11-14 - Honours the first-allocation seam (#38).
 '   2026-08-19
-'==============================================================================
 '
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Arr()               As String          'Working failure-list buffer
-    Dim NewIndex            As Long            'Index the entry is written to
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeTryAppendFailureEntry"
+
+    Dim Arr()       As String   'Working failure-list buffer
+    Dim NewIndex    As Long     'Index the entry is written to
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the entry has been published
         UI_RuntimeTryAppendFailureEntry = False
@@ -643,7 +676,7 @@ Private Function UI_RuntimeTryAppendFailureEntry( _
     'test that forgets to disarm it cannot suppress diagnostics indefinitely.
         If m_InjectFailureListGrowthFailure Then
             m_InjectFailureListGrowthFailure = False
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -654,7 +687,7 @@ Private Function UI_RuntimeTryAppendFailureEntry( _
         If m_InjectFailureListFirstAllocationFailure Then
             If Not IsArray(FailureList) Then
                 m_InjectFailureListFirstAllocationFailure = False
-                GoTo Safe_Exit
+                GoTo SafeExit
             End If
         End If
 
@@ -684,28 +717,27 @@ Private Function UI_RuntimeTryAppendFailureEntry( _
         UI_RuntimeTryAppendFailureEntry = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Leave the caller's buffer exactly as it was found
         UI_RuntimeTryAppendFailureEntry = False
 
 End Function
 
-
 Private Sub UI_RuntimeMarkFailureListTruncated( _
     ByRef FailureList As Variant, _
     ByVal FailureCount As Long)
 '
-'==============================================================================
-' UI_RuntimeMarkFailureListTruncated
+'------------------------------------------------------------------------------
+'                         MARK FAILURE LIST TRUNCATED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Records, inside the failure list itself, that the list could not be grown
@@ -730,7 +762,7 @@ Private Sub UI_RuntimeMarkFailureListTruncated( _
 '     Authoritative failure count, reported in the marker text.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Overwrites the last existing element with the truncation marker.
@@ -742,29 +774,30 @@ Private Sub UI_RuntimeMarkFailureListTruncated( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - UI_RuntimeAddFailure
-'
 ' NOTES
 '   The marker text is a literal joined to one CStr call. If even that cannot
 '   be composed the procedure leaves the list alone rather than raising, and
 '   FailureCount remains the caller's signal that failures occurred.
 '
+' CALLED FROM
+'   - UI_RuntimeAddFailure
+'
 ' UPDATED
 '   2026-08-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Arr()               As String          'Working failure-list buffer
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeMarkFailureListTruncated"
+
+    Dim Arr()   As String   'Working failure-list buffer
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' VALIDATE BUFFER
@@ -772,13 +805,13 @@ Private Sub UI_RuntimeMarkFailureListTruncated( _
     'Without an existing slot there is nowhere to write without allocating,
     'which is precisely what must be avoided here
         If Not IsArray(FailureList) Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
         Arr = FailureList
 
         If UBound(Arr) < 1 Then
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -792,27 +825,26 @@ Private Sub UI_RuntimeMarkFailureListTruncated( _
         FailureList = Arr
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Leave the caller's buffer exactly as it was found
-        Resume Safe_Exit
+        Resume SafeExit
 
 End Sub
-
 
 Public Sub UI_InternalInjectFailureListGrowthFailure( _
     ByVal FailNextGrowth As Boolean)
 '
-'==============================================================================
-' UI_InternalInjectFailureListGrowthFailure
+'------------------------------------------------------------------------------
+'                            ARM LIST GROWTH FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arms or disarms a one-shot failure of the next failure-list growth.
@@ -828,7 +860,7 @@ Public Sub UI_InternalInjectFailureListGrowthFailure( _
 '     True arms the seam; False disarms it.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - The armed state is consumed by the next growth attempt and is not
@@ -841,18 +873,17 @@ Public Sub UI_InternalInjectFailureListGrowthFailure( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_RUNTIME
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     prevents exposure to external VBA projects.
 '   - Production code must never call it.
 '
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_RUNTIME
+'
 ' UPDATED
 '   2026-08-19
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' SET SEAM
@@ -862,12 +893,11 @@ Public Sub UI_InternalInjectFailureListGrowthFailure( _
 
 End Sub
 
-
 Public Sub UI_InternalInjectFailureListFirstAllocationFailure( _
     ByVal FailNextFirstAllocation As Boolean)
 '
-'==============================================================================
-' UI_InternalInjectFailureListFirstAllocationFailure
+'------------------------------------------------------------------------------
+'                          ARM FIRST ALLOCATION FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arms or disarms a one-shot failure of the next attempt to start a failure
@@ -889,7 +919,7 @@ Public Sub UI_InternalInjectFailureListFirstAllocationFailure( _
 '     True arms the seam; False disarms it.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - The armed state is consumed by the next append made while the buffer
@@ -903,18 +933,17 @@ Public Sub UI_InternalInjectFailureListFirstAllocationFailure( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_RUNTIME
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     prevents exposure to external VBA projects.
 '   - Production code must never call it.
 '
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_RUNTIME
+'
 ' UPDATED
 '   2026-11-14
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' SET SEAM
@@ -924,12 +953,11 @@ Public Sub UI_InternalInjectFailureListFirstAllocationFailure( _
 
 End Sub
 
-
 Public Sub UI_InternalInjectQuietUpdateFault( _
     ByVal FaultKind As Long)
 '
-'==============================================================================
-' UI_InternalInjectQuietUpdateFault
+'------------------------------------------------------------------------------
+'                            ARM QUIET UPDATE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arms a one-shot fault for the next quiet-update scope entry.
@@ -956,7 +984,7 @@ Public Sub UI_InternalInjectQuietUpdateFault( _
 '     module; neither is exported.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Records the fault for the next scope entry to consume.
@@ -970,19 +998,18 @@ Public Sub UI_InternalInjectQuietUpdateFault( _
 ' DEPENDENCIES
 '   None.
 '
-' CALLED FROM
-'   - M_EXCEL_UI_TEST_RUNTIME
-'
 ' NOTES
 '   - Public only for same-project regression access. Option Private Module
 '     prevents exposure to external VBA projects, so this is project-public
 '     surface and not part of the supported facade.
 '   - Production code must never call it.
 '
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_RUNTIME
+'
 ' UPDATED
 '   2026-08-29
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' SET SEAM
@@ -992,13 +1019,12 @@ Public Sub UI_InternalInjectQuietUpdateFault( _
 
 End Sub
 
-
 Public Sub UI_RuntimeBeginQuietUpdate( _
     ByRef OldScreenUpdating As Boolean, _
     ByRef QuietModeChanged As Boolean)
 '
-'==============================================================================
-' UI_RuntimeBeginQuietUpdate
+'------------------------------------------------------------------------------
+'                           BEGIN QUIET UPDATE SCOPE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Enters a best-effort Application.ScreenUpdating suppression scope, claiming
@@ -1027,7 +1053,7 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
 '     caused.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   entry read fails                 no ownership, Changed False
@@ -1042,10 +1068,6 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
 '
 ' DEPENDENCIES
 '   None.
-'
-' CALLED FROM
-'   - M_EXCEL_UI
-'   - M_EXCEL_UI_SNAPSHOT
 '
 ' NOTES
 '   ScreenUpdating suppression cannot fully eliminate Ribbon or non-client
@@ -1065,19 +1087,24 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
 '   Detecting a leftover of this kind at the end of a run belongs to
 '   certification.
 '
+' CALLED FROM
+'   - M_EXCEL_UI
+'   - M_EXCEL_UI_SNAPSHOT
+'
 ' UPDATED
 '   2026-08-29
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim EntryValue          As Boolean         'ScreenUpdating seen on entry
-    Dim ReadNumber          As Long            'Error from the entry read
-    Dim BackValue           As Boolean         'ScreenUpdating seen after write
-    Dim BackNumber          As Long            'Error from the readback
-    Dim Fault               As Long            'Armed regression fault, if any
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeBeginQuietUpdate"
+
+    Dim EntryValue  As Boolean  'ScreenUpdating seen on entry
+    Dim ReadNumber  As Long     'Error from the entry read
+    Dim BackValue   As Boolean  'ScreenUpdating seen after write
+    Dim BackNumber  As Long     'Error from the readback
+    Dim Fault       As Long     'Armed regression fault, if any
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1098,16 +1125,16 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
     'Never let a host refusal escape this scope
         On Error Resume Next
 
-            Err.Clear
+        Err.Clear
 
-            If Fault = QUIET_FAULT_ENTRY Then
-                Err.Raise UI_ERR_INJECTED_QUIET_FAULT
-            Else
-                EntryValue = Application.ScreenUpdating
-            End If
+        If Fault = QUIET_FAULT_ENTRY Then
+            Err.Raise UI_ERR_INJECTED_QUIET_FAULT
+        Else
+            EntryValue = Application.ScreenUpdating
+        End If
 
-            ReadNumber = Err.Number
-            Err.Clear
+        ReadNumber = Err.Number
+        Err.Clear
 
         On Error GoTo 0
 
@@ -1129,26 +1156,26 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
 
         On Error Resume Next
 
-            Err.Clear
+        Err.Clear
 
-            If Fault <> QUIET_FAULT_WRITE Then
-                Application.ScreenUpdating = False
-            End If
+        If Fault <> QUIET_FAULT_WRITE Then
+            Application.ScreenUpdating = False
+        End If
 
-            Err.Clear
+        Err.Clear
 
 '------------------------------------------------------------------------------
 ' CONFIRM OWNERSHIP
 '------------------------------------------------------------------------------
     'The write is not evidence. Only the readback is.
-            If Fault = QUIET_FAULT_READBACK Then
-                Err.Raise UI_ERR_INJECTED_QUIET_FAULT
-            Else
-                BackValue = Application.ScreenUpdating
-            End If
+        If Fault = QUIET_FAULT_READBACK Then
+            Err.Raise UI_ERR_INJECTED_QUIET_FAULT
+        Else
+            BackValue = Application.ScreenUpdating
+        End If
 
-            BackNumber = Err.Number
-            Err.Clear
+        BackNumber = Err.Number
+        Err.Clear
 
         On Error GoTo 0
 
@@ -1164,13 +1191,12 @@ Public Sub UI_RuntimeBeginQuietUpdate( _
 
 End Sub
 
-
 Public Sub UI_RuntimeEndQuietUpdate( _
     ByVal OldScreenUpdating As Boolean, _
     ByVal QuietModeChanged As Boolean)
 '
-'==============================================================================
-' UI_RuntimeEndQuietUpdate
+'------------------------------------------------------------------------------
+'                            END QUIET UPDATE SCOPE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restores Application.ScreenUpdating when this module changed it.
@@ -1188,7 +1214,7 @@ Public Sub UI_RuntimeEndQuietUpdate( _
 '     True only when this module actually suppressed redraw.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Restores the captured value only when this module changed it.
@@ -1201,14 +1227,17 @@ Public Sub UI_RuntimeEndQuietUpdate( _
 ' DEPENDENCIES
 '   None.
 '
+' NOTES
+'   Errors are suppressed for the whole body, so a restore the host refuses
+'   is silent and nothing is reported to the caller.
+'
 ' CALLED FROM
 '   - M_EXCEL_UI
 '   - M_EXCEL_UI_SNAPSHOT
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1226,14 +1255,13 @@ Public Sub UI_RuntimeEndQuietUpdate( _
 
 End Sub
 
-
 Public Function UI_RuntimeTrySetRibbonVisibleIfNeeded( _
     ByVal IsVisible As Boolean, _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_RuntimeTrySetRibbonVisibleIfNeeded
+'------------------------------------------------------------------------------
+'                       SET RIBBON VISIBILITY IF CHANGED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Sets Ribbon visibility only when the current state differs from the request.
@@ -1270,29 +1298,30 @@ Public Function UI_RuntimeTrySetRibbonVisibleIfNeeded( _
 '   - UI_RuntimeTrySetRibbonVisible
 '   - UI_RuntimeBuildErrorText
 '
-' CALLED FROM
-'   - M_EXCEL_UI
-'   - M_EXCEL_UI_SNAPSHOT
-'
 ' NOTES
 '   A failed read is not itself a failure of this routine. It only disables the
 '   no-op short circuit, and the write is still attempted.
 '
+' CALLED FROM
+'   - M_EXCEL_UI
+'   - M_EXCEL_UI_SNAPSHOT
+'
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CurrentVisible      As Boolean         'Ribbon state observed on entry
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeTrySetRibbonVisibleIfNeeded"
+
+    Dim CurrentVisible  As Boolean  'Ribbon state observed on entry
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the operation completes
         UI_RuntimeTrySetRibbonVisibleIfNeeded = False
@@ -1307,7 +1336,7 @@ Public Function UI_RuntimeTrySetRibbonVisibleIfNeeded( _
         If UI_RuntimeTryGetRibbonVisible(CurrentVisible, FailMsg) Then
             If CurrentVisible = IsVisible Then
                 UI_RuntimeTrySetRibbonVisibleIfNeeded = True
-                GoTo Safe_Exit
+                GoTo SafeExit
             End If
         End If
 
@@ -1322,21 +1351,20 @@ Public Function UI_RuntimeTrySetRibbonVisibleIfNeeded( _
             UI_RuntimeTrySetRibbonVisible(IsVisible, FailMsg)
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_RuntimeBuildErrorText
 
 End Function
-
 
 Public Function UI_RuntimeTrySetBooleanPropertyIfNeeded( _
     ByVal Target As Object, _
@@ -1345,8 +1373,8 @@ Public Function UI_RuntimeTrySetBooleanPropertyIfNeeded( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_RuntimeTrySetBooleanPropertyIfNeeded
+'------------------------------------------------------------------------------
+'                       SET BOOLEAN PROPERTY IF CHANGED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Sets a Boolean object-model property only when its value differs from the
@@ -1391,25 +1419,30 @@ Public Function UI_RuntimeTrySetBooleanPropertyIfNeeded( _
 '   - UI_RuntimeTrySetBooleanProperty
 '   - UI_RuntimeBuildErrorText
 '
+' NOTES
+'   A failed read is discarded before the write, so FailMsg describes the
+'   write only. A write is never skipped because the read failed.
+'
 ' CALLED FROM
 '   - M_EXCEL_UI
 '   - M_EXCEL_UI_SNAPSHOT
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CurrentValue        As Boolean         'Property value observed on entry
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeTrySetBooleanPropertyIfNeeded"
+
+    Dim CurrentValue    As Boolean  'Property value observed on entry
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the operation completes
         UI_RuntimeTrySetBooleanPropertyIfNeeded = False
@@ -1426,7 +1459,7 @@ Public Function UI_RuntimeTrySetBooleanPropertyIfNeeded( _
 
             If CurrentValue = NewValue Then
                 UI_RuntimeTrySetBooleanPropertyIfNeeded = True
-                GoTo Safe_Exit
+                GoTo SafeExit
             End If
         End If
 
@@ -1441,29 +1474,28 @@ Public Function UI_RuntimeTrySetBooleanPropertyIfNeeded( _
             UI_RuntimeTrySetBooleanProperty(Target, PropertyName, NewValue, FailMsg)
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_RuntimeBuildErrorText
 
 End Function
-
 
 Public Function UI_RuntimeTryGetRibbonVisible( _
     ByRef IsVisible As Boolean, _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_RuntimeTryGetRibbonVisible
+'------------------------------------------------------------------------------
+'                            READ RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads the current Ribbon visibility, preferring the CommandBars object model
@@ -1499,29 +1531,30 @@ Public Function UI_RuntimeTryGetRibbonVisible( _
 ' DEPENDENCIES
 '   - UI_RuntimeBuildErrorText
 '
-' CALLED FROM
-'   - UI_RuntimeTrySetRibbonVisibleIfNeeded
-'   - M_EXCEL_UI_SNAPSHOT
-'
 ' NOTES
 '   Ribbon reads are explicitly best effort. A False return is not an error in
 '   the surrounding operation; it only means no-op suppression is unavailable.
 '
+' CALLED FROM
+'   - UI_RuntimeTrySetRibbonVisibleIfNeeded
+'   - M_EXCEL_UI_SNAPSHOT
+'
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim V                   As Variant         'Raw Excel 4 macro result
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeTryGetRibbonVisible"
+
+    Dim V   As Variant  'Raw Excel 4 macro result
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until one mechanism answers
         UI_RuntimeTryGetRibbonVisible = False
@@ -1535,55 +1568,54 @@ Public Function UI_RuntimeTryGetRibbonVisible( _
 '------------------------------------------------------------------------------
     'Probe the object model without letting a missing CommandBar raise
         On Error Resume Next
-            IsVisible = Application.CommandBars("Ribbon").Visible
+        IsVisible = Application.CommandBars("Ribbon").Visible
 
     'Accept the object-model answer when the probe did not raise
         If Err.Number = 0 Then
-            On Error GoTo Err_Handler
+            On Error GoTo ErrorHandler
             UI_RuntimeTryGetRibbonVisible = True
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Discard the probe error and continue to the fallback
         Err.Clear
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' TRY EXCEL 4 FALLBACK
 '------------------------------------------------------------------------------
     'Probe the legacy toolbar query without letting a disabled host raise
         On Error Resume Next
-            V = Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
+        V = Application.ExecuteExcel4Macro("Get.ToolBar(7,""Ribbon"")")
 
     'Accept the legacy answer when the probe did not raise
         If Err.Number = 0 Then
-            On Error GoTo Err_Handler
+            On Error GoTo ErrorHandler
             IsVisible = CBool(V)
             UI_RuntimeTryGetRibbonVisible = True
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Both mechanisms failed; report the fallback reason
         FailMsg = CStr(Err.Number) & ": " & Err.Description
         Err.Clear
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_RuntimeBuildErrorText
 
 End Function
-
 
 Public Function UI_RuntimeTryGetBooleanProperty( _
     ByVal Target As Object, _
@@ -1592,8 +1624,8 @@ Public Function UI_RuntimeTryGetBooleanProperty( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_RuntimeTryGetBooleanProperty
+'------------------------------------------------------------------------------
+'                            READ BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads a Boolean object-model property through CallByName.
@@ -1634,25 +1666,30 @@ Public Function UI_RuntimeTryGetBooleanProperty( _
 ' DEPENDENCIES
 '   - UI_RuntimeBuildErrorText
 '
+' NOTES
+'   The CallByName result is coerced with CBool. A value that cannot be
+'   converted raises, and is reported as a failure with ValueOut False.
+'
 ' CALLED FROM
 '   - UI_RuntimeTrySetBooleanPropertyIfNeeded
 '   - M_EXCEL_UI_SNAPSHOT
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim V                   As Variant         'Raw CallByName result
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeTryGetBooleanProperty"
+
+    Dim V   As Variant  'Raw CallByName result
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the read completes
         UI_RuntimeTryGetBooleanProperty = False
@@ -1667,13 +1704,13 @@ Public Function UI_RuntimeTryGetBooleanProperty( _
     'Validate the target object
         If Target Is Nothing Then
             FailMsg = "target object is Nothing"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Validate the property name
         If Len(PropertyName) = 0 Then
             FailMsg = "property name is empty"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1687,29 +1724,28 @@ Public Function UI_RuntimeTryGetBooleanProperty( _
         UI_RuntimeTryGetBooleanProperty = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_RuntimeBuildErrorText
 
 End Function
-
 
 Private Function UI_RuntimeTrySetRibbonVisible( _
     ByVal IsVisible As Boolean, _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_RuntimeTrySetRibbonVisible
+'------------------------------------------------------------------------------
+'                           WRITE RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Shows or hides the Ribbon using legacy Excel 4 macro execution.
@@ -1742,24 +1778,29 @@ Private Function UI_RuntimeTrySetRibbonVisible( _
 ' DEPENDENCIES
 '   - UI_RuntimeBuildErrorText
 '
+' NOTES
+'   True means ExecuteExcel4Macro returned without raising. The Ribbon is not
+'   read back here, so a write the host silently ignores is not detected.
+'
 ' CALLED FROM
 '   - UI_RuntimeTrySetRibbonVisibleIfNeeded
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim MacroText           As String          'Excel 4 command to execute
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeTrySetRibbonVisible"
+
+    Dim MacroText   As String   'Excel 4 command to execute
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the macro executes
         UI_RuntimeTrySetRibbonVisible = False
@@ -1784,21 +1825,20 @@ Private Function UI_RuntimeTrySetRibbonVisible( _
         UI_RuntimeTrySetRibbonVisible = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_RuntimeBuildErrorText
 
 End Function
-
 
 Private Function UI_RuntimeTrySetBooleanProperty( _
     ByVal Target As Object, _
@@ -1807,8 +1847,8 @@ Private Function UI_RuntimeTrySetBooleanProperty( _
     ByRef FailMsg As String) _
     As Boolean
 '
-'==============================================================================
-' UI_RuntimeTrySetBooleanProperty
+'------------------------------------------------------------------------------
+'                            WRITE BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes a Boolean object-model property through CallByName.
@@ -1846,19 +1886,27 @@ Private Function UI_RuntimeTrySetBooleanProperty( _
 ' DEPENDENCIES
 '   - UI_RuntimeBuildErrorText
 '
+' NOTES
+'   True means CallByName returned without raising. The property is not read
+'   back, so a write the host silently ignores is not detected.
+'
 ' CALLED FROM
 '   - UI_RuntimeTrySetBooleanPropertyIfNeeded
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeTrySetBooleanProperty"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Route unexpected runtime errors to the error handler
-        On Error GoTo Err_Handler
+        On Error GoTo ErrorHandler
 
     'Assume failure until the write completes
         UI_RuntimeTrySetBooleanProperty = False
@@ -1872,13 +1920,13 @@ Private Function UI_RuntimeTrySetBooleanProperty( _
     'Validate the target object
         If Target Is Nothing Then
             FailMsg = "target object is Nothing"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
     'Validate the property name
         If Len(PropertyName) = 0 Then
             FailMsg = "property name is empty"
-            GoTo Safe_Exit
+            GoTo SafeExit
         End If
 
 '------------------------------------------------------------------------------
@@ -1891,27 +1939,26 @@ Private Function UI_RuntimeTrySetBooleanProperty( _
         UI_RuntimeTrySetBooleanProperty = True
 
 '------------------------------------------------------------------------------
-' RETURN SUCCESS
+' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-Safe_Exit:
+SafeExit:
     'Exit before the error-handler block
         Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
-Err_Handler:
+ErrorHandler:
     'Report the unexpected runtime error as the failure reason
         FailMsg = UI_RuntimeBuildErrorText
 
 End Function
 
-
 Public Function UI_RuntimeBuildErrorText() _
     As String
 '
-'==============================================================================
-' UI_RuntimeBuildErrorText
+'------------------------------------------------------------------------------
+'                               BUILD ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Builds a consistent diagnostic string from the active Err object.
@@ -1919,6 +1966,9 @@ Public Function UI_RuntimeBuildErrorText() _
 ' WHY THIS EXISTS
 '   Every error handler in the package reports through the same Detail format,
 '   so a failure list is readable without knowing which module produced it.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   String
@@ -1934,27 +1984,28 @@ Public Function UI_RuntimeBuildErrorText() _
 ' DEPENDENCIES
 '   None.
 '
+' NOTES
+'   Erl returns zero unless the procedure carries line numbers, so the Line
+'   fragment is omitted for the unnumbered source used throughout this project.
+'
 ' CALLED FROM
 '   - This module
 '   - M_EXCEL_UI
 '   - M_EXCEL_UI_SNAPSHOT
 '
-' NOTES
-'   Erl returns zero unless the procedure carries line numbers, so the Line
-'   fragment is omitted for the unnumbered source used throughout this project.
-'
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ErrNumber           As Long            'Err.Number captured on entry
-    Dim ErrDescription      As String          'Err.Description captured on entry
-    Dim ErrSource           As String          'Err.Source captured on entry
-    Dim ErrLine             As Long            'Erl captured on entry
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeBuildErrorText"
+
+    Dim ErrNumber       As Long     'Err.Number captured on entry
+    Dim ErrDescription  As String   'Err.Description captured on entry
+    Dim ErrSource       As String   'Err.Source captured on entry
+    Dim ErrLine         As Long     'Erl captured on entry
 
 '------------------------------------------------------------------------------
 ' CAPTURE ERR STATE
@@ -1985,13 +2036,12 @@ Public Function UI_RuntimeBuildErrorText() _
 
 End Function
 
-
 Public Function UI_RuntimeBuildWindowLabel( _
     ByVal TargetWindow As Object) _
     As String
 '
-'==============================================================================
-' UI_RuntimeBuildWindowLabel
+'------------------------------------------------------------------------------
+'                              BUILD WINDOW LABEL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Builds a stable best-effort diagnostic label for one Excel Window.
@@ -2023,20 +2073,26 @@ Public Function UI_RuntimeBuildWindowLabel( _
 ' DEPENDENCIES
 '   None.
 '
+' NOTES
+'   Every read runs with errors suppressed. An unreadable workbook name or
+'   caption is left empty and the label falls back to the other field, then
+'   to the fixed text "Excel window".
+'
 ' CALLED FROM
 '   - M_EXCEL_UI
 '   - M_EXCEL_UI_SNAPSHOT
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim WorkbookName        As String          'Parent workbook name, if readable
-    Dim WindowCaption       As String          'Window caption, if readable
+    Const PROC_NAME As String = "M_EXCEL_UI_RUNTIME.UI_RuntimeBuildWindowLabel"
+
+    Dim WorkbookName    As String   'Parent workbook name, if readable
+    Dim WindowCaption   As String   'Window caption, if readable
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2069,14 +2125,13 @@ Public Function UI_RuntimeBuildWindowLabel( _
 
 End Function
 
-
 Public Sub UI_RuntimeLogFailure( _
     ByVal ProcName As String, _
     ByVal Stage As String, _
     ByVal Detail As String)
 '
-'==============================================================================
-' UI_RuntimeLogFailure
+'------------------------------------------------------------------------------
+'                       LOG FAILURE TO IMMEDIATE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes one consistent diagnostic line to the Immediate Window.
@@ -2097,7 +2152,7 @@ Public Sub UI_RuntimeLogFailure( _
 '     Host error text or explicit validation reason.
 '
 ' RETURNS
-'   None.
+'   Nothing
 '
 ' BEHAVIOR
 '   - Emits "ProcName failed @ Stage | Detail".
@@ -2109,14 +2164,17 @@ Public Sub UI_RuntimeLogFailure( _
 ' DEPENDENCIES
 '   None.
 '
+' NOTES
+'   The line goes to the Immediate Window through Debug.Print only. Nothing is
+'   written to a file or shown in a dialog.
+'
 ' CALLED FROM
 '   - UI_RuntimeHandleFailure
 '   - M_EXCEL_UI
 '
 ' UPDATED
 '   2026-08-18
-'==============================================================================
-'
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' WRITE DIAGNOSTIC LINE
