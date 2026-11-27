@@ -32,6 +32,58 @@ Option Private Module
 '     - easier to maintain
 '     - easier to reuse across projects
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Runs nothing at load time; every routine is a procedure that demo code
+'     calls, apart from the cleanup probe routines, which only
+'     M_DEMO_CLEANUP_TESTS calls
+'   - Groups the helpers by job:
+'       * sheet lifecycle: DEMO_Sheet_BuildTemplate, DEMO_Sheet_Reset,
+'         DEMO_Sheet_GetOrCreate and the helpers they share
+'       * fast mode: DEMO_FastMode_Begin, DEMO_FastMode_End and
+'         DEMO_FastMode_EndPreservingError
+'       * formatting, borders, validation lists, workbook names and tables
+'       * shape buttons (DEMO_Btn_*), the status-bar progress message
+'         (DEMO_SB_SetProgress) and Forms / ActiveX check boxes (DEMO_CB_*)
+'       * the cleanup probe and its one-shot fault suppliers
+'   - The only state the code reads or writes is the cleanup probe: the armed
+'     flag, the hit counter of each probe site and the armed fault bits
+'
+' ERROR POLICY
+'   - Build, format, validation, table, button and check-box builder helpers
+'     raise errors normally, as vbObjectError + 2xxx with the procedure name as
+'     the source
+'   - DEMO_Sheet_BuildTemplate, DEMO_Sheet_Reset and DEMO_FastMode_Begin run one
+'     cleanup pass and then re-raise the original error; a failed cleanup step
+'     is appended to its description as a "Cleanup failure: " line
+'   - DEMO_FastMode_End raises after trying every restoration; the cleanup
+'     helpers (DEMO_FastMode_Restore, DEMO_Sheet_DeleteOwned,
+'     DEMO_FastMode_EndPreservingError), DEMO_CB_TryGetState and
+'     DEMO_CB_TrySetState do not raise
+'   - DEMO_Btn_PlayFeedback suppresses any error from DEMO_Btn_Click
+'
+' DEPENDENCIES
+'   - Excel object model: Application, Workbook, Worksheet, Range, Shape,
+'     ListObject, CheckBox and OLEObject
+'   - Office shape and state constants (MsoTriState, msoShapeRoundedRectangle
+'     and the like)
+'   - No other project module and no WinAPI declaration
+'   - M_DEMO_CLEANUP_TESTS calls the DEMO_InternalCleanupProbe* routines and
+'     mirrors the probe-site, fault-bit and fast-mode-bit constants
+'
+' NOTES
+'   - Option Private Module keeps the public routines out of other VBA projects
+'   - The injected-fault error numbers are vbObjectError + 2190 to + 2196; the
+'     probe and the fault suppliers do nothing until
+'     DEMO_InternalCleanupProbeBegin arms them
+'   - mResetWorkbookName, mResetSheetName and mResetShapeName are declared but
+'     no code uses them
+'
 ' DESIGN
 '   - This module is workbook-oriented and defaults to ThisWorkbook for build
 '     operations unless a workbook is explicitly passed by the caller.
@@ -403,7 +455,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
     Dim SavedErrDesc    As String   'Captured error description
 
 '------------------------------------------------------------------------------
-' VALIDATE
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Every check that needs no workbook runs here, before anything is created
     'or reset, so an invalid request leaves the workbook as it was
@@ -505,9 +557,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                       "HideRowsFrom must be between 1 and the worksheet last row."
         End If
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
     'Enable structured cleanup on failure
         On Error GoTo CleanFail
 
@@ -812,7 +861,7 @@ Private Function DEMO_ColumnLetter( _
     As String
 '
 '------------------------------------------------------------------------------
-'                                COLUMN LETTER
+'                        CONVERT INDEX TO COLUMN LETTER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the Excel column letter for a 1-based column index
@@ -829,8 +878,20 @@ Private Function DEMO_ColumnLetter( _
 '   String
 '     Excel column letter text
 '
+' BEHAVIOR
+'   - Raises vbObjectError + 2025 when ColIndex is less than 1
+'   - Converts the index by repeated base-26 division, prepending one letter
+'     per step (1 is A, 26 is Z, 27 is AA)
+'
 ' ERROR POLICY
 '   Raises when ColIndex is less than 1
+'
+' DEPENDENCIES
+'   - VBA Chr$ only
+'
+' NOTES
+'   - The index is not compared with the last worksheet column; the caller keeps
+'     it inside the grid
 '
 ' UPDATED
 '   2026-04-19
@@ -926,6 +987,16 @@ Public Sub DEMO_FastMode_Begin( _
 '   - After a failed Begin, StateOut.Applied is 0, so DEMO_FastMode_End has
 '     nothing left to restore
 '
+' DEPENDENCIES
+'   - Application.ScreenUpdating, EnableEvents, DisplayAlerts, Calculation and
+'     Cursor
+'   - DEMO_FastModeValue
+'   - DEMO_FastMode_Restore
+'
+' NOTES
+'   - Callers end the scope with DEMO_FastMode_End or
+'     DEMO_FastMode_EndPreservingError on their cleanup path
+'
 ' OWNERSHIP
 '   Fast mode owns only these five temporary settings. The window and
 '   Application view settings that DEMO_Sheet_BuildTemplate applies, such as
@@ -956,7 +1027,7 @@ Public Sub DEMO_FastMode_Begin( _
     Dim SavedErrDescription As String   'Captured error description
 
 '------------------------------------------------------------------------------
-' CAPTURE CURRENT STATE
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Own nothing until every entry value is known
         StateOut.Captured = False
@@ -970,9 +1041,6 @@ Public Sub DEMO_FastMode_Begin( _
         StateOut.Cursor = Application.Cursor
         StateOut.Captured = True
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
     'Roll back a partial entry on failure
         On Error GoTo CleanFail
 
@@ -1056,6 +1124,12 @@ Public Sub DEMO_FastMode_End( _
 '   failed. The description names each failed setting with its error number,
 '   source and description.
 '
+' DEPENDENCIES
+'   - DEMO_FastMode_Restore
+'
+' NOTES
+'   None
+'
 ' HISTORY
 '   2026-11-14 - Every restoration attempted; failures reported (#70).
 '   2026-04-19
@@ -1098,12 +1172,20 @@ Public Sub DEMO_FastMode_EndPreservingError( _
 '   Ends fast mode on a caller's cleanup path and folds a restoration failure
 '   into the caller's saved error instead of discarding it.
 '
+' WHY THIS EXISTS
+'   A cleanup path that re-raises a saved error would lose a failed
+'   restoration, or let it replace the operation error. This routine keeps both
+'   (added for #70).
+'
 ' INPUTS
 '   StateIn
 '     The state DEMO_FastMode_Begin filled.
 '
 '   ErrNumber / ErrSource / ErrDescription
 '     The caller's saved operation error, or 0 when there is none
+'
+' RETURNS
+'   Nothing
 '
 ' BEHAVIOR
 '   - Calls DEMO_FastMode_End once
@@ -1115,6 +1197,13 @@ Public Sub DEMO_FastMode_EndPreservingError( _
 ' ERROR POLICY
 '   Does not raise. The caller re-raises the saved error after disabling its
 '   own handler.
+'
+' DEPENDENCIES
+'   - DEMO_FastMode_End
+'
+' NOTES
+'   - The caller's three error values are ByRef, so they are updated in place
+'   - On Error Resume Next covers only the DEMO_FastMode_End call
 '
 ' HISTORY
 '   2026-11-14 - Added for #70.
@@ -1167,11 +1256,21 @@ Private Function DEMO_FastMode_Restore( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            DEMO FAST MODE RESTORE
+'                       RESTORE OWNED FAST-MODE SETTINGS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes back every setting marked in State.Applied, each in its own guarded
 '   attempt, and returns the failures.
+'
+' WHY THIS EXISTS
+'   DEMO_FastMode_End and the rollback of DEMO_FastMode_Begin restore the same
+'   settings. Both go through this routine, so each attempt is guarded the same
+'   way (added for #70).
+'
+' INPUTS
+'   State
+'     Fast-mode state; State.Applied names the settings to restore and is
+'     cleared afterwards
 '
 ' RETURNS
 '   String
@@ -1188,6 +1287,18 @@ Private Function DEMO_FastMode_Restore( _
 '
 ' ERROR POLICY
 '   Does not raise
+'
+' DEPENDENCIES
+'   - Application.Cursor, Calculation, DisplayAlerts, EnableEvents and
+'     ScreenUpdating
+'   - DEMO_FastModeValue
+'   - DEMO_FastMode_AddFailure
+'
+' NOTES
+'   - On Error Resume Next is on for the whole restoration and switched off
+'     before State.Applied is cleared
+'   - Each write passes through DEMO_FastModeValue, so an armed restoration
+'     fault fails that attempt inside the guarded step
 '
 ' HISTORY
 '   2026-11-14 - Added for #70.
@@ -1238,7 +1349,8 @@ Private Function DEMO_FastMode_Restore( _
             FailNumber = Err.Number
             FailSource = Err.Source
             FailDescription = Err.Description
-            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_DISPLAYALERTS, FailNumber, FailSource, FailDescription)
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_DISPLAYALERTS, FailNumber, FailSource, _
+                FailDescription)
         End If
 
     'Restore events
@@ -1258,7 +1370,8 @@ Private Function DEMO_FastMode_Restore( _
             FailNumber = Err.Number
             FailSource = Err.Source
             FailDescription = Err.Description
-            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_SCREENUPDATING, FailNumber, FailSource, FailDescription)
+            Failures = DEMO_FastMode_AddFailure(Failures, DEMO_FM_SCREENUPDATING, FailNumber, FailSource, _
+                FailDescription)
         End If
 
         Err.Clear
@@ -1281,7 +1394,7 @@ Private Function DEMO_FastMode_AddFailure( _
     As String
 '
 '------------------------------------------------------------------------------
-'                          DEMO FAST MODE ADD FAILURE
+'                       APPEND FAST-MODE RESTORE FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Appends one failed restoration to the failure list; returns the list
@@ -1314,7 +1427,7 @@ Private Function DEMO_FastModeSettingName( _
     As String
 '
 '------------------------------------------------------------------------------
-'                         DEMO FAST MODE SETTING NAME
+'                           NAME A FAST-MODE SETTING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the Application property name of one DEMO_FM_* setting bit.
@@ -1350,7 +1463,7 @@ Private Function DEMO_FastModeValue( _
     As Variant
 '
 '------------------------------------------------------------------------------
-'                             DEMO FAST MODE VALUE
+'                         SUPPLY FAST-MODE WRITE VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the value of one fast-mode entry or restoration write.
@@ -1374,10 +1487,27 @@ Private Function DEMO_FastModeValue( _
 '   Variant
 '     Value, unchanged
 '
+' BEHAVIOR
+'   - Counts the write: DEMO_PROBE_FM_RESTORE for a restoration,
+'     DEMO_PROBE_FM_ENTRY for an entry write
+'   - Resolves the fault bit as Setting times DEMO_FAULT_FM_RESTORE_UNIT or
+'     DEMO_FAULT_FM_ENTRY_UNIT
+'   - When that bit is armed, clears it and raises the injected fault
+'   - Otherwise returns Value unchanged
+'
 ' ERROR POLICY
 '   Raises once while M_DEMO_CLEANUP_TESTS has armed a fault for this setting
 '   and phase: vbObjectError + 2193 for an entry write, vbObjectError + 2194
 '   for a restoration write
+'
+' DEPENDENCIES
+'   - DEMO_CleanupProbeHit
+'   - DEMO_FastModeSettingName
+'   - mCleanupFaults, the armed fault bits
+'
+' NOTES
+'   - Inert unless M_DEMO_CLEANUP_TESTS has armed a fault through
+'     DEMO_InternalCleanupProbeBegin
 '
 ' HISTORY
 '   2026-11-14 - Added for #70.
@@ -1598,6 +1728,18 @@ Public Function DEMO_Sheet_GetOrCreate( _
 '   Raises errors normally. A failed deletion after a failed rename is
 '   appended to the rename error's description as a "Cleanup failure: " line.
 '
+' DEPENDENCIES
+'   - DEMO_SheetNameProblem
+'   - DEMO_Sheet_FindWorksheet
+'   - DEMO_SheetNameValue
+'   - DEMO_Sheet_DeleteOwned
+'   - Workbook.Worksheets.Add and Worksheet.Name
+'
+' NOTES
+'   - Names are compared without regard to case, as Excel does
+'   - The new worksheet is added after the last worksheet, or after the last
+'     sheet of a workbook that has no worksheet
+'
 ' REGRESSION SEAMS
 '   The new name passes through DEMO_SheetNameValue, which fails the rename
 '   once while M_DEMO_CLEANUP_TESTS has armed that fault.
@@ -1704,7 +1846,7 @@ Private Function DEMO_Sheet_FindWorksheet( _
     As Worksheet
 '
 '------------------------------------------------------------------------------
-'                          DEMO SHEET FIND WORKSHEET
+'                            FIND WORKSHEET BY NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the worksheet of WB named SheetName, or Nothing when no sheet has
@@ -1716,6 +1858,12 @@ Private Function DEMO_Sheet_FindWorksheet( _
 '   worksheet under it would then fail at the rename.
 '
 ' INPUTS
+'   WB
+'     Workbook whose sheets are searched
+'
+'   SheetName
+'     Name to look for, compared without regard to case
+'
 '   ErrSource
 '     Source of the error raised for a name held by another sheet type, so
 '     the error names the public procedure that refused the request
@@ -1760,11 +1908,21 @@ Private Function DEMO_Sheet_DeleteOwned( _
     As String
 '
 '------------------------------------------------------------------------------
-'                           DEMO SHEET DELETE OWNED
+'                           DELETE CREATED WORKSHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Deletes a worksheet that the calling invocation created, on its failure
 '   path
+'
+' WHY THIS EXISTS
+'   The failure paths of DEMO_Sheet_GetOrCreate and DEMO_Sheet_BuildTemplate
+'   remove a worksheet they created without losing their original error. The
+'   delete is guarded and its failures come back as text (added for #74).
+'
+' INPUTS
+'   WS
+'     Worksheet to delete; Nothing makes the routine return an empty string
+'     without doing anything
 '
 ' RETURNS
 '   String
@@ -1778,6 +1936,14 @@ Private Function DEMO_Sheet_DeleteOwned( _
 '
 ' ERROR POLICY
 '   Does not raise
+'
+' DEPENDENCIES
+'   - Application.DisplayAlerts
+'   - Worksheet.Delete
+'
+' NOTES
+'   - Callers append a non-empty result to their saved error as a
+'     "Cleanup failure: " line
 '
 ' HISTORY
 '   2026-11-14 - Added for #74.
@@ -1852,11 +2018,25 @@ Private Function DEMO_SheetNameProblem( _
     As String
 '
 '------------------------------------------------------------------------------
-'                           DEMO SHEET NAME PROBLEM
+'                            CHECK SHEET NAME RULES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns why Excel would refuse SheetName as a sheet name, or an empty
 '   string when the name passes these rules
+'
+' WHY THIS EXISTS
+'   A name Excel would refuse is rejected before a worksheet is created, so a
+'   failed call cannot leave an unnamed sheet behind (added for #74).
+'
+' INPUTS
+'   SheetName
+'     Candidate worksheet name
+'
+' RETURNS
+'   String
+'     Empty when SheetName passes; otherwise the first problem found, such as
+'     "it is blank", "it is longer than 31 characters" or "it contains the
+'     character <c>"
 '
 ' BEHAVIOR
 '   Checks the documented sheet-name rules: not blank, at most 31 characters,
@@ -1865,6 +2045,13 @@ Private Function DEMO_SheetNameProblem( _
 '
 ' ERROR POLICY
 '   Does not raise
+'
+' DEPENDENCIES
+'   - VBA string functions only
+'
+' NOTES
+'   - The History comparison ignores case; the reserved characters are matched
+'     with a binary compare
 '
 ' HISTORY
 '   2026-11-14 - Added for #74.
@@ -1921,19 +2108,44 @@ Private Function DEMO_ParseColumnSpec( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            DEMO PARSE COLUMN SPEC
+'                          PARSE COLUMN SPECIFICATION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Parses "C" or "C:M" (letters only, case-insensitive, each part optionally
 '   prefixed with $) into 1-based column indexes, without touching a worksheet
+'
+' WHY THIS EXISTS
+'   DEMO_Sheet_BuildTemplate checks its column specifications before it creates
+'   or resets anything, so the parse works on text alone (added for #74).
+'
+' INPUTS
+'   Spec
+'     Column text such as "C" or "C:M"
+'
+'   FirstCol
+'     Receives the first column index, or 0 when Spec is not valid
+'
+'   LastCol
+'     Receives the last column index, or 0 when Spec is not valid
 '
 ' RETURNS
 '   Boolean
 '     TRUE with FirstCol <= LastCol, a reversed range being swapped; FALSE
 '     with both set to 0 when Spec is not one column or one column range
 '
+' BEHAVIOR
+'   - Sets both outputs to 0 and splits the trimmed Spec on ":"
+'   - One part gives both columns; two parts give the first and the last; any
+'     other count returns FALSE
+'   - Resolves each part with DEMO_ColumnIndex and returns FALSE when either is
+'     not a column
+'   - Swaps a reversed range so FirstCol is not greater than LastCol
+'
 ' ERROR POLICY
 '   Does not raise
+'
+' DEPENDENCIES
+'   - DEMO_ColumnIndex
 '
 ' NOTES
 '   The indexes are not checked against the worksheet's last column here;
@@ -1994,14 +2206,40 @@ Private Function DEMO_ColumnIndex( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                              DEMO COLUMN INDEX
+'                       CONVERT COLUMN LETTERS TO INDEX
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Converts one to three column letters, optionally prefixed with $, to a
 '   1-based column index; returns 0 for anything else
 '
+' WHY THIS EXISTS
+'   DEMO_ParseColumnSpec needs a conversion from column letters to an index that
+'   does not touch a worksheet (added for #74).
+'
+' INPUTS
+'   Part
+'     One to three column letters, optionally prefixed with $
+'
+' RETURNS
+'   Long
+'     1-based column index, or 0 when Part is empty, longer than three letters
+'     or holds a character outside A to Z
+'
+' BEHAVIOR
+'   - Trims and upper-cases Part and drops one leading $
+'   - Returns 0 when 1 to 3 letters do not remain
+'   - Accumulates the index in base 26, returning 0 at the first character that
+'     is not A to Z
+'
 ' ERROR POLICY
 '   Does not raise
+'
+' DEPENDENCIES
+'   - VBA string functions only
+'
+' NOTES
+'   - Up to ZZZ is accepted, which can lie beyond the last worksheet column;
+'     callers check the grid
 '
 ' HISTORY
 '   2026-11-14 - Added for #74.
@@ -2045,7 +2283,7 @@ Private Function DEMO_SheetNameValue( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            DEMO SHEET NAME VALUE
+'                            SUPPLY NEW SHEET NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the name DEMO_Sheet_GetOrCreate assigns to a sheet it created
@@ -2198,6 +2436,23 @@ Public Sub DEMO_Sheet_Reset( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Resolves the target: WS_In, or ActiveSheet when WS_In is omitted or
+'     Nothing; refuses a sheet that is not a worksheet
+'   - Captures whether the sheet is protected, every Protect option and
+'     EnableSelection
+'   - Unprotects with ProtectPassword; raises vbObjectError + 2100 when the
+'     sheet is protected and no password was supplied
+'   - Applies each requested step in this order: deletes shapes, deletes
+'     tables, unmerges cells, clears validation, clears cells, clears comments
+'     and notes, turns wrap text off, unhides rows, unhides columns, resets
+'     column widths, resets row heights, resets the tab color, and removes
+'     manual page breaks and hides the indicators
+'   - Calls the armed operation-fault seam
+'   - Cleanup pass: when this call unprotected the sheet and ReProtectAtEnd is
+'     TRUE, restores the Protect options and EnableSelection, one attempt each,
+'     then re-raises the saved error
+'
 ' ERROR POLICY
 '   Raises errors normally except for explicitly marked best-effort cleanup
 '   steps guarded with On Error Resume Next
@@ -2206,6 +2461,22 @@ Public Sub DEMO_Sheet_Reset( _
 '   operation error keeps its number/source and original description prefix;
 '   a separate cleanup diagnostic is appended. Otherwise cleanup failure is
 '   raised directly. There is no retry or watchdog for a blocked Excel call.
+'
+' DEPENDENCIES
+'   - Worksheet Shapes, ListObjects, Cells, Rows, Columns, Tab, Protect,
+'     Unprotect, EnableSelection and ResetAllPageBreaks
+'   - DEMO_Sheet_HidePageBreaks
+'   - DEMO_CleanupProbeHit
+'   - DEMO_CleanupOperationFault
+'   - DEMO_CleanupProtectPassword
+'   - DEMO_CleanupSelectionValue
+'
+' NOTES
+'   - Clearing validation, comments and notes and removing page breaks are
+'     guarded with On Error Resume Next and are best effort
+'   - The handler captures the error and resumes at CleanExit, so cleanup runs
+'     once whether or not the body failed
+'   - DEMO_Sheet_BuildTemplate calls it with RemovePageBreaks:=False (#187)
 '
 ' PROTECTION CONTRACT
 '   Captures Protect options and EnableSelection before unprotecting. Cleanup
@@ -2529,9 +2800,6 @@ CleanExit:
             End If
         End If
 
-'------------------------------------------------------------------------------
-' RE-RAISE ERROR AFTER CLEANUP
-'------------------------------------------------------------------------------
     'Re-raise the captured error after cleanup when needed
         If SavedErrNumber <> 0 Then
             Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
@@ -2560,7 +2828,7 @@ Private Sub DEMO_Sheet_HidePageBreaks( _
     ByVal WS As Worksheet)
 '
 '------------------------------------------------------------------------------
-'                         DEMO SHEET HIDE PAGE BREAKS
+'                          HIDE PAGE-BREAK INDICATORS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Hides the page-break indicators of a worksheet when they are shown.
@@ -2619,7 +2887,7 @@ Public Sub DEMO_InternalCleanupProbeBegin( _
     ByVal FaultMask As Long)
 '
 '------------------------------------------------------------------------------
-'                      DEMO INTERNAL CLEANUP PROBE BEGIN
+'                              ARM CLEANUP PROBE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Zeroes the cleanup probe counters, starts counting and arms one-shot
@@ -2662,6 +2930,10 @@ Public Sub DEMO_InternalCleanupProbeBegin( _
 ' ERROR POLICY
 '   Does not raise
 '
+' DEPENDENCIES
+'   - DEMO_PROBE_SITE_COUNT
+'   - mCleanupProbeCounts, mCleanupFaults and mCleanupProbeArmed
+'
 ' NOTES
 '   - Public only so another module of the demo project can reach it. Option
 '     Private Module keeps it out of other VBA projects. Demo code must never
@@ -2700,11 +2972,15 @@ Public Function DEMO_InternalCleanupProbeCount( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                      DEMO INTERNAL CLEANUP PROBE COUNT
+'                           READ CLEANUP PROBE COUNT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns how often one cleanup probe site was reached since the last
 '   DEMO_InternalCleanupProbeBegin.
+'
+' WHY THIS EXISTS
+'   The counters are module-private. M_DEMO_CLEANUP_TESTS reads them through
+'   this routine to check how often each cleanup site ran (#71 harness).
 '
 ' INPUTS
 '   Site
@@ -2723,8 +2999,20 @@ Public Function DEMO_InternalCleanupProbeCount( _
 '   Long
 '     The count, or -1 for an unknown site
 '
+' BEHAVIOR
+'   - Returns the counter of Site when it lies between 1 and
+'     DEMO_PROBE_SITE_COUNT
+'   - Returns -1 for any other Site
+'
 ' ERROR POLICY
 '   Does not raise
+'
+' DEPENDENCIES
+'   - mCleanupProbeCounts
+'
+' NOTES
+'   - Counters change only while the probe is armed, and stay readable after
+'     DEMO_InternalCleanupProbeEnd
 '
 ' CALLED FROM
 '   - M_DEMO_CLEANUP_TESTS
@@ -2749,7 +3037,7 @@ Public Sub DEMO_InternalCleanupProbeEnd()
 
 '
 '------------------------------------------------------------------------------
-'                       DEMO INTERNAL CLEANUP PROBE END
+'                             DISARM CLEANUP PROBE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Stops counting and disarms every cleanup fault that has not fired.
@@ -2758,11 +3046,26 @@ Public Sub DEMO_InternalCleanupProbeEnd()
 '   A fault left armed would fire inside an unrelated demo build later in the
 '   same session. The counters are kept so the last run can still be read.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Clears the armed flag, so the probe sites stop counting
+'   - Clears every pending fault bit
+'   - Leaves the counters as they are
+'
 ' ERROR POLICY
 '   Does not raise
+'
+' DEPENDENCIES
+'   - mCleanupProbeArmed and mCleanupFaults
+'
+' NOTES
+'   - Call it after a probe run; the counters stay readable through
+'     DEMO_InternalCleanupProbeCount
 '
 ' CALLED FROM
 '   - M_DEMO_CLEANUP_TESTS
@@ -2784,7 +3087,7 @@ Private Sub DEMO_CleanupProbeHit( _
     ByVal Site As Long)
 '
 '------------------------------------------------------------------------------
-'                            DEMO CLEANUP PROBE HIT
+'                           COUNT CLEANUP PROBE HIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Counts one pass through a cleanup probe site while the probe is armed.
@@ -2820,7 +3123,7 @@ Private Sub DEMO_CleanupOperationFault()
 
 '
 '------------------------------------------------------------------------------
-'                         DEMO CLEANUP OPERATION FAULT
+'                         RAISE ARMED OPERATION FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raises the armed DEMO_Sheet_Reset operation fault once, and disarms it.
@@ -2860,7 +3163,7 @@ Private Function DEMO_CleanupProtectPassword( _
     As String
 '
 '------------------------------------------------------------------------------
-'                        DEMO CLEANUP PROTECT PASSWORD
+'                       SUPPLY CLEANUP PROTECT PASSWORD
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the Password argument of the cleanup Protect statement.
@@ -2912,7 +3215,7 @@ Private Function DEMO_CleanupSelectionValue( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                         DEMO CLEANUP SELECTION VALUE
+'                        SUPPLY CLEANUP SELECTION VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the value of the cleanup EnableSelection restoration.
@@ -2962,7 +3265,7 @@ Private Function DEMO_FormulaBarValue( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            DEMO FORMULA BAR VALUE
+'                           SUPPLY FORMULA-BAR VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Supplies the value of the DisplayFormulaBar write of
@@ -3034,6 +3337,14 @@ Public Sub DEMO_Format_Labels( _
 ' ERROR POLICY
 '   Raises errors normally.
 '
+' DEPENDENCIES
+'   - DEMO_Set_RangeBorder
+'   - Range.Interior, Font, VerticalAlignment and HorizontalAlignment
+'
+' NOTES
+'   - Colors come from COLOR_LABEL_BACK and COLOR_LABEL_FONT; the border is
+'     black, thin and includes the inside lines
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -3093,6 +3404,14 @@ Public Sub DEMO_Format_InputCell( _
 ' ERROR POLICY
 '   Raises errors normally.
 '
+' DEPENDENCIES
+'   - DEMO_Set_RangeBorder
+'   - Range.Interior, VerticalAlignment and HorizontalAlignment
+'
+' NOTES
+'   - The fill is COLOR_INPUT; the border is black, thin and includes the
+'     inside lines
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -3149,6 +3468,14 @@ Public Sub DEMO_Format_OutputCell( _
 ' ERROR POLICY
 '   Raises errors normally.
 '
+' DEPENDENCIES
+'   - DEMO_Set_RangeBorder
+'   - Range.Interior, Font, VerticalAlignment and HorizontalAlignment
+'
+' NOTES
+'   - The style is no fill, black regular font and left alignment; the border
+'     is black, thin and includes the inside lines
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -3193,7 +3520,7 @@ Public Sub DEMO_Write_BandHeader( _
 '                              WRITE BAND HEADER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Writes and formats one left-aligned header band without merged cells.
+'   Writes and formats one header band without merged cells.
 '
 ' WHY THIS EXISTS
 '   DEMO sheets often use title, subtitle, or banner ranges spanning multiple
@@ -3224,6 +3551,10 @@ Public Sub DEMO_Write_BandHeader( _
 '     TRUE  => apply an outside border
 '     FALSE => do not apply a border
 '
+'   IsCentered (optional)
+'     TRUE  => center the text across the band (the default)
+'     FALSE => align the text to the left
+'
 ' RETURNS
 '   Nothing
 '
@@ -3232,12 +3563,23 @@ Public Sub DEMO_Write_BandHeader( _
 '   - Ensures the range is not merged
 '   - Clears prior contents from the full target range
 '   - Writes the requested text into the first cell only
-'   - Applies fill / font / alignment formatting
-'   - Keeps the band left aligned
+'   - Applies fill / font formatting
+'   - Aligns the text to the left, or centers it across the band when
+'     IsCentered is TRUE
 '   - Optionally applies a border
 '
 ' ERROR POLICY
 '   Raises errors normally.
+'
+' DEPENDENCIES
+'   - DEMO_Set_RangeBorder
+'   - Range.UnMerge, ClearContents, Interior, Font, HorizontalAlignment and
+'     VerticalAlignment
+'
+' NOTES
+'   - The band is never merged; centering uses xlCenterAcrossSelection
+'   - The border is outside only: DEMO_Set_RangeBorder is called with
+'     IncludeInside FALSE
 '
 ' UPDATED
 '   2026-04-19
@@ -3324,6 +3666,14 @@ Public Sub DEMO_Apply_ValidationList( _
 '
 ' ERROR POLICY
 '   Raises errors normally.
+'
+' DEPENDENCIES
+'   - Range.Validation: Delete, Add, IgnoreBlank, InCellDropdown, ShowInput
+'     and ShowError
+'
+' NOTES
+'   - ListText is passed to the validation as Formula1 without change; the
+'     alert style is xlValidAlertStop
 '
 ' UPDATED
 '   2026-04-19
@@ -3644,6 +3994,10 @@ Public Sub DEMO_Apply_BoolValidation( _
 '   - DEMO_Create_BoolList
 '   - DEMO_Apply_ValidationList
 '
+' NOTES
+'   - The list name is created by DEMO_Create_BoolList, which always creates
+'     BoolList; a different ListName must already exist in the workbook
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -3702,6 +4056,16 @@ Public Sub DEMO_Set_WorkbookName( _
 '
 ' ERROR POLICY
 '   Raises errors normally.
+'
+' DEPENDENCIES
+'   - Workbook.Names: Delete and Add
+'   - Range.Parent.Name and Range.Address
+'
+' NOTES
+'   - A missing existing name is ignored: the delete runs under
+'     On Error Resume Next
+'   - The name refers to the sheet-qualified address of TargetCell; only
+'     Nothing is checked, not the cell count
 '
 ' UPDATED
 '   2026-04-19
@@ -3812,6 +4176,17 @@ Public Sub DEMO_Btn_Add( _
 '
 ' ERROR POLICY
 '   Raises errors normally
+'
+' DEPENDENCIES
+'   - Worksheet.Shapes.AddShape (msoShapeRoundedRectangle)
+'   - Shape Fill, Line, OnAction and TextFrame2
+'   - ThisWorkbook.Name
+'
+' NOTES
+'   - OnAction is qualified with the name of ThisWorkbook unless ActionMacro
+'     already contains "!"
+'   - The caption is white, 10 pt, bold and centered; the line color is
+'     RGB(90, 90, 90)
 '
 ' HISTORY
 '   2026-11-06 - A blank ActionMacro leaves OnAction empty instead of naming
@@ -3942,6 +4317,12 @@ Public Sub DEMO_Hide_HelperColumns( _
 ' ERROR POLICY
 '   Raises errors normally.
 '
+' DEPENDENCIES
+'   - Worksheet.Columns(...).Hidden
+'
+' NOTES
+'   - DEMO_Create_BoolList uses it to hide AA:AZ
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -4001,6 +4382,15 @@ Public Function DEMO_Create_Table( _
 '
 ' ERROR POLICY
 '   Raises errors normally.
+'
+' DEPENDENCIES
+'   - Worksheet.ListObjects: Add and Delete
+'   - ListObject.Name and TableStyle
+'
+' NOTES
+'   - The existing table is looked up on the worksheet of TargetRange, and a
+'     missing one is ignored (On Error Resume Next)
+'   - TargetRange must include the header row
 '
 ' UPDATED
 '   2026-04-19
@@ -4089,6 +4479,12 @@ Public Sub DEMO_Clear_TableBody( _
 ' ERROR POLICY
 '   Raises errors normally.
 '
+' DEPENDENCIES
+'   - ListObject.DataBodyRange
+'
+' NOTES
+'   - The body rows are deleted with DataBodyRange.Delete, not cleared
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -4146,6 +4542,15 @@ Public Sub DEMO_Append_TableRow( _
 ' ERROR POLICY
 '   Raises errors normally.
 '
+' DEPENDENCIES
+'   - ListObject.ListRows.Add and ListColumns.Count
+'   - ListRow.Range
+'   - Application.Min
+'
+' NOTES
+'   - The first value written is element LBound(RowValues), whatever the base
+'     of the array
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -4175,7 +4580,7 @@ Public Sub DEMO_Append_TableRow( _
         End If
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' ADD ROW AND SIZE WRITE
 '------------------------------------------------------------------------------
     'Add one new row to the table
         Set LR = TableObject.ListRows.Add
@@ -4249,6 +4654,9 @@ Public Sub DEMO_Prepare_LabeledInputSection( _
 '   - DEMO_Write_BandHeader
 '   - DEMO_Format_Labels
 '   - DEMO_Format_InputCell
+'
+' NOTES
+'   - WS is accepted but not read; the ranges carry their own worksheet
 '
 ' UPDATED
 '   2026-04-19
@@ -4354,6 +4762,12 @@ Public Sub DEMO_Write_NamedInputRow( _
 '   - DEMO_Apply_ValidationList
 '   - DEMO_Apply_NumericValidation
 '   - DEMO_Set_WorkbookName
+'
+' NOTES
+'   - WS is read only to name the worksheet that holds the Boolean helper list
+'   - ValidationSource applies to the list kind; ValidationMin, ValidationMax
+'     and AllowDecimal apply to the numeric kind; the Boolean kind uses the
+'     =BoolList name
 '
 ' UPDATED
 '   2026-04-19
@@ -4489,6 +4903,10 @@ Public Sub DEMO_Btn_AddGrid( _
 '
 ' DEPENDENCIES
 '   - DEMO_Btn_Add
+'
+' NOTES
+'   - ButtonSpecs is declared ByRef but only read
+'   - A third element that is neither text nor numeric is ignored
 '
 ' HISTORY
 '   2026-11-06 - A button without an ActionMacro gets no macro (#129).
@@ -4763,7 +5181,7 @@ Public Function DEMO_Create_TableSection( _
         End If
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' COUNT HEADER CAPTIONS
 '------------------------------------------------------------------------------
     'Determine the number of header captions
         HeaderCount = UBound(Headers) - LBound(Headers) + 1
@@ -4886,6 +5304,15 @@ Public Sub DEMO_Btn_ApplyState( _
 ' ERROR POLICY
 '   Raises errors normally
 '
+' DEPENDENCIES
+'   - Shape Fill, Line and TextFrame2
+'   - BTN_PRIMARY_N, BTN_PRIMARY_H, BTN_PRIMARY_P and WHITE
+'
+' NOTES
+'   - State names are matched without regard to case or surrounding spaces; an
+'     unknown name gets the normal color
+'   - The state also hides the outline of the shape
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -4955,6 +5382,14 @@ Private Function DEMO_Btn_CaptureAppearance( _
 '
 ' ERROR POLICY
 '   Raises errors normally
+'
+' DEPENDENCIES
+'   - Shape Fill, Line, TextFrame2, Shadow, Top and Left
+'   - tButtonAppearance
+'
+' NOTES
+'   - Line color and weight are stored as 0 when the line is not visible; the
+'     text values are captured only when the shape has text
 '
 ' UPDATED
 '   2026-04-19
@@ -5041,6 +5476,14 @@ Private Sub DEMO_Btn_RestoreAppearance( _
 ' ERROR POLICY
 '   Raises errors normally
 '
+' DEPENDENCIES
+'   - Shape Fill, Line, TextFrame2, Shadow, Top and Left
+'   - tButtonAppearance
+'
+' NOTES
+'   - Values are written back as captured, including the 0 line color and
+'     weight stored for a hidden line
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -5082,7 +5525,7 @@ Public Sub DEMO_Btn_Click()
 
 '
 '------------------------------------------------------------------------------
-'                                 BUTTON CLICK
+'                          SHOW BUTTON PRESS FEEDBACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies a short pressed-state visual feedback to the calling shape button
@@ -5207,7 +5650,7 @@ Public Sub DEMO_Btn_PlayFeedback()
 
 '
 '------------------------------------------------------------------------------
-'                            DEMO BTN PLAY FEEDBACK
+'                             PLAY BUTTON FEEDBACK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Invoke the shared button-click feedback helper on a best-effort basis
@@ -5216,11 +5659,24 @@ Public Sub DEMO_Btn_PlayFeedback()
 '   Several public demo actions want the same visual pressed-state feedback
 '   without duplicating local error suppression around DEMO_Btn_Click
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Calls DEMO_Btn_Click with errors suppressed
+'   - Restores normal error handling afterwards
+'
 ' ERROR POLICY
 '   Best effort only
+'
+' DEPENDENCIES
+'   - DEMO_Btn_Click
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-04-19
@@ -5242,7 +5698,7 @@ Public Sub DEMO_SB_SetProgress( _
     ByVal StepText As String)
 '
 '------------------------------------------------------------------------------
-'                              SUITE SET PROGRESS
+'                             SHOW SUITE PROGRESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes regression-suite progress to the Excel status bar
@@ -5263,6 +5719,23 @@ Public Sub DEMO_SB_SetProgress( _
 '
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Sets TotalSteps to 1 when it is smaller
+'   - Clamps CurrentStep between 0 and TotalSteps
+'   - Formats CurrentStep / TotalSteps as a whole percentage
+'   - Writes "cPerformanceManager Regression Suite | n/N | p% | StepText" to
+'     the status bar
+'
+' ERROR POLICY
+'   Raises errors normally. Out-of-range counts are clamped, not rejected.
+'
+' DEPENDENCIES
+'   - Application.StatusBar
+'
+' NOTES
+'   - This routine never clears the status bar
+'   - The clamping changes only the local copies of the two counts
 '
 ' UPDATED
 '   2026-04-19
@@ -5316,7 +5789,7 @@ Public Sub DEMO_CB_AddForms( _
     Optional ByVal CheckBoxNames As Variant)
 '
 '------------------------------------------------------------------------------
-'                              DEMO CB ADD FORMS
+'                            ADD FORMS CHECK BOXES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Add one Forms check box for each cell in the supplied anchor range
@@ -5369,6 +5842,17 @@ Public Sub DEMO_CB_AddForms( _
 ' ERROR POLICY
 '   Raises errors normally
 '
+' DEPENDENCIES
+'   - DEMO_CB_ValidateNamesInput
+'   - DEMO_CB_ResolveName
+'   - DEMO_AddOneFormsCheckBox
+'
+' NOTES
+'   - The names input is validated before the first control is created, so a
+'     bad CheckBoxNames adds no control
+'   - Controls are created one cell at a time with no rollback; a failure in
+'     a later cell leaves the earlier check boxes in place
+'
 ' UPDATED
 '   2026-04-19
 '------------------------------------------------------------------------------
@@ -5415,7 +5899,7 @@ Public Sub DEMO_CB_AddForms( _
         End If
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' COUNT TARGET CELLS
 '------------------------------------------------------------------------------
     'Capture the number of target cells
         CellCount = AnchorRange.Cells.Count
@@ -5452,7 +5936,7 @@ Private Sub DEMO_CB_ValidateNamesInput( _
     ByVal CheckBoxNames As Variant)
 '
 '------------------------------------------------------------------------------
-'                         DEMO CB VALIDATE NAMES INPUT
+'                           VALIDATE CHECK-BOX NAMES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validate the optional CheckBoxNames input for DEMO_CB_AddForms
@@ -5471,8 +5955,23 @@ Private Sub DEMO_CB_ValidateNamesInput( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Counts the cells of AnchorRange
+'   - Returns when CheckBoxNames was omitted
+'   - Single cell: accepts a String or a one-element array; any other input
+'     raises vbObjectError + 2145
+'   - Multi-cell: requires an array (vbObjectError + 2146) with exactly one
+'     element per cell (vbObjectError + 2147)
+'
 ' ERROR POLICY
 '   Raises errors normally
+'
+' DEPENDENCIES
+'   - Range.Cells.Count
+'
+' NOTES
+'   - Only the shape of the input is checked; DEMO_CB_ResolveName trims each
+'     element and replaces a blank one with the default name
 '
 ' UPDATED
 '   2026-04-19
@@ -5558,7 +6057,7 @@ Private Function DEMO_CB_ResolveName( _
     As String
 '
 '------------------------------------------------------------------------------
-'                             DEMO CB RESOLVE NAME
+'                            RESOLVE CHECK-BOX NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolve the effective checkbox name for one target cell
@@ -5640,7 +6139,7 @@ Private Function DEMO_CB_DefaultName( _
     As String
 '
 '------------------------------------------------------------------------------
-'                             DEMO CB DEFAULT NAME
+'                         BUILD DEFAULT CHECK-BOX NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a deterministic default checkbox name from one target cell
@@ -5675,7 +6174,7 @@ Private Sub DEMO_AddOneFormsCheckBox( _
     ByVal CheckBoxName As String)
 '
 '------------------------------------------------------------------------------
-'                         DEMO ADD ONE FORMS CHECK BOX
+'                           ADD ONE FORMS CHECK BOX
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Create one Forms check box centered inside one anchor cell
@@ -5697,8 +6196,24 @@ Private Sub DEMO_AddOneFormsCheckBox( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises vbObjectError + 2148 for a blank CheckBoxName and
+'     vbObjectError + 2149 when AnchorCell is not a single cell
+'   - Deletes an existing same-sheet Forms check box with that name, ignoring
+'     the error when there is none
+'   - Computes an 18 by 16 box centered in the cell
+'   - Adds the check box and sets its name, an empty caption, unchecked value,
+'     no linked cell, xlMoveAndSize placement and PrintObject TRUE
+'
 ' ERROR POLICY
 '   Raises errors normally
+'
+' DEPENDENCIES
+'   - Worksheet.CheckBoxes: Add and Delete
+'   - CheckBox Name, Caption, Value, LinkedCell, Placement and PrintObject
+'
+' NOTES
+'   - The size is fixed at 18 by 16 points
 '
 ' UPDATED
 '   2026-04-19
@@ -5741,7 +6256,7 @@ Private Sub DEMO_AddOneFormsCheckBox( _
         On Error GoTo 0
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' COMPUTE CHECK-BOX POSITION
 '------------------------------------------------------------------------------
     'Define the standard visual check-box size
         BoxWidth = 18
@@ -5789,10 +6304,15 @@ Public Function DEMO_CB_TryGetState( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            DEMO CB TRY GET STATE
+'                             READ CHECK-BOX STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Reads the checked state of a Forms or ActiveX check box on a worksheet
+'
+' WHY THIS EXISTS
+'   A check box on a demo sheet is either a Forms control or an ActiveX control,
+'   and the two are read through different objects. This routine hides the
+'   difference and reports failure through FailMsg instead of raising (#73).
 '
 ' INPUTS
 '   WS
@@ -5822,6 +6342,15 @@ Public Function DEMO_CB_TryGetState( _
 ' ERROR POLICY
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
+'
+' DEPENDENCIES
+'   - DEMO_CB_ResolveControl
+'   - DEMO_CB_ErrorText
+'   - Shape.ControlFormat.Value for a Forms check box
+'   - OLEObject.Object, Value through CallByName, for an ActiveX check box
+'
+' NOTES
+'   - IsChecked is FALSE on entry and whenever the function returns FALSE
 '
 ' HISTORY
 '   2026-11-14 - Moved from M_EXCEL_UI_DEMO; ActiveX dispatch and mixed
@@ -5904,10 +6433,15 @@ Public Function DEMO_CB_TrySetState( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            DEMO CB TRY SET STATE
+'                            WRITE CHECK-BOX STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes the checked state of a Forms or ActiveX check box on a worksheet
+'
+' WHY THIS EXISTS
+'   A check box on a demo sheet is either a Forms control or an ActiveX control,
+'   and the two are written through different objects. This routine hides the
+'   difference and reports failure through FailMsg instead of raising (#73).
 '
 ' INPUTS
 '   WS
@@ -5935,6 +6469,16 @@ Public Function DEMO_CB_TrySetState( _
 ' ERROR POLICY
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
+'
+' DEPENDENCIES
+'   - DEMO_CB_ResolveControl
+'   - DEMO_CB_ErrorText
+'   - Shape.ControlFormat.Value for a Forms check box
+'   - OLEObject.Object, Value through CallByName, for an ActiveX check box
+'
+' NOTES
+'   - When the resolver refuses the control, the result stays FALSE and FailMsg
+'     holds the reason it set
 '
 ' HISTORY
 '   2026-11-14 - Moved from M_EXCEL_UI_DEMO; ActiveX dispatch (#73).
@@ -6001,7 +6545,7 @@ Private Function DEMO_CB_ResolveControl( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                           DEMO CB RESOLVE CONTROL
+'                          RESOLVE CHECK-BOX CONTROL
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Finds a check box by name and reports whether it is a Forms or an ActiveX
@@ -6012,6 +6556,24 @@ Private Function DEMO_CB_ResolveControl( _
 '   the shape for a Forms control first and refusing anything else would
 '   reject every ActiveX check box before its OLEObject is reached, so the
 '   shape type decides the path.
+'
+' INPUTS
+'   WS
+'     Worksheet containing the control
+'
+'   ControlName
+'     Name of the control; for an ActiveX control, the shape and the OLEObject
+'     share it
+'
+'   Shp
+'     Receives the shape of a Forms check box; Nothing for any other result
+'
+'   CheckBoxOle
+'     Receives the OLEObject of an ActiveX check box; Nothing for any other
+'     result
+'
+'   FailMsg
+'     Receives the reason when the result is DEMO_CB_KIND_NONE
 '
 ' RETURNS
 '   Long
@@ -6028,6 +6590,17 @@ Private Function DEMO_CB_ResolveControl( _
 ' ERROR POLICY
 '   Raises only when Excel fails while reading a control it found; the
 '   callers turn that into FailMsg
+'
+' DEPENDENCIES
+'   - Worksheet.Shapes and OLEObjects
+'   - Shape.Type, FormControlType and OLEObject.progID
+'   - DEMO_CB_KIND_NONE, DEMO_CB_KIND_FORMS and DEMO_CB_KIND_ACTIVEX
+'
+' NOTES
+'   - A missing name is expected, so both lookups run under
+'     On Error Resume Next and test the result for Nothing
+'   - A control is an ActiveX check box when its progID contains "CheckBox",
+'     compared without regard to case
 '
 ' HISTORY
 '   2026-11-14 - Added for #73.
@@ -6114,7 +6687,7 @@ Private Function DEMO_CB_ErrorText( _
     As String
 '
 '------------------------------------------------------------------------------
-'                              DEMO CB ERROR TEXT
+'                         FORMAT CHECK-BOX ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Formats a runtime error for a check-box FailMsg
