@@ -47,6 +47,9 @@ DEFECTS: list[tuple[str, Callable[[str], str], str]] = [
     ("VBA analyzer",
      lambda text: text.replace("End Sub", "    UI_Nowhere\r\nEnd Sub"),
      f"{EXTRA}:8: unresolved: "),
+    ("VBA syntax",
+     lambda text: text.replace("    Count = 1\r\n", "    Count = (1\r\n"),
+     f"{EXTRA}:7: all compilations: Extra_Probe: parentheses: 1 opening parenthesis never closed"),
     ("house-style formatter",
      lambda text: text + "\r\n",
      f"{EXTRA}: not in house-style normal form"),
@@ -97,7 +100,7 @@ class ExtraModuleReachesEveryModuleCheck(unittest.TestCase):
         # A check that reads modules must appear in DEFECTS, or a new module
         # check could be added without proof that it sees discovered modules.
         module_checks = {"module names", "option policy", "encoding and line endings",
-                         "banner rule widths", "house labels", "VBA analyzer",
+                         "banner rule widths", "house labels", "VBA analyzer", "VBA syntax",
                          "house-style formatter"}
         self.assertEqual({label for label, _, _ in DEFECTS}, module_checks)
 
