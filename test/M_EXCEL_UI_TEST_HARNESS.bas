@@ -1138,7 +1138,7 @@ Private Function TST_CertRecordEntry( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT RECORD ENTRY
+'                          STORE CERTIFICATION ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one entry in the record of the certification run in progress, and
@@ -1222,7 +1222,7 @@ Public Function TST_CertAddFinding( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                             TST CERT ADD FINDING
+'                            STORE CLEANUP FINDING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one cleanup finding, a difference between the exit state and the
@@ -1250,11 +1250,18 @@ Public Function TST_CertAddFinding( _
 '     TRUE  => the finding is stored and counted.
 '     FALSE => it was not stored; Rec.RecordFailed is TRUE.
 '
+' BEHAVIOR
+'   - Stores a TEST_CERT_ENTRY_FINDING entry through TST_CertAddCleanupEntry
+'     and returns its result.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertAddCleanupEntry
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1279,7 +1286,7 @@ Public Function TST_CertAddUnverified( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           TST CERT ADD UNVERIFIED
+'                           STORE UNVERIFIED SURFACE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store the name of one surface that cleanup could not compare, in a
@@ -1299,11 +1306,18 @@ Public Function TST_CertAddUnverified( _
 '     TRUE when the entry is stored; FALSE when it is not, in which case
 '     Rec.RecordFailed is TRUE.
 '
+' BEHAVIOR
+'   - Stores a TEST_CERT_ENTRY_UNVERIFIED entry through TST_CertAddCleanupEntry
+'     and returns its result.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertAddCleanupEntry
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1328,7 +1342,7 @@ Private Function TST_CertAddCleanupEntry( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT ADD CLEANUP ENTRY
+'                             STORE CLEANUP ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one finding or one unverified surface, and make sure that an entry
@@ -1349,12 +1363,23 @@ Private Function TST_CertAddCleanupEntry( _
 '   Boolean
 '     TRUE when the entry was stored and published.
 '
+' BEHAVIOR
+'   - Remembers Rec.RecordFailCount.
+'   - Replaces line breaks in Detail with spaces and stores the entry, named
+'     Code and not passed, through TST_CertTryAppendEntry.
+'   - When the entry was not stored and the failure count did not move, flags
+'     the record with TEST_CERT_RECFAIL_WRITE.
+'   - Returns whether the entry was stored.
+'
 ' ERROR POLICY
 '   - Does not raise. An error flags the record.
 '
 ' DEPENDENCIES
 '   - TST_CertTryAppendEntry
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertAddFinding
@@ -1430,7 +1455,7 @@ Public Sub TST_CertCountCheck( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT COUNT CHECK
+'                           COUNT CLEANUP COMPARISON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Count one comparison that cleanup completed.
@@ -1447,8 +1472,17 @@ Public Sub TST_CertCountCheck( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Adds one to Rec.CheckCount while it is below 2147483647.
+'
 ' ERROR POLICY
 '   - Does not raise. The count saturates.
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1472,7 +1506,7 @@ Public Function TST_CertEntryCodes( _
     As String
 '
 '------------------------------------------------------------------------------
-'                             TST CERT ENTRY CODES
+'                               LIST ENTRY CODES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   List the identifiers of the findings or unverified surfaces of a record, in
@@ -1495,11 +1529,20 @@ Public Function TST_CertEntryCodes( _
 '     "|code1|code2|" in recording order; "|" when there is none. When the
 '     record cannot be read, "|UNREADABLE|".
 '
+' BEHAVIOR
+'   - Returns "|UNREADABLE|" when TST_CertRecordIsConsistent rejects the
+'     record.
+'   - Otherwise starts from "|" and, for each entry of the requested kind in
+'     recording order, appends its name and a closing "|".
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertRecordIsConsistent
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1569,7 +1612,7 @@ Public Function TST_CertEntrySummary( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT ENTRY SUMMARY
+'                          JOIN ENTRIES INTO ONE LINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Join the findings or unverified surfaces of a record into one line of
@@ -1591,12 +1634,21 @@ Public Function TST_CertEntrySummary( _
 '     The items joined by " | "; empty when there is none. When the record
 '     cannot be read, "the record could not be read".
 '
+' BEHAVIOR
+'   - Returns "the record could not be read" when TST_CertRecordIsConsistent
+'     rejects the record.
+'   - Otherwise, for each entry of the requested kind in recording order,
+'     appends "name: detail" to the summary through TST_CertAppendDetail.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertRecordIsConsistent
 '   - TST_CertAppendDetail
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RecordRestoreFailure
@@ -1663,7 +1715,7 @@ Public Sub TST_CertCaseStart( _
     ByVal CaseId As String)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT CASE START
+'                              RECORD CASE START
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record that one mandatory case started, under its stable identifier.
@@ -1681,6 +1733,12 @@ Public Sub TST_CertCaseStart( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - While m_CertActive is TRUE, stores a TEST_CERT_ENTRY_CASE_START entry
+'     named CaseId, not passed and with no detail, through
+'     TST_CertRecordEntry. When that returns FALSE it logs a RECORD FAIL line.
+'   - Outside a certification run it does nothing.
+'
 ' ERROR POLICY
 '   - Does not raise. A start that cannot be stored sets
 '     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE.
@@ -1689,6 +1747,9 @@ Public Sub TST_CertCaseStart( _
 '
 ' DEPENDENCIES
 '   - TST_CertRecordEntry
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertRunCase
@@ -1726,7 +1787,7 @@ Public Sub TST_CertCaseEnd( _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                              TST CERT CASE END
+'                              RECORD CASE STATUS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record the one terminal status of a mandatory case, under its stable
@@ -1751,6 +1812,15 @@ Public Sub TST_CertCaseEnd( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - While m_CertActive is TRUE, replaces line breaks in Detail with spaces.
+'   - Stores a TEST_CERT_ENTRY_CASE_END entry named CaseId, with Passed and
+'     the cleaned detail, through TST_CertRecordEntry. When that returns FALSE
+'     it logs a RECORD FAIL line.
+'   - Logs CASE PASS or CASE FAIL through TST_Log, with the detail appended
+'     when it is not empty.
+'   - Outside a certification run it does nothing.
+'
 ' ERROR POLICY
 '   - Does not raise. A status that cannot be stored sets
 '     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE.
@@ -1758,6 +1828,9 @@ Public Sub TST_CertCaseEnd( _
 '
 ' DEPENDENCIES
 '   - TST_CertRecordEntry
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertRunCase
@@ -1809,7 +1882,7 @@ Public Function TST_CertCarryEntries( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT CARRY ENTRIES
+'                        CARRY ENTRIES BETWEEN RECORDS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Copy the cleanup findings, and optionally the unverified surfaces and the
@@ -1842,6 +1915,20 @@ Public Function TST_CertCarryEntries( _
 '     TRUE  => every entry was stored in Target.
 '     FALSE => Target is flagged as a recording failure.
 '
+' BEHAVIOR
+'   - Flags Target with TEST_CERT_RECFAIL_INVARIANT and returns FALSE when
+'     Source fails TST_CertRecordIsConsistent.
+'   - When Source.RecordFailed is TRUE, flags Target with the failure stage and
+'     error number of Source and makes the result FALSE; copying then
+'     continues.
+'   - For each entry of Source in order, stores each finding in Target through
+'     TST_CertAddFinding, with CodePrefix before its code. When
+'     IncludeUnverified is TRUE it also stores each unverified surface through
+'     TST_CertAddUnverified. Entries of any other kind are not carried.
+'   - When IncludeUnverified is TRUE, adds Source.CheckCount to
+'     Target.CheckCount unless the sum would pass the largest Long.
+'   - Returns FALSE if any entry could not be stored.
+'
 ' ERROR POLICY
 '   - Does not raise. A Source that cannot be read, or that was itself flagged,
 '     flags Target.
@@ -1851,6 +1938,9 @@ Public Function TST_CertCarryEntries( _
 '   - TST_CertAddFinding
 '   - TST_CertAddUnverified
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -1968,7 +2058,7 @@ Public Function TST_CertAddExpected( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT ADD EXPECTED
+'                             STORE EXPECTED CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one case the manifest expects, with its unit, in a certification
@@ -1992,11 +2082,18 @@ Public Function TST_CertAddExpected( _
 '     TRUE when the entry is stored; FALSE when it is not, in which case
 '     Rec.RecordFailed is TRUE.
 '
+' BEHAVIOR
+'   - Stores a TEST_CERT_ENTRY_EXPECTED entry named CaseId, with UnitName as
+'     its detail, through TST_CertAddCleanupEntry and returns its result.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertAddCleanupEntry
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -2018,7 +2115,7 @@ Public Function TST_CertEvaluateInventory( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST CERT EVALUATE INVENTORY
+'                            COMPARE CASE INVENTORY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare the expected cases of a certification record with the cases that
@@ -2062,6 +2159,9 @@ Public Function TST_CertEvaluateInventory( _
 '   - TST_CertIsFirstCaseEntry
 '   - TST_CertNoteInventory
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -2209,7 +2309,7 @@ Private Sub TST_CertNoteInventory( _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                           TST CERT NOTE INVENTORY
+'                           STORE INVENTORY FINDING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one inventory finding, named "<code>:<case>".
@@ -2251,7 +2351,7 @@ Private Function TST_CertCountEntries( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                            TST CERT COUNT ENTRIES
+'                        COUNT ENTRIES BY KIND AND NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Count the entries of one kind and one name among the first entries of a
@@ -2317,7 +2417,7 @@ Private Function TST_CertIsFirstCaseEntry( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST CERT IS FIRST CASE ENTRY
+'                            CHECK FIRST CASE ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report whether no earlier case start or case status has the name of the
@@ -2382,7 +2482,7 @@ Private Function TST_CertExpectedUnit( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT EXPECTED UNIT
+'                              FIND EXPECTED UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the unit the manifest lists a case under.
@@ -2447,7 +2547,7 @@ Public Function TST_CertSummarize( _
     As String
 '
 '------------------------------------------------------------------------------
-'                              TST CERT SUMMARIZE
+'                          SUMMARIZE ENTRIES BY KIND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Join the entries of one kind into one line of "name: detail" items, in
@@ -2478,12 +2578,25 @@ Public Function TST_CertSummarize( _
 '     "(+n more)" when items were left out; empty when there is none. When the
 '     record cannot be read, "the record could not be read".
 '
+' BEHAVIOR
+'   - Returns "the record could not be read" when TST_CertRecordIsConsistent
+'     rejects the record.
+'   - Walks the entries of the requested kind in recording order, skipping the
+'     ones that passed when FailedOnly is TRUE.
+'   - Names each remaining item as "name: detail", cut to 300 characters,
+'     through TST_CertAppendDetail, until MaxItems items are named, and counts
+'     the rest.
+'   - Appends "(+n more)" when items were left out.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertRecordIsConsistent
 '   - TST_CertAppendDetail
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
