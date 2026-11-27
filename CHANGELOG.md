@@ -170,7 +170,7 @@ measured against that baseline.
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
 | Runtime correctness fixes | #26, #27 and #45 complete; #23 certified and open until the README and Wiki describe it; #38 certified and open until the Wiki describes it; remaining title-bar defects open |
-| Regression and certification fixes | #43, #135, #50, #35 and #42 complete; remaining certification gates open |
+| Regression and certification fixes | #43, #135, #50, #35 and #42 complete; #28 implemented and not yet certified; remaining certification gates open |
 | Regression VBA | Caller-owned snapshot refusal, ownership-failure, Ribbon wrong-window refusal, WinAPI error-capture and certification unit-isolation coverage added; split into a harness and four suite modules (#90); certified |
 | Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); fast-mode state (#70), ActiveX check boxes (#73) and template validation (#74) corrected and checked on Excel with harness scenarios S15-S44 (2026-11-14); title-bar error capture (#144) and printer-free demo build (#187) checked on Excel with scenarios S45-S48 (2026-11-17) |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
@@ -182,6 +182,55 @@ measured against that baseline.
 
 ### ➕ Added
 
+- **Not yet certified.** Release certification now reads back the state each
+  managed element achieves after a write
+  ([#28](https://github.com/danielep71/VBA-EXCEL_UI/issues/28),
+  `ICR-UI-112-P3-06`). The object-model and Ribbon setters stay best effort: a
+  write that raises nothing, and a setter that returns `True`, do not show that
+  Excel kept the state. A new mandatory unit, `AchievedStateVerification`, in
+  the new module `test/M_EXCEL_UI_TEST_ACHIEVED.bas`, runs under
+  `Test_EXCEL_UI_RunReleaseCertification` and makes each observation as
+  **write, settle, read, compare**. It reads the state, writes one element
+  through `UI_SetExcelUI_WithResult` under one scope, settles, reads the state
+  back from the object model or the native frame without using the production
+  getters, and records one outcome: `verified-no-op`, `verified-write`,
+  `write-failed`, `readback-failed`, `state-mismatch`, `restore-failed` or
+  `not-verifiable`, with the reason. Status Bar, Scroll Bars and Formula Bar are
+  observed under `Application`. Headings, Workbook Tabs and Gridlines are
+  observed under every `UIWindowTargetScope`, reading every open window, so a
+  window in the scope must read back at the request and every other window
+  unchanged. The title bar is read back from the frame that
+  `UI_TryGetActiveFramePair` named before the write, refused when the active
+  frame is no longer that frame, and visible only with both `WS_BORDER` and
+  `WS_DLGFRAME`. The Ribbon is read back only while the window that owned it is
+  still active, and a Ribbon that cannot be addressed or read is
+  `not-verifiable`, never a silent pass. Each element is hidden twice and shown
+  twice, so the path that changes the state and the path that finds it already
+  correct are both verified, and its entry state is then restored through the
+  harness writers and read back too. Every wait goes through one bounded poll of
+  at most 20 reads, 0.05 s apart. A failed outcome fails its case, the unit and
+  the verdict although the setter returned `True`. Two cases prove the
+  verification with fault seams that need no failing host: a setter asked for
+  nothing, a value no member names, a failed readback, a skipped restoring write
+  and an unreadable Ribbon each give their own outcome and text, and a mismatch
+  fails the unit, the verdict and both documents. `certification.json` gains
+  `achieved`, `achievedDetail`, `achievedChecked`, `achievedState` (the
+  `element`, `scope`, `operation`, `requested`, `observed`, `outcome` and
+  `reason` of every observation), `achievedMismatches` and
+  `achievedUnverifiable`, and `certification.txt` gains an `OBSERVATIONS`
+  summary, a `MISMATCH` line per failed observation and an `UNVERIFIABLE` line
+  per surface that could not be verified. The manifest becomes version 2: it
+  lists the sixth unit and its eight cases (62 cases in six units, so the
+  verdict line reads `units=6`) and an `achieved_state` section naming the
+  elements and scopes a document must hold. The gate fails when the VBA no
+  longer names one of them, and `tools/check_excel_evidence.py` fails a bundle
+  that lacks an observation, a verified write, a verified no-op or a verified
+  restoration for any of them, that holds a failed one, or whose summary fields
+  do not follow from its observations. The two harness writers it restores
+  through are now `Public`. Strict readback is a release-certification feature,
+  not a new guarantee of the fire-and-forget API: no production module changed,
+  and the `[supported]` facade and every public signature are unchanged. The
+  unit has not run on Excel yet, so none of this is certified.
 - Added one VBA house style, the formatter that writes it and the checks that
   hold it ([#210](https://github.com/danielep71/VBA-EXCEL_UI/issues/210)).
   `docs/VBA_HOUSE_STYLE.md` defines the style (layout, banners, the nine header

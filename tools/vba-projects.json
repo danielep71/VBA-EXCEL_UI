@@ -19,6 +19,7 @@
     "test/M_EXCEL_UI_TEST_RUNTIME.bas": "Runtime cases: visibility, structured results, target scope, failure list, and quiet-update scope",
     "test/M_EXCEL_UI_TEST_SNAPSHOT.bas": "Snapshot cases, the snapshot-identity runner, and the Ribbon SDI probe",
     "test/M_EXCEL_UI_TEST_TITLEBAR.bas": "Title-bar cases, the title-bar pack, and the SDI title-bar identity runner",
+    "test/M_EXCEL_UI_TEST_ACHIEVED.bas": "Achieved-state verification: write, settle, read back and compare for every managed element, with its fault seams",
     "test/M_EXCEL_UI_TEST_CERTIFICATION.bas": "Release certification, the combined regression pack, and the certification cases",
     "demo/M_EXCEL_UI_DEMO.bas": "Demonstration actions",
     "demo/M_DEMO_BUILDER.bas": "Demo worksheet construction",
@@ -36,7 +37,7 @@
       ]
     },
     "development": {
-      "description": "A workbook that runs the regression suite and release certification: the production modules, the test harness and the four suite modules.",
+      "description": "A workbook that runs the regression suite and release certification: the production modules, the test harness and the five suite modules.",
       "gating": true,
       "modules": [
         "src/M_EXCEL_UI_RUNTIME.bas",
@@ -47,6 +48,7 @@
         "test/M_EXCEL_UI_TEST_RUNTIME.bas",
         "test/M_EXCEL_UI_TEST_SNAPSHOT.bas",
         "test/M_EXCEL_UI_TEST_TITLEBAR.bas",
+        "test/M_EXCEL_UI_TEST_ACHIEVED.bas",
         "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"
       ]
     },

@@ -235,10 +235,19 @@ unknown commit, no bundle folder or an unusable policy). It checks that:
   case that started and passed, `inventory` is `OK`, and `inventoryFindings` is
   empty. A document that passes the unit counters and lacks the inventory is
   rejected, because the counters alone do not show that the required cases ran;
+- when the commit's manifest has an `achieved_state` section, `certification.json`
+  carries the achieved state: `achieved` is `OK`, `achievedState` lists no failed
+  observation, and for every element and scope the manifest lists there is a
+  hide or show that changed the state and one that found it already correct, each
+  verified by readback, and a restoration that read back. The Ribbon alone may be
+  `not-verifiable` throughout, with its reasons. `achieved`, `achievedChecked`,
+  `achievedMismatches` and `achievedUnverifiable` must follow from
+  `achievedState`, so that no field says `OK` over an observation that failed;
 - the `RESULT:` line, the unit lines, any `RECORDING` line, the `CASES`,
-  `EXPECTED`, `CASE` and `INVENTORY` lines and, for a document that itemizes
-  cleanup, the `CLEANUP` and `UNVERIFIED` lines of `certification.txt` agree
-  with `certification.json`;
+  `EXPECTED`, `CASE` and `INVENTORY` lines, the `OBSERVATIONS`, `MISMATCH` and
+  `UNVERIFIABLE` lines of a document that itemizes the achieved state and, for a
+  document that itemizes cleanup, the `CLEANUP` and `UNVERIFIED` lines of
+  `certification.txt` agree with `certification.json`;
 - `host.json` names Windows and the Excel version, build and bitness, agrees
   with the Excel version, build, operating system and bitness that
   `certification.json` reports, and records `automation_security` as
@@ -272,7 +281,7 @@ the release.
 
 ## 🧭 The case inventory
 
-A verdict such as `units=5 failed=0 skipped=0 cleanup=OK` proves only the
+A verdict such as `units=6 failed=0 skipped=0 cleanup=OK` proves only the
 outcomes of the units that were dispatched. It does not prove that the cases a
 release needs were present, unique and executed: a case can exist in source, run
 in a focused pack and never appear in the release verdict. Certification
@@ -297,6 +306,7 @@ replaced that case, so the manifest carries
 | `RegressionPack` | live | the 45 cases of `TST_RunRegressionPack` |
 | `SnapshotIdentity` | live | `Test_EXCEL_UI_RunSnapshotIdentity` |
 | `TitleBarSdiIdentity` | live | the six cases of `Test_EXCEL_UI_RunTitleBarSdiIdentity` |
+| `AchievedStateVerification` | live | the eight cases of `Test_EXCEL_UI_RunAchievedStateVerification` |
 
 **One list, proved equal.** The VBA cannot read the manifest, so the
 certification module registers the same list in `TST_CertManifestCase`, runs each
@@ -353,6 +363,20 @@ unit, reported as `isolated.app.DisplayStatusBar` although the run puts the host
 back (case H). The error carries the number, the
 source, the verdict, the failed units and the inventory findings, and no
 evidence file is written for these runs.
+
+**The achieved state.** The `AchievedStateVerification` unit reads back the
+state of every managed element after a write ([#28](https://github.com/danielep71/VBA-EXCEL_UI/issues/28)),
+and the manifest's `achieved_state` section lists the element and scope
+observations it must record: Status Bar, Scroll Bars and Formula Bar under
+`Application`, Headings, Workbook Tabs and Gridlines under `AllWindows`,
+`ActiveWindow` and `ActiveWorkbookWindows`, the title bar under `ActiveFrame` and
+the Ribbon under `ActiveWindow`, which alone may be `not-verifiable`. The gate
+fails when the VBA module that holds the unit's runner no longer names a listed
+element or scope as a string literal of its code. The README describes the
+outcomes, the scenario and the fault seams
+([What the achieved-state verification covers](../README.md#what-the-achieved-state-covers)).
+Strict readback is a release-certification feature: it adds no guarantee to the
+fire-and-forget API, whose setters are unchanged.
 
 **Evidence and versions.** `manifestVersion` in the document must equal
 `manifest_version` of the manifest at the commit, and `TEST_CERT_MANIFEST_VERSION`

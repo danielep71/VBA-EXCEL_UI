@@ -26,6 +26,10 @@ static gate when they do not, and its fixtures prove that it does:
 - classification: every TST_Case_ procedure and every public Test_EXCEL_UI_
   runner is a mandatory case, a unit runner, the release runner, a listed
   focused case or a listed interactive runner, so a new one needs a decision;
+- achieved: when the manifest has an achieved_state section (#28), the module that
+  holds the runner of its unit names every element and scope it lists, as string
+  literals of its code, so an observation cannot be deleted or renamed in the VBA
+  while the manifest, and the evidence checker that reads it, still require it;
 - version: TEST_CERT_MANIFEST_VERSION equals the manifest's version.
 
 Identifiers that begin with SelfTest. are synthetic cases of the run faults
@@ -51,6 +55,10 @@ from vba_lex import LexicalError, split_code_comment
 SCHEMA = 1
 MANIFEST_KEYS = ("schema_version", "manifest_version", "description", "units", "required_cases",
                  "focused_cases", "interactive_runners")
+# Keys a manifest may leave out. A manifest without achieved_state predates the achieved-state unit (#28).
+OPTIONAL_MANIFEST_KEYS = ("achieved_state",)
+ACHIEVED_KEYS = ("unit", "description", "observations")
+OBSERVATION_KEYS = ("element", "scope")
 EXECUTIONS = ("isolated", "live")
 CASE_ID = re.compile(r"(?:TST_Case_|Test_EXCEL_UI_)[A-Za-z0-9_]+")
 IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
@@ -89,12 +97,30 @@ class Unit:
 
 
 @dataclass(frozen=True)
+class Observation:
+    """One element under one scope that the achieved-state unit must record (#28)."""
+
+    element: str
+    scope: str
+    may_be_unverifiable: bool
+
+
+@dataclass(frozen=True)
+class AchievedState:
+    """The observations of the unit that reads back the state a write achieved."""
+
+    unit: str
+    observations: tuple[Observation, ...]
+
+
+@dataclass(frozen=True)
 class Manifest:
     version: int
     units: tuple[Unit, ...]
     required: tuple[str, ...]
     focused: dict[str, str]
     interactive: dict[str, str]
+    achieved: AchievedState | None = None
 
     @property
     def pairs(self) -> tuple[tuple[str, str], ...]:
@@ -169,7 +195,7 @@ def parse_manifest(text: str) -> Manifest:
     if not isinstance(document, dict):
         raise fail("the manifest is not a JSON object")
     missing = [key for key in MANIFEST_KEYS if key not in document]
-    unknown = sorted(key for key in document if key not in MANIFEST_KEYS)
+    unknown = sorted(key for key in document if key not in MANIFEST_KEYS + OPTIONAL_MANIFEST_KEYS)
     if missing or unknown:
         raise fail("; ".join(([f"missing {', '.join(missing)}"] if missing else [])
                              + ([f"unknown {', '.join(unknown)}"] if unknown else [])))
@@ -204,7 +230,46 @@ def parse_manifest(text: str) -> Manifest:
     clash = sorted(set(interactive) & runners)
     if clash:
         raise fail(f"interactive_runners lists mandatory or unit runners: {', '.join(clash)}")
-    return Manifest(version, units, required, focused, interactive)
+    achieved = parse_achieved(document["achieved_state"], names) if "achieved_state" in document else None
+    return Manifest(version, units, required, focused, interactive, achieved)
+
+
+def parse_achieved(value: object, unit_names: list[str]) -> AchievedState:
+    """Validate the achieved_state section: a unit of the manifest and its unique observations."""
+    where = "achieved_state"
+    table = table_of(value, where)
+    missing = [key for key in ACHIEVED_KEYS if key not in table]
+    unknown = sorted(key for key in table if key not in ACHIEVED_KEYS)
+    if missing or unknown:
+        raise fail(f"{where}: " + "; ".join(([f"missing {', '.join(missing)}"] if missing else [])
+                                             + ([f"unknown {', '.join(unknown)}"] if unknown else [])))
+    unit = text_of(table["unit"], f"{where}.unit", IDENTIFIER)
+    if unit not in unit_names:
+        raise fail(f"{where}.unit {unit!r} is not a unit of the manifest")
+    text_of(table["description"], f"{where}.description")
+    listed = table["observations"]
+    if not isinstance(listed, list) or not listed:
+        raise fail(f"{where}.observations must be a non-empty list")
+    observations: list[Observation] = []
+    for index, item in enumerate(listed):
+        here = f"{where}.observations[{index}]"
+        if not isinstance(item, dict):
+            raise fail(f"{here} must be an object")
+        unexpected = sorted(set(item) - set(OBSERVATION_KEYS) - {"may_be_unverifiable"})
+        absent = [key for key in OBSERVATION_KEYS if key not in item]
+        if unexpected or absent:
+            raise fail(f"{here}: " + "; ".join(([f"missing {', '.join(absent)}"] if absent else [])
+                                                 + ([f"unknown {', '.join(unexpected)}"] if unexpected else [])))
+        flag = item.get("may_be_unverifiable", False)
+        if type(flag) is not bool:
+            raise fail(f"{here}.may_be_unverifiable must be true or false")
+        observations.append(Observation(text_of(item["element"], f"{here}.element", IDENTIFIER),
+                                        text_of(item["scope"], f"{here}.scope", IDENTIFIER), flag))
+    pairs = [(item.element, item.scope) for item in observations]
+    repeated = sorted({pair for pair in pairs if pairs.count(pair) > 1})
+    if repeated:
+        raise fail(f"{where}.observations lists {', '.join('.'.join(pair) for pair in repeated)} more than once")
+    return AchievedState(unit, tuple(observations))
 
 
 def parse_required(value: object, mandatory: set[str]) -> tuple[str, ...]:
@@ -568,6 +633,39 @@ def classification_findings(manifest: Manifest, procedures: list[Procedure], rel
     return findings
 
 
+STRING_LITERAL = re.compile(r'"((?:[^"]|"")*)"')
+
+
+def code_literals(text: str) -> set[str]:
+    """The string literals of the code of a module, comments excluded."""
+    found: set[str] = set()
+    for _, statement in logical_statements(text):
+        found.update(match.replace('""', '"') for match in STRING_LITERAL.findall(statement))
+    return found
+
+
+def achieved_findings(manifest: Manifest, sources: dict[str, str], procedures: list[Procedure]) -> list[str]:
+    """The module of the achieved-state unit's runner names every element and scope the manifest lists."""
+    achieved = manifest.achieved
+    if achieved is None:
+        return []
+    unit = next(unit for unit in manifest.units if unit.name == achieved.unit)
+    if unit.runner is None:
+        return [f"[achieved] unit {unit.name} has no runner, so no module holds its observations"]
+    runner = find_procedures(procedures, unit.runner)
+    if len(runner) != 1:
+        return [f"[achieved] the runner {unit.runner} of unit {unit.name} is defined {len(runner)} times"]
+    module = runner[0].module
+    literals = code_literals(sources[module])
+    findings: list[str] = []
+    for observation in achieved.observations:
+        for kind, name in (("element", observation.element), ("scope", observation.scope)):
+            if name not in literals:
+                findings.append(f"[achieved] {module}: the {kind} {name!r} of the observation "
+                                f"{observation.element}.{observation.scope} is not a string literal of its code")
+    return findings
+
+
 def version_findings(manifest: Manifest, sources: dict[str, str]) -> list[str]:
     declared = [(module, int(match[1])) for module, text in sorted(sources.items())
                 for match in VERSION_DECLARATION.finditer(text)]
@@ -590,6 +688,7 @@ def findings_for(manifest_text: str, sources: dict[str, str], release_runner: st
     findings: list[str] = []
     for rule in (registry_findings, dispatch_findings, call_site_findings, resolve_findings):
         findings.extend(rule(manifest, procedures))
+    findings.extend(achieved_findings(manifest, sources, procedures))
     findings.extend(unit_findings(manifest, procedures, release_runner))
     findings.extend(classification_findings(manifest, procedures, release_runner))
     findings.extend(version_findings(manifest, sources))
@@ -638,6 +737,14 @@ FIXTURE_MANIFEST: dict[str, Any] = {
     "required_cases": [{"case": "TST_Case_B", "note": "named by the issue"}],
     "focused_cases": {"TST_Case_Focused": "run by one focused pack only"},
     "interactive_runners": {"Test_EXCEL_UI_RunAll": "an interactive pack"},
+    "achieved_state": {
+        "unit": "PackUnit",
+        "description": "The observations of the fixture.",
+        "observations": [
+            {"element": "Alpha", "scope": "Here"},
+            {"element": "Beta", "scope": "There", "may_be_unverifiable": True},
+        ],
+    },
 }
 
 FIXTURE_SOURCE = """Attribute VB_Name = "M_FIXTURE"
@@ -669,6 +776,11 @@ End Sub
 Private Sub TST_RunPack(ByVal IncludeTitleBarTests As Boolean, ByVal CallerProc As String)
     TST_CertRunCase "TST_Case_A", IncludeTitleBarTests
     TST_CertRunCase "TST_Case_B", IncludeTitleBarTests
+    TST_Observe "Alpha", "Here"
+    TST_Observe "Beta", "There" ' "Gamma"
+End Sub
+
+Private Sub TST_Observe(ByVal Element As String, ByVal Scope As String)
 End Sub
 
 Private Function TST_CertManifestCase(ByVal Index As Long, ByRef UnitName As String, ByRef CaseId As String) As Boolean
@@ -784,6 +896,11 @@ def source_cases() -> list[tuple[str, str, str]]:
          base.replace("Public Sub Test_EXCEL_UI_RunSingle()\nEnd Sub\n", ""), "resolve"),
         ("a registered version that differs",
          base.replace("TEST_CERT_MANIFEST_VERSION As Long = 3", "TEST_CERT_MANIFEST_VERSION As Long = 2"), "version"),
+        ("an achieved element the VBA no longer names", base.replace('TST_Observe "Alpha", "Here"', ""), "achieved"),
+        ("an achieved scope the VBA no longer names",
+         base.replace('TST_Observe "Beta", "There"', 'TST_Observe "Beta", "Elsewhere"'), "achieved"),
+        ("an achieved scope that only a comment names",
+         base.replace('TST_Observe "Beta", "There" \' "Gamma"', 'TST_Observe "Beta" \' "There"'), "achieved"),
     ]
 
 
@@ -813,6 +930,15 @@ def manifest_cases() -> list[tuple[str, dict[str, Any], str]]:
         ("a registry that lacks a unit the manifest adds",
          change(lambda doc: doc["units"].append({"name": "More", "execution": "live",
                                                  "cases": ["Test_EXCEL_UI_RunMore"]})), "registry"),
+        ("an achieved_state section for a unit the manifest does not list",
+         change(lambda doc: doc["achieved_state"].update(unit="NoSuchUnit")), "manifest"),
+        ("an achieved observation listed twice",
+         change(lambda doc: doc["achieved_state"]["observations"].append({"element": "Alpha", "scope": "Here"})),
+         "manifest"),
+        ("an achieved observation with an unknown key",
+         change(lambda doc: doc["achieved_state"]["observations"][0].update(extra=1)), "manifest"),
+        ("an achieved section without observations",
+         change(lambda doc: doc["achieved_state"].update(observations=[])), "manifest"),
     ]
 
 

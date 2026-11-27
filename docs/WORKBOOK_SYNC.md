@@ -95,7 +95,7 @@ the script names them in a warning. For a workbook with exactly one
 configuration, start from a new workbook with `-NewWorkbook`.
 
 A development workbook synchronized from v1.1.2 or earlier also holds
-`M_EXCEL_UI_REGRESSION_TESTS`, which the five test modules replace. It is no
+`M_EXCEL_UI_REGRESSION_TESTS`, which the six test modules replace. It is no
 longer a repository module, so the script does not name it, and it declares
 the same runners as the test modules, so the project does not compile while
 both are present. Remove it in the VBE, or start from a new workbook with

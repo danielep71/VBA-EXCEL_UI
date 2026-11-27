@@ -61,9 +61,9 @@ Option Private Module
 '     takes, and the one-shot certification record fault
 '   - Certification records and evidence: one record of unit outcomes,
 '     skips, cleanup findings, unverifiable surfaces, expected cases, case
-'     starts, case results and inventory findings that publishes an entry only
-'     once it is complete, snapshots a unit left behind, the verdict, and the
-'     JSON and text evidence files
+'     starts, case results, inventory findings and achieved-state observations
+'     that publishes an entry only once it is complete, snapshots a unit left
+'     behind, the verdict, and the JSON and text evidence files
 '   - Cleanup helpers: entry title-bar style restoration, cleanup-failure
 '     reporting, and best-effort window and workbook closing
 '   - Snapshot / restore helpers: the harness's own capture and restore of the
@@ -117,6 +117,11 @@ Option Private Module
 '   1.1.2
 '
 ' HISTORY
+'   2026-11-28 - Certification records one achieved-state observation per write
+'                it reads back, with its requested and observed state and its
+'                outcome, and lists them in both evidence documents. The record
+'                gains the achieved kind, and the Ribbon and Boolean property
+'                writers are Public for the restoration of that unit (#28).
 '   2026-11-28 - Entries can be carried from one record to another, so the
 '                entry baseline survives the isolated units and what they
 '                leave behind is judged against it (#42).
@@ -183,7 +188,8 @@ Option Private Module
     'could not compare and does not fail it. An expected entry is one case the
     'manifest lists, a case start and a case end are what one case recorded under
     'its identifier, and an inventory entry is one difference between the
-    'expected and the observed cases (#42).
+    'expected and the observed cases (#42). An achieved entry is one observation
+    'of the state a write achieved, read back after it (#28).
     Public Const TEST_CERT_ENTRY_UNIT       As Long = 1 'Entry: one unit outcome
     Public Const TEST_CERT_ENTRY_SKIP       As Long = 2 'Entry: one skipped case
     Public Const TEST_CERT_ENTRY_FINDING    As Long = 3 'Entry: one cleanup finding
@@ -192,10 +198,27 @@ Option Private Module
     Public Const TEST_CERT_ENTRY_CASE_START As Long = 6 'Entry: a case started
     Public Const TEST_CERT_ENTRY_CASE_END   As Long = 7 'Entry: a case recorded its terminal status
     Public Const TEST_CERT_ENTRY_INVENTORY  As Long = 8 'Entry: one difference between expected and observed cases
+    Public Const TEST_CERT_ENTRY_ACHIEVED   As Long = 9 'Entry: one achieved-state observation
+
+    'Outcomes of one achieved-state observation (#28). A verified outcome says that
+    'the state read back after the write is the requested one. A failed outcome
+    'fails the case and the run. not-verifiable names a surface that could not be
+    'addressed or read, and is listed in both documents, never counted as a pass.
+    Public Const TEST_ACH_OUTCOME_NOOP              As String = "verified-no-op"    'Already in the requested state; readback confirmed it
+    Public Const TEST_ACH_OUTCOME_WRITE             As String = "verified-write"    'Changed to the requested state; readback confirmed it
+    Public Const TEST_ACH_OUTCOME_WRITE_FAILED      As String = "write-failed"      'The setter reported a failure
+    Public Const TEST_ACH_OUTCOME_READ_FAILED       As String = "readback-failed"   'The state could not be read after the write
+    Public Const TEST_ACH_OUTCOME_MISMATCH          As String = "state-mismatch"    'The state read back is not the requested one
+    Public Const TEST_ACH_OUTCOME_RESTORE_FAILED    As String = "restore-failed"    'The entry state was not put back
+    Public Const TEST_ACH_OUTCOME_UNVERIFIABLE      As String = "not-verifiable"    'The surface could not be addressed or read
+
+    Public Const TEST_ACH_CLASS_VERIFIED        As Long = 0 'Outcome class: readback confirmed the state
+    Public Const TEST_ACH_CLASS_FAILED          As Long = 1 'Outcome class: the observation fails the run
+    Public Const TEST_ACH_CLASS_UNVERIFIABLE    As Long = 2 'Outcome class: the surface could not be verified
 
     'Version of the mandatory-case manifest. tools/certification-manifest.json
     'holds the same number, and the static gate fails when they differ.
-    Public Const TEST_CERT_MANIFEST_VERSION As Long = 1 'Version of the registered manifest
+    Public Const TEST_CERT_MANIFEST_VERSION As Long = 2 'Version of the registered manifest
 
     'The parallel buffers of a certification record, in the order they grow.
     'TST_CertRecordIsConsistent walks them from the first to the last.
@@ -338,8 +361,13 @@ Option Private Module
     'but an entry exists only once EntryCount includes it, and EntryCount grows
     'only after every buffer holds the complete entry. The invariants are
     '
-    '    the eight kind counts add up to EntryCount >= 0
+    '    the nine kind counts add up to EntryCount >= 0
     '    every buffer is unallocated or 1-based, with UBound >= EntryCount
+    '
+    'An achieved-state observation (#28) is an entry of the same record. Its
+    'element is the EntryName; EntryPassed is FALSE only for a failed outcome; and
+    'EntryDetail holds the scope, operation, requested and observed state, outcome
+    'and reason, joined by tabs, which TST_CertAddAchieved removes from each field.
     '
     'Cleanup findings and unverified surfaces (#35) are entries of the same record,
     'stored by the same path. A finding has its identifier in EntryName and its
@@ -369,6 +397,7 @@ Option Private Module
         CaseStartCount      As Long                'Published case starts
         CaseEndCount        As Long                'Published case terminal statuses
         InventoryCount      As Long                'Published inventory findings
+        AchievedCount       As Long                'Published achieved-state observations
         CheckCount          As Long                'Comparisons cleanup completed
         EntryKind()         As Long                'TEST_CERT_ENTRY_* per entry
         EntryName()         As String              'Unit name, or the skipping procedure
@@ -967,6 +996,7 @@ Public Function TST_CertResetRecord( _
         Rec.CaseStartCount = 0
         Rec.CaseEndCount = 0
         Rec.InventoryCount = 0
+        Rec.AchievedCount = 0
         Rec.InventoryChecked = False
         Rec.CheckCount = 0
 
@@ -2938,8 +2968,9 @@ Private Function TST_CertBuildInventoryLists( _
                         Rec.EntryDetail(ScanIdx) & vbNewLine
 
                 Case TEST_CERT_ENTRY_UNIT, TEST_CERT_ENTRY_SKIP, _
-                    TEST_CERT_ENTRY_FINDING, TEST_CERT_ENTRY_UNVERIFIED
-                'Listed by TST_CertBuildEntryLists
+                    TEST_CERT_ENTRY_FINDING, TEST_CERT_ENTRY_UNVERIFIED, _
+                    TEST_CERT_ENTRY_ACHIEVED
+                'Listed by TST_CertBuildEntryLists and TST_CertBuildAchievedLists
 
                 Case Else
                     Matched = False
@@ -3043,6 +3074,591 @@ ErrorHandler:
 
 End Function
 
+Public Function TST_CertAchievedClass( _
+    ByVal Outcome As String) _
+    As Long
+'
+'------------------------------------------------------------------------------
+'                      CLASSIFY AN ACHIEVED-STATE OUTCOME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Say whether the outcome of an achieved-state observation is verified,
+'   failed or unverifiable.
+'
+' WHY THIS EXISTS
+'   The record, the evidence and the verdict must classify an outcome the same
+'   way, so the classification is written once. An outcome that no constant
+'   names is a failure, never a pass.
+'
+' INPUTS
+'   Outcome
+'     One of the TEST_ACH_OUTCOME_* texts.
+'
+' RETURNS
+'   Long
+'     TEST_ACH_CLASS_VERIFIED for verified-no-op and verified-write,
+'     TEST_ACH_CLASS_UNVERIFIABLE for not-verifiable, and
+'     TEST_ACH_CLASS_FAILED for every other text.
+'
+' BEHAVIOR
+'   - Selects on the outcome text and returns its class.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   None.
+'
+' NOTES
+'   None
+'
+' CALLED FROM
+'   - TST_CertAddAchieved
+'   - TST_CertBuildAchievedLists
+'   - M_EXCEL_UI_TEST_ACHIEVED
+'
+' HISTORY
+'   2026-11-28 - Added (#28).
+'
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' CLASSIFY OUTCOME
+'------------------------------------------------------------------------------
+    'An outcome nobody defined is a failure, not a pass
+        Select Case Outcome
+
+            Case TEST_ACH_OUTCOME_NOOP, TEST_ACH_OUTCOME_WRITE
+                TST_CertAchievedClass = TEST_ACH_CLASS_VERIFIED
+
+            Case TEST_ACH_OUTCOME_UNVERIFIABLE
+                TST_CertAchievedClass = TEST_ACH_CLASS_UNVERIFIABLE
+
+            Case Else
+                TST_CertAchievedClass = TEST_ACH_CLASS_FAILED
+
+        End Select
+
+End Function
+
+Private Function TST_CertAchievedField( _
+    ByVal Text As String) _
+    As String
+'
+'------------------------------------------------------------------------------
+'                           KEEP A FIELD ON ONE LINE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Replace the characters that would split an achieved-state field or its
+'   packed detail.
+'
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETURN FIELD
+'------------------------------------------------------------------------------
+    'Line breaks and tabs become spaces
+        TST_CertAchievedField = Replace(Replace(Replace(Text, vbCr, " "), _
+            vbLf, " "), vbTab, " ")
+
+End Function
+
+Public Function TST_CertAddAchieved( _
+    ByRef Rec As tCertRecord, _
+    ByVal Element As String, _
+    ByVal Scope As String, _
+    ByVal Operation As String, _
+    ByVal Requested As String, _
+    ByVal Observed As String, _
+    ByVal Outcome As String, _
+    ByVal Reason As String) _
+    As Boolean
+'
+'------------------------------------------------------------------------------
+'                     STORE AN ACHIEVED-STATE OBSERVATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Store one achieved-state observation, the outcome of a write that was read
+'   back and compared, in a certification record.
+'
+' WHY THIS EXISTS
+'   A write that raised nothing and returned True does not show that the
+'   requested state was reached. The observation is an entry of the record,
+'   stored by the same path as a unit (#50), so one that cannot be stored flags
+'   the record, which forces FAIL | INCOMPLETE, and the evidence lists what was
+'   requested, what was observed and how the two compared (#28).
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to add to.
+'
+'   Element / Scope / Operation
+'     What was written: the managed element (StatusBar, Headings and so on),
+'     the scope it was written under (Application, ActiveWindow and so on) and
+'     the operation (hide, show or restore).
+'
+'   Requested / Observed
+'     The state asked for and the state read back, as text.
+'
+'   Outcome
+'     One of the TEST_ACH_OUTCOME_* texts.
+'
+'   Reason
+'     Why the outcome is not a verified one; empty for a verified outcome.
+'     Line breaks and tabs in any field are replaced by spaces.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => the observation is stored and counted.
+'     FALSE => it was not stored; Rec.RecordFailed is TRUE.
+'
+' BEHAVIOR
+'   - Joins the scope, operation, requested and observed state, outcome and
+'     reason with tabs, each on one line, as the detail of the entry.
+'   - Stores a TEST_CERT_ENTRY_ACHIEVED entry named Element through
+'     TST_CertTryAppendEntry, passed unless the outcome is a failed one.
+'   - When the entry was not stored and the failure count did not move, flags
+'     the record with TEST_CERT_RECFAIL_WRITE.
+'
+' ERROR POLICY
+'   - Does not raise. An error flags the record.
+'
+' DEPENDENCIES
+'   - TST_CertTryAppendEntry
+'   - TST_CertAchievedClass
+'   - TST_CertAchievedField
+'   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
+'
+' CALLED FROM
+'   - M_EXCEL_UI_TEST_ACHIEVED
+'
+' HISTORY
+'   2026-11-28 - Added (#28).
+'
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_HARNESS.TST_CertAddAchieved"
+
+    Dim FailuresBefore  As Long     'Failure count before the append
+    Dim Packed          As String   'Scope, operation, states, outcome and reason
+    Dim Stored          As Boolean  'TRUE once the entry is published
+    Dim FailNumber      As Long     'Error number of a failure
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
+
+        TST_CertAddAchieved = False
+        Stored = False
+
+        FailuresBefore = Rec.RecordFailCount
+
+'------------------------------------------------------------------------------
+' APPEND OBSERVATION
+'------------------------------------------------------------------------------
+    'Six fields in one detail, each free of the separator
+        Packed = TST_CertAchievedField(Scope) & vbTab & _
+            TST_CertAchievedField(Operation) & vbTab & _
+            TST_CertAchievedField(Requested) & vbTab & _
+            TST_CertAchievedField(Observed) & vbTab & _
+            TST_CertAchievedField(Outcome) & vbTab & _
+            TST_CertAchievedField(Reason)
+
+        Stored = TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_ACHIEVED, _
+            TST_CertAchievedField(Element), _
+            (TST_CertAchievedClass(Outcome) <> TEST_ACH_CLASS_FAILED), Packed)
+
+    'A miss the append could not flag itself is still a recording failure
+        If Not Stored Then
+            If Rec.RecordFailCount = FailuresBefore Then
+                TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_WRITE, 0
+            End If
+        End If
+
+        TST_CertAddAchieved = Stored
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Flag the record before anything else can allocate
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_WRITE, FailNumber
+
+        TST_CertAddAchieved = False
+
+        Resume SafeExit
+
+End Function
+
+Private Function TST_CertBuildAchievedLists( _
+    ByRef Rec As tCertRecord, _
+    ByRef StateJson As String, _
+    ByRef MismatchJson As String, _
+    ByRef UnverifiableJson As String, _
+    ByRef MismatchLines As String, _
+    ByRef UnverifiableLines As String, _
+    ByRef Checked As Long, _
+    ByRef Failed As Long, _
+    ByRef Unverifiable As Long, _
+    ByRef Detail As String) _
+    As Boolean
+'
+'------------------------------------------------------------------------------
+'                         LIST ACHIEVED-STATE SECTIONS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Read the achieved-state observations of a record once and compose the
+'   observation, mismatch and unverifiable sections of both evidence documents.
+'
+' WHY THIS EXISTS
+'   The JSON and the text report must list the same observations, so both are
+'   composed from one pass over the record, after its invariants are checked
+'   (#28).
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to read.
+'
+'   StateJson / MismatchJson / UnverifiableJson
+'     ByRef outputs: the members of the achievedState, achievedMismatches and
+'     achievedUnverifiable arrays. A state member is
+'     {"seq":n,"element":"...","scope":"...","operation":"...",
+'     "requested":"...","observed":"...","outcome":"...","reason":"..."}, one
+'     per observation in recording order. A mismatch or unverifiable member is
+'     {"seq":n,"code":"<element>.<scope>.<operation>","detail":"..."}.
+'
+'   MismatchLines / UnverifiableLines
+'     ByRef outputs: the MISMATCH and UNVERIFIABLE lines of the report, each
+'     "code | detail".
+'
+'   Checked / Failed / Unverifiable
+'     ByRef outputs: the observations read, the failed ones and the
+'     unverifiable ones.
+'
+'   Detail
+'     ByRef output: the failed observations joined by " | ".
+'
+' RETURNS
+'   Boolean
+'     TRUE  => every observation was read and the count matches.
+'     FALSE => every output is empty. The record is flagged only when the
+'              entries disagree with the count; a record whose buffers
+'              disagree was flagged by TST_CertBuildEntryLists already.
+'
+' BEHAVIOR
+'   - Empties every output. When TST_CertRecordIsConsistent rejects the record
+'     it returns FALSE without flagging it again.
+'   - Reads the entries once, in recording order. An achieved entry whose
+'     detail does not hold six fields stops the pass.
+'   - Adds each observation to the state array. A failed outcome also adds a
+'     mismatch member, a MISMATCH line and its text to Detail; an unverifiable
+'     outcome adds an unverifiable member and an UNVERIFIABLE line.
+'   - Checks that the observations read match Rec.AchievedCount. On a mismatch
+'     it flags the record with TEST_CERT_RECFAIL_INVARIANT and empties every
+'     output. An error flags it with TEST_CERT_RECFAIL_EVIDENCE.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertRecordIsConsistent
+'   - TST_CertAchievedClass
+'   - TST_CertJsonEscape
+'   - TST_CertAppendDetail
+'   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
+'
+' CALLED FROM
+'   - TST_CertComposeEvidence
+'   - TST_CertAchievedSummary
+'
+' HISTORY
+'   2026-11-28 - Added (#28).
+'
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_HARNESS.TST_CertBuildAchievedLists"
+
+    Dim ScanIdx         As Long     'Cursor over the entries
+    Dim Seen            As Long     'Achieved entries read
+    Dim OutcomeClass    As Long     'Class of one outcome
+    Dim Matched         As Boolean  'TRUE while the entries match the count
+    Dim Fields()        As String   'The six fields of one observation
+    Dim Code            As String   'Element, scope and operation of one observation
+    Dim Text            As String   'One observation as a finding reads
+    Dim FailNumber      As Long     'Error number of a failed read
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        StateJson = vbNullString
+        MismatchJson = vbNullString
+        UnverifiableJson = vbNullString
+        MismatchLines = vbNullString
+        UnverifiableLines = vbNullString
+        Checked = 0
+        Failed = 0
+        Unverifiable = 0
+        Detail = vbNullString
+
+        TST_CertBuildAchievedLists = False
+
+        On Error GoTo ErrorHandler
+
+    'A record that fails its check lists nothing, and is not flagged again
+        If Not TST_CertRecordIsConsistent(Rec) Then
+            GoTo SafeExit
+        End If
+
+        Matched = True
+
+'------------------------------------------------------------------------------
+' READ ENTRIES
+'------------------------------------------------------------------------------
+    'One pass, in recording order
+        For ScanIdx = 1 To Rec.EntryCount
+
+            If Rec.EntryKind(ScanIdx) = TEST_CERT_ENTRY_ACHIEVED Then
+
+                Seen = Seen + 1
+
+                Fields = Split(Rec.EntryDetail(ScanIdx), vbTab)
+
+                If UBound(Fields) <> 5 Then
+                    Matched = False
+                    Exit For
+                End If
+
+                Code = Rec.EntryName(ScanIdx) & "." & Fields(0) & "." & Fields(1)
+
+                Text = Fields(4) & ": requested=" & Fields(2) & _
+                    " observed=" & Fields(3) & _
+                    IIf(Len(Fields(5)) > 0, " | " & Fields(5), vbNullString)
+
+                If Seen > 1 Then
+                    StateJson = StateJson & ","
+                End If
+
+                StateJson = StateJson & "{""seq"":" & CStr(Seen) & _
+                    ",""element"":""" & TST_CertJsonEscape(Rec.EntryName(ScanIdx)) & """" & _
+                    ",""scope"":""" & TST_CertJsonEscape(Fields(0)) & """" & _
+                    ",""operation"":""" & TST_CertJsonEscape(Fields(1)) & """" & _
+                    ",""requested"":""" & TST_CertJsonEscape(Fields(2)) & """" & _
+                    ",""observed"":""" & TST_CertJsonEscape(Fields(3)) & """" & _
+                    ",""outcome"":""" & TST_CertJsonEscape(Fields(4)) & """" & _
+                    ",""reason"":""" & TST_CertJsonEscape(Fields(5)) & """}"
+
+                OutcomeClass = TST_CertAchievedClass(Fields(4))
+
+                Select Case OutcomeClass
+
+                    Case TEST_ACH_CLASS_FAILED
+                        Failed = Failed + 1
+
+                        If Failed > 1 Then
+                            MismatchJson = MismatchJson & ","
+                        End If
+
+                        MismatchJson = MismatchJson & "{""seq"":" & CStr(Failed) & _
+                            ",""code"":""" & TST_CertJsonEscape(Code) & """" & _
+                            ",""detail"":""" & TST_CertJsonEscape(Text) & """}"
+
+                        MismatchLines = MismatchLines & "  MISMATCH  " & _
+                            Code & " | " & Text & vbNewLine
+
+                        Detail = TST_CertAppendDetail(Detail, Code & ": " & Text)
+
+                    Case TEST_ACH_CLASS_UNVERIFIABLE
+                        Unverifiable = Unverifiable + 1
+
+                        If Unverifiable > 1 Then
+                            UnverifiableJson = UnverifiableJson & ","
+                        End If
+
+                        UnverifiableJson = UnverifiableJson & "{""seq"":" & _
+                            CStr(Unverifiable) & _
+                            ",""code"":""" & TST_CertJsonEscape(Code) & """" & _
+                            ",""detail"":""" & TST_CertJsonEscape(Text) & """}"
+
+                        UnverifiableLines = UnverifiableLines & "  UNVERIFIABLE  " & _
+                            Code & " | " & Text & vbNewLine
+
+                    Case Else
+                    'A verified observation is listed in the state array only
+
+                End Select
+
+            End If
+
+        Next ScanIdx
+
+    'Every published observation must have been read
+        If Matched Then
+            Matched = (Seen = Rec.AchievedCount)
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN LISTS
+'------------------------------------------------------------------------------
+    'A record that does not match its count lists nothing
+        If Matched Then
+            Checked = Seen
+            TST_CertBuildAchievedLists = True
+        Else
+            TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_INVARIANT, 0
+
+            StateJson = vbNullString
+            MismatchJson = vbNullString
+            UnverifiableJson = vbNullString
+            MismatchLines = vbNullString
+            UnverifiableLines = vbNullString
+            Failed = 0
+            Unverifiable = 0
+            Detail = vbNullString
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+SafeExit:
+    'Exit before the error-handler block
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Flag the record first, then drop whatever was half read
+        FailNumber = Err.Number
+
+        TST_CertMarkRecordFailure Rec, TEST_CERT_RECFAIL_EVIDENCE, FailNumber
+
+        StateJson = vbNullString
+        MismatchJson = vbNullString
+        UnverifiableJson = vbNullString
+        MismatchLines = vbNullString
+        UnverifiableLines = vbNullString
+        Checked = 0
+        Failed = 0
+        Unverifiable = 0
+        Detail = vbNullString
+
+        TST_CertBuildAchievedLists = False
+
+        Resume SafeExit
+
+End Function
+
+Public Function TST_CertAchievedSummary( _
+    ByRef Rec As tCertRecord) _
+    As String
+'
+'------------------------------------------------------------------------------
+'                        SUMMARIZE FAILED OBSERVATIONS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Join the failed achieved-state observations of a record into one line.
+'
+' WHY THIS EXISTS
+'   The error certification raises must carry what was found, and a regression
+'   case asserts the same text (#28).
+'
+' INPUTS
+'   Rec
+'     ByRef. The record to read. It is not changed.
+'
+' RETURNS
+'   String
+'     "<element>.<scope>.<operation>: <outcome>: requested=... observed=...
+'     | <reason>" for each failed observation, joined by " | "; empty when
+'     there is none. When the record cannot be read, "the achieved-state
+'     observations could not be read".
+'
+' BEHAVIOR
+'   - Reads the observations through TST_CertBuildAchievedLists and returns
+'     its Detail, or the unreadable text when that returns FALSE.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertBuildAchievedLists
+'
+' NOTES
+'   None
+'
+' CALLED FROM
+'   - Test_EXCEL_UI_RunReleaseCertification
+'   - M_EXCEL_UI_TEST_ACHIEVED
+'
+' HISTORY
+'   2026-11-28 - Added (#28).
+'
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_HARNESS.TST_CertAchievedSummary"
+
+    Dim StateJson           As String   'Unused: the observation members
+    Dim MismatchJson        As String   'Unused: the mismatch members
+    Dim UnverifiableJson    As String   'Unused: the unverifiable members
+    Dim MismatchLines       As String   'Unused: the MISMATCH lines
+    Dim UnverifiableLines   As String   'Unused: the UNVERIFIABLE lines
+    Dim Checked             As Long     'Unused: the observations read
+    Dim Failed              As Long     'Unused: the failed observations
+    Dim Unverifiable        As Long     'Unused: the unverifiable observations
+    Dim Detail              As String   'Failed observations joined
+
+'------------------------------------------------------------------------------
+' RETURN SUMMARY
+'------------------------------------------------------------------------------
+    'Only the joined detail is wanted; the other outputs are discarded
+        If TST_CertBuildAchievedLists(Rec, StateJson, MismatchJson, _
+            UnverifiableJson, MismatchLines, UnverifiableLines, Checked, _
+            Failed, Unverifiable, Detail) Then
+
+            TST_CertAchievedSummary = Detail
+
+        Else
+            TST_CertAchievedSummary = _
+                "the achieved-state observations could not be read"
+        End If
+
+End Function
+
 Public Function TST_CertTryAppendEntry( _
     ByRef Rec As tCertRecord, _
     ByVal Kind As Long, _
@@ -3065,9 +3681,10 @@ Public Function TST_CertTryAppendEntry( _
 '   then read past the end of that array with every error suppressed (#50).
 '
 '   This is the one append path for every kind of entry: units, skips,
-'   cleanup findings, unverified surfaces and, for the case inventory (#42),
-'   expected cases, case starts, case results and inventory findings. A new
-'   kind adds a TEST_CERT_ENTRY_* value and its count, not a new set of arrays.
+'   cleanup findings, unverified surfaces, for the case inventory (#42),
+'   expected cases, case starts, case results and inventory findings, and for
+'   the achieved state (#28), observations. A new kind adds a TEST_CERT_ENTRY_*
+'   value and its count, not a new set of arrays.
 '
 ' INPUTS
 '   Rec
@@ -3160,7 +3777,7 @@ Public Function TST_CertTryAppendEntry( _
         Stage = TEST_CERT_RECFAIL_KIND
 
         If Kind < TEST_CERT_ENTRY_UNIT Or _
-            Kind > TEST_CERT_ENTRY_INVENTORY Then
+            Kind > TEST_CERT_ENTRY_ACHIEVED Then
 
             TST_CertMarkRecordFailure Rec, Stage, 0
             GoTo SafeExit
@@ -3223,6 +3840,9 @@ Public Function TST_CertTryAppendEntry( _
 
             Case TEST_CERT_ENTRY_CASE_END
                 Rec.CaseEndCount = Rec.CaseEndCount + 1
+
+            Case TEST_CERT_ENTRY_ACHIEVED
+                Rec.AchievedCount = Rec.AchievedCount + 1
 
             Case Else
                 Rec.InventoryCount = Rec.InventoryCount + 1
@@ -3591,12 +4211,12 @@ Public Function TST_CertRecordIsConsistent( _
 '
 ' RETURNS
 '   Boolean
-'     TRUE when the counts are non-negative, the eight kind counts add up to
+'     TRUE when the counts are non-negative, the nine kind counts add up to
 '     EntryCount, and every buffer is either unallocated with EntryCount = 0
 '     or 1-based with an upper bound of at least EntryCount.
 '
 ' BEHAVIOR
-'   - Checks that no count is negative and that the eight kind counts add up
+'   - Checks that no count is negative and that the nine kind counts add up
 '     to EntryCount.
 '   - When they do, checks that every buffer holds at least EntryCount
 '     elements, through TST_CertBufferCapacity.
@@ -3651,13 +4271,15 @@ Public Function TST_CertRecordIsConsistent( _
             (Rec.ExpectedCount >= 0) And _
             (Rec.CaseStartCount >= 0) And _
             (Rec.CaseEndCount >= 0) And _
-            (Rec.InventoryCount >= 0)
+            (Rec.InventoryCount >= 0) And _
+            (Rec.AchievedCount >= 0)
 
         If Consistent Then
             Consistent = (Rec.UnitCount + Rec.SkipCount + _
                 Rec.FindingCount + Rec.UnverifiedCount + _
                 Rec.ExpectedCount + Rec.CaseStartCount + _
-                Rec.CaseEndCount + Rec.InventoryCount = Rec.EntryCount)
+                Rec.CaseEndCount + Rec.InventoryCount + _
+                Rec.AchievedCount = Rec.EntryCount)
         End If
 
 '------------------------------------------------------------------------------
@@ -3749,17 +4371,23 @@ Public Sub TST_CertComposeEvidence( _
 '                    nothing
 '   2  verdict       Complete requires no skip, no recording failure and a
 '                    case inventory that was compared and is exact; Passed
-'                    requires Complete, no failed unit, no cleanup finding and
-'                    cleanup OK. Unit counters and the case inventory are
-'                    separate parts of the verdict
+'                    requires Complete, no failed unit, no cleanup finding,
+'                    cleanup OK and no failed achieved-state observation. Unit
+'                    counters and the case inventory are separate parts of the
+'                    verdict
 '   3  documents     JSON with "cleanupFindings", "cleanupUnverified",
 '                    "cleanupChecked", "manifestVersion", "inventory",
 '                    "expectedCases", "caseResults", "inventoryFindings",
-'                    "recording" and "recordingDetail", and a text report with
+'                    "achieved", "achievedDetail", "achievedChecked",
+'                    "achievedState", "achievedMismatches",
+'                    "achievedUnverifiable", "recording" and
+'                    "recordingDetail", and a text report with
 '                    a CLEANUP line per finding, an UNVERIFIED line per
 '                    unverified surface, a CASES summary with an EXPECTED, a
-'                    CASE and an INVENTORY line per entry, and a RECORDING line
-'                    when recording failed
+'                    CASE and an INVENTORY line per entry, an OBSERVATIONS
+'                    summary with a MISMATCH line per failed observation and an
+'                    UNVERIFIABLE line per surface that could not be verified,
+'                    and a RECORDING line when recording failed
 '
 ' ERROR POLICY
 '   - Does not raise. An error flags the record with
@@ -3771,6 +4399,7 @@ Public Sub TST_CertComposeEvidence( _
 ' DEPENDENCIES
 '   - TST_CertBuildEntryLists
 '   - TST_CertBuildInventoryLists
+'   - TST_CertBuildAchievedLists
 '   - TST_CertSummarize
 '   - TST_CertVerdictLine
 '   - TST_CertRecordingDetail
@@ -3788,6 +4417,9 @@ Public Sub TST_CertComposeEvidence( _
 '   - TST_Case_CertRecordFailsClosed
 '
 ' HISTORY
+'   2026-11-28 - A failed achieved-state observation fails the verdict, and
+'                both documents list the observations, the mismatches and the
+'                surfaces that could not be verified (#28).
 '   2026-11-27 - A run is complete only when its case inventory was compared
 '                and is exact, and both documents list the inventory (#42).
 '   2026-11-18 - Cleanup is FAILED whenever the record holds a finding, and
@@ -3804,26 +4436,35 @@ Public Sub TST_CertComposeEvidence( _
 '------------------------------------------------------------------------------
     Const PROC_NAME As String = "M_EXCEL_UI_TEST_HARNESS.TST_CertComposeEvidence"
 
-    Dim UnitJson        As String   'unitResults members
-    Dim SkipJson        As String   'skipDetail members
-    Dim UnitLines       As String   'Unit lines of the report
-    Dim SkipLines       As String   'Skip lines of the report
-    Dim FindingJson     As String   'cleanupFindings members
-    Dim UnverifiedJson  As String   'cleanupUnverified members
-    Dim FindingLines    As String   'CLEANUP lines of the report
-    Dim UnverifiedLines As String   'UNVERIFIED lines of the report
-    Dim FindingSummary  As String   'Finding details joined
-    Dim ExpectedJson    As String   'expectedCases members
-    Dim CaseJson        As String   'caseResults members
-    Dim InventoryJson   As String   'inventoryFindings members
-    Dim ExpectedLines   As String   'EXPECTED lines of the report
-    Dim CaseLines       As String   'CASE lines of the report
-    Dim InventoryLines  As String   'INVENTORY lines of the report
-    Dim InventoryDetail As String   'Inventory findings joined
-    Dim InventoryPassed As Boolean  'TRUE when the inventory was compared and is exact
-    Dim CallerDetail    As String   'Detail the caller passed in
-    Dim CleanupPassed   As Boolean  'Cleanup verdict after the findings
-    Dim FailNumber      As Long     'Error number of a failure
+    Dim UnitJson            As String   'unitResults members
+    Dim SkipJson            As String   'skipDetail members
+    Dim UnitLines           As String   'Unit lines of the report
+    Dim SkipLines           As String   'Skip lines of the report
+    Dim FindingJson         As String   'cleanupFindings members
+    Dim UnverifiedJson      As String   'cleanupUnverified members
+    Dim FindingLines        As String   'CLEANUP lines of the report
+    Dim UnverifiedLines     As String   'UNVERIFIED lines of the report
+    Dim FindingSummary      As String   'Finding details joined
+    Dim ExpectedJson        As String   'expectedCases members
+    Dim CaseJson            As String   'caseResults members
+    Dim InventoryJson       As String   'inventoryFindings members
+    Dim ExpectedLines       As String   'EXPECTED lines of the report
+    Dim CaseLines           As String   'CASE lines of the report
+    Dim InventoryLines      As String   'INVENTORY lines of the report
+    Dim InventoryDetail     As String   'Inventory findings joined
+    Dim InventoryPassed     As Boolean  'TRUE when the inventory was compared and is exact
+    Dim AchievedJson        As String   'achievedState members
+    Dim MismatchJson        As String   'achievedMismatches members
+    Dim UnverifiableJson    As String   'achievedUnverifiable members
+    Dim MismatchLines       As String   'MISMATCH lines of the report
+    Dim UnverifiableLines   As String   'UNVERIFIABLE lines of the report
+    Dim AchievedDetail      As String   'Failed observations joined
+    Dim AchievedChecked     As Long     'Observations read
+    Dim AchievedFailed      As Long     'Failed observations read
+    Dim AchievedUnverified  As Long     'Observations that could not be verified
+    Dim CallerDetail        As String   'Detail the caller passed in
+    Dim CleanupPassed       As Boolean  'Cleanup verdict after the findings
+    Dim FailNumber          As Long     'Error number of a failure
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3866,6 +4507,20 @@ Public Sub TST_CertComposeEvidence( _
             CaseLines:=CaseLines, _
             InventoryLines:=InventoryLines
 
+    'The achieved-state observations are read from the same record, after the
+    'same check
+        TST_CertBuildAchievedLists _
+            Rec:=Rec, _
+            StateJson:=AchievedJson, _
+            MismatchJson:=MismatchJson, _
+            UnverifiableJson:=UnverifiableJson, _
+            MismatchLines:=MismatchLines, _
+            UnverifiableLines:=UnverifiableLines, _
+            Checked:=AchievedChecked, _
+            Failed:=AchievedFailed, _
+            Unverifiable:=AchievedUnverified, _
+            Detail:=AchievedDetail
+
 '------------------------------------------------------------------------------
 ' DETERMINE VERDICT
 '------------------------------------------------------------------------------
@@ -3894,7 +4549,11 @@ Public Sub TST_CertComposeEvidence( _
         End If
 
         Complete = (Rec.SkipCount = 0) And Not Rec.RecordFailed And InventoryPassed
-        Passed = (UnitsFailed = 0) And CleanupPassed And Complete
+
+    'A write whose achieved state did not read back as requested fails the run,
+    'whatever the production setter returned and whatever the units reported
+        Passed = (UnitsFailed = 0) And CleanupPassed And Complete And _
+            (AchievedFailed = 0)
 
         Verdict = TST_CertVerdictLine( _
             Passed:=Passed, _
@@ -3928,7 +4587,13 @@ Public Sub TST_CertComposeEvidence( _
             InventoryDetail:=InventoryDetail, _
             ExpectedJson:=ExpectedJson, _
             CaseJson:=CaseJson, _
-            InventoryJson:=InventoryJson)
+            InventoryJson:=InventoryJson, _
+            AchievedChecked:=AchievedChecked, _
+            AchievedFailed:=AchievedFailed, _
+            AchievedDetail:=AchievedDetail, _
+            AchievedJson:=AchievedJson, _
+            MismatchJson:=MismatchJson, _
+            UnverifiableJson:=UnverifiableJson)
 
         ReportText = TST_CertBuildTextReport( _
             Rec:=Rec, _
@@ -3942,7 +4607,12 @@ Public Sub TST_CertComposeEvidence( _
             InventoryPassed:=InventoryPassed, _
             ExpectedLines:=ExpectedLines, _
             CaseLines:=CaseLines, _
-            InventoryLines:=InventoryLines)
+            InventoryLines:=InventoryLines, _
+            AchievedChecked:=AchievedChecked, _
+            AchievedFailed:=AchievedFailed, _
+            AchievedUnverified:=AchievedUnverified, _
+            MismatchLines:=MismatchLines, _
+            UnverifiableLines:=UnverifiableLines)
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -4187,6 +4857,9 @@ Private Function TST_CertBuildEntryLists( _
                         TEST_CERT_ENTRY_CASE_END, _
                         TEST_CERT_ENTRY_INVENTORY
                     'The case inventory is listed by TST_CertBuildInventoryLists
+
+                    Case TEST_CERT_ENTRY_ACHIEVED
+                    'The observations are listed by TST_CertBuildAchievedLists
 
                     Case Else
                         Matched = False
@@ -4514,7 +5187,13 @@ Public Function TST_CertBuildJsonEvidence( _
     ByVal InventoryDetail As String, _
     ByVal ExpectedJson As String, _
     ByVal CaseJson As String, _
-    ByVal InventoryJson As String) _
+    ByVal InventoryJson As String, _
+    ByVal AchievedChecked As Long, _
+    ByVal AchievedFailed As Long, _
+    ByVal AchievedDetail As String, _
+    ByVal AchievedJson As String, _
+    ByVal MismatchJson As String, _
+    ByVal UnverifiableJson As String) _
     As String
 '
 '------------------------------------------------------------------------------
@@ -4556,6 +5235,13 @@ Public Function TST_CertBuildJsonEvidence( _
 '     Members of the expectedCases, caseResults and inventoryFindings arrays,
 '     composed by TST_CertBuildInventoryLists.
 '
+'   AchievedChecked / AchievedFailed / AchievedDetail
+'     The observations read, how many of them failed and the failures joined.
+'
+'   AchievedJson / MismatchJson / UnverifiableJson
+'     Members of the achievedState, achievedMismatches and achievedUnverifiable
+'     arrays, composed by TST_CertBuildAchievedLists.
+'
 ' RETURNS
 '   String
 '     A single-line JSON document. Cleanup is reported as "cleanup",
@@ -4565,7 +5251,12 @@ Public Function TST_CertBuildJsonEvidence( _
 '     reported as "manifestVersion", "inventory", "inventoryDetail",
 '     "expectedCases" (every case the manifest lists), "caseResults" (every
 '     case that started, in order, with its one terminal status) and
-'     "inventoryFindings" (every difference between the two).
+'     "inventoryFindings" (every difference between the two). The achieved
+'     state is reported as "achieved" (OK, or FAILED when an observation
+'     failed), "achievedDetail", "achievedChecked", "achievedState" (every
+'     observation with its element, scope, operation, requested and observed
+'     state, outcome and reason), "achievedMismatches" and
+'     "achievedUnverifiable".
 '
 ' BEHAVIOR
 '   - Takes the VBA generation and the Office bitness from conditional
@@ -4594,6 +5285,7 @@ Public Function TST_CertBuildJsonEvidence( _
 '   - TST_CertComposeEvidence
 '
 ' HISTORY
+'   2026-11-28 - Reports the achieved-state observations (#28).
 '   2026-11-27 - Reports the case inventory (#42).
 '   2026-11-18 - Reports "cleanupFindings", "cleanupUnverified" and
 '                "cleanupChecked" (#35).
@@ -4666,7 +5358,16 @@ Public Function TST_CertBuildJsonEvidence( _
             ",""inventoryDetail"":""" & TST_CertJsonEscape(InventoryDetail) & """" & _
             ",""expectedCases"":[" & ExpectedJson & "]" & _
             ",""caseResults"":[" & CaseJson & "]" & _
-            ",""inventoryFindings"":[" & InventoryJson & "]" & _
+            ",""inventoryFindings"":[" & InventoryJson & "]"
+
+    'The achieved state, then the recording status and the verdict
+        Json = Json & _
+            ",""achieved"":""" & IIf(AchievedFailed = 0, "OK", "FAILED") & """" & _
+            ",""achievedDetail"":""" & TST_CertJsonEscape(AchievedDetail) & """" & _
+            ",""achievedChecked"":" & CStr(AchievedChecked) & _
+            ",""achievedState"":[" & AchievedJson & "]" & _
+            ",""achievedMismatches"":[" & MismatchJson & "]" & _
+            ",""achievedUnverifiable"":[" & UnverifiableJson & "]" & _
             ",""recording"":""" & IIf(Recorded, "OK", "FAILED") & """" & _
             ",""recordingDetail"":""" & TST_CertJsonEscape(RecordingDetail) & """" & _
             ",""complete"":" & IIf(Complete And Recorded, "true", "false") & _
@@ -4771,7 +5472,12 @@ Public Function TST_CertBuildTextReport( _
     ByVal InventoryPassed As Boolean, _
     ByVal ExpectedLines As String, _
     ByVal CaseLines As String, _
-    ByVal InventoryLines As String) _
+    ByVal InventoryLines As String, _
+    ByVal AchievedChecked As Long, _
+    ByVal AchievedFailed As Long, _
+    ByVal AchievedUnverified As Long, _
+    ByVal MismatchLines As String, _
+    ByVal UnverifiableLines As String) _
     As String
 '
 '------------------------------------------------------------------------------
@@ -4808,6 +5514,14 @@ Public Function TST_CertBuildTextReport( _
 '     Whether the case inventory was compared and agrees, and the EXPECTED,
 '     CASE and INVENTORY lines composed by TST_CertBuildInventoryLists.
 '
+'   AchievedChecked / AchievedFailed / AchievedUnverified
+'     The achieved-state observations read, how many failed and how many
+'     could not be verified.
+'
+'   MismatchLines / UnverifiableLines
+'     The MISMATCH and UNVERIFIABLE lines composed by
+'     TST_CertBuildAchievedLists.
+'
 ' RETURNS
 '   String
 '     A multi-line report. A recording failure adds a RECORDING line directly
@@ -4816,6 +5530,9 @@ Public Function TST_CertBuildTextReport( _
 '     compare is an UNVERIFIED line after them. The case inventory follows: a
 '     CASES summary line, then an EXPECTED line per case the manifest lists, a
 '     CASE line per case that started, and an INVENTORY line per difference.
+'     The achieved state follows: an OBSERVATIONS summary line, a MISMATCH line
+'     per failed observation and an UNVERIFIABLE line per surface that could
+'     not be verified.
 '
 ' BEHAVIOR
 '   - Writes the heading: the title, the Excel version and build, the
@@ -4825,7 +5542,8 @@ Public Function TST_CertBuildTextReport( _
 '   - Appends the unit, skip and finding lines, a CLEANUP line for
 '     CleanupDetail when it is not empty, then the unverified lines.
 '   - Appends the CASES summary line, then the expected, case and inventory
-'     lines, and returns the report.
+'     lines, then the OBSERVATIONS summary line and the MISMATCH and
+'     UNVERIFIABLE lines, and returns the report.
 '
 ' ERROR POLICY
 '   - Does not raise.
@@ -4841,6 +5559,8 @@ Public Function TST_CertBuildTextReport( _
 '   - TST_CertComposeEvidence
 '
 ' HISTORY
+'   2026-11-28 - Summarizes the achieved-state observations and lists every
+'                mismatch and every surface that could not be verified (#28).
 '   2026-11-27 - Lists the case inventory (#42).
 '   2026-11-18 - Lists every cleanup finding and unverified surface (#35).
 '   2026-11-16 - Takes the composed lines and reports a recording failure
@@ -4908,6 +5628,17 @@ Public Function TST_CertBuildTextReport( _
             " inventory=" & IIf(InventoryPassed, "OK", "FAILED") & vbNewLine
 
         Report = Report & ExpectedLines & CaseLines & InventoryLines
+
+    'The achieved state: the counts first, then every mismatch and every
+    'surface that could not be verified, so that a clean line says what it
+    'excludes
+        Report = Report & "  OBSERVATIONS  checked=" & CStr(AchievedChecked) & _
+            " verified=" & CStr(AchievedChecked - AchievedFailed - AchievedUnverified) & _
+            " failed=" & CStr(AchievedFailed) & _
+            " unverifiable=" & CStr(AchievedUnverified) & _
+            " achieved=" & IIf(AchievedFailed = 0, "OK", "FAILED") & vbNewLine
+
+        Report = Report & MismatchLines & UnverifiableLines
 
 '------------------------------------------------------------------------------
 ' RETURN REPORT
@@ -7561,7 +8292,7 @@ ErrorHandler:
 
 End Function
 
-Private Function TST_TrySetBooleanProperty( _
+Public Function TST_TrySetBooleanProperty( _
     ByVal Target As Object, _
     ByVal PropertyName As String, _
     ByVal NewValue As Boolean, _
@@ -7608,10 +8339,20 @@ Private Function TST_TrySetBooleanProperty( _
 '
 ' NOTES
 '   - Intended for Application and Window Boolean property writes in this
-'     module
+'     module, and for the restoration of the achieved-state unit, which must not
+'     put state back through the API under test
+'
+' CALLED FROM
+'   - TST_RestoreBoolean
+'   - M_EXCEL_UI_TEST_ACHIEVED
+'
+' HISTORY
+'   2026-11-28 - Public, so that the achieved-state unit restores through it
+'                (#28).
+'   2026-07-25
 '
 ' UPDATED
-'   2026-07-25
+'   2026-11-28
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -7778,7 +8519,7 @@ ErrorHandler:
 
 End Function
 
-Private Function TST_TrySetRibbonVisible( _
+Public Function TST_TrySetRibbonVisible( _
     ByVal IsVisible As Boolean, _
     ByRef FailMsg As String) As Boolean
 '
@@ -7820,8 +8561,17 @@ Private Function TST_TrySetRibbonVisible( _
 ' NOTES
 '   None
 '
-' UPDATED
+' CALLED FROM
+'   - TST_RestoreState
+'   - M_EXCEL_UI_TEST_ACHIEVED
+'
+' HISTORY
+'   2026-11-28 - Public, so that the achieved-state unit restores through it
+'                (#28).
 '   2026-07-25
+'
+' UPDATED
+'   2026-11-28
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------

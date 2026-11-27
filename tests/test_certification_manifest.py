@@ -42,15 +42,15 @@ class ManifestFileTests(unittest.TestCase):
         self.manifest = manifests.parse_manifest(MANIFEST.read_text(encoding="utf-8"))
 
     def test_this_repository_manifest_is_valid(self) -> None:
-        self.assertEqual(self.manifest.version, 1)
+        self.assertEqual(self.manifest.version, 2)
         self.assertEqual([unit.name for unit in self.manifest.units],
                          ["CertificationSelfTest", "OwnershipCleanupChecks", "RegressionPack", "SnapshotIdentity",
-                          "TitleBarSdiIdentity"])
+                          "TitleBarSdiIdentity", "AchievedStateVerification"])
         self.assertEqual(len(self.manifest.cases), len(set(self.manifest.cases)))
 
     def test_isolated_units_come_first(self) -> None:
         executions = [unit.execution for unit in self.manifest.units]
-        self.assertEqual(executions, ["isolated", "isolated", "live", "live", "live"])
+        self.assertEqual(executions, ["isolated", "isolated", "live", "live", "live", "live"])
 
     def test_the_cases_the_issue_names_are_required_and_mandatory(self) -> None:
         for case in NAMED_BY_THE_ISSUE:
@@ -67,7 +67,35 @@ class ManifestFileTests(unittest.TestCase):
 
     def test_pairs_follow_the_units_in_order(self) -> None:
         self.assertEqual(self.manifest.pairs[0], ("CertificationSelfTest", "Test_EXCEL_UI_RunCertificationSelfTest"))
-        self.assertEqual(self.manifest.pairs[-1][0], "TitleBarSdiIdentity")
+        self.assertEqual(self.manifest.pairs[-1][0], "AchievedStateVerification")
+
+    def test_the_achieved_state_unit_runs_last_through_its_own_runner(self) -> None:
+        unit = self.manifest.units[-1]
+        self.assertEqual((unit.name, unit.execution, unit.runner),
+                         ("AchievedStateVerification", "live", "Test_EXCEL_UI_RunAchievedStateVerification"))
+        self.assertEqual(len(unit.cases), 8)
+        self.assertIn("TST_Case_AchievedMismatchFailsTheUnit", self.manifest.required)
+        self.assertIn("TST_Case_AchievedOutcomesAreDistinct", self.manifest.required)
+
+    def test_the_achieved_state_section_lists_every_managed_element_and_scope(self) -> None:
+        section = self.manifest.achieved
+        assert section is not None
+        self.assertEqual(section.unit, "AchievedStateVerification")
+        pairs = [(item.element, item.scope) for item in section.observations]
+        self.assertEqual(len(pairs), len(set(pairs)))
+        for element in ("StatusBar", "ScrollBars", "FormulaBar"):
+            self.assertIn((element, "Application"), pairs)
+        for element in ("Headings", "WorkbookTabs", "Gridlines"):
+            for scope in ("AllWindows", "ActiveWindow", "ActiveWorkbookWindows"):
+                self.assertIn((element, scope), pairs)
+        self.assertIn(("TitleBar", "ActiveFrame"), pairs)
+        self.assertIn(("Ribbon", "ActiveWindow"), pairs)
+        self.assertEqual([item.element for item in section.observations if item.may_be_unverifiable], ["Ribbon"])
+
+    def test_a_manifest_without_the_section_still_parses(self) -> None:
+        doc = document()
+        del doc["achieved_state"]
+        self.assertIsNone(manifests.parse_manifest(json.dumps(doc)).achieved)
 
 
 class ManifestValidationTests(unittest.TestCase):
@@ -113,6 +141,20 @@ class ManifestValidationTests(unittest.TestCase):
                 {"Test_EXCEL_UI_RunSnapshotIdentity": "no"}), "interactive_runners lists mandatory"),
             "interactive runner without a reason": (lambda doc: doc["interactive_runners"].update(
                 {"Test_EXCEL_UI_RunMore": ""}), "must be non-empty text"),
+            "achieved unit that is not a unit": (lambda doc: doc["achieved_state"].update(unit="Nothing"),
+                                                 "is not a unit of the manifest"),
+            "achieved section without a key": (lambda doc: doc["achieved_state"].pop("observations"),
+                                               "achieved_state: missing observations"),
+            "achieved section with an unknown key": (lambda doc: doc["achieved_state"].update(extra=1),
+                                                     "achieved_state: unknown extra"),
+            "achieved section without observations": (lambda doc: doc["achieved_state"].update(observations=[]),
+                                                      "observations must be a non-empty list"),
+            "achieved observation twice": (lambda doc: doc["achieved_state"]["observations"].append(
+                {"element": "StatusBar", "scope": "Application"}), "more than once"),
+            "achieved observation without a scope": (lambda doc: doc["achieved_state"]["observations"][0].pop("scope"),
+                                                     "missing scope"),
+            "achieved flag that is not a boolean": (lambda doc: doc["achieved_state"]["observations"][0].update(
+                may_be_unverifiable="yes"), "must be true or false"),
         }
         for name, (change, fragment) in cases.items():
             with self.subTest(name):

@@ -110,7 +110,8 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(default, [
             "Test_EXCEL_UI_RunAll", "Test_EXCEL_UI_RunCore", "Test_EXCEL_UI_RunTitleBarOnly",
             "Test_EXCEL_UI_RunSnapshotIdentity", "Test_EXCEL_UI_RunTitleBarSdiIdentity",
-            "Test_EXCEL_UI_RunCertificationSelfTest", "Test_EXCEL_UI_RunOwnershipCleanupChecks"])
+            "Test_EXCEL_UI_RunAchievedStateVerification", "Test_EXCEL_UI_RunCertificationSelfTest",
+            "Test_EXCEL_UI_RunOwnershipCleanupChecks"])
         publics = vba_publics(*sorted((ROOT / "test").glob("*.bas")))
         for name in [*default, probe]:
             with self.subTest(name):

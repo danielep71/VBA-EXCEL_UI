@@ -117,6 +117,7 @@ $DefaultRunners = @(
     'Test_EXCEL_UI_RunTitleBarOnly',
     'Test_EXCEL_UI_RunSnapshotIdentity',
     'Test_EXCEL_UI_RunTitleBarSdiIdentity',
+    'Test_EXCEL_UI_RunAchievedStateVerification',
     'Test_EXCEL_UI_RunCertificationSelfTest',
     'Test_EXCEL_UI_RunOwnershipCleanupChecks'
 )

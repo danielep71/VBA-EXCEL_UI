@@ -104,7 +104,8 @@ continues the production import order:
 | 6 | `test/M_EXCEL_UI_TEST_RUNTIME.bas` | `M_EXCEL_UI_TEST_RUNTIME` | Runtime cases: visibility, structured results, target scope, failure list, and quiet-update scope |
 | 7 | `test/M_EXCEL_UI_TEST_SNAPSHOT.bas` | `M_EXCEL_UI_TEST_SNAPSHOT` | Snapshot cases, the snapshot-identity runner, and the Ribbon SDI probe |
 | 8 | `test/M_EXCEL_UI_TEST_TITLEBAR.bas` | `M_EXCEL_UI_TEST_TITLEBAR` | Title-bar cases, the title-bar pack, and the SDI title-bar identity runner |
-| 9 | `test/M_EXCEL_UI_TEST_CERTIFICATION.bas` | `M_EXCEL_UI_TEST_CERTIFICATION` | Release certification, the combined regression pack, and the certification cases |
+| 9 | `test/M_EXCEL_UI_TEST_ACHIEVED.bas` | `M_EXCEL_UI_TEST_ACHIEVED` | Achieved-state verification: write, settle, read back and compare for every managed element, with its fault seams |
+| 10 | `test/M_EXCEL_UI_TEST_CERTIFICATION.bas` | `M_EXCEL_UI_TEST_CERTIFICATION` | Release certification, the combined regression pack, and the certification cases |
 
 <!-- /generated:modules:development -->
 
@@ -159,9 +160,9 @@ saved. Compile afterwards as in step 5. See
 A successful import is not sufficient evidence that the installation is correct.
 
 `Test_EXCEL_UI_RunReleaseCertification` is defined in
-`test/M_EXCEL_UI_TEST_CERTIFICATION.bas`, one of the five test modules of the
+`test/M_EXCEL_UI_TEST_CERTIFICATION.bas`, one of the six test modules of the
 development configuration above; none of them is part of the four-module
-production package. Before release or production certification, import all five
+production package. Before release or production certification, import all six
 test modules from the **same tag or commit** as the production modules, in the
 order above, compile the complete VBA project, and then run the certification
 procedure. If the destination workbook is not intended to retain test code,
@@ -207,7 +208,7 @@ Before upgrading:
 - Replace all four production modules together from the same tag.
 - Re-import the matching optional test modules when validating an upgrade.
   Remove `M_EXCEL_UI_REGRESSION_TESTS` first if the project still holds it:
-  the five test modules replace it and declare the same runners, so the
+  the six test modules replace it and declare the same runners, so the
   project does not compile while both are present.
 - Review newly observable diagnostics and recovery behavior even when public signatures are unchanged.
 - Never restore per-window state by collection index or reuse a stale snapshot as current authority.

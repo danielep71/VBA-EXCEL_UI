@@ -50,6 +50,7 @@ Option Private Module
 '   - M_EXCEL_UI_TEST_RUNTIME
 '   - M_EXCEL_UI_TEST_SNAPSHOT
 '   - M_EXCEL_UI_TEST_TITLEBAR
+'   - M_EXCEL_UI_TEST_ACHIEVED
 '
 ' NOTES
 '   The runners are destructive: they create and close temporary workbooks and
@@ -78,6 +79,8 @@ Option Private Module
 '     - RegressionPack: the full regression pack, title-bar cases included
 '     - SnapshotIdentity
 '     - TitleBarSdiIdentity
+'     - AchievedStateVerification: reads back the state every managed element
+'       reaches after a write (#28)
 '
 '   Case inventory
 '     - every mandatory case is a procedure the manifest names, and runs
@@ -131,6 +134,9 @@ Option Private Module
 '   1.1.2
 '
 ' HISTORY
+'   2026-11-28 - Certification runs the AchievedStateVerification unit, and the
+'                error it raises names every achieved-state observation that
+'                failed (#28).
 '   2026-11-28 - The entry baseline is captured before the isolated units, so
 '                what they leave behind is judged against it and reported as
 '                an isolated finding, and the entry window is restored before
@@ -536,10 +542,11 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   - Runs the certification self-test and the ownership checks first, as
 '     isolated units: each calls certification itself, so each runs before the
 '     live record opens and is recorded once it is open.
-'   - Runs the full regression pack, the snapshot-identity runner and the SDI
-'     title-bar identity runner, each under its own error boundary so one
-'     failing unit does not conceal the rest. Every mandatory case records its
-'     start and one terminal status under its identifier.
+'   - Runs the full regression pack, the snapshot-identity runner, the SDI
+'     title-bar identity runner and the achieved-state verification runner,
+'     each under its own error boundary so one failing unit does not conceal
+'     the rest. Every mandatory case records its start and one terminal status
+'     under its identifier.
 '   - Releases a snapshot a unit left behind before the next unit runs, so the
 '     next unit is not refused because of it, and records the leak.
 '   - Verifies cleanup by comparing the exit state with that baseline, and
@@ -557,8 +564,8 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   - Reports FAIL | INCOMPLETE, and names the failure in both documents,
 '     when a unit or skip could not be recorded.
 '   - Raises when the verdict is anything other than a complete pass, with the
-'     verdict, every cleanup finding, the failed units and the inventory
-'     findings in the error it raises.
+'     verdict, every cleanup finding, the failed units, the inventory findings
+'     and every achieved-state observation that failed in the error it raises.
 '
 ' ERROR POLICY
 '   - Individual unit failures are captured, not propagated.
@@ -593,6 +600,8 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
 '   that nested call clears the record.
 '
 ' HISTORY
+'   2026-11-28 - Runs the AchievedStateVerification unit and names the failed
+'                achieved-state observations in the error it raises (#28).
 '   2026-11-27 - Runs the isolated units, records and compares the case
 '                inventory, and adds the failed-unit and inventory-gap run
 '                faults (#42).
@@ -625,6 +634,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
     Dim InventoryOK         As Boolean          'TRUE when the expected and observed cases agree
     Dim UnitDetail          As String           'Failed units, for the error raised
     Dim InventoryDetail     As String           'Inventory findings, for the error raised
+    Dim AchievedDetail      As String           'Failed achieved-state observations, for the error raised
 
     Dim UnitsFailed     As Long     'Units that reported failure
     Dim CleanupOK       As Boolean  'TRUE when no state leaked
@@ -798,6 +808,7 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
                 TST_CertRunUnit "RegressionPack"
                 TST_CertRunUnit "SnapshotIdentity"
                 TST_CertRunUnit "TitleBarSdiIdentity"
+                TST_CertRunUnit "AchievedStateVerification"
 
         End Select
 
@@ -901,6 +912,8 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
                     InventoryDetail, "the case inventory was not compared")
             End If
 
+            AchievedDetail = TST_CertAchievedSummary(m_CertRecord)
+
             Err.Raise _
                 TEST_CERT_ERR_BASE + 3, _
                 PROC_NAME, _
@@ -908,7 +921,8 @@ Public Sub Test_EXCEL_UI_RunReleaseCertification()
                 IIf(Len(CleanupDetail) > 0, " | " & CleanupDetail, vbNullString) & _
                 IIf(Len(RecordingDetail) > 0, " | " & RecordingDetail, vbNullString) & _
                 IIf(Len(UnitDetail) > 0, " | failed units: " & UnitDetail, vbNullString) & _
-                IIf(Len(InventoryDetail) > 0, " | inventory: " & InventoryDetail, vbNullString)
+                IIf(Len(InventoryDetail) > 0, " | inventory: " & InventoryDetail, vbNullString) & _
+                IIf(Len(AchievedDetail) > 0, " | achieved state: " & AchievedDetail, vbNullString)
 
         End If
 
@@ -1281,6 +1295,7 @@ Private Sub TST_CertExecuteUnit( _
 '   - TST_CertRunCase
 '   - TST_RunRegressionPack
 '   - Test_EXCEL_UI_RunTitleBarSdiIdentity
+'   - Test_EXCEL_UI_RunAchievedStateVerification
 '   - TST_CertSelfTestCaptureFailureUnit
 '   - TST_CertSelfTestFollowingUnit
 '   - TST_CertSelfTestForcedFailureUnit
@@ -1361,6 +1376,9 @@ Private Sub TST_CertExecuteUnit( _
 
             Case "TitleBarSdiIdentity"
                 Test_EXCEL_UI_RunTitleBarSdiIdentity
+
+            Case "AchievedStateVerification"
+                Test_EXCEL_UI_RunAchievedStateVerification
 
             Case "SelfTest.CaptureFailure"
                 TST_CertSelfTestCaptureFailureUnit
@@ -1715,7 +1733,8 @@ Private Function TST_CertManifestCase( _
 '   - Clears UnitName and CaseId and sets the result to FALSE.
 '   - Looks Index up in a Select Case. Cases 1 and 2 are the two isolated
 '     units, 3 to 47 belong to the RegressionPack unit, 48 to the
-'     SnapshotIdentity unit and 49 to 54 to the TitleBarSdiIdentity unit.
+'     SnapshotIdentity unit, 49 to 54 to the TitleBarSdiIdentity unit and 55 to
+'     62 to the AchievedStateVerification unit.
 '   - For a listed Index it sets UnitName and CaseId and returns TRUE. Any
 '     other Index leaves both empty and returns FALSE.
 '
@@ -1964,6 +1983,38 @@ Private Function TST_CertManifestCase( _
             Case 54
                 UnitName = "TitleBarSdiIdentity"
                 CaseId = "TST_Case_TitleBarClosedFrameReopenedIsRefused"
+
+            Case 55
+                UnitName = "AchievedStateVerification"
+                CaseId = "TST_Case_AchievedAppLevelState"
+
+            Case 56
+                UnitName = "AchievedStateVerification"
+                CaseId = "TST_Case_AchievedWindowStateAllWindows"
+
+            Case 57
+                UnitName = "AchievedStateVerification"
+                CaseId = "TST_Case_AchievedWindowStateActiveWindow"
+
+            Case 58
+                UnitName = "AchievedStateVerification"
+                CaseId = "TST_Case_AchievedWindowStateActiveWorkbookWindows"
+
+            Case 59
+                UnitName = "AchievedStateVerification"
+                CaseId = "TST_Case_AchievedTitleBarFrameState"
+
+            Case 60
+                UnitName = "AchievedStateVerification"
+                CaseId = "TST_Case_AchievedRibbonOwningWindow"
+
+            Case 61
+                UnitName = "AchievedStateVerification"
+                CaseId = "TST_Case_AchievedOutcomesAreDistinct"
+
+            Case 62
+                UnitName = "AchievedStateVerification"
+                CaseId = "TST_Case_AchievedMismatchFailsTheUnit"
 
             Case Else
                 Exit Function
@@ -2302,6 +2353,30 @@ Private Sub TST_CertDispatchCase( _
 
             Case "TST_Case_TitleBarClosedFrameReopenedIsRefused"
                 TST_Case_TitleBarClosedFrameReopenedIsRefused
+
+            Case "TST_Case_AchievedAppLevelState"
+                TST_Case_AchievedAppLevelState
+
+            Case "TST_Case_AchievedWindowStateAllWindows"
+                TST_Case_AchievedWindowStateAllWindows
+
+            Case "TST_Case_AchievedWindowStateActiveWindow"
+                TST_Case_AchievedWindowStateActiveWindow
+
+            Case "TST_Case_AchievedWindowStateActiveWorkbookWindows"
+                TST_Case_AchievedWindowStateActiveWorkbookWindows
+
+            Case "TST_Case_AchievedTitleBarFrameState"
+                TST_Case_AchievedTitleBarFrameState
+
+            Case "TST_Case_AchievedRibbonOwningWindow"
+                TST_Case_AchievedRibbonOwningWindow
+
+            Case "TST_Case_AchievedOutcomesAreDistinct"
+                TST_Case_AchievedOutcomesAreDistinct
+
+            Case "TST_Case_AchievedMismatchFailsTheUnit"
+                TST_Case_AchievedMismatchFailsTheUnit
 
             Case Else
                 Err.Raise _
@@ -5825,6 +5900,9 @@ Public Function TST_RunRunnerWithLog( _
 
             Case "Test_EXCEL_UI_RunTitleBarSdiIdentity"
                 Test_EXCEL_UI_RunTitleBarSdiIdentity
+
+            Case "Test_EXCEL_UI_RunAchievedStateVerification"
+                Test_EXCEL_UI_RunAchievedStateVerification
 
             Case "Test_EXCEL_UI_RunCertificationSelfTest"
                 Test_EXCEL_UI_RunCertificationSelfTest

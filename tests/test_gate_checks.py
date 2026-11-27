@@ -584,8 +584,8 @@ class CertificationManifest(GateTestCase):
         self.assertFails("TST_Case_TitleBarFrameRefreshDebtRetried is not a mandatory case of any unit")
 
     def test_fails_when_the_registered_version_differs(self) -> None:
-        self.repo.replace(TESTS, "TEST_CERT_MANIFEST_VERSION As Long = 1", "TEST_CERT_MANIFEST_VERSION As Long = 2")
-        self.assertFails("TEST_CERT_MANIFEST_VERSION is 2, the manifest's manifest_version is 1")
+        self.repo.replace(TESTS, "TEST_CERT_MANIFEST_VERSION As Long = 2", "TEST_CERT_MANIFEST_VERSION As Long = 3")
+        self.assertFails("TEST_CERT_MANIFEST_VERSION is 3, the manifest's manifest_version is 2")
 
     def test_fails_when_the_policy_names_no_manifest(self) -> None:
         policy = json.loads(self.repo.read_text(self.POLICY))
