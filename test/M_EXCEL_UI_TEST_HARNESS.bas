@@ -413,7 +413,7 @@ Public Sub TST_InjectPostCapture(ByVal FaultKind As Long)
 
 '
 '------------------------------------------------------------------------------
-'                           TST INJECT POST CAPTURE
+'                            ARM POST CAPTURE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot post-capture fault for the next runner that reaches its
@@ -432,8 +432,17 @@ Public Sub TST_InjectPostCapture(ByVal FaultKind As Long)
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Stores FaultKind in the module-level m_InjectFault.
+'
 ' ERROR POLICY
 '   - Cannot raise
+'
+' DEPENDENCIES
+'   None beyond the module-level m_InjectFault.
+'
+' NOTES
+'   The fault is one-shot: TST_TakePostCaptureFault returns it and disarms it.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunOwnershipCleanupChecks
@@ -450,7 +459,7 @@ Public Function TST_TakePostCaptureFault() As Long
 
 '
 '------------------------------------------------------------------------------
-'                         TST TAKE POST CAPTURE FAULT
+'                           TAKE POST CAPTURE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the armed fault and disarm it in the same step.
@@ -460,11 +469,24 @@ Public Function TST_TakePostCaptureFault() As Long
 '   read it and then failed, and every caller reads it immediately before
 '   failing on purpose.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   The armed fault kind, or TEST_FAULT_NONE
 '
+' BEHAVIOR
+'   - Returns the value of m_InjectFault.
+'   - Sets m_InjectFault back to TEST_FAULT_NONE.
+'
 ' ERROR POLICY
 '   - Cannot raise
+'
+' DEPENDENCIES
+'   None beyond the module-level m_InjectFault.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunCertificationSelfTest
@@ -484,7 +506,7 @@ Public Sub TST_CertInjectRecordFault( _
     ByVal BufferId As Long)
 '
 '------------------------------------------------------------------------------
-'                         TST CERT INJECT RECORD FAULT
+'                         ARM RECORD ALLOCATION FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot allocation failure for the next certification record
@@ -513,8 +535,17 @@ Public Sub TST_CertInjectRecordFault( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Stores FaultKind in m_CertRecordFault.
+'   - Stores BufferId in m_CertRecordFaultBuffer.
+'   - Validates neither value; TST_CertTakeRecordFault reads both.
+'
 ' ERROR POLICY
 '   - Cannot raise.
+'
+' DEPENDENCIES
+'   None beyond the module-level m_CertRecordFault and
+'   m_CertRecordFaultBuffer.
 '
 ' NOTES
 '   The fault is consumed only by an allocation it matches: a FIRST fault is
@@ -543,7 +574,7 @@ Private Function TST_CertTakeRecordFault( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT TAKE RECORD FAULT
+'                          TAKE MATCHING RECORD FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report whether the armed record fault matches this allocation, and disarm
@@ -565,8 +596,24 @@ Private Function TST_CertTakeRecordFault( _
 '   Boolean
 '     TRUE when the allocation must fail; the fault is then disarmed.
 '
+' BEHAVIOR
+'   - Matches by allocation shape: a FIRST fault matches when Allocated is
+'     FALSE, a GROWTH fault when it is TRUE. Any other armed value, including
+'     none, does not match.
+'   - When the fault matches and names a buffer other than
+'     TEST_CERT_BUFFER_ANY, it also requires BufferId to equal that buffer.
+'   - When the fault fires, disarms both fault fields.
+'   - Returns whether the fault fired.
+'
 ' ERROR POLICY
 '   - Cannot raise.
+'
+' DEPENDENCIES
+'   None beyond the module-level m_CertRecordFault and
+'   m_CertRecordFaultBuffer.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertReserveBuffer
@@ -627,7 +674,7 @@ Public Sub TST_CertInjectRunFault( _
     ByVal FaultKind As Long)
 '
 '------------------------------------------------------------------------------
-'                          TST CERT INJECT RUN FAULT
+'                         ARM CERTIFICATION RUN FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot fault for the next call of
@@ -650,8 +697,15 @@ Public Sub TST_CertInjectRunFault( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Stores FaultKind in the module-level m_CertRunFault.
+'
 ' ERROR POLICY
 '   - Cannot raise.
+'
+' DEPENDENCIES
+'   None beyond the module-level m_CertRunFault, which TST_CertTakeRunFault
+'   reads.
 '
 ' NOTES
 '   The fault is consumed by the next certification call whether or not it
@@ -676,7 +730,7 @@ Public Function TST_CertTakeRunFault() As Long
 
 '
 '------------------------------------------------------------------------------
-'                           TST CERT TAKE RUN FAULT
+'                         TAKE CERTIFICATION RUN FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the armed run fault and disarm it in the same step.
@@ -685,11 +739,24 @@ Public Function TST_CertTakeRunFault() As Long
 '   Reading and clearing separately would leave the fault armed on a path that
 '   read it and then failed, and the only reader acts on it at once.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   The armed TEST_CERT_RUN_FAULT_* value, or TEST_CERT_RUN_FAULT_NONE.
 '
+' BEHAVIOR
+'   - Returns the value of m_CertRunFault.
+'   - Sets m_CertRunFault back to TEST_CERT_RUN_FAULT_NONE.
+'
 ' ERROR POLICY
 '   - Cannot raise.
+'
+' DEPENDENCIES
+'   None beyond the module-level m_CertRunFault.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -718,7 +785,7 @@ Public Sub TST_CertResetCounters()
 
 '
 '------------------------------------------------------------------------------
-'                           TST CERT RESET COUNTERS
+'                          RESET CERTIFICATION STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clear the certification record, the leak record and the record fault
@@ -733,6 +800,9 @@ Public Sub TST_CertResetCounters()
 '   A run that follows a recording failure must also start clean: the fatal
 '   flag of the earlier run is cleared, and a record fault left armed is
 '   disarmed, so neither can decide the next verdict (#50).
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -749,6 +819,10 @@ Public Sub TST_CertResetCounters()
 '
 ' DEPENDENCIES
 '   - TST_CertResetRecord
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body, so a failing step
+'   does not stop the steps after it.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -787,7 +861,7 @@ Public Function TST_CertResetRecord( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT RESET RECORD
+'                          EMPTY CERTIFICATION RECORD
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Empty one certification record and verify that every buffer is released.
@@ -822,6 +896,9 @@ Public Function TST_CertResetRecord( _
 ' DEPENDENCIES
 '   - TST_CertBufferCapacity
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertResetCounters
@@ -899,7 +976,7 @@ Public Sub TST_CertRecordSkip( _
     ByVal Reason As String)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT RECORD SKIP
+'                             RECORD SKIPPED CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Log a skipped case and, during a certification run, count it.
@@ -923,6 +1000,13 @@ Public Sub TST_CertRecordSkip( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Logs the skip through TST_Log under the tag SKIP, whether or not a
+'     certification run is active.
+'   - While m_CertActive is TRUE, stores a TEST_CERT_ENTRY_SKIP entry named
+'     CallerProc, not passed, with Reason as its detail, through
+'     TST_CertRecordEntry. When that returns FALSE it logs a RECORD FAIL line.
+'
 ' ERROR POLICY
 '   - Does not raise. A skip that cannot be stored sets
 '     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE; that flag,
@@ -930,6 +1014,9 @@ Public Sub TST_CertRecordSkip( _
 '
 ' DEPENDENCIES
 '   - TST_CertRecordEntry
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RunRegressionPack
@@ -973,7 +1060,7 @@ Public Sub TST_CertRecordUnit( _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT RECORD UNIT
+'                             RECORD UNIT OUTCOME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Append one unit outcome to the certification record.
@@ -996,6 +1083,12 @@ Public Sub TST_CertRecordUnit( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Stores a TEST_CERT_ENTRY_UNIT entry through TST_CertRecordEntry. When that
+'     returns FALSE it logs a RECORD FAIL line.
+'   - Logs the outcome through TST_Log as UNIT PASS or UNIT FAIL, with the
+'     detail appended when it is not empty.
+'
 ' ERROR POLICY
 '   - Does not raise. An outcome that cannot be stored sets
 '     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE; that flag,
@@ -1003,6 +1096,10 @@ Public Sub TST_CertRecordUnit( _
 '
 ' DEPENDENCIES
 '   - TST_CertRecordEntry
+'
+' NOTES
+'   Unlike TST_CertRecordSkip it does not test m_CertActive. On Error Resume
+'   Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertRunUnit
