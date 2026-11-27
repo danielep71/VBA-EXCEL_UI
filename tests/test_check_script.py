@@ -305,7 +305,7 @@ class LogSinkSourceTests(unittest.TestCase):
     def test_every_demo_harness_line_goes_through_the_sink(self) -> None:
         text = read(DEMO_TESTS)
         self.assertEqual(re.findall(r"(?m)^[ \t]*Debug\.Print (.*)$", text), ["LineText"])
-        self.assertEqual(len(re.findall(r"(?m)^[ \t]*DEMO_CT_Print ", text)), 8)
+        self.assertEqual(len(re.findall(r"(?m)^[ \t]*DEMO_CT_Print ", text)), 9)
 
     def test_the_entry_points_report_instead_of_raising(self) -> None:
         for path, name in ((TEST_CERTIFICATION, "TST_RunRunnerWithLog"), (DEMO_TESTS, "Demo_Test_RunLogged")):
@@ -317,6 +317,15 @@ class LogSinkSourceTests(unittest.TestCase):
                 self.assertIn('Verdict = "RESULT: PASS"', body)
                 self.assertIn('Verdict = "RESULT: FAIL | Error " & CStr(RaisedNumber)', body)
                 self.assertIn('" | LOG WRITE FAILED: "', body)
+
+    def test_a_run_that_only_skipped_is_an_incomplete_verdict_that_names_the_skips(self) -> None:
+        body = vba_procedure(DEMO_TESTS, "Demo_Test_RunLogged")
+        handler = body.split(f"{house_style.labels().handler}:", 1)[1]
+        self.assertIn("If RaisedNumber = ERR_RUN_INCOMPLETE Then", handler)
+        self.assertIn('Verdict = "RESULT: INCOMPLETE | " & RaisedDescription', handler)
+        runner = vba_procedure(DEMO_TESTS, "Demo_Test_RunCleanupChecks")
+        self.assertIn("If mSkipped <> 0 Then\n            Err.Raise ERR_RUN_INCOMPLETE, PROC_NAME", runner)
+        self.assertIn('", skipped " & CStr(mSkipped)', runner)
 
 
 @unittest.skipUnless(PWSH, "PowerShell 7 (pwsh) is not installed")
@@ -502,6 +511,56 @@ class HelperTests(unittest.TestCase):
             "detail": "RESULT: PASS; the log could not be written: error 75 writing x: Path/File access error"})
         self.assertEqual(result["none"], {"passed": False, "detail": "no verdict was returned: ''"})
         self.assertEqual(result["raised"], {"passed": False, "detail": "Application.Run raised: Cannot run the macro"})
+
+    def test_an_incomplete_verdict_is_a_skip_and_never_a_pass(self) -> None:
+        result = self.run_body(
+            "$log = Join-Path $env:TEMPDIR 'demo.log'\n"
+            "$incomplete = 'RESULT: INCOMPLETE | skipped 2 of 49 scenarios: S45_ResetManualBreaks, S47_BreaksShown'\n"
+            "function Outcome([string]$returned, [string]$logLast, [string]$raised = '') {\n"
+            "  [IO.File]::WriteAllText($log, \"START`r`n  SKIP S45_X: x`r`n$logLast`r`n\", $Utf8NoBom)\n"
+            "  $o = Get-MacroOutcome -Returned $returned -Raised $raised -LogPath $log\n"
+            "  return @{ status = (Get-OutcomeStatus $o); passed = $o.Passed; detail = $o.Detail } }\n"
+            "$skip = Outcome $incomplete $incomplete\n"
+            "$pass = Outcome 'RESULT: PASS' 'RESULT: PASS'\n"
+            "$fail = Outcome 'RESULT: FAIL | Error 5 | Source: S | text' 'RESULT: FAIL | Error 5 | Source: S | text'\n"
+            "$mismatch = Outcome $incomplete 'RESULT: PASS'\n"
+            "$logFailed = Outcome ($incomplete + ' | LOG WRITE FAILED: error 75') $incomplete\n"
+            "$raised = Outcome '' '' 'Cannot run the macro'\n"
+            "$verdicts = @('RESULT: INCOMPLETE', 'RESULT: INCOMPLETE | x', 'RESULT: INCOMPLETEX', "
+            "'RESULT: PARTIAL | x') | "
+            "ForEach-Object { (ConvertFrom-Verdict $_).HasVerdict }\n"
+            "@{ skip = $skip; pass = $pass; fail = $fail; mismatch = $mismatch; logFailed = $logFailed; "
+            "raised = $raised; verdicts = @($verdicts) }" + WRITE)
+        self.assertEqual(result["skip"], {"status": "SKIP", "passed": False, "detail":
+                         "RESULT: INCOMPLETE | skipped 2 of 49 scenarios: S45_ResetManualBreaks, S47_BreaksShown"})
+        self.assertEqual((result["pass"]["status"], result["pass"]["passed"]), ("PASS", True))
+        self.assertEqual((result["fail"]["status"], result["fail"]["passed"]), ("FAIL", False))
+        for name in ("mismatch", "logFailed", "raised"):
+            with self.subTest(name):
+                self.assertEqual((result[name]["status"], result[name]["passed"]), ("FAIL", False))
+        self.assertEqual(result["verdicts"], [True, True, False, False])
+
+    def test_a_skipped_step_makes_the_run_incomplete_not_passed(self) -> None:
+        result = self.run_body(
+            "function S([string]$n, [string]$s, [string]$d = '', [string]$l = '') { "
+            "[ordered]@{ name = $n; status = $s; detail = $d; log = $l } }\n"
+            "$ok = @((S 'a' 'PASS'), (S 'b' 'WARN'), (S 'c' 'INFO'))\n"
+            "$skipped = $ok + @(S 'demo-cleanup-checks' 'SKIP' 'RESULT: INCOMPLETE | skipped 1 of 49 scenarios: "
+            "S47_BreaksShown' 'demo-cleanup-checks.log')\n"
+            "$summary = Format-Summary -Commit ('0' * 40) -HostLine '' -Steps $skipped "
+            "-Result (Get-RunResult -Steps $skipped -Cancelled $false).Result\n"
+            "@{ skipped = (Get-RunResult -Steps $skipped -Cancelled $false); "
+            "failed = (Get-RunResult -Steps ($skipped + @(S 'd' 'FAIL')) -Cancelled $false); "
+            "notRun = (Get-RunResult -Steps ($skipped + @(S 'e' 'NOT_RUN')) -Cancelled $false); "
+            "cancelled = (Get-RunResult -Steps $skipped -Cancelled $true); summary = @($summary) }" + WRITE)
+        self.assertEqual(result["skipped"], {"Result": "INCOMPLETE", "ExitCode": 3})
+        self.assertEqual(result["failed"], {"Result": "FAIL", "ExitCode": 1})
+        self.assertEqual(result["notRun"], {"Result": "FAIL", "ExitCode": 1})
+        self.assertEqual(result["cancelled"], {"Result": "FAIL", "ExitCode": 2})
+        self.assertEqual(result["summary"][-2:], [
+            "SKIP demo-cleanup-checks: RESULT: INCOMPLETE | skipped 1 of 49 scenarios: S47_BreaksShown "
+            "[demo-cleanup-checks.log]",
+            "RESULT: INCOMPLETE"])
 
     def test_results_timings_and_the_summary(self) -> None:
         result = self.run_body(

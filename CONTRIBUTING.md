@@ -575,10 +575,13 @@ Open it, run **Debug → Compile VBAProject**, and run
 `Demo_Test_RunCleanupChecks` from the Immediate window or the Macros dialog, or
 let `tools\Check-EXCEL_UI.cmd` build the workbook and run it for you
 ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)). It
-creates a temporary workbook, runs forty-eight scenarios on sheets of its own,
-closes the workbook without saving and prints one `PASS` or `FAIL` line per
-scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS` or
-`DEMO CLEANUP CHECKS: FAIL`. A failed run also raises an error after cleanup. An
+creates a temporary workbook, runs forty-nine scenarios on sheets of its own,
+closes the workbook without saving and prints one `PASS`, `FAIL` or `SKIP` line
+per scenario, then a summary line that starts with `DEMO CLEANUP CHECKS: PASS`,
+`DEMO CLEANUP CHECKS: INCOMPLETE` or `DEMO CLEANUP CHECKS: FAIL`. The line
+counts the scenarios run, failed and skipped, and names every skipped one. A
+failed run, and a run that skipped a scenario without failing any, also raise an
+error after cleanup: a skip is not a pass. An
 operation error after a successful unprotect, a failed Protect and a failed
 `EnableSelection` restoration have no worksheet cause that can be produced on
 demand, and neither has a failed fast-mode or `DisplayFormulaBar` write or a
@@ -596,11 +599,20 @@ line with the entry, fast-mode and exit values. Scenarios S32-S34 add ActiveX
 controls to the temporary workbook, so they fail when ActiveX controls are
 disabled in the Trust Center. Scenarios S45-S48 set manual page breaks or show
 the page-break indicators on their own sheets, so Excel consults the default
-printer driver for those sheets. Run them with a default printer whose driver
-can lay out pages, such as Microsoft Print to PDF: when it cannot, they fail
-while arranging their sheets
-([#199](https://github.com/danielep71/VBA-EXCEL_UI/issues/199)). Record the commit, Excel build and bitness
-with the Immediate window output.
+printer driver for those sheets. When the driver cannot lay a sheet out, Excel
+raises error 1004 while the scenario arranges it. The scenario then prints
+`SKIP <name>: the default printer driver could not lay out the sheet (<error>)`
+and stops, the summary line is `INCOMPLETE` and `Demo_Test_RunLogged` returns
+`RESULT: INCOMPLETE`. Only that error, raised by the statements that arrange the
+sheet, is a skip
+([#199](https://github.com/danielep71/VBA-EXCEL_UI/issues/199)): an error from
+`DEMO_Sheet_Reset`, `DEMO_Sheet_BuildTemplate` or any other statement is still a
+failure. To check the scenarios themselves, run with a default printer whose
+driver can lay out pages, such as Microsoft Print to PDF. Scenario S49 injects
+a 1004 error where S45 arranges, and an error of another number, and checks the
+first is one skip and the second one failure, so the skip path runs on any
+host; it leaves the totals of the run as they were. Record the commit, Excel
+build and bitness with the Immediate window output.
 
 ### Evidence principles
 
