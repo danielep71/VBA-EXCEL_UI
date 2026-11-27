@@ -55,6 +55,9 @@ The default runners are `Test_EXCEL_UI_RunAll`, `Test_EXCEL_UI_RunCore`,
 `Test_EXCEL_UI_RunTitleBarSdiIdentity`,
 `Test_EXCEL_UI_RunCertificationSelfTest` and
 `Test_EXCEL_UI_RunOwnershipCleanupChecks`.
+The certification step already runs the last two, once each, as isolated units
+([EXCEL_CERTIFICATION.md](EXCEL_CERTIFICATION.md#the-case-inventory)); this script
+also runs them alone, as before, so that a failure has a log of its own.
 `Test_EXCEL_UI_RunRibbonSdiProbe` asserts nothing
 ([RIBBON_SDI_BEHAVIOR.md](RIBBON_SDI_BEHAVIOR.md)), so it runs only when you
 ask for it and its step is `INFO` whatever it reports. For example:

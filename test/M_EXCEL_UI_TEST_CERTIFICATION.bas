@@ -6043,6 +6043,11 @@ Private Sub TST_Case_CertBaselineMatchesUntouchedHost()
                 "|frameRegistry.scope|", vbBinaryCompare) > 0), _
             PROC & ".FrameRegistryScopeNamed"
 
+    'A record that never compared its case inventory is not a complete pass, so
+    'the comparison of an empty inventory is made first
+        TST_AssertBooleanEquals True, TST_CertEvaluateInventory(Rec), _
+            PROC & ".Inventory.Compared"
+
     'An unverified surface does not fail cleanup, and is in both documents
         TST_CertComposeEvidence _
             Rec:=Rec, _
@@ -7794,6 +7799,10 @@ Private Sub TST_CertCheckRecordFault( _
             TST_CertTryAppendEntry(Rec, TEST_CERT_ENTRY_UNIT, "Clean", True, vbNullString), _
             Scenario & ".CleanEntryStored"
 
+    'A complete pass needs the case inventory compared, whatever it holds
+        TST_AssertBooleanEquals True, TST_CertEvaluateInventory(Rec), _
+            Scenario & ".CleanRun.InventoryCompared"
+
         TST_CertComposeEvidence _
             Rec:=Rec, _
             CleanupOK:=True, _
@@ -8133,7 +8142,7 @@ Private Sub TST_CertCheckInventoryScenario( _
     ByVal StartIds As String, _
     ByVal EndIds As String, _
     ByVal ExpectedCode As String, _
-    ByVal Compare As Boolean)
+    ByVal DoCompare As Boolean)
 
 '
 '==============================================================================
@@ -8162,7 +8171,7 @@ Private Sub TST_CertCheckInventoryScenario( _
 '     Empty when the inventory is exact. Otherwise the code, as
 '     "<code>:<case>", that the comparison must record.
 '
-'   Compare
+'   DoCompare
 '     FALSE to leave the record uncompared, for the scenario that asserts the
 '     verdict is not complete without a comparison.
 '
@@ -8228,7 +8237,7 @@ Private Sub TST_CertCheckInventoryScenario( _
 '------------------------------------------------------------------------------
 ' COMPARE AND COMPOSE
 '------------------------------------------------------------------------------
-        If Compare Then
+        If DoCompare Then
 
             Clean = TST_CertEvaluateInventory(Rec)
 
@@ -8321,7 +8330,7 @@ Private Sub TST_CertCheckInventoryScenario( _
                     vbBinaryCompare) > 0), _
                 Scenario & ".Json.InventoryFailed"
 
-            If Compare Then
+            If DoCompare Then
 
                 TST_AssertTrue _
                     (InStr(1, TST_CertEntryCodes(Rec, TEST_CERT_ENTRY_INVENTORY), _
