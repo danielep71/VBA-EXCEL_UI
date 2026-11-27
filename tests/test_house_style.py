@@ -16,7 +16,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gate_fixture import (
-    PLANT,
     REPO,
     LexicalError,
     executable_signature,
@@ -26,7 +25,6 @@ from gate_fixture import (
     house_rules_fixtures,
     house_style,
     layout_edit,
-    planted_module,
     reformat,
     vba_house,
     vba_house_rules,
@@ -202,7 +200,7 @@ class Tree(unittest.TestCase):
 
 
 class SwitchedOn(unittest.TestCase):
-    """The tree is held to the style, and what a person still has to settle is listed."""
+    """The tree is held to the style."""
 
     def found(self) -> list[tuple[str, vba_house_rules.Finding]]:
         return [(name, item) for _, name, text in modules() for item in vba_house_rules.findings(text, name)]
@@ -213,29 +211,8 @@ class SwitchedOn(unittest.TestCase):
             with self.subTest(module=rel):
                 self.assertEqual(reformat.reformat_text(text, name), text)
 
-    def listed(self) -> str:
-        """The pending list, or nothing once the last finding is settled and the file is gone."""
-        path = REPO / vba_house_rules.PENDING_FILE
-        return path.read_text(encoding="ascii") if path.exists() else ""
-
-    def test_the_pending_list_holds_the_findings_of_the_tree_and_nothing_else(self) -> None:
-        result = vba_house_rules.compare_pending(self.found(), self.listed())
-        self.assertEqual(result, ([], [], []))
-
-    def test_the_list_is_what_the_tool_writes(self) -> None:
-        found = self.found()
-        expected = vba_house_rules.pending_text(found) if found else ""
-        self.assertEqual(expected, self.listed())
-
-    def test_every_remaining_finding_is_one_a_person_settles(self) -> None:
-        self.assertLessEqual({item.rule for _, item in self.found()}, {"header", "sections", "proc-name"})
-
-    def test_every_procedure_with_a_declare_section_names_itself_in_proc_name(self) -> None:
-        # What remains is a procedure that has no DECLARE section at all.
-        for name, item in self.found():
-            if item.rule == "proc-name":
-                with self.subTest(module=name, procedure=item.where):
-                    self.assertTrue(item.message.startswith("no DECLARE section"), item)
+    def test_the_tree_has_no_finding(self) -> None:
+        self.assertEqual([f"{name}: {item}" for name, item in self.found()], [])
 
     def test_a_bare_literal_stands_only_under_the_deliberate_comment(self) -> None:
         """No total is pinned: the property holds for however many such literals the tree has.
@@ -264,66 +241,6 @@ class SwitchedOn(unittest.TestCase):
 
     def test_every_select_case_has_a_case_else(self) -> None:
         self.assertEqual([item for _, item in self.found() if item.rule == "select-case"], [])
-
-
-class WritePending(unittest.TestCase):
-    """reformat.py --write-pending writes the list, and only ever shrinks it."""
-
-    def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        root = Path(self.directory.name)
-        self.module = root / f"{PLANT}.bas"
-        self.module.write_bytes(planted_module().encode("ascii"))
-        self.target = root / "pending.txt"
-
-    def run_it(self) -> tuple[int, str]:
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            status = reformat.write_pending([self.module], self.target)
-        return status, out.getvalue()
-
-    def test_it_creates_the_list_when_there_is_none(self) -> None:
-        status, _ = self.run_it()
-        self.assertEqual(status, 0)
-        text = self.target.read_text(encoding="ascii")
-        self.assertIn(f"{PLANT}: header\n", text)
-        self.assertIn(f"{PLANT}.Probe_Describe: header\n", text)
-        self.assertEqual(self.run_it()[0], 0)
-        self.assertEqual(self.target.read_text(encoding="ascii"), text)
-
-    def test_it_removes_a_line_whose_finding_is_settled(self) -> None:
-        self.run_it()
-        text = self.target.read_text(encoding="ascii")
-        self.target.write_text(text + f"{PLANT}.Probe_Reset: sections\n", encoding="ascii")
-        status, _ = self.run_it()
-        self.assertEqual(status, 0)
-        self.assertEqual(self.target.read_text(encoding="ascii"), text)
-
-    def test_it_refuses_to_add_a_line_to_an_existing_list(self) -> None:
-        self.run_it()
-        lines = self.target.read_text(encoding="ascii").splitlines(keepends=True)
-        gone = next(n for n, line in enumerate(lines)
-                    if line.startswith(f"{PLANT}.") and line.endswith(": header\n"))
-        before = "".join(lines[:gone] + lines[gone + 1:])
-        self.target.write_text(before, encoding="ascii")
-        status, out = self.run_it()
-        self.assertEqual(status, 1)
-        self.assertIn("refusing to add 1 line", out)
-        self.assertEqual(self.target.read_text(encoding="ascii"), before)
-
-    def test_it_removes_the_file_when_nothing_is_left(self) -> None:
-        self.target.write_text("M_PROBE: header\n", encoding="ascii")
-        self.module.write_bytes(house_format_fixtures.HOUSE_MODULE.encode("ascii"))
-        status, _ = self.run_it()
-        self.assertEqual(status, 0)
-        self.assertFalse(self.target.exists())
-
-    def test_it_refuses_a_module_without_a_name(self) -> None:
-        self.module.write_bytes(b"Option Explicit\r\n")
-        status, out = self.run_it()
-        self.assertEqual(status, 1)
-        self.assertIn("no Attribute VB_Name", out)
 
 
 class Equivalence(unittest.TestCase):

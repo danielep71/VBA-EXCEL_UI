@@ -396,9 +396,9 @@ which is not a pass; with `--ci` it fails. Fix formatting drift with
 `python3 tools/reformat.py --write src/*.bas test/*.bas demo/*.bas`, then
 re-import the affected modules into the VBE. The layout it writes is the house
 style, defined in
-[docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md#house-style-210). Findings of
-the style that are still to be settled by hand are listed in
-`tools/house_style_pending.txt`; new code is never added to it.
+[docs/VBA_HOUSE_STYLE.md](docs/VBA_HOUSE_STYLE.md#house-style-210). What no
+rewrite can settle, such as a header field or a `Case Else`, fails the
+*house-style rules* check until you write it.
 
 The gate's *VBA syntax* check catches mistakes that Excel would otherwise
 report only when it compiles the project on a Windows host: an unbalanced

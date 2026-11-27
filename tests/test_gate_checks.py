@@ -1211,45 +1211,24 @@ class HouseStyleRules(GateTestCase):
         with patch.object(vba_house_rules, "COMPARE_CALL_RE", NEVER):
             self.assertFails("InStr with two arguments")
 
-    PENDING = vba_house_rules.PENDING_FILE
-
-    def drop_pending_list(self) -> None:
-        if self.repo.path(self.PENDING).exists():
-            self.repo.remove(self.PENDING)
-
-    def list_pending(self, lines: str) -> None:
-        """Add lines to the pending list, creating the file once the real list is gone."""
-        if self.repo.path(self.PENDING).exists():
-            self.repo.append(self.PENDING, "\n" + lines)
-        else:
-            self.repo.write(self.PENDING, lines)
-
     def planted(self) -> list[str]:
         """The findings that name the planted module."""
-        return [f for f in self.findings() if PLANT_PATH in f or PLANT in f]
+        return [f for f in self.findings() if PLANT_PATH in f]
 
-    def test_fails_on_a_finding_that_is_not_listed(self) -> None:
+    def test_fails_on_a_finding(self) -> None:
         self.repo.write(PLANT_PATH, planted_module())
-        self.assertFails(f"{PLANT_PATH}:", "header lacks NOTES", f"is not listed in {self.PENDING}")
+        self.assertFails(f"{PLANT_PATH}:", "header lacks NOTES")
 
-    def test_passes_on_a_finding_that_is_listed(self) -> None:
-        self.repo.write(PLANT_PATH, planted_module())
-        self.list_pending(f"{PLANT}: header\n{PLANT}.Probe_Describe: header\n")
+    def test_passes_on_a_module_that_breaks_no_rule(self) -> None:
+        self.repo.write(PLANT_PATH, planted_module(procedure_notes=True, module_notes=True))
         self.assertEqual(self.planted(), [])
 
-    def test_fails_on_a_stale_line(self) -> None:
-        self.list_pending(f"{PLANT}.Probe_Describe: select-case\n")
-        self.repo.write(PLANT_PATH, planted_module(procedure_notes=True, module_notes=True))
-        self.assertFails(f"{self.PENDING}:", "stale line", f"{PLANT}.Probe_Describe: select-case")
-
-    def test_fails_on_a_second_finding_that_a_line_does_not_cover(self) -> None:
-        # The procedure is listed once for its header; a second header finding is not covered.
+    def test_fails_on_every_finding_of_a_module(self) -> None:
         text = planted_module(module_notes=True)
         text = text.replace("' UPDATED\r\n'   2026-11-02\r\n'---", "' UPDATED\r\n'   2026-11-02 - Added.\r\n'---", 1)
         self.repo.write(PLANT_PATH, text)
-        self.list_pending(f"{PLANT}.Probe_Describe: header\n")
-        found = self.assertFails("Probe_Describe: ", f"is not listed in {self.PENDING}")
-        self.assertEqual(len([f for f in found if PLANT_PATH in f]), 1, found)
+        found = self.assertFails("Probe_Describe: ", "header lacks NOTES", "UPDATED is not a single")
+        self.assertEqual(len([f for f in found if PLANT_PATH in f]), 2, found)
 
     def plant_with_constant(self, replacement: str) -> None:
         text = planted_module(procedure_notes=True, module_notes=True)
@@ -1263,24 +1242,14 @@ class HouseStyleRules(GateTestCase):
 
     def test_fails_on_a_bare_proc_name_without_its_comment(self) -> None:
         self.plant_with_constant(house_rules_fixtures.BARE_CONST)
-        self.assertFails("Probe_Describe: PROC_NAME is the bare name", f"is not listed in {self.PENDING}")
+        self.assertFails("Probe_Describe: PROC_NAME is the bare name")
 
     def test_fails_on_the_deliberate_comment_above_another_literal(self) -> None:
         self.plant_with_constant(house_rules_fixtures.DELIBERATE
                                  + house_rules_fixtures.QUALIFIED_CONST.replace("M_PROBE", PLANT))
         self.assertFails("Probe_Describe: the deliberate-value comment stands above")
 
-    def test_fails_on_a_line_that_is_not_an_entry(self) -> None:
-        self.list_pending("settled in the next change\n")
-        self.assertFails(f"{vba_house_rules.PENDING_FILE}:", "not a")
-
-    def test_without_the_pending_list_every_finding_fails(self) -> None:
-        self.drop_pending_list()
-        self.repo.write(PLANT_PATH, planted_module())
-        self.assertFails(f"{PLANT_PATH}:", "header lacks NOTES", "is not listed")
-
     def test_does_not_read_the_modules_while_the_style_is_off(self) -> None:
-        self.drop_pending_list()
         self.repo.write(PLANT_PATH, planted_module())
         with patch.object(house_style, "HOUSE_STYLE_ACTIVE", False):
             self.assertEqual(self.findings(), [])

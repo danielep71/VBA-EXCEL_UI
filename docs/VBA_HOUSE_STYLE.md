@@ -52,17 +52,6 @@ its spellings (`ErrorHandler`, `SafeExit`, `CleanExit`, `CleanFail`) and the
 layout the modules had before, and the fixtures of the formatter and of each
 rule run in either state, so a rule stays proved whatever the constant says.
 
-**What is not settled yet.** The header fields that a person has to write, a
-procedure that has locals or a handler but no `DECLARE` section are listed in `tools/house_style_pending.txt`, one
-line per finding: `<Module>.<Procedure>: <rule>`, or `<Module>: <rule>` for the
-module header. The *house-style rules* check allows exactly those findings. A
-finding that is not listed fails it, and so does a listed line that no finding
-matches any more, so the list can only shrink: settle a finding, then delete its
-line. New code follows the style and is never listed. `python3 tools/reformat.py
---write-pending src/*.bas test/*.bas demo/*.bas` rewrites the list from the
-modules; once the file exists it refuses to add a line. I delete the file when
-it is empty.
-
 ### Files
 
 - Line endings are CRLF, the file ends with CRLF, there are no tabs, no trailing
@@ -362,7 +351,6 @@ and refuses a module where the rewrite would be ambiguous.
 | Blank lines, banners and their characters, centred titles, header field order and spacing, `HISTORY`, `UPDATED` as one date, `RETURNS` of a `Sub` that says none, declaration alignment, section titles for the exit and the handler, `INITIALIZE` opened at the handler statement, label column, statement and comment indentation | `tools/reformat.py` rewrites them; `--check` and the *house-style formatter* check report drift |
 | The renames above | `tools/reformat.py`, which compares the executable tokens before it writes |
 | The nine fields present and in order, `UPDATED` a date, `RETURNS` of a `Sub` is `Nothing`, the section order, `On Error GoTo` in `INITIALIZE`, an `Exit` in `EXIT PROCEDURE`, `Const PROC_NAME` first in `DECLARE` with `<Module>.<Procedure>` or the deliberate bare name under its comment, `Select Case` without `Case Else`, `InStr` and `StrComp` without a compare mode, one statement per line, `Next` without its counter, an `=` rule outside a component header | the *house-style rules* check (`tools/vba_house_rules.py`), which proves each rule on failing and passing fixtures (`tools/house_rules_fixtures.py`) |
-| The findings of those rules that are still to be settled by hand | `tools/house_style_pending.txt`, which the *house-style rules* check holds the tree to in both directions (see [What is not settled yet](#house-style-210)) |
 | Header text, the content of a field, a title that says what the procedure does rather than spelling its identifier, local variable names, `vbNullString`, line length | I write and review them; no check rewrites them |
 
 A title that repeats the identifier of its procedure becomes the words of that
@@ -372,10 +360,11 @@ it by a verb phrase is part of the review.
 The formatter never invents the text of a missing field and never adds the
 `PROC_NAME` constant, because either would change what a person wrote or what
 the module contains. It prints a `note` for each module that names the rules a
-person still has to settle. The rule fixtures, the formatter fixtures
+person still has to settle, and the *house-style rules* check fails on every one
+of them. The rule fixtures, the formatter fixtures
 (`tools/house_format_fixtures.py`) and the tests under `tests/test_house_style.py`
-run whatever the state of the switch, so each rule stays proved while the tree
-is not yet held to it.
+run whatever the state of the switch, so each rule stays proved whatever the
+constant says.
 
 ## Formatter verification (#52)
 

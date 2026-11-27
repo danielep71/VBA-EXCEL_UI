@@ -3,9 +3,8 @@
 ``HOUSE_STYLE_ACTIVE`` is the single switch for the style described in
 docs/VBA_HOUSE_STYLE.md. While it is True the repository's modules are held to
 the style: the formatter's ``--check`` and the checks that name error-handling
-labels read the house spellings, and the rules check reads the modules, with
-the findings still to be settled by hand listed in tools/house_style_pending.txt.
-While it is False the modules are held to the previous normal form (``--style
+labels read the house spellings, and the rules check reads the modules and fails
+on every finding. While it is False the modules are held to the previous normal form (``--style
 legacy``) and the checks that need the new header fields and sections do not
 scan the tree. The fixtures of the formatter and of each rule force the switch
 either way, so every rule stays proved whatever the constant says.

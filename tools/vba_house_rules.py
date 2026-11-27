@@ -7,18 +7,11 @@ changes what a person wrote or what the code does. This module reports them.
 
 ``findings`` reads one module and returns every deviation, whatever the state
 of ``house_style.HOUSE_STYLE_ACTIVE``. The gate decides whether to scan the
-tree with it (``check_repo.check_house_style_rules``); its own fixtures call
-it directly, so each rule stays proved while the style is off.
-
-While the modules are brought to the style, the findings that are still to be
-settled by hand are listed in tools/house_style_pending.txt, one line per
-finding. ``compare_pending`` holds the tree to that list in both directions: a
-finding that is not listed fails, and so does a listed line that no finding
-matches any more.
+tree with it (``check_repo.check_house_style_rules``), where any finding fails;
+its own fixtures call it directly, so each rule stays proved whatever the
+switch says.
 """
 import re
-from collections import Counter
-from collections.abc import Iterable
 from typing import NamedTuple
 
 import house_style as hs
@@ -332,98 +325,3 @@ def summarise(items: list[Finding]) -> dict[str, int]:
     for item in items:
         counts[item.rule] += 1
     return counts
-
-
-# --------------------------------------------------------------------------
-# The pending list
-
-PENDING_FILE = "tools/house_style_pending.txt"
-PENDING_HEADER = f"""\
-# House-style findings I have not yet settled by hand (#210).
-#
-# The house-style rules check reads this file while the modules are brought to
-# the style. A finding listed here is allowed. A finding that is not listed
-# fails the check, and so does a line here that no finding matches any more
-# (a stale line). Each line is "<Module>.<Procedure>: <rule>", or
-# "<Module>: <rule>" for a finding of the module's own header, and stands for
-# one finding. The rules are:
-#   {", ".join(RULES)}.
-#
-# Settle a finding, then delete its line. Do not add a line for new code: new
-# code follows the style. I delete this file when it is empty.
-#
-# Regenerate it with:
-#   python3 tools/reformat.py --write-pending src/*.bas test/*.bas demo/*.bas
-# Once the file exists, that only removes lines; it refuses to add one.
-"""
-PENDING_LINE = re.compile(r"^(?P<where>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?): (?P<rule>[a-z][a-z-]*)$")
-
-
-def pending_key(module: str, item: Finding) -> str:
-    """The line of the pending list that stands for one finding."""
-    where = module if item.where == module else f"{module}.{item.where}"
-    return f"{where}: {item.rule}"
-
-
-def pending_text(found: Iterable[tuple[str, Finding]]) -> str:
-    """The pending list for these findings (module, finding), in the order given."""
-    return PENDING_HEADER + "".join(pending_key(module, item) + "\n" for module, item in found)
-
-
-class PendingEntry(NamedTuple):
-    number: int
-    key: str
-
-
-def read_pending(text: str) -> tuple[list[PendingEntry], list[tuple[int, str]]]:
-    """The entries of a pending list, and the lines that are neither a comment nor an entry."""
-    entries: list[PendingEntry] = []
-    problems: list[tuple[int, str]] = []
-    for number, line in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        m = PENDING_LINE.match(stripped)
-        if m is None:
-            problems.append((number, f'not a "<Module>.<Procedure>: <rule>" line: {stripped!r}'))
-        elif m.group("rule") not in RULES:
-            problems.append((number, f"unknown rule {m.group('rule')!r}"))
-        else:
-            entries.append(PendingEntry(number, stripped))
-    return entries, problems
-
-
-class PendingResult(NamedTuple):
-    unlisted: list[tuple[str, Finding]]     # findings with no line left in the list
-    stale: list[PendingEntry]               # lines that no finding matches
-    problems: list[tuple[int, str]]         # lines that are not entries
-
-
-def compare_pending(found: list[tuple[str, Finding]], text: str) -> PendingResult:
-    """Hold the findings (module, finding) to the pending list, one line per finding.
-
-    A line covers one finding of its module, procedure and rule, so a second
-    finding of that kind in the procedure is not covered until it is listed.
-    """
-    entries, problems = read_pending(text)
-    free = Counter(entry.key for entry in entries)
-    unlisted: list[tuple[str, Finding]] = []
-    for module, item in found:
-        key = pending_key(module, item)
-        if free[key] > 0:
-            free[key] -= 1
-        else:
-            unlisted.append((module, item))
-    stale: list[PendingEntry] = []
-    for entry in reversed(entries):
-        if free[entry.key] > 0:
-            free[entry.key] -= 1
-            stale.append(entry)
-    return PendingResult(unlisted, sorted(stale), problems)
-
-
-def additions(found: list[tuple[str, Finding]], text: str) -> list[str]:
-    """The lines that writing the list for these findings would add to the list ``text``."""
-    held = Counter(entry.key for entry in read_pending(text)[0])
-    wanted = Counter(pending_key(module, item) for module, item in found)
-    return sorted((wanted - held).elements())
