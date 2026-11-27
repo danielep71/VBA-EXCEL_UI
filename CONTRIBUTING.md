@@ -341,15 +341,43 @@ capture / hide / reset
 Certification is the gate. Quote its verdict line in the pull request:
 
 ```text
-RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+RESULT: PASS | COMPLETE | units=5 failed=0 skipped=0 cleanup=OK
 ```
 
 A run reporting `INCOMPLETE`, any `skipped` count above zero, or
 `cleanup=FAILED` is not a pass, whatever the assertions that did execute
-reported. The narrower runners remain useful while iterating, but do not
-substitute for certification: `Test_EXCEL_UI_RunAll` does not run the
-snapshot-identity and SDI identity units, and produces no machine-readable
-evidence. It still opens and closes temporary windows and workbooks.
+reported. The unit counters and the case inventory are separate parts of the
+verdict: the counters say how the dispatched units ended, and the inventory says
+that every case in `tools/certification-manifest.json` started and recorded one
+status. A `missing`, `duplicate`, `unexpected`, `noStart` or `noResult` line in
+the report is `FAIL | INCOMPLETE` even when `failed=0`. The narrower runners
+remain useful while iterating, but do not substitute for certification:
+`Test_EXCEL_UI_RunAll`, `Test_EXCEL_UI_RunCore` and `Test_EXCEL_UI_RunTitleBarOnly`
+record no case inventory, run neither the isolated nor the identity units, and
+produce no machine-readable evidence. They still open and close temporary windows
+and workbooks.
+
+### Adding a regression case
+
+A case that a release needs is a mandatory case, and it must reach the verdict:
+
+1. Write the case as a `Public` or `Private` `Sub` named `TST_Case_<Name>` in the
+   suite module that owns it. A case raises on its first failed assertion.
+2. List it under its unit in `tools/certification-manifest.json`, in the order the
+   run executes it. A case the release must never lose also goes in
+   `required_cases`, with a note saying why.
+3. Run it through the wrapper from the pack or runner that executes its unit:
+   `TST_CertRunCase "TST_Case_<Name>", IncludeTitleBarTests`.
+4. Add one `Case` to `TST_CertManifestCase` and one `Case` to
+   `TST_CertDispatchCase` in `test/M_EXCEL_UI_TEST_CERTIFICATION.bas`, and raise
+   `TEST_CERT_MANIFEST_VERSION` in the harness together with `manifest_version` in
+   the manifest when the list of cases changes.
+
+A case that is deliberately not mandatory goes under `focused_cases` with its
+reason, and a new public `Test_EXCEL_UI_Run*` runner under `interactive_runners`.
+The gate (`certification manifest`) fails on a case that is listed in one place
+and missing from another, dispatched twice, run outside the wrapper, or not
+classified at all.
 
 For every change, run the static checks before you push:
 

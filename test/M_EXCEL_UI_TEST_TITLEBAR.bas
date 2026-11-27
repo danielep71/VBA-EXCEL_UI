@@ -164,7 +164,14 @@ Public Sub Test_EXCEL_UI_RunTitleBarOnly()
 ' DEPENDENCIES
 '   - TST_RunTitleBarOnlyPack
 '
+' NOTES
+'   An interactive runner, not release certification. It records no case
+'   inventory and runs no other unit. Every case it runs is also a mandatory
+'   case of the RegressionPack unit that certification runs, and the static
+'   gate fails when a title-bar case exists that the manifest does not list.
+'
 ' UPDATED
+'   2026-11-27 - States that it is not release certification (#42).
 '   2026-07-29
 '==============================================================================
 '
@@ -216,6 +223,7 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '   - Preserves the original test failure through cleanup.
 '
 ' DEPENDENCIES
+'   - TST_CertRunCase
 '   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
 '   - TST_Case_TitleBarCapturedFrameClosedIsReported
 '   - TST_Case_RibbonRestoreRefusesOtherActiveWindow
@@ -227,11 +235,17 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 '   Destructive: creates and closes temporary workbooks. It is deliberately a
 '   separate runner rather than part of Test_EXCEL_UI_RunAll. RunAll also opens
 '   and closes temporary windows and workbooks for its targeting and
-'   handle-reuse cases, but it does not run these SDI identity cases. Folding
-'   every mandatory case into one runner is
-'   tracked separately as the release-certification work.
+'   handle-reuse cases, but it does not run these SDI identity cases.
+'
+'   Each case runs through TST_CertRunCase, so release certification, which runs
+'   this runner as the TitleBarSdiIdentity unit, records its start and its one
+'   terminal status under its identifier. Run directly, the runner records
+'   nothing and behaves as it always did. The four cases of this module are
+'   Public so that the dispatcher of the certification module can run them.
 '
 ' UPDATED
+'   2026-11-27 - Runs its cases through TST_CertRunCase, which records them
+'                during certification (#42).
 '   2026-11-06 - Restored the anchor frame through the harness instead of
 '                the API under test, and failed when it could not (#66).
 '   2026-11-06 - Registered the pair-refusal and closed-and-reopened-frame
@@ -314,21 +328,21 @@ Public Sub Test_EXCEL_UI_RunTitleBarSdiIdentity()
 ' RUN REGRESSION CASES
 '------------------------------------------------------------------------------
     'Restoration must reach the captured frame, not the active one
-        TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
+        TST_CertRunCase "TST_Case_TitleBarSdiRestoreTargetsCapturedFrame", True
 
     'A captured frame that has closed must be reported, never redirected
-        TST_Case_TitleBarCapturedFrameClosedIsReported
+        TST_CertRunCase "TST_Case_TitleBarCapturedFrameClosedIsReported", True
 
     'The Ribbon acts only on the active window, so restore must refuse it when
     'its captured window is not active, and when that window has closed
-        TST_Case_RibbonRestoreRefusesOtherActiveWindow
-        TST_Case_RibbonRestoreRefusesClosedWindow
+        TST_CertRunCase "TST_Case_RibbonRestoreRefusesOtherActiveWindow", True
+        TST_CertRunCase "TST_Case_RibbonRestoreRefusesClosedWindow", True
 
     'A refused frame pair must write nothing through any public entry point,
     'and a captured frame that closed must stay refused once a new window has
     'opened in its place
-        TST_Case_TitleBarPairRefusalLeavesFrameUntouched
-        TST_Case_TitleBarClosedFrameReopenedIsRefused
+        TST_CertRunCase "TST_Case_TitleBarPairRefusalLeavesFrameUntouched", True
+        TST_CertRunCase "TST_Case_TitleBarClosedFrameReopenedIsRefused", True
 
     'Log successful completion before cleanup
         TST_Log PROC, "PASS", _
@@ -2669,7 +2683,7 @@ Err_Handler:
 End Sub
 
 
-Private Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
+Public Sub TST_Case_TitleBarSdiRestoreTargetsCapturedFrame()
 
 '
 '==============================================================================
@@ -3011,7 +3025,7 @@ Err_Handler:
 End Sub
 
 
-Private Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
+Public Sub TST_Case_TitleBarCapturedFrameClosedIsReported()
 
 '
 '==============================================================================
@@ -3228,7 +3242,7 @@ Err_Handler:
 End Sub
 
 
-Private Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
+Public Sub TST_Case_TitleBarPairRefusalLeavesFrameUntouched()
 
 '
 '==============================================================================
@@ -3612,7 +3626,7 @@ Err_Handler:
 End Sub
 
 
-Private Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
+Public Sub TST_Case_TitleBarClosedFrameReopenedIsRefused()
 
 '
 '==============================================================================

@@ -154,8 +154,8 @@ Keep a failed bundle as it is: it records what happened.
 | `session.json` | the script | Commit SHA, whether the working tree had changes, start and end times in UTC and local time, each step with its status and detail, the workbook's VBA components, the SHA-256 of each collected evidence file, the result and the exit code of the run. |
 | `host.json` | the script | Windows caption, version, build and architecture; Excel version, build, `Application.OperatingSystem` and bitness (read from the Excel process); the Click-to-Run version; the macro setting and VBA project access as found; and how the macros were enabled, `msoAutomationSecurityByUI` or `msoAutomationSecurityLow (-Unattended)`. |
 | `source-digests.json` | the script | For each module of the `development` configuration at the commit: its path, module name, SHA-256 of the commit's content with CRLF line endings as a checkout writes it, and SHA-256 of the file the build imported. |
-| `certification.json` | the workbook | The certification document: Excel version and build, bitness, unit counts and results, skips, cleanup with every finding, every unverified surface and the number of comparisons made, whether every unit and skip was recorded, and the verdict. |
-| `certification.txt` | the workbook | The text report with its `RESULT:` line, a `CLEANUP` line per cleanup finding, an `UNVERIFIED` line per surface cleanup could not compare, and a `RECORDING` line when a unit, skip or finding could not be recorded. |
+| `certification.json` | the workbook | The certification document: Excel version and build, bitness, unit counts and results, skips, cleanup with every finding, every unverified surface and the number of comparisons made, the case inventory (the manifest version, the expected cases, the ordered case results and every inventory finding), whether every unit and skip was recorded, and the verdict. |
+| `certification.txt` | the workbook | The text report with its `RESULT:` line, a `CLEANUP` line per cleanup finding, an `UNVERIFIED` line per surface cleanup could not compare, a `CASES` line with the inventory counts, an `EXPECTED` line per expected case, a `CASE` line per case that started and an `INVENTORY` line per finding, and a `RECORDING` line when a unit, skip or finding could not be recorded. |
 | `session.log` | the script | Everything the script printed, including the synchronizer's output. |
 | `EXCEL_UI-development.xlsm` | the synchronizer | The workbook that ran. It is not part of the validation. |
 
@@ -182,7 +182,8 @@ code `2`.
 | `manifest` | The project manifest, `tools/vba-projects.json`. |
 | `configuration` | The configuration the workbook is built from, `development`. |
 | `certification_module` | The module that holds the certification runner. |
-| `certification_runner` | The macro the certify step runs, `Test_EXCEL_UI_RunReleaseCertification`. Its `TST_CertRunUnit` calls are the units a bundle must report. |
+| `certification_runner` | The macro the certify step runs, `Test_EXCEL_UI_RunReleaseCertification`. Without a `case_manifest`, its `TST_CertRunUnit` calls are the units a bundle must report. |
+| `case_manifest` | Optional. The manifest of mandatory certification units and cases, `tools/certification-manifest.json`. When it is present, the units and cases a bundle must report come from the manifest at the commit, and a bundle without the case inventory is rejected. A policy without it describes the earlier contract, which had no case inventory. |
 | `required_files` | The bundle file for each role: the session record, the host record, the source digests, the certification document and the text report. |
 | `evidence_files` | The files the workbook writes and the collect step copies. `session.json` records the SHA-256 of each. |
 | `steps` | The steps the script records, in the order it runs them. |
@@ -218,8 +219,9 @@ unknown commit, no bundle folder or an unusable policy). It checks that:
 - the workbook held exactly those modules as standard modules, and no class
   module or form;
 - `certification.json` reports `PASS` and `COMPLETE`, no failed or skipped
-  unit, cleanup `OK`, recording `OK`, and the units that the commit's
-  `Test_EXCEL_UI_RunReleaseCertification` runs. A document without a
+  unit, cleanup `OK`, recording `OK`, and the units of the commit's case
+  manifest (or, under a policy without one, the units that the commit's
+  `Test_EXCEL_UI_RunReleaseCertification` runs). A document without a
   `recording` field comes from a runner that did not report it, and is read
   as recording `OK`. A document that itemizes cleanup (`cleanupFindings`,
   `cleanupUnverified` and `cleanupChecked`, which come together) must hold no
@@ -227,9 +229,16 @@ unknown commit, no bundle folder or an unusable policy). It checks that:
   number its findings and unverified surfaces from 1, each with a code and a
   detail. A document without those fields comes from a runner that did not
   itemize cleanup, and is read as it was;
-- the `RESULT:` line, the unit lines, any `RECORDING` line and, for a document
-  that itemizes cleanup, the `CLEANUP` and `UNVERIFIED` lines of
-  `certification.txt` agree with `certification.json`;
+- under a policy that names a case manifest, `certification.json` carries the
+  case inventory: `manifestVersion` equals the commit's manifest, `expectedCases`
+  are its cases in order, `caseResults` lists each of them once, in order, as a
+  case that started and passed, `inventory` is `OK`, and `inventoryFindings` is
+  empty. A document that passes the unit counters and lacks the inventory is
+  rejected, because the counters alone do not show that the required cases ran;
+- the `RESULT:` line, the unit lines, any `RECORDING` line, the `CASES`,
+  `EXPECTED`, `CASE` and `INVENTORY` lines and, for a document that itemizes
+  cleanup, the `CLEANUP` and `UNVERIFIED` lines of `certification.txt` agree
+  with `certification.json`;
 - `host.json` names Windows and the Excel version, build and bitness, agrees
   with the Excel version, build, operating system and bitness that
   `certification.json` reports, and records `automation_security` as
@@ -258,6 +267,100 @@ I accept a bundle as release evidence only when the validator passes it for
 the exact commit being released. A bundle for any other commit, including the
 pull-request head of a release that merges into a new commit, does not certify
 the release.
+
+<a id="the-case-inventory"></a>
+
+## 🧭 The case inventory
+
+A verdict such as `units=5 failed=0 skipped=0 cleanup=OK` proves only the
+outcomes of the units that were dispatched. It does not prove that the cases a
+release needs were present, unique and executed: a case can exist in source, run
+in a focused pack and never appear in the release verdict. Certification
+therefore keeps two separate parts of the verdict, the unit counters and the
+case inventory, and a run is complete only when both hold.
+
+[`tools/certification-manifest.json`](../tools/certification-manifest.json) is
+the release contract. It lists the units in the order a run executes them, and
+the mandatory cases of each. A case identifier is the name of the procedure that
+runs it. The manifest also lists the cases a release must never lose
+(`required_cases`: the five of [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42),
+the self-test and the ownership checks), the cases that exist but are deliberately
+not mandatory (`focused_cases`, none today) and the interactive runners
+(`interactive_runners`). #42 names `TST_Case_TitleBarSameStyleHandleReuse`; #32
+replaced that case, so the manifest carries
+`TST_Case_TitleBarSameHwndGenerationReuse` under that requirement.
+
+| Unit | Execution | Cases |
+| --- | --- | --- |
+| `CertificationSelfTest` | isolated | `Test_EXCEL_UI_RunCertificationSelfTest` |
+| `OwnershipCleanupChecks` | isolated | `Test_EXCEL_UI_RunOwnershipCleanupChecks` |
+| `RegressionPack` | live | the 45 cases of `TST_RunRegressionPack` |
+| `SnapshotIdentity` | live | `Test_EXCEL_UI_RunSnapshotIdentity` |
+| `TitleBarSdiIdentity` | live | the six cases of `Test_EXCEL_UI_RunTitleBarSdiIdentity` |
+
+**One list, proved equal.** The VBA cannot read the manifest, so the
+certification module registers the same list in `TST_CertManifestCase`, runs each
+case from `TST_CertDispatchCase` and reaches it through one `TST_CertRunCase`
+call. The gate's `certification manifest` check (`tools/certification_manifest.py`)
+fails when the registry, the dispatch, the call sites or the manifest disagree:
+a case deleted from one place, dispatched twice, run twice, run outside the
+wrapper, or added without being listed. Every `TST_Case_` procedure and every
+public `Test_EXCEL_UI_` runner must be classified in the manifest, so a new one
+needs a reviewed decision. Its fixtures break each of these in turn and expect
+the gate to fail. It reads source text; it does not show that a case ran.
+
+**Recording.** `TST_CertRunCase` records a start and exactly one terminal status
+under the identifier of the case, and raises the failure of a failed case
+unchanged after recording it. Outside a certification run it records nothing, so
+the interactive runners behave as they did and are not release certification. At
+the end of the run certification stores the expected cases in the record and
+compares them exactly with the cases that ran. An expected case that never
+started is `missing`, one that recorded a status without a start is `noStart`,
+one that started more than once or recorded more statuses than starts is
+`duplicate`, one that started and recorded fewer statuses is `noResult`, and a
+case the manifest does not list is `unexpected`. Any of them makes the verdict
+`FAIL | INCOMPLETE`, as does a comparison that could not run, whatever the unit
+counters say.
+
+**Isolated units.** `Test_EXCEL_UI_RunCertificationSelfTest` calls certification
+to test a rejection path, and `Test_EXCEL_UI_RunOwnershipCleanupChecks` runs
+nested certifications under run faults. A nested call clears the record and the
+active flag, so inside a live run it would corrupt the accounting of the run that
+executes it. Certification therefore runs both once, first, while no
+certification is active, holds their outcome in local variables, and records
+them once the live record is open. Each appears exactly once in the expected and
+the observed cases. Both remain public runners that can be run alone, and
+`tools\Check-EXCEL_UI.cmd` still runs them that way.
+
+The entry baseline of the cleanup comparison is captured before either of them
+runs, so that what they change is judged against the state the caller had. For
+example, `Test_EXCEL_UI_RunSnapshotIdentity` leaves its own workbook active; with
+another workbook active on entry, a baseline taken afterwards would call that
+the entry state. What the capture records is held in a record of its own and
+carried into the live record after it is cleared. What the isolated units leave
+behind is compared with the baseline as soon as they return, before the live
+units can change it again, and is reported as a cleanup finding whose code
+begins with `isolated.`. The entry window is then made active again, so the live
+units start where the caller was, and the comparison at the end of the run
+reports anything the run itself leaves.
+
+**Failures reach the caller.** `Test_EXCEL_UI_RunOwnershipCleanupChecks` forces
+four runs of the real certification call, each under a one-shot run fault, and
+asserts what the call raises and what it records: a cleanup failure (case E), a
+failed mandatory unit with an exact inventory (case F), an inventory with one
+missing case while every unit passes (case G) and a change left by an isolated
+unit, reported as `isolated.app.DisplayStatusBar` although the run puts the host
+back (case H). The error carries the number, the
+source, the verdict, the failed units and the inventory findings, and no
+evidence file is written for these runs.
+
+**Evidence and versions.** `manifestVersion` in the document must equal
+`manifest_version` of the manifest at the commit, and `TEST_CERT_MANIFEST_VERSION`
+in the harness must equal both; change all three together when the list of cases
+changes. The repository policy names the manifest, so a bundle without a case
+inventory is rejected from now on. A bundle collected before the manifest existed
+validates only under the policy of its own commit, which has no `case_manifest`,
+by `--policy`.
 
 ## 🪪 Title-bar refusal coverage
 
@@ -314,6 +417,9 @@ release must certify are governed by
   64-bit Office only: the validator also accepts an `x86` bundle, but a run on
   32-bit Office is not release evidence
   ([#51](https://github.com/danielep71/VBA-EXCEL_UI/issues/51)).
+- The inventory proves that each mandatory case started and recorded one status
+  in a run. It does not prove that a case asserts enough, and it is as good as
+  the manifest: a case that is in no list is in no verdict.
 - The script runs only `Test_EXCEL_UI_RunReleaseCertification`. The manual
   checks of [RELEASING.md](../RELEASING.md) and
   [the regression section of the README](../README.md#regression-testing)

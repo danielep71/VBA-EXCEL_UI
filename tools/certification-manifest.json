@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "manifest_version": 1,
+  "description": "The release contract of Test_EXCEL_UI_RunReleaseCertification: the units and the mandatory cases a certification run must execute exactly once, listed in the order it executes them. A case identifier is the name of the procedure that runs it. test/M_EXCEL_UI_TEST_CERTIFICATION.bas registers the same list in TST_CertManifestCase and the run compares it with the cases that started and recorded a status; tools/certification_manifest.py, which the static gate runs, fails when the registry, the dispatch, the call sites or this file differ. docs/EXCEL_CERTIFICATION.md describes the contract.",
+  "units": [
+    {
+      "name": "CertificationSelfTest",
+      "execution": "isolated",
+      "cases": [
+        "Test_EXCEL_UI_RunCertificationSelfTest"
+      ]
+    },
+    {
+      "name": "OwnershipCleanupChecks",
+      "execution": "isolated",
+      "cases": [
+        "Test_EXCEL_UI_RunOwnershipCleanupChecks"
+      ]
+    },
+    {
+      "name": "RegressionPack",
+      "execution": "live",
+      "runner": "TST_RunRegressionPack",
+      "cases": [
+        "TST_Case_ShowAllBaseline",
+        "TST_Case_SelectiveHide",
+        "TST_Case_SelectiveShow",
+        "TST_Case_NoOpLeaveUnchanged",
+        "TST_Case_WithResult_AllSuccess",
+        "TST_Case_WithResult_NoOpSuccess",
+        "TST_Case_WithResult_SuccessWithoutFailureList",
+        "TST_Case_WithResult_InvalidVisibility",
+        "TST_Case_TargetScope_ActiveWindow",
+        "TST_Case_TargetScope_ActiveWorkbookWindows",
+        "TST_Case_TargetScope_InvalidValue",
+        "TST_Case_ScreenUpdatingPreserved",
+        "TST_Case_FailureAccumulatorDegradesSafely",
+        "TST_Case_FirstFailureAllocationKeepsContract",
+        "TST_Case_CertificationCleanupUsesBaseline",
+        "TST_Case_CertBaselineMatchesUntouchedHost",
+        "TST_Case_CertCleanupDetectsLeakedAndReplacedWindows",
+        "TST_Case_CertCleanupDetectsPropertyDrift",
+        "TST_Case_CertCleanupDetectsTitleBarMismatch",
+        "TST_Case_CertCleanupHelperFailureIsFinding",
+        "TST_Case_CertCleanupReportsQuietUpdateResidue",
+        "TST_Case_CertRecordFailsClosed",
+        "TST_Case_CertInventoryDetectsDrift",
+        "TST_Case_SnapshotCaptureResultSuccess",
+        "TST_Case_SnapshotResetResultSuccess",
+        "TST_Case_SnapshotResetResultNoSnapshot",
+        "TST_Case_SnapshotCapturePartialApplicationRead",
+        "TST_Case_SnapshotLifecycle",
+        "TST_Case_ResetWithoutSnapshot_NoOp",
+        "TST_Case_DestructiveRunnersPreserveCallerSnapshot",
+        "TST_Case_CertUnitIsolatesCaptureFailure",
+        "TST_Case_QuietScopeOwnershipIsVerified",
+        "TST_Case_ConvenienceWrappers",
+        "TST_Case_TitleBarRoundTrip",
+        "TST_Case_TitleBarOwnedBitPreservation",
+        "TST_Case_TitleBarShowRecoversWithoutBaseline",
+        "TST_Case_TitleBarShowRejectsCaptionlessBaseline",
+        "TST_Case_TitleBarVisibilityRequiresCompleteCaption",
+        "TST_Case_TitleBarShowRejectsPartialCaptionBaseline",
+        "TST_Case_TitleBarShowPublicPaths",
+        "TST_Case_TitleBarFrameRefreshDebtRetried",
+        "TST_Case_TitleBarStaleFrameEntryNotReused",
+        "TST_Case_TitleBarSameHwndGenerationReuse",
+        "TST_Case_ActiveFramePairRefusesMismatch",
+        "TST_Case_TitleBarApiErrorCapture"
+      ]
+    },
+    {
+      "name": "SnapshotIdentity",
+      "execution": "live",
+      "cases": [
+        "Test_EXCEL_UI_RunSnapshotIdentity"
+      ]
+    },
+    {
+      "name": "TitleBarSdiIdentity",
+      "execution": "live",
+      "runner": "Test_EXCEL_UI_RunTitleBarSdiIdentity",
+      "cases": [
+        "TST_Case_TitleBarSdiRestoreTargetsCapturedFrame",
+        "TST_Case_TitleBarCapturedFrameClosedIsReported",
+        "TST_Case_RibbonRestoreRefusesOtherActiveWindow",
+        "TST_Case_RibbonRestoreRefusesClosedWindow",
+        "TST_Case_TitleBarPairRefusalLeavesFrameUntouched",
+        "TST_Case_TitleBarClosedFrameReopenedIsRefused"
+      ]
+    }
+  ],
+  "required_cases": [
+    {
+      "case": "TST_Case_TitleBarFrameRefreshDebtRetried",
+      "note": "Named by #42: a failed frame refresh is retried, not short-circuited."
+    },
+    {
+      "case": "TST_Case_TitleBarStaleFrameEntryNotReused",
+      "note": "Named by #42: frame state that cannot be proved is discarded, not applied."
+    },
+    {
+      "case": "TST_Case_ActiveFramePairRefusesMismatch",
+      "note": "Named by #42: a disagreed active-frame pair is refused by both callers."
+    },
+    {
+      "case": "TST_Case_TitleBarSameHwndGenerationReuse",
+      "note": "#42 names TST_Case_TitleBarSameStyleHandleReuse. #32 replaced that case with this one, which keeps the numeric hWnd and changes only the window generation, so this is the name a release must carry."
+    },
+    {
+      "case": "TST_Case_TitleBarShowRejectsCaptionlessBaseline",
+      "note": "Named by #42: a captionless baseline is unusable for show, and fails within a bound (#66)."
+    },
+    {
+      "case": "Test_EXCEL_UI_RunCertificationSelfTest",
+      "note": "Named by #42: appears exactly once in the release evidence, run as an isolated unit outside the live record because it calls certification itself."
+    },
+    {
+      "case": "Test_EXCEL_UI_RunOwnershipCleanupChecks",
+      "note": "Named by #42: its standalone ownership and cleanup coverage stays, as a mandatory isolated unit whose nested certification runs cannot reach the live record."
+    }
+  ],
+  "focused_cases": {},
+  "interactive_runners": {
+    "Test_EXCEL_UI_RunAll": "Runs the regression pack from the Immediate window. It records no case inventory, skips the isolated units and the identity units, and is not release certification.",
+    "Test_EXCEL_UI_RunCore": "Runs the regression pack without the title-bar cases. It records no case inventory and is not release certification.",
+    "Test_EXCEL_UI_RunTitleBarOnly": "Runs the title-bar cases alone, for a quicker loop. It records no case inventory and is not release certification; every case it runs is also a mandatory case of RegressionPack.",
+    "Test_EXCEL_UI_RunRibbonSdiProbe": "A characterization that asserts nothing (docs/RIBBON_SDI_BEHAVIOR.md). Not part of the release gate."
+  }
+}
