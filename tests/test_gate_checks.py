@@ -15,7 +15,19 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
-from gate_fixture import GateTestCase, check_repo, house_style, reformat, vba_api, vba_house_rules, wiki_badges
+from gate_fixture import (
+    PLANT,
+    PLANT_PATH,
+    GateTestCase,
+    check_repo,
+    house_rules_fixtures,
+    house_style,
+    planted_module,
+    reformat,
+    vba_api,
+    vba_house_rules,
+    wiki_badges,
+)
 
 RUNTIME = "src/M_EXCEL_UI_RUNTIME.bas"
 UI = "src/M_EXCEL_UI.bas"
@@ -1199,47 +1211,77 @@ class HouseStyleRules(GateTestCase):
         with patch.object(vba_house_rules, "COMPARE_CALL_RE", NEVER):
             self.assertFails("InStr with two arguments")
 
+    PENDING = vba_house_rules.PENDING_FILE
+
+    def drop_pending_list(self) -> None:
+        if self.repo.path(self.PENDING).exists():
+            self.repo.remove(self.PENDING)
+
+    def list_pending(self, lines: str) -> None:
+        """Add lines to the pending list, creating the file once the real list is gone."""
+        if self.repo.path(self.PENDING).exists():
+            self.repo.append(self.PENDING, "\n" + lines)
+        else:
+            self.repo.write(self.PENDING, lines)
+
+    def planted(self) -> list[str]:
+        """The findings that name the planted module."""
+        return [f for f in self.findings() if PLANT_PATH in f or PLANT in f]
+
     def test_fails_on_a_finding_that_is_not_listed(self) -> None:
-        self.repo.replace(vba_house_rules.PENDING_FILE, "M_EXCEL_UI: header\n", "")
-        self.assertFails("src/M_EXCEL_UI.bas:", "header lacks", f"is not listed in {vba_house_rules.PENDING_FILE}")
+        self.repo.write(PLANT_PATH, planted_module())
+        self.assertFails(f"{PLANT_PATH}:", "header lacks NOTES", f"is not listed in {self.PENDING}")
+
+    def test_passes_on_a_finding_that_is_listed(self) -> None:
+        self.repo.write(PLANT_PATH, planted_module())
+        self.list_pending(f"{PLANT}: header\n{PLANT}.Probe_Describe: header\n")
+        self.assertEqual(self.planted(), [])
 
     def test_fails_on_a_stale_line(self) -> None:
-        self.repo.append(vba_house_rules.PENDING_FILE, "M_EXCEL_UI.UI_HideExcelUI: select-case\n")
-        self.assertFails(f"{vba_house_rules.PENDING_FILE}:", "stale line", "M_EXCEL_UI.UI_HideExcelUI: select-case")
+        self.list_pending(f"{PLANT}.Probe_Describe: select-case\n")
+        self.repo.write(PLANT_PATH, planted_module(procedure_notes=True, module_notes=True))
+        self.assertFails(f"{self.PENDING}:", "stale line", f"{PLANT}.Probe_Describe: select-case")
 
     def test_fails_on_a_second_finding_that_a_line_does_not_cover(self) -> None:
-        # UI_HideExcelUI is listed once for its header; a second header finding is not covered.
-        text = self.repo.read_text(UI)
-        start = text.index("Public Sub UI_HideExcelUI")
-        at = text.index("' UPDATED\r\n'   ", start) + len("' UPDATED\r\n'   ")
-        end = text.index("\r\n", at)
-        self.repo.write(UI, text[:end] + " - Added." + text[end:])
-        found = self.assertFails("UI_HideExcelUI: ", f"is not listed in {vba_house_rules.PENDING_FILE}")
-        self.assertEqual(len(found), 1, found)
+        # The procedure is listed once for its header; a second header finding is not covered.
+        text = planted_module(module_notes=True)
+        text = text.replace("' UPDATED\r\n'   2026-11-02\r\n'---", "' UPDATED\r\n'   2026-11-02 - Added.\r\n'---", 1)
+        self.repo.write(PLANT_PATH, text)
+        self.list_pending(f"{PLANT}.Probe_Describe: header\n")
+        found = self.assertFails("Probe_Describe: ", f"is not listed in {self.PENDING}")
+        self.assertEqual(len([f for f in found if PLANT_PATH in f]), 1, found)
+
+    def plant_with_constant(self, replacement: str) -> None:
+        text = planted_module(procedure_notes=True, module_notes=True)
+        qualified = house_rules_fixtures.QUALIFIED_CONST.replace("M_PROBE", PLANT)
+        self.assertIn(qualified, text)
+        self.repo.write(PLANT_PATH, text.replace(qualified, replacement, 1))
+
+    def test_passes_on_a_bare_proc_name_under_its_comment(self) -> None:
+        self.plant_with_constant(house_rules_fixtures.DELIBERATE + house_rules_fixtures.BARE_CONST)
+        self.assertEqual(self.planted(), [])
 
     def test_fails_on_a_bare_proc_name_without_its_comment(self) -> None:
-        text = self.repo.read_text(UI)
-        comment = "    " + house_style.DELIBERATE_VALUE_COMMENT + "\r\n"
-        self.assertIn(comment, text)
-        self.repo.write(UI, text.replace(comment, "", 1))
-        self.assertFails("UI_SetExcelUI: PROC_NAME is the bare name",
-                         f"is not listed in {vba_house_rules.PENDING_FILE}")
+        self.plant_with_constant(house_rules_fixtures.BARE_CONST)
+        self.assertFails("Probe_Describe: PROC_NAME is the bare name", f"is not listed in {self.PENDING}")
 
     def test_fails_on_the_deliberate_comment_above_another_literal(self) -> None:
-        text = self.repo.read_text(UI)
-        self.repo.write(UI, text.replace('"UI_SetExcelUI"', '"M_EXCEL_UI.UI_SetExcelUI"', 1))
-        self.assertFails("UI_SetExcelUI: the deliberate-value comment stands above")
+        self.plant_with_constant(house_rules_fixtures.DELIBERATE
+                                 + house_rules_fixtures.QUALIFIED_CONST.replace("M_PROBE", PLANT))
+        self.assertFails("Probe_Describe: the deliberate-value comment stands above")
 
     def test_fails_on_a_line_that_is_not_an_entry(self) -> None:
-        self.repo.append(vba_house_rules.PENDING_FILE, "settled in the next change\n")
+        self.list_pending("settled in the next change\n")
         self.assertFails(f"{vba_house_rules.PENDING_FILE}:", "not a")
 
     def test_without_the_pending_list_every_finding_fails(self) -> None:
-        self.repo.remove(vba_house_rules.PENDING_FILE)
-        self.assertFails(f"{RUNTIME}:", "header lacks", "is not listed")
+        self.drop_pending_list()
+        self.repo.write(PLANT_PATH, planted_module())
+        self.assertFails(f"{PLANT_PATH}:", "header lacks NOTES", "is not listed")
 
     def test_does_not_read_the_modules_while_the_style_is_off(self) -> None:
-        self.repo.remove(vba_house_rules.PENDING_FILE)
+        self.drop_pending_list()
+        self.repo.write(PLANT_PATH, planted_module())
         with patch.object(house_style, "HOUSE_STYLE_ACTIVE", False):
             self.assertEqual(self.findings(), [])
 

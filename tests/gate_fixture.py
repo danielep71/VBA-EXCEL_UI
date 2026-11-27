@@ -45,6 +45,26 @@ import wiki_badges as wiki_badges  # noqa: E402
 from vba_lex import LexicalError as LexicalError  # noqa: E402
 from vba_lex import executable_signature as executable_signature  # noqa: E402
 
+PLANT = "M_EXCEL_UI_EXTRA"
+PLANT_PATH = "src/M_EXCEL_UI_EXTRA.bas"
+PROCEDURE_NOTES = "' NOTES\r\n'   A text such as \"GoTo ErrorHandler\" is data.\r\n'\r\n"
+MODULE_NOTES = "' NOTES\r\n'   The fixtures read this header.\r\n'\r\n"
+
+
+def planted_module(name: str = PLANT, *, procedure_notes: bool = False, module_notes: bool = False) -> str:
+    """A module in the style with header fields missing, so that no real module has to supply a finding.
+
+    ``Probe_Describe`` lacks NOTES unless ``procedure_notes``, and so does the module header unless
+    ``module_notes``. With both given it breaks no rule at all.
+    """
+    text = house_format_fixtures.HOUSE_MODULE.replace("M_PROBE", name)
+    for keep, field in ((procedure_notes, PROCEDURE_NOTES), (module_notes, MODULE_NOTES)):
+        assert field in text
+        if not keep:
+            text = text.replace(field, "", 1)
+    return text
+
+
 # Fixture repositories must not depend on whoever runs the tests: a personal
 # excludesFile or attributes file would change what git check-ignore and
 # git check-attr report, and therefore what the gate decides.
