@@ -146,9 +146,9 @@ corrections:
 
 Title-bar capture and persistent frame state now pair each native hWnd with the
 Excel Window that owns it. Show now uses baseline state and readback, but the
-complete caption-mask correction remains open under #6. The bounded control
-(#66), the untouched-frame evidence (#45) and the same-hWnd generation proof
-(#32) are complete.
+complete caption-mask correction (#6) is in place and certified. The bounded
+control (#66), the untouched-frame evidence (#45), the same-hWnd generation
+proof (#32) and the complete caption mask (#6) are complete.
 
 `M_EXCEL_UI_RUNTIME`, `M_EXCEL_UI_SNAPSHOT`, `M_EXCEL_UI_TITLEBAR`, the
 regression tests and the demo modules have therefore changed; `M_EXCEL_UI`
@@ -166,23 +166,23 @@ measured against that baseline.
 
 | Area | Current state |
 |---|---|
-| Production VBA | Runtime quiet-scope ownership, Ribbon fail-closed restore and title-bar WinAPI error capture implemented; title-bar Window/hWnd identity, registry generation and show verification implemented; #45 and #32 closed, #6 correction gap open |
+| Production VBA | Runtime quiet-scope ownership, Ribbon fail-closed restore and title-bar WinAPI error capture implemented; title-bar Window/hWnd identity, registry generation and show verification implemented; #45, #32 and #6 closed |
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
 | Runtime correctness fixes | #26, #27 and #45 complete; #23 certified and open until the README and Wiki describe it; #38 certified and open until the Wiki describes it; remaining title-bar defects open |
-| Regression and certification fixes | #43, #135 and #50 complete; the mandatory case inventory (#42) is implemented and not yet certified; remaining certification gates open |
+| Regression and certification fixes | #43, #135, #50, #35 and #42 complete; remaining certification gates open |
 | Regression VBA | Caller-owned snapshot refusal, ownership-failure, Ribbon wrong-window refusal, WinAPI error-capture and certification unit-isolation coverage added; split into a harness and four suite modules (#90); certified |
 | Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); fast-mode state (#70), ActiveX check boxes (#73) and template validation (#74) corrected and checked on Excel with harness scenarios S15-S44 (2026-11-14); title-bar error capture (#144) and printer-free demo build (#187) checked on Excel with scenarios S45-S48 (2026-11-17) |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
 | Static validation | `python3 tools/verify.py --ci` runs every static check, including the 40 checks of `tools/check_repo.py`; the release branch passes |
 | Wiki | Last recorded track is v1.1.2; the badge workflow runs from the default branch, with final evidence still pending under #53 |
-| Excel runtime certification | Candidate heads certified on Excel 16.0 build 20430, 64-bit (2026-11-06, 2026-11-14 and 2026-11-17); the final v1.1.3 head is not yet certified |
+| Excel runtime certification | Candidate heads certified on Excel 16.0 build 20430, 64-bit (2026-11-06, 2026-11-14, 2026-11-17 and 2026-11-27); the final v1.1.3 head is not yet certified |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
 ### ➕ Added
 
-- **Not yet certified.** Release certification now verifies the exact mandatory
+- **Certified on Excel 16.0 build 20527, 64-bit (2026-11-27).** Release certification now verifies the exact mandatory
   case inventory, not only the outcomes of the units it dispatched
   ([#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42),
   `ICR-UI-112-P2-06`). A new versioned manifest,
@@ -227,7 +227,9 @@ measured against that baseline.
   that passes the unit counters without the case inventory; the policy key
   `case_manifest` switches this on, and a policy without it still reads the
   earlier contract. No production module changed and the `[supported]` facade is
-  unchanged. This was checked by the static gate only; it needs an Excel run.
+  unchanged. The run on Excel 16.0 build 20527, 64-bit (2026-11-27, `371cede`) gave
+  `units=5`, 54 expected, started and passed cases and `inventory=OK`, and the
+  validator's case inventory check passed.
 - Added the **VBA syntax** check to `tools/check_repo.py`, in `tools/vba_syntax.py`
   with its fixtures in `tools/vba_syntax_fixtures.py`
   ([#203](https://github.com/danielep71/VBA-EXCEL_UI/issues/203)). The gate
@@ -250,7 +252,7 @@ measured against that baseline.
   `FixtureOwned = EntryStyle And TST_TITLEBAR_OWNED_MASK`) are fixtures. The
   check passes on the current modules without suppressions. No VBA module
   changed. It does not replace `Debug -> Compile VBAProject` on Excel.
-- **Not yet certified.** Release certification now judges cleanup against a
+- **Certified on Excel 16.0 build 20527, 64-bit (2026-11-27).** Release certification now judges cleanup against a
   baseline of the Excel host that it owns, not against four conditions
   ([#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35),
   `ICR-UI-112-P2-05`; the quiet-update handoff of
@@ -292,7 +294,8 @@ measured against that baseline.
   cleanup failure and checks that
   `Test_EXCEL_UI_RunReleaseCertification` raises with its verdict and finding
   intact. No production module changed and the `[supported]` facade is
-  unchanged. This was checked by the static gate only; it needs an Excel run.
+  unchanged. The run on Excel 16.0 build 20527, 64-bit (2026-11-27, `d79586b`) gave
+  `cleanup=OK` with 15 comparisons and the two unverified surfaces listed.
 - **Checked on Excel 16.0 build 20430, 64-bit (2026-11-17).** Added
   **tools/Check-EXCEL_UI.ps1** and its launcher **tools/Check-EXCEL_UI.cmd**
   ([#197](https://github.com/danielep71/VBA-EXCEL_UI/issues/197)). One command
@@ -315,7 +318,7 @@ measured against that baseline.
   write is reported in that verdict and never fails the runner. With no sink
   set, the Immediate window shows what it showed before. The supported API is
   unchanged.
-- **Not yet checked on Excel.** Added an `-Unattended` switch to
+- **Checked on Excel 16.0 build 20527, 64-bit (2026-11-27).** Added an `-Unattended` switch to
   **tools/Check-EXCEL_UI.ps1** and **tools/Certify-EXCEL_UI.ps1**
   ([#206](https://github.com/danielep71/VBA-EXCEL_UI/issues/206)), so a run
   needs no key press and no click from the start to the final `RESULT:` line.
@@ -781,7 +784,7 @@ measured against that baseline.
   failure and the recovery if Excel stops responding. That run has not been
   performed.
 
-- **Not yet certified.** Added the complete-caption regressions for
+- **Certified on Excel 16.0 build 20527, 64-bit (2026-11-27).** Added the complete-caption regressions for
   [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6), registered in the
   title-bar pack and in the certification regression pack:
   `TST_Case_TitleBarVisibilityRequiresCompleteCaption` (all readers, against
@@ -1136,7 +1139,7 @@ measured against that baseline.
   crosses to the window. With the retained-Window check removed, the source
   predicts a failure at `TST_Case_TitleBarSameHwndGenerationReuse.Crossed` in
   the first pass; that control has not been run on Excel.
-- **Not yet certified.** A title bar is now visible only when the complete
+- **Certified on Excel 16.0 build 20527, 64-bit (2026-11-27).** A title bar is now visible only when the complete
   `WS_CAPTION` mask is set ([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)).
   `WS_CAPTION` is `WS_BORDER` | `WS_DLGFRAME`, and the merged correction tested
   `(style And WS_CAPTION) <> 0`, so a style or baseline carrying only one of
@@ -1640,9 +1643,9 @@ Ten throwaway variants were produced; none was committed. Their outcomes differ:
 
 Thus eight variants produced useful detecting failures, one generation control
 has insufficient isolation, and one attempt hung before #66 bounded it. #6 now has
-a completed negative control; its complete composite `WS_CAPTION` mask
-correction is implemented, not yet certified on Excel, and the issue remains
-open; #45 and #32 are closed. The #32 row records
+a completed negative control, and its complete composite `WS_CAPTION` mask
+correction was certified on Excel on 2026-11-27 (the mutant variants added
+with it were not run on Excel); #6, #45 and #32 are closed. The #32 row records
 the earlier distinct-handle seam. The same-hWnd regression that replaced it
 passed on Excel on 2026-11-17; its mutant was checked against a model of the
 registry logic, not run on Excel.
@@ -1722,7 +1725,7 @@ Dispositions are as of 2026-11-15 and are updated with the issues.
 | `ICR-UI-112-P1-01` | v1.1.2 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | — | Open (v1.1.3); fail-closed restore certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
 | `ICR-UI-112-P2-01` | v1.1.2 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | — | Closed; certified on Excel 16.0 build 20430 x64 (2026-11-14) |
 | `ICR-UI-112-P2-02` | v1.1.2 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | — | Closed (v1.1.3); retained-Window generation identity merged (PR #63) and the same-numeric-hWnd regression certified on 2026-11-17 (PR #198) |
-| `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Reopened (v1.1.3); bounded negative control passed (#66, 2026-11-14); the complete `WS_CAPTION` mask correction is implemented and not yet certified |
+| `ICR-UI-112-P2-03` | v1.1.2 | [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | — | Closed (v1.1.3); bounded negative control passed (#66, 2026-11-14); the complete `WS_CAPTION` mask correction certified on Excel 16.0 build 20527 x64 (2026-11-27) |
 | `ICR-UI-112-P2-04` | v1.1.2 | [#43](https://github.com/danielep71/VBA-EXCEL_UI/issues/43) | — | Closed; corrected on `release/v1.1.3` at `32baef384ee306082483ea5dcaf40abfe3224118` |
 | `ICR-UI-112-P2-05` | v1.1.2 | [#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35) | — | Open (v1.1.3) |
 | `ICR-UI-112-P2-06` | v1.1.2 | [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42) | — | Reopened (v1.1.3) |
@@ -1766,8 +1769,8 @@ baseline, not a non-zero baseline without `WS_CAPTION`, and a visible baseline
 requires the complete `WS_CAPTION` mask, `WS_BORDER` and `WS_DLGFRAME` together.
 Its bounded negative control passed on 2026-11-14
 under [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66), which is
-closed; the complete-mask correction is implemented on `release/v1.1.3`, not
-yet certified on Excel, and #6 stays open until it is.
+closed; the complete-mask correction is on `release/v1.1.3` and was certified
+on Excel on 2026-11-27, and #6 is closed.
 
 ### ⚠️ Release-blocker status
 
@@ -1783,7 +1786,7 @@ practical closure status of any item that has since been reopened.
 | [#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23) | Ribbon wrong-target restoration fails closed | Certified on Excel 16.0 build 20430 x64 (2026-11-06); open until the README and Wiki describe it (#53, #36) |
 | [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) | Pair Excel Window and native hWnd identity defensibly | Closed; certified on Excel 16.0 build 20430 x64 (2026-11-14) |
 | [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32) | Reject recycled-hWnd same-style registry collisions | Closed; same-numeric-hWnd generation regression certified on Excel 16.0 build 20430 x64 (2026-11-17) |
-| [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Reopened; bounded negative control passed (#66); composite caption-mask correction open |
+| [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) | Prevent false title-bar show success from a non-zero captionless baseline | Closed; bounded negative control passed (#66); complete caption-mask correction certified on Excel 16.0 build 20527 x64 (2026-11-27) |
 | [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66) | Bounded title-bar mutation control that fails instead of hanging | Closed |
 | [#70](https://github.com/danielep71/VBA-EXCEL_UI/issues/70) | Demo builder restores application state after partial fast-mode entry or cleanup failure | Closed; Excel harness passed 44 scenarios and 295 checks on build 20430 x64 (2026-11-14) |
 | [#71](https://github.com/danielep71/VBA-EXCEL_UI/issues/71) | Demo template and sheet-reset handlers do not recatch their own re-raised errors | Closed; Excel harness passed 14 scenarios and 89 checks on build 20430 x64 (2026-11-06) |

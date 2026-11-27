@@ -504,9 +504,8 @@ style, keeping every unrelated bit. Every show, including a no-op, reads the
 live style back and reports success only when the complete mask is set; a
 missing caption returns `False` with a `TitleBar` diagnostic. The visibility
 readers (`UI_TryGetTitleBarVisible` and the explicit-window reader) apply the
-same test. This correction is not yet certified on Excel, and
-[#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6) stays open until
-`Test_EXCEL_UI_RunReleaseCertification` passes on the exact source. The bounded
+same test. This correction was certified on Excel on 2026-11-27
+([#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6)). The bounded
 negative control for the v1.1.2 condition passed under
 [#66](https://github.com/danielep71/VBA-EXCEL_UI/issues/66): with that condition
 restored, the regression fails instead of hanging.
@@ -922,10 +921,10 @@ No third-party DLL, COM component, package manager, or non-standard VBA referenc
 - **Retained identity, in memory only.** Window identity is retained by object reference; on `release/v1.1.3` the title bar also pairs that object with its `Window.hWnd`. Snapshots do not survive VBA reset or Excel restart.
 - **Changed window set after capture.** New windows are unchanged; missing captured windows produce diagnostics.
 - **Ribbon restoration is not window-identity-safe.** Every Ribbon mechanism acts on the active window and accepts no window argument. In v1.1.2, a snapshot restored while a different window is active applies the captured value to that window. On `release/v1.1.3`, that restore fails closed instead: it reports a Ribbon failure and writes nothing ([#23](https://github.com/danielep71/VBA-EXCEL_UI/issues/23)). Restoring the Ribbon to its captured window by activating it is [#44](https://github.com/danielep71/VBA-EXCEL_UI/issues/44). See [docs/RIBBON_SDI_BEHAVIOR.md](docs/RIBBON_SDI_BEHAVIOR.md).
-- **Native frame corrections are incomplete.** `release/v1.1.3` carries partial
-  corrections for [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32), [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) and [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6). All three are still
-  open, and none of them is a release claim until the exact source passes the
-  Excel regression and release gates; see the release boundaries in
+- **Native frame corrections are certified on candidate heads only.** `release/v1.1.3` carries corrections
+  for [#32](https://github.com/danielep71/VBA-EXCEL_UI/issues/32), [#45](https://github.com/danielep71/VBA-EXCEL_UI/issues/45) and [#6](https://github.com/danielep71/VBA-EXCEL_UI/issues/6). All three were certified
+  on Excel on candidate heads, and none of them is a release claim until the
+  exact final source passes the Excel regression and release gates; see the release boundaries in
   [INSTALLATION.md](INSTALLATION.md).
 - **Best-effort Ribbon and frame behavior.** Excel, Windows, add-ins, and window mode can affect visible results.
 - **No durable transaction.** Process termination can prevent restoration.
