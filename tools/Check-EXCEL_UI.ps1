@@ -43,6 +43,18 @@ open, run and close Excel the same way.
 Exit codes: 0 no step failed; 1 a step failed or the run stopped on an error;
 2 the operator cancelled it.
 
+Unattended: with -Unattended the whole run needs no key press and no click,
+from the start to the final RESULT line. The switch goes to
+tools\Certify-EXCEL_UI.ps1 too. Every Excel instance this script (or that
+script) starts is set to msoAutomationSecurityLow before it opens its workbook,
+so the macros of the workbooks built from the checked-out commit run without
+the Enable Content message; no other instance, the Trust Center, the registry
+and the Trusted Locations are left as they are. session.json records
+automation_security as "msoAutomationSecurityLow (-Unattended)". Each wait is
+bounded: a workbook whose macros do not answer within 60 seconds, or a compile
+command that stays enabled for 30 seconds, fails its step with a message that
+says why. Without the switch the script asks, as described above.
+
 See docs\EXCEL_CHECKS.md.
 
 .PARAMETER BundleDir
@@ -65,6 +77,11 @@ WARN, not a FAIL. Default 10.
 The Python 3.11+ executable that tools\Certify-EXCEL_UI.ps1 validates its
 bundle with. By default that script looks for one.
 
+.PARAMETER Unattended
+Run without any prompt, as described above. It is passed to
+tools\Certify-EXCEL_UI.ps1. Without it the script asks you to click Enable
+Content and to confirm a compile that Excel does not report as finished.
+
 .PARAMETER RepoRoot
 The repository. By default, the parent of this script's folder.
 
@@ -82,7 +99,8 @@ param(
     [ValidateRange(0.1, 3600)]
     [double]$SlowBuildSeconds = 10,
     [string]$Python,
-    [string]$RepoRoot
+    [string]$RepoRoot,
+    [switch]$Unattended
 )
 
 Set-StrictMode -Version Latest
@@ -129,9 +147,12 @@ $SharedFunctions = @(
     'Get-UtcStamp', 'Get-LocalStamp', 'Write-Log', 'Stop-Cancelled', 'Get-InnerMessage', 'Get-ComHResult',
     'Invoke-Excel', 'Invoke-Native', 'Invoke-Git', 'Read-EvidencePolicy', 'Write-JsonFile', 'Get-RegistryValue',
     'Get-OfficeVersion', 'Get-SecurityValue', 'Get-MacroSetting', 'Get-VbaProjectAccess', 'Get-WindowsInfo',
-    'Initialize-Native', 'Get-ExcelProcessId', 'Get-ExcelBitness', 'Stop-QuitProcess', 'Release-Com'
+    'Initialize-Native', 'Get-ExcelProcessId', 'Get-ExcelBitness', 'Stop-QuitProcess', 'Release-Com',
+    'Get-AutomationSecurityLabel', 'Set-ExcelAutomationSecurity', 'Read-OperatorAnswer', 'Wait-ExcelMacros',
+    'Wait-CompileCommand', 'Resolve-CompileFallback'
 )
-$SharedValues = @('MsoAutomationSecurityByUI', 'CompileControlId', 'ReadinessMacro')
+$SharedValues = @('MsoAutomationSecurityByUI', 'MsoAutomationSecurityLow', 'CompileControlId', 'ReadinessMacro',
+                  'MacrosWaitSeconds', 'MacrosPollSeconds', 'CompileWaitSeconds')
 
 $script:SessionLog = $null
 $script:Steps = @()
@@ -445,35 +466,15 @@ function Open-ExcelWorkbook($State, [string]$Path) {
         $State.ProcessStart = (Get-Process -Id $State.ProcessId -ErrorAction SilentlyContinue).StartTime
     }
     Invoke-Excel { $State.Excel.Visible = $true }
-    Invoke-Excel { $State.Excel.AutomationSecurity = $MsoAutomationSecurityByUI }
+    [void](Set-ExcelAutomationSecurity $State.Excel)
     $State.Workbook = Invoke-Excel { $State.Excel.Workbooks.Open($Path) }
     $State.Qualified = "'" + ([string]$State.Workbook.Name).Replace("'", "''") + "'!"
 }
 
 function Wait-WorkbookMacros($State) {
     # Waits until a read-only public function of the workbook runs, which it
-    # does only once its macros are enabled.
-    $ready = $false
-    while (-not $ready) {
-        try {
-            [void](Invoke-Excel { $State.Excel.Run($State.Qualified + $ReadinessMacro) })
-            $ready = $true
-        }
-        catch {
-            Write-Host ''
-            Write-Host ('The macros of {0} do not run. In the Excel window, click Enable Content in the' -f
-                        $State.Workbook.Name)
-            Write-Host 'message bar (or File > Info > Enable Content), then press Enter here.'
-            Write-Host 'If Excel shows a compile error instead, close the message and type F.'
-            $answer = Read-Host 'Enter to try again, F for a compile error, Q to stop'
-            if ($answer -match '^\s*q') {
-                Stop-Cancelled 'The operator stopped: the macros were not enabled.'
-            }
-            if ($answer -match '^\s*f') {
-                throw 'The project does not compile: Excel reported a compile error.'
-            }
-        }
-    }
+    # does only once its macros are enabled, as the certification script does.
+    Wait-ExcelMacros -Excel $State.Excel -Qualified $State.Qualified -WorkbookName ([string]$State.Workbook.Name)
 }
 
 function Invoke-ProjectCompile($State) {
@@ -495,27 +496,11 @@ function Invoke-ProjectCompile($State) {
         Invoke-Excel { $control.Execute() }
     }
     Release-Com $control
-    $compiled = $false
-    for ($attempt = 0; $attempt -lt 10 -and -not $compiled; $attempt++) {
-        Start-Sleep -Milliseconds 500
-        $control = Invoke-Excel { $State.Vbe.CommandBars.FindControl(1, $CompileControlId) }
-        $compiled = -not (Invoke-Excel { $control.Enabled })
-        Release-Com $control
-    }
     $detail = 'Debug > Compile VBAProject completed and is greyed out'
-    if (-not $compiled) {
-        # The command can stay enabled without an error; the operator looks.
-        Write-Host ''
-        Write-Host 'Debug > Compile VBAProject is still enabled. In the VBE, choose Debug > Compile'
-        Write-Host 'VBAProject yourself. Type Y if it completes with no error, N if it reports one.'
-        $answer = Read-Host 'Compiled with no error? (Y/N, Q to stop)'
-        if ($answer -match '^\s*q') {
-            Stop-Cancelled 'The operator stopped at the compile step.'
-        }
-        if ($answer -notmatch '^\s*y') {
-            throw 'The project does not compile: the VBE reported an error.'
-        }
-        $detail = 'Debug > Compile VBAProject completed with no error, as the operator saw in the VBE'
+    if (-not (Wait-CompileCommand $State.Vbe)) {
+        # The command can stay enabled without an error; the operator looks,
+        # or, with -Unattended, the step fails.
+        $detail = Resolve-CompileFallback
     }
     Invoke-Excel { $State.Vbe.MainWindow.Visible = $false }
     Invoke-Excel { $State.Workbook.Activate() }
@@ -704,8 +689,12 @@ catch {
 }
 . $shared.Definitions
 $MsoAutomationSecurityByUI = $shared.Values['MsoAutomationSecurityByUI']
+$MsoAutomationSecurityLow = $shared.Values['MsoAutomationSecurityLow']
 $CompileControlId = $shared.Values['CompileControlId']
 $ReadinessMacro = $shared.Values['ReadinessMacro']
+$MacrosWaitSeconds = $shared.Values['MacrosWaitSeconds']
+$MacrosPollSeconds = $shared.Values['MacrosPollSeconds']
+$CompileWaitSeconds = $shared.Values['CompileWaitSeconds']
 
 # ---------------------------------------------------------------------------
 # Repository, commit and bundle
@@ -825,7 +814,7 @@ try {
         $script:Session.host.trust_center = [ordered]@{
             macro_setting       = $macroSetting
             vba_project_access  = $vbaProjectAccess
-            automation_security = 'msoAutomationSecurityByUI'
+            automation_security = (Get-AutomationSecurityLabel)
         }
         Write-Log "Macro setting: $macroSetting; Trust access to the VBA project object model: $vbaProjectAccess"
         if ($vbaProjectAccess -ne 'On') {
@@ -852,12 +841,16 @@ try {
     else {
         # --- certification --------------------------------------------------
         # Run unchanged as a child process with the console of this one, so
-        # its prompts reach the operator.
+        # its prompts reach the operator, or with the same -Unattended, so it
+        # has none.
         Set-CheckStep 'certification' 'RUNNING' "tools\$CertifyScriptName; it builds, compiles and certifies"
         $certifyArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $CertifyScript,
                               '-BundleDir', $certificationDir, '-RepoRoot', $script:RepoRoot)
         if ($Python) {
             $certifyArguments += @('-Python', $Python)
+        }
+        if ($Unattended) {
+            $certifyArguments += '-Unattended'
         }
         $certifyCode = Invoke-Interactive -FilePath 'powershell.exe' -Arguments $certifyArguments
         $reportLine = Get-ReportResultLine (Join-Path $certificationDir ([string]$policy.required_files.certification_report))

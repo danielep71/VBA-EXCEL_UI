@@ -21,8 +21,10 @@ never Excel, and reports one PASS or FAIL line per check:
 - the RESULT line, the unit lines, any RECORDING line and, when cleanup is
   itemized, the CLEANUP and UNVERIFIED lines of the text report agree with
   the certification document;
-- the host record names Windows and the Excel version, build and bitness, and
-  agrees with the host the certification document reports;
+- the host record names Windows and the Excel version, build and bitness,
+  agrees with the host the certification document reports, and records how
+  the macros were enabled (msoAutomationSecurityByUI, or
+  "msoAutomationSecurityLow (-Unattended)"), and no other value;
 - the certification document was written during the recorded session.
 
 The evidence contract (the file names, the steps, the configuration, the
@@ -101,6 +103,10 @@ ROLES = ("session", "host", "source_digests", "certification_json", "certificati
 # The roles whose file is a JSON document, whatever the policy names it.
 JSON_ROLES = ("session", "host", "source_digests", "certification_json")
 HOST_SECTIONS = ("windows", "excel")
+# How the macros of the workbook were enabled: the instance followed the Trust
+# Center, or the run was unattended and set msoAutomationSecurityLow on the
+# instance it started. The scripts write exactly these two values.
+AUTOMATION_SECURITY = ("msoAutomationSecurityByUI", "msoAutomationSecurityLow (-Unattended)")
 # The host fields the PASS line of the host check prints.
 REPORTED_HOST_FIELDS = {"windows": ("caption", "version", "build"), "excel": ("version", "build", "bitness")}
 POLICY_KEYS = ("description", "schema_version", "evidence_schema", "component", "manifest", "configuration",
@@ -749,6 +755,12 @@ def check_host(bundle: Bundle) -> str:
     for key in policy.host_fields["excel"]:
         text_field(excel, key, f"{label} excel")
     require(excel["bitness"] in policy.bitness, f"{label}: Excel bitness must be one of {policy.bitness}")
+    trust_center = field(host, "trust_center", label)
+    require(isinstance(trust_center, dict), f"{label}: trust_center must be an object")
+    automation = trust_center.get("automation_security")
+    require(automation in AUTOMATION_SECURITY,
+            f"{label}: trust_center automation_security {automation!r} must be one of "
+            f"{', '.join(repr(value) for value in AUTOMATION_SECURITY)}")
     result = bundle.document(policy.certification_json)
     for key, theirs in policy.excel_matches_certification.items():
         require(excel[key] == result.get(theirs),

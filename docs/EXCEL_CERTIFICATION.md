@@ -51,7 +51,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Certify-EXCEL_UI
 ```
 
 or double-click `tools\Certify-EXCEL_UI.cmd`, which runs the same script and
-keeps the window open at the end.
+keeps the window open at the end. To run without any prompt, add `-Unattended`
+to either command; the launcher then skips its final pause. See
+[Running unattended](#-running-unattended).
 
 | Parameter | Effect |
 | --- | --- |
@@ -59,6 +61,35 @@ keeps the window open at the end.
 | `-AllowDirty` | Runs even though the working tree has changes. The bundle records it, and the validator rejects such a bundle. Use it only to try the tooling. |
 | `-Python <exe>` | The Python 3.11+ executable for the validation. By default the script tries `py -3`, `python` and `python3`. |
 | `-RepoRoot <folder>` | The repository. By default, the parent of the `tools` folder. |
+| `-Unattended` | Runs without any prompt, as [Running unattended](#-running-unattended) describes. |
+
+## 🤖 Running unattended
+
+With `-Unattended` a run needs no key press and no click, from the start to the
+final `RESULT:` line. I keep it opt-in: without the switch the script asks, as
+the steps below describe, and `tools\Certify-EXCEL_UI.cmd` never adds it.
+
+- The script sets `Application.AutomationSecurity` to
+  `msoAutomationSecurityLow` on the Excel instance it starts, before that
+  instance opens the workbook, so the macros of the workbook built from the
+  checked-out commit run without the **Enable Content** message. Without the
+  switch the instance follows the Trust Center (`msoAutomationSecurityByUI`).
+- `host.json` records `automation_security` as `msoAutomationSecurityLow
+  (-Unattended)`, or as `msoAutomationSecurityByUI`; the validator accepts
+  those two values and no other. The evidence therefore says how the macros
+  were enabled.
+- It changes nothing but the setting of that instance, which ends when the
+  instance quits. It writes nothing to the Trust Center, the registry or a
+  Trusted Location, and it touches no other Excel instance.
+- It never prompts. The enable-macros step polls every 2 seconds for at most
+  60 seconds until the workbook macros answer, then fails with a message that
+  gives the last error. The compile step waits at most 30 seconds for
+  **Debug → Compile VBAProject** to grey out, then fails with a message that
+  says the compile could not be confirmed. Excel's own retry of a call it
+  rejects as busy (up to 60 seconds per call) still applies, and a modal
+  message that Excel shows can hold a call until someone closes it.
+
+To certify attended, run the script without `-Unattended`.
 
 ## 🔁 What it does
 
@@ -75,15 +106,18 @@ The script prints each step as it runs and records it in `session.log` and
    to create `EXCEL_UI-development.xlsm` in the bundle with the modules of the
    `development` configuration of `tools/vba-projects.json`.
 3. **Open.** Starts a visible Excel instance, opens the workbook with the
-   Trust Center macro setting, and writes `host.json`.
+   Trust Center macro setting (with `-Unattended`, with the macros of the
+   workbook enabled for that instance), and writes `host.json`.
 4. **Enable macros.** Calls a read-only public function of the workbook. If the
    macros are disabled, click **Enable Content** in the Excel message bar and
    press Enter in the script window. Type `Q` to stop, or `F` if Excel shows a
-   compile error instead.
+   compile error instead. With `-Unattended` it polls for at most 60 seconds
+   and fails the step if the macros still do not run.
 5. **Compile.** Shows the VBE and runs **Debug → Compile VBAProject**. The
    command turns grey once the project compiles. If it stays enabled, the
    script asks you to compile in the VBE yourself and answer `Y` (no error) or
-   `N` (a compile error, which fails the run). It then records the workbook's
+   `N` (a compile error, which fails the run); with `-Unattended` it fails the
+   step after 30 seconds instead of asking. It then records the workbook's
    VBA components and hides the VBE.
 6. **Certify.** Runs `Test_EXCEL_UI_RunReleaseCertification` with
    `Application.Run`. Do not use Excel until it returns. A run that does not
@@ -118,7 +152,7 @@ Keep a failed bundle as it is: it records what happened.
 | File | Written by | Content |
 | --- | --- | --- |
 | `session.json` | the script | Commit SHA, whether the working tree had changes, start and end times in UTC and local time, each step with its status and detail, the workbook's VBA components, the SHA-256 of each collected evidence file, the result and the exit code of the run. |
-| `host.json` | the script | Windows caption, version, build and architecture; Excel version, build, `Application.OperatingSystem` and bitness (read from the Excel process); the Click-to-Run version; the macro setting and VBA project access as found. |
+| `host.json` | the script | Windows caption, version, build and architecture; Excel version, build, `Application.OperatingSystem` and bitness (read from the Excel process); the Click-to-Run version; the macro setting and VBA project access as found; and how the macros were enabled, `msoAutomationSecurityByUI` or `msoAutomationSecurityLow (-Unattended)`. |
 | `source-digests.json` | the script | For each module of the `development` configuration at the commit: its path, module name, SHA-256 of the commit's content with CRLF line endings as a checkout writes it, and SHA-256 of the file the build imported. |
 | `certification.json` | the workbook | The certification document: Excel version and build, bitness, unit counts and results, skips, cleanup with every finding, every unverified surface and the number of comparisons made, whether every unit and skip was recorded, and the verdict. |
 | `certification.txt` | the workbook | The text report with its `RESULT:` line, a `CLEANUP` line per cleanup finding, an `UNVERIFIED` line per surface cleanup could not compare, and a `RECORDING` line when a unit, skip or finding could not be recorded. |
@@ -196,9 +230,11 @@ unknown commit, no bundle folder or an unusable policy). It checks that:
 - the `RESULT:` line, the unit lines, any `RECORDING` line and, for a document
   that itemizes cleanup, the `CLEANUP` and `UNVERIFIED` lines of
   `certification.txt` agree with `certification.json`;
-- `host.json` names Windows and the Excel version, build and bitness, and
-  agrees with the Excel version, build, operating system and bitness that
-  `certification.json` reports;
+- `host.json` names Windows and the Excel version, build and bitness, agrees
+  with the Excel version, build, operating system and bitness that
+  `certification.json` reports, and records `automation_security` as
+  `msoAutomationSecurityByUI` or `msoAutomationSecurityLow (-Unattended)`, and
+  no other value;
 - `certification.json` was written during the recorded session.
 
 To see the source digests a bundle needs for a commit:

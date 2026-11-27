@@ -14,11 +14,14 @@ For the commit checked out in this repository:
 2. build: creates a development workbook in the bundle with
    tools\Sync-EXCEL_UI-VBA.ps1 -Mode Development -NewWorkbook;
 3. open: opens it in a visible Excel instance of its own, which follows the
-   Trust Center macro setting, and writes host.json;
+   Trust Center macro setting (or, with -Unattended, runs the macros of the
+   workbook it built), and writes host.json;
 4. enable-macros: waits for the operator to click Enable Content when the
-   macros are disabled;
+   macros are disabled; with -Unattended it polls, for a bounded time, until
+   the macros answer;
 5. compile: runs Debug > Compile VBAProject and stops when the project does not
-   compile;
+   compile; when the command stays enabled it asks the operator, or, with
+   -Unattended, fails the step;
 6. certify: runs Test_EXCEL_UI_RunReleaseCertification;
 7. collect: copies the JSON document and the text report that run wrote to the
    temporary folder into the bundle;
@@ -36,6 +39,16 @@ stops before it runs anything when that file is missing or incomplete.
 Exit codes: 0 the certification passed (and the bundle validated, when Python
 was found); 1 it failed or stopped on an error; 2 the operator cancelled it.
 
+Unattended: with -Unattended the script never prompts, so a run needs no key
+press and no click. It sets Application.AutomationSecurity to
+msoAutomationSecurityLow on the Excel instance it starts, and on no other, so
+the macros of the workbook it built from the checked-out commit run without
+the Enable Content message. It writes nothing to the Trust Center, the
+registry or a Trusted Location, and host.json records automation_security as
+"msoAutomationSecurityLow (-Unattended)". A macros wait that runs out, or a
+compile command that stays enabled, fails the step with a message that says
+why.
+
 See docs\EXCEL_CERTIFICATION.md.
 
 .PARAMETER BundleDir
@@ -49,6 +62,13 @@ validator rejects such a bundle: it cannot certify a commit.
 .PARAMETER Python
 The Python 3.11+ executable that validates the bundle. By default the script
 tries py -3, python and python3.
+
+.PARAMETER Unattended
+Run without any prompt. Sets AutomationSecurity to msoAutomationSecurityLow on
+the Excel instance this script starts, waits at most 60 seconds for the
+workbook macros to answer and at most 30 seconds for the compile command to
+grey out, and fails the step instead of asking. Without it the script asks,
+as described above.
 
 .PARAMETER RepoRoot
 The repository. By default, the parent of this script's folder.
@@ -64,7 +84,8 @@ param(
     [string]$BundleDir,
     [switch]$AllowDirty,
     [string]$Python,
-    [string]$RepoRoot
+    [string]$RepoRoot,
+    [switch]$Unattended
 )
 
 Set-StrictMode -Version Latest
@@ -75,7 +96,14 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $Latin1 = [System.Text.Encoding]::GetEncoding(28591)
 
 $MsoAutomationSecurityByUI = 2
+# Used only behind -Unattended, on the instance this script starts.
+$MsoAutomationSecurityLow = 1
 $CompileControlId = 578
+# With -Unattended: how long to wait, polling, for the workbook macros to answer
+# and for Debug > Compile VBAProject to grey out, before the step fails.
+$MacrosWaitSeconds = 60
+$MacrosPollSeconds = 2
+$CompileWaitSeconds = 30
 $WorkbookFileName = 'EXCEL_UI-development.xlsm'
 # A read-only public function: it runs only when the macros are enabled.
 $ReadinessMacro = 'M_EXCEL_UI.UI_HasExcelUIStateSnapshot'
@@ -605,6 +633,125 @@ function Release-Com($Object) {
     }
 }
 
+function Get-AutomationSecurityLabel {
+    # How the macros of the workbook are enabled, as the evidence records it.
+    if ($Unattended) {
+        return 'msoAutomationSecurityLow (-Unattended)'
+    }
+    return 'msoAutomationSecurityByUI'
+}
+
+function Set-ExcelAutomationSecurity($Excel) {
+    # Sets AutomationSecurity on an instance this script started, before it
+    # opens the workbook, and returns the label the evidence records. The
+    # setting belongs to that instance and ends with it. With -Unattended it
+    # is msoAutomationSecurityLow, so the macros of the workbook this script
+    # built run without the Enable Content message; otherwise the instance
+    # follows the Trust Center (msoAutomationSecurityByUI). Nothing writes the
+    # Trust Center, the registry or a Trusted Location, and no other instance
+    # is touched.
+    if ($Unattended) {
+        Invoke-Excel { $Excel.AutomationSecurity = $MsoAutomationSecurityLow }
+    }
+    else {
+        Invoke-Excel { $Excel.AutomationSecurity = $MsoAutomationSecurityByUI }
+    }
+    return (Get-AutomationSecurityLabel)
+}
+
+function Read-OperatorAnswer([string]$Prompt) {
+    # The only place that reads the console. An unattended run never gets
+    # here: its callers fail the step first.
+    if ($Unattended) {
+        throw "An unattended run reached a prompt ($Prompt); this is a defect in the script."
+    }
+    return (Read-Host $Prompt)
+}
+
+function Wait-ExcelMacros {
+    # Waits until a read-only public function of the workbook runs, which it
+    # does only once its macros are enabled. Attended, it asks the operator to
+    # click Enable Content and repeats until the function runs. With
+    # -Unattended it polls for at most $TimeoutSeconds and then fails the
+    # step; it never prompts.
+    param(
+        [Parameter(Mandatory = $true)]$Excel,
+        [Parameter(Mandatory = $true)][string]$Qualified,
+        [Parameter(Mandatory = $true)][string]$WorkbookName,
+        [double]$TimeoutSeconds = $MacrosWaitSeconds,
+        [double]$PollSeconds = $MacrosPollSeconds
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        try {
+            [void](Invoke-Excel { $Excel.Run($Qualified + $ReadinessMacro) })
+            return
+        }
+        catch {
+            $reason = Get-InnerMessage $_
+            if ($Unattended) {
+                if ((Get-Date) -ge $deadline) {
+                    throw (('The macros of {0} did not run within {1} seconds although -Unattended set ' -f
+                            $WorkbookName, $TimeoutSeconds) +
+                           ('AutomationSecurity to msoAutomationSecurityLow; the last error was: {0}. ' -f $reason) +
+                           'A compile error or a blocked file can cause this; run without -Unattended to look.')
+                }
+                Start-Sleep -Milliseconds ([int]($PollSeconds * 1000))
+                continue
+            }
+            Write-Host ''
+            Write-Host ('The macros of {0} do not run. In the Excel window, click Enable Content in the' -f $WorkbookName)
+            Write-Host 'message bar (or File > Info > Enable Content), then press Enter here.'
+            Write-Host 'If Excel shows a compile error instead, close the message and type F.'
+            $answer = Read-OperatorAnswer 'Enter to try again, F for a compile error, Q to stop'
+            if ($answer -match '^\s*q') {
+                Stop-Cancelled 'The operator stopped: the macros were not enabled.'
+            }
+            if ($answer -match '^\s*f') {
+                throw 'The project does not compile: Excel reported a compile error.'
+            }
+        }
+    }
+}
+
+function Wait-CompileCommand($Vbe) {
+    # True once Debug > Compile VBAProject is greyed out, which it is when
+    # the active project is compiled. Attended, it looks for 5 seconds;
+    # with -Unattended, for $CompileWaitSeconds.
+    $attempts = $(if ($Unattended) { [int]($CompileWaitSeconds * 2) } else { 10 })
+    $compiled = $false
+    for ($attempt = 0; $attempt -lt $attempts -and -not $compiled; $attempt++) {
+        Start-Sleep -Milliseconds 500
+        $control = Invoke-Excel { $Vbe.CommandBars.FindControl(1, $CompileControlId) }
+        $compiled = -not (Invoke-Excel { $control.Enabled })
+        Release-Com $control
+    }
+    return $compiled
+}
+
+function Resolve-CompileFallback {
+    # Called when Debug > Compile VBAProject is still enabled after the wait:
+    # the command can stay enabled without an error. Attended, the operator
+    # looks in the VBE; the function returns the step's detail or throws.
+    # With -Unattended nobody can look, so the step fails.
+    if ($Unattended) {
+        throw (('Debug > Compile VBAProject was still enabled after {0} seconds, so the compile could not be ' -f
+                $CompileWaitSeconds) +
+               'confirmed and -Unattended never asks. Run without -Unattended and compile in the VBE to see why.')
+    }
+    Write-Host ''
+    Write-Host 'Debug > Compile VBAProject is still enabled. In the VBE, choose Debug > Compile'
+    Write-Host 'VBAProject yourself. Type Y if it completes with no error, N if it reports one.'
+    $answer = Read-OperatorAnswer 'Compiled with no error? (Y/N, Q to stop)'
+    if ($answer -match '^\s*q') {
+        Stop-Cancelled 'The operator stopped at the compile step.'
+    }
+    if ($answer -notmatch '^\s*y') {
+        throw 'The project does not compile: the VBE reported an error.'
+    }
+    return 'Debug > Compile VBAProject completed with no error, as the operator saw in the VBE'
+}
+
 # ---------------------------------------------------------------------------
 # Repository, commit and bundle
 # ---------------------------------------------------------------------------
@@ -761,7 +908,8 @@ try {
         $excelProcessStart = (Get-Process -Id $excelProcessId -ErrorAction SilentlyContinue).StartTime
     }
     Invoke-Excel { $excel.Visible = $true }
-    Invoke-Excel { $excel.AutomationSecurity = $MsoAutomationSecurityByUI }
+    $automationSecurity = Set-ExcelAutomationSecurity $excel
+    Write-Log "Automation security of this Excel instance: $automationSecurity"
     $workbook = Invoke-Excel { $excel.Workbooks.Open($workbookPath) }
     $operatingSystem = [string](Invoke-Excel { $excel.OperatingSystem })
     $bitness = Get-ExcelBitness $excelProcessId $operatingSystem
@@ -781,7 +929,7 @@ try {
         trust_center = [ordered]@{
             macro_setting       = $macroSetting
             vba_project_access  = $vbaProjectAccess
-            automation_security = 'msoAutomationSecurityByUI'
+            automation_security = $automationSecurity
         }
     }
     Write-JsonFile $PolicyFiles.host $hostRecord
@@ -791,26 +939,7 @@ try {
     # --- enable-macros ------------------------------------------------------
     Set-Step 'enable-macros' 'RUNNING' 'Waiting for the workbook macros to run'
     $qualified = "'" + $workbook.Name.Replace("'", "''") + "'!"
-    $ready = $false
-    while (-not $ready) {
-        try {
-            [void](Invoke-Excel { $excel.Run($qualified + $ReadinessMacro) })
-            $ready = $true
-        }
-        catch {
-            Write-Host ''
-            Write-Host 'The workbook macros do not run. In the Excel window, click Enable Content in the'
-            Write-Host 'message bar (or File > Info > Enable Content), then press Enter here.'
-            Write-Host 'If Excel shows a compile error instead, close the message and type F.'
-            $answer = Read-Host 'Enter to try again, F for a compile error, Q to stop'
-            if ($answer -match '^\s*q') {
-                Stop-Cancelled 'The operator stopped: the macros were not enabled.'
-            }
-            if ($answer -match '^\s*f') {
-                throw 'The project does not compile: Excel reported a compile error.'
-            }
-        }
-    }
+    Wait-ExcelMacros -Excel $excel -Qualified $qualified -WorkbookName $workbook.Name
     Set-Step 'enable-macros' 'PASS' 'The workbook macros run'
 
     # --- compile ------------------------------------------------------------
@@ -833,27 +962,11 @@ try {
         Invoke-Excel { $control.Execute() }
     }
     Release-Com $control
-    $compiled = $false
-    for ($attempt = 0; $attempt -lt 10 -and -not $compiled; $attempt++) {
-        Start-Sleep -Milliseconds 500
-        $control = Invoke-Excel { $vbe.CommandBars.FindControl(1, $CompileControlId) }
-        $compiled = -not (Invoke-Excel { $control.Enabled })
-        Release-Com $control
-    }
     $compileDetail = 'Debug > Compile VBAProject completed and is greyed out'
-    if (-not $compiled) {
-        # The command can stay enabled without an error; the operator looks.
-        Write-Host ''
-        Write-Host 'Debug > Compile VBAProject is still enabled. In the VBE, choose Debug > Compile'
-        Write-Host 'VBAProject yourself. Type Y if it completes with no error, N if it reports one.'
-        $answer = Read-Host 'Compiled with no error? (Y/N, Q to stop)'
-        if ($answer -match '^\s*q') {
-            Stop-Cancelled 'The operator stopped at the compile step.'
-        }
-        if ($answer -notmatch '^\s*y') {
-            throw 'The project does not compile: the VBE reported an error.'
-        }
-        $compileDetail = 'Debug > Compile VBAProject completed with no error, as the operator saw in the VBE'
+    if (-not (Wait-CompileCommand $vbe)) {
+        # The command can stay enabled without an error; the operator looks,
+        # or, with -Unattended, the step fails.
+        $compileDetail = Resolve-CompileFallback
     }
     $components = New-Object System.Collections.ArrayList
     foreach ($component in @(Invoke-Excel { $workbook.VBProject.VBComponents })) {
