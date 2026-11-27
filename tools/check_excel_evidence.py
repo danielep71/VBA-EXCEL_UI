@@ -18,9 +18,14 @@ never Excel, and reports one PASS or FAIL line per check:
   commit's certification runner runs; when it itemizes cleanup, a cleanup OK
   comes with no finding and at least one comparison made, and every
   unverified surface is listed;
-- the RESULT line, the unit lines, any RECORDING line and, when cleanup is
-  itemized, the CLEANUP and UNVERIFIED lines of the text report agree with
-  the certification document;
+- when the policy names a case manifest, the document carries the case
+  inventory: the manifest's cases as expectedCases, every one of them as a case
+  that started and passed exactly once and in order, and no inventory finding.
+  Unit counters and the case inventory are separate parts of the verdict, so a
+  document that passes the first and lacks the second is rejected;
+- the RESULT line, the unit lines, any RECORDING line, the case inventory lines
+  and, when cleanup is itemized, the CLEANUP and UNVERIFIED lines of the text
+  report agree with the certification document;
 - the host record names Windows and the Excel version, build and bitness,
   agrees with the host the certification document reports, and records how
   the macros were enabled (msoAutomationSecurityByUI, or
@@ -56,6 +61,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, NoReturn
 
+import certification_manifest as manifests
+
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / ".github" / "excel-evidence-policy.json"
 POLICY_SCHEMA = 1
@@ -73,8 +80,16 @@ UNIT_LINE = re.compile(r"^  (PASS|FAIL)  (\S+)", re.MULTILINE)
 RECORDING_LINE = re.compile(r"^  RECORDING  (.*)$", re.MULTILINE)
 CLEANUP_LINE = re.compile(r"^  CLEANUP  (.*)$", re.MULTILINE)
 UNVERIFIED_LINE = re.compile(r"^  UNVERIFIED  (.*)$", re.MULTILINE)
+EXPECTED_LINE = re.compile(r"^  EXPECTED  (\S+)  (\S+)[ \t]*$", re.MULTILINE)
+CASE_LINE = re.compile(r"^  CASE  (PASS|FAIL|NO-RESULT|NO-START)  (\S+)  (\S+)(?: \| (.*))?$", re.MULTILINE)
+CASES_LINE = re.compile(r"^  CASES  (.*)$", re.MULTILINE)
+INVENTORY_LINE = re.compile(r"^  INVENTORY  (.*)$", re.MULTILINE)
 # The fields that itemize cleanup. A runner that reports one reports all three.
 CLEANUP_FIELDS = ("cleanupFindings", "cleanupUnverified", "cleanupChecked")
+# The fields that carry the case inventory. A runner that reports one reports all.
+INVENTORY_FIELDS = ("manifestVersion", "inventory", "inventoryDetail", "expectedCases", "caseResults",
+                    "inventoryFindings")
+CASE_STATUSES = ("PASS", "FAIL", "NO-RESULT", "NO-START")
 LONE_LF = re.compile(rb"(?<!\r)\n")
 
 
@@ -112,6 +127,9 @@ REPORTED_HOST_FIELDS = {"windows": ("caption", "version", "build"), "excel": ("v
 POLICY_KEYS = ("description", "schema_version", "evidence_schema", "component", "manifest", "configuration",
                "certification_module", "certification_runner", "required_files", "evidence_files", "steps",
                "host_fields", "excel_matches_certification", "bitness")
+# Keys a policy may leave out. A policy without case_manifest describes the contract that had no case inventory.
+OPTIONAL_POLICY_KEYS = ("case_manifest",)
+ALL_POLICY_KEYS = POLICY_KEYS + OPTIONAL_POLICY_KEYS
 
 STEP_NAME = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -136,6 +154,7 @@ class Policy:
     host_fields: dict[str, tuple[str, ...]]
     excel_matches_certification: dict[str, str]
     bitness: tuple[str, ...]
+    case_manifest: str | None = None
 
     @property
     def required_files(self) -> tuple[str, ...]:
@@ -213,7 +232,7 @@ def policy_document(read: PolicyReader, document: object) -> dict[str, Any]:
     if not isinstance(document, dict):
         read.fail("the policy is not a JSON object")
     missing = [key for key in POLICY_KEYS if key not in document]
-    unknown = sorted(key for key in document if key not in POLICY_KEYS)
+    unknown = sorted(key for key in document if key not in ALL_POLICY_KEYS)
     if missing or unknown:
         read.fail("; ".join(([f"missing {', '.join(missing)}"] if missing else [])
                             + ([f"unknown {', '.join(unknown)}"] if unknown else [])))
@@ -280,6 +299,8 @@ def parse_policy(document: object, path: Path) -> Policy:
         host_fields=host_fields,
         excel_matches_certification=matches,
         bitness=read.names(checked["bitness"], "bitness", IDENTIFIER),
+        case_manifest=(read.repository_path(checked["case_manifest"], "case_manifest")
+                       if "case_manifest" in checked else None),
     )
 
 
@@ -389,6 +410,17 @@ def certification_units(root: Path, sha: str, policy: Policy | None = None) -> l
     units = UNIT_CALL.findall(body.group(1))
     require(units, f"{runner} at {sha[:12]} runs no TST_CertRunUnit unit")
     return list(units)
+
+
+def case_manifest(root: Path, sha: str, policy: Policy) -> manifests.Manifest:
+    """The mandatory-case manifest of the commit; EvidenceError when it is missing or unusable."""
+    path = policy.case_manifest
+    require(path is not None, "the evidence policy names no case manifest")
+    assert path is not None
+    try:
+        return manifests.parse_manifest(committed(root, sha, path).decode("utf-8-sig"))
+    except (UnicodeDecodeError, manifests.ManifestError) as error:
+        raise EvidenceError(f"{path} at {sha[:12]}: {error}") from error
 
 
 # ----------------------------------------------------------------------------
@@ -668,6 +700,82 @@ def cleanup_state(result: dict[str, Any], label: str) -> CleanupState | None:
     return state
 
 
+@dataclass(frozen=True)
+class CaseRow:
+    """One entry of caseResults: a case that started, or a status that had no start."""
+
+    unit: str
+    case: str
+    started: bool
+    status: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class InventoryState:
+    """What a document reports about the case inventory."""
+
+    version: int
+    status: str
+    detail: str
+    expected: tuple[tuple[str, str], ...]
+    results: tuple[CaseRow, ...]
+    findings: tuple[tuple[str, str], ...]
+
+
+def inventory_rows(result: dict[str, Any], key: str, label: str) -> list[dict[str, Any]]:
+    rows = field(result, key, label)
+    require(isinstance(rows, list) and all(isinstance(item, dict) for item in rows),
+            f"{label}: {key} must be a list of objects")
+    for position, item in enumerate(rows, start=1):
+        require(type(item.get("seq")) is int and item["seq"] == position,
+                f"{label}: {key}[{position - 1}] must have seq {position}")
+    return list(rows)
+
+
+def inventory_state(result: dict[str, Any], label: str) -> InventoryState | None:
+    """The case inventory of a document, or None when its runner did not report one.
+
+    A document without any of the inventory fields was written by a runner that
+    predates the manifest. A document with some of them is malformed.
+    """
+    present = [key for key in INVENTORY_FIELDS if key in result]
+    if not present:
+        return None
+    missing = [key for key in INVENTORY_FIELDS if key not in result]
+    require(not missing, f"{label}: the case inventory is itemized but has no {', '.join(missing)}")
+    version = result["manifestVersion"]
+    require(type(version) is int and version >= 1, f"{label}: manifestVersion must be a positive integer")
+    status = result["inventory"]
+    require(status in ("OK", "FAILED"), f"{label}: inventory must be OK or FAILED")
+    detail = result["inventoryDetail"]
+    require(isinstance(detail, str), f"{label}: inventoryDetail must be text")
+    expected = []
+    for position, item in enumerate(inventory_rows(result, "expectedCases", label)):
+        unit, case = item.get("unit"), item.get("case")
+        require(isinstance(unit, str) and unit.strip() and isinstance(case, str) and case.strip(),
+                f"{label}: expectedCases[{position}] must name a unit and a case")
+        expected.append((str(unit), str(case)))
+    results = []
+    for position, item in enumerate(inventory_rows(result, "caseResults", label)):
+        unit, case, started = item.get("unit"), item.get("case"), item.get("started")
+        outcome, note = item.get("status"), item.get("detail")
+        where = f"{label}: caseResults[{position}]"
+        require(isinstance(unit, str), f"{where} must have a unit (empty for a case the manifest does not list)")
+        require(isinstance(case, str) and case.strip(), f"{where} must name a case")
+        require(isinstance(started, bool), f"{where}: started must be true or false")
+        require(outcome in CASE_STATUSES, f"{where}: status must be one of {', '.join(CASE_STATUSES)}")
+        require(isinstance(note, str), f"{where}: detail must be text")
+        results.append(CaseRow(str(unit), str(case), bool(started), str(outcome), str(note)))
+    findings = cleanup_items(result, "inventoryFindings", label)
+    if status == "OK":
+        require(detail == "", f"{label}: inventory is OK but inventoryDetail is not empty")
+        require(not findings, f"{label}: inventory is OK but inventoryFindings is not empty")
+    else:
+        require(findings or detail.strip(), f"{label}: inventory FAILED without a finding or an inventoryDetail")
+    return InventoryState(int(version), str(status), detail, tuple(expected), tuple(results), findings)
+
+
 def unit_results(result: dict[str, Any], label: str) -> list[tuple[str, bool]]:
     units = field(result, "unitResults", label)
     require(isinstance(units, list) and all(isinstance(item, dict) for item in units),
@@ -685,8 +793,11 @@ def check_verdict(bundle: Bundle) -> str:
     recording, recording_detail = recording_state(result, label)
     require(recording == "OK", f"{label}: {recording_detail}")
     cleanup_state(result, label)
-    # A failed cleanup fails the verdict too; say what it found, not only that it failed.
+    inventory = inventory_state(result, label)
+    # A failed cleanup or an inexact inventory fails the verdict too; say what it found, not only that it failed.
     why = "" if result["cleanup"] == "OK" else f"; cleanup FAILED: {result.get('cleanupDetail', '')}"
+    if inventory is not None and inventory.status != "OK":
+        why += f"; case inventory FAILED: {inventory.detail}"
     require(result["passed"] is True and result["complete"] is True,
             f"{label}: the verdict is {line.removeprefix('RESULT: ')}{why}")
     require(result["unitsFailed"] == 0, f"{label}: {result['unitsFailed']} unit(s) failed")
@@ -694,13 +805,75 @@ def check_verdict(bundle: Bundle) -> str:
     require(result["cleanup"] == "OK", f"{label}: cleanup FAILED: {result.get('cleanupDetail', '')}")
     require(field(result, "skipDetail", label) == [], f"{label}: skipDetail is not empty")
     units = unit_results(result, label)
-    expected = certification_units(bundle.root, bundle.sha, policy)
+    if policy.case_manifest is None:
+        expected = certification_units(bundle.root, bundle.sha, policy)
+    else:
+        expected = [unit.name for unit in case_manifest(bundle.root, bundle.sha, policy).units]
     require([name for name, _ in units] == expected,
             f"{label}: units {[name for name, _ in units]} are not the commit's {expected}")
     require(result["units"] == len(expected), f"{label}: units={result['units']}, not {len(expected)}")
     failed = [name for name, passed in units if not passed]
     require(not failed, f"{label}: failed units: " + ", ".join(failed))
     return line
+
+
+def check_inventory(bundle: Bundle) -> str:
+    """The document's case inventory is the manifest's: every case started and passed once, in order."""
+    policy = bundle.policy
+    label = policy.certification_json
+    result = bundle.document(label)
+    if policy.case_manifest is None:
+        return "not required by this policy, which predates the case inventory"
+    state = inventory_state(result, label)
+    require(state is not None, f"{label}: no case inventory (manifestVersion, expectedCases, caseResults and "
+                               "inventoryFindings); a run without one proves only its unit counters")
+    assert state is not None
+    manifest = case_manifest(bundle.root, bundle.sha, policy)
+    require(state.version == manifest.version,
+            f"{label}: manifestVersion is {state.version}, the commit's manifest is {manifest.version}")
+    wanted = list(manifest.pairs)
+    require(list(state.expected) == wanted,
+            f"{label}: expectedCases are not the commit's manifest: "
+            f"missing {sorted(set(wanted) - set(state.expected))}, "
+            f"unexpected {sorted(set(state.expected) - set(wanted))}")
+    require(state.status == "OK" and not state.findings,
+            f"{label}: the case inventory is {state.status}: "
+            + "; ".join(f"{code} | {detail}" for code, detail in state.findings or ((state.detail, ""),)))
+    observed = [(row.unit, row.case) for row in state.results]
+    counts = {pair: observed.count(pair) for pair in set(observed)}
+    missing = [pair for pair in wanted if pair not in counts]
+    repeated = sorted(pair for pair, count in counts.items() if count > 1)
+    unexpected = sorted(pair for pair in counts if pair not in wanted)
+    require(not (missing or repeated or unexpected),
+            f"{label}: caseResults differ from the manifest: missing {missing}, repeated {repeated}, "
+            f"unexpected {unexpected}")
+    failed = [row.case for row in state.results if not (row.started and row.status == "PASS")]
+    require(not failed, f"{label}: cases that did not start and pass: {', '.join(failed)}")
+    require(observed == wanted, f"{label}: the cases ran in another order than the manifest's")
+    return (f"{len(wanted)} cases of {len(manifest.units)} units, manifest version {manifest.version}, "
+            "each started once and passed")
+
+
+def inventory_report_lines(report: str, report_label: str, label: str, state: InventoryState | None) -> None:
+    """The EXPECTED, CASE, CASES and INVENTORY lines of the report list what the document itemizes."""
+    expected = [(unit, case) for unit, case in EXPECTED_LINE.findall(report)]
+    cases = [(status, unit, case, str(note).rstrip()) for status, unit, case, note in CASE_LINE.findall(report)]
+    counts = [str(item).rstrip() for item in CASES_LINE.findall(report)]
+    findings = [str(item).rstrip() for item in INVENTORY_LINE.findall(report)]
+    if state is None:
+        require(not (expected or cases or counts or findings),
+                f"{report_label}: case inventory lines, which {label} does not itemize")
+        return
+    require(expected == list(state.expected), f"{report_label}: EXPECTED lines {expected} differ from {label}")
+    rows = [(row.status, row.unit or "-", row.case, row.detail) for row in state.results]
+    require(cases == rows, f"{report_label}: CASE lines {cases} differ from {label}")
+    started = sum(1 for row in state.results if row.started)
+    resulted = sum(1 for row in state.results if row.status != "NO-RESULT")
+    wanted = (f"expected={len(state.expected)} started={started} results={resulted} "
+              f"manifest={state.version} inventory={state.status}")
+    require(counts == [wanted], f"{report_label}: CASES lines {counts} differ from {label}, which says {wanted!r}")
+    require(findings == CleanupState.lines(state.findings),
+            f"{report_label}: INVENTORY lines {findings} differ from {label}")
 
 
 def check_cleanup_lines(report: str, report_label: str, label: str, result: dict[str, Any],
@@ -739,6 +912,7 @@ def check_report(bundle: Bundle) -> str:
     state = cleanup_state(result, label)
     if state is not None:
         check_cleanup_lines(report, report_label, label, result, state)
+    inventory_report_lines(report, report_label, label, inventory_state(result, label))
     return lines[0]
 
 
@@ -797,6 +971,7 @@ CHECKS: tuple[tuple[str, Callable[[Bundle], str]], ...] = (
     ("source digests", check_sources),
     ("workbook modules", check_components),
     ("verdict", check_verdict),
+    ("case inventory", check_inventory),
     ("report", check_report),
     ("host", check_host),
     ("timing", check_timing),

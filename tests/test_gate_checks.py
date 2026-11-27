@@ -486,6 +486,120 @@ class DemoCleanupRegression(GateTestCase):
         self.assertFails("page breaks: DisplayPageBreaks must be read first and written, counted, only when True")
 
 
+class CertificationManifest(GateTestCase):
+    """The registry, dispatch and call sites of the mandatory cases are held to the manifest (#42)."""
+
+    check = "certification manifest"
+    MANIFEST = "tools/certification-manifest.json"
+    POLICY = ".github/excel-evidence-policy.json"
+    CASE = "TST_Case_CertInventoryDetectsDrift"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_one_registry_entry_is_deleted(self) -> None:
+        entry = f'                UnitName = "RegressionPack"\r\n                CaseId = "{self.CASE}"\r\n'
+        self.repo.replace(CERTIFICATION_TESTS, entry, "                UnitName = \"RegressionPack\"\r\n"
+                          "                CaseId = \"TST_Case_ShowAllBaseline\"\r\n")
+        self.assertFails(f"does not register {self.CASE}", "registers TST_Case_ShowAllBaseline")
+
+    def test_fails_when_one_dispatch_branch_is_deleted(self) -> None:
+        branch = f'            Case "{self.CASE}"\r\n                {self.CASE}\r\n\r\n'
+        self.repo.replace(CERTIFICATION_TESTS, branch, "")
+        self.assertFails("[dispatch]", f"{self.CASE} has no dispatch branch")
+
+    def test_fails_when_one_dispatch_branch_is_duplicated(self) -> None:
+        branch = f'            Case "{self.CASE}"\r\n                {self.CASE}\r\n\r\n'
+        self.repo.replace(CERTIFICATION_TESTS, branch, branch + branch)
+        self.assertFails(f"{self.CASE} is dispatched more than once")
+
+    def test_fails_when_a_dispatch_branch_calls_another_case(self) -> None:
+        self.repo.replace(CERTIFICATION_TESTS, f'            Case "{self.CASE}"\r\n                {self.CASE}\r\n',
+                          f'            Case "{self.CASE}"\r\n                TST_Case_CertRecordFailsClosed\r\n')
+        self.assertFails(f"the branch for {self.CASE} calls TST_Case_CertRecordFailsClosed")
+
+    def test_fails_when_a_case_is_no_longer_run_through_the_wrapper(self) -> None:
+        call = f'        TST_CertRunCase "{self.CASE}", IncludeTitleBarTests\r\n'
+        self.repo.replace(CERTIFICATION_TESTS, call, "")
+        self.assertFails(f"{self.CASE} is never run through TST_CertRunCase")
+
+    def test_fails_when_a_case_is_run_twice(self) -> None:
+        call = f'        TST_CertRunCase "{self.CASE}", IncludeTitleBarTests\r\n'
+        self.repo.replace(CERTIFICATION_TESTS, call, call + call)
+        self.assertFails(f"{self.CASE} is run through TST_CertRunCase 2 times")
+
+    def test_fails_when_a_title_bar_case_is_called_directly(self) -> None:
+        self.repo.replace(TITLEBAR_TESTS,
+                          '        TST_CertRunCase "TST_Case_TitleBarPairRefusalLeavesFrameUntouched", True\r\n',
+                          "        TST_Case_TitleBarPairRefusalLeavesFrameUntouched\r\n")
+        self.assertFails("TST_Case_TitleBarPairRefusalLeavesFrameUntouched is never run through TST_CertRunCase")
+
+    def test_fails_on_an_unmanifested_mandatory_case(self) -> None:
+        self.repo.append(CERTIFICATION_TESTS, "\r\nPrivate Sub TST_Case_CertUnlisted()\r\nEnd Sub\r\n")
+        self.repo.replace(CERTIFICATION_TESTS,
+                          '            Case Else\r\n                Err.Raise _\r\n'
+                          '                    TEST_CERT_ERR_BASE + TST_CERT_ERR_UNKNOWN_CASE, _',
+                          '            Case "TST_Case_CertUnlisted"\r\n                TST_Case_CertUnlisted\r\n\r\n'
+                          '            Case Else\r\n                Err.Raise _\r\n'
+                          '                    TEST_CERT_ERR_BASE + TST_CERT_ERR_UNKNOWN_CASE, _')
+        self.repo.replace(CERTIFICATION_TESTS, f'        TST_CertRunCase "{self.CASE}", IncludeTitleBarTests\r\n',
+                          f'        TST_CertRunCase "{self.CASE}", IncludeTitleBarTests\r\n'
+                          '        TST_CertRunCase "TST_Case_CertUnlisted", IncludeTitleBarTests\r\n')
+        self.assertFails("TST_Case_CertUnlisted is dispatched but the manifest does not list it",
+                         "TST_CertRunCase runs TST_Case_CertUnlisted, which the manifest does not list")
+
+    def test_fails_on_a_case_nobody_classified(self) -> None:
+        self.repo.append(CERTIFICATION_TESTS, "\r\nPrivate Sub TST_Case_CertUnlisted()\r\nEnd Sub\r\n")
+        self.assertFails("TST_Case_CertUnlisted is neither a mandatory case nor a listed focused case")
+
+    def test_fails_on_a_public_runner_nobody_classified(self) -> None:
+        self.repo.append(CERTIFICATION_TESTS, "\r\nPublic Sub Test_EXCEL_UI_RunNewPack()\r\nEnd Sub\r\n")
+        self.assertFails("the public runner Test_EXCEL_UI_RunNewPack is neither a mandatory case")
+
+    def test_fails_when_a_unit_is_run_in_another_order(self) -> None:
+        self.repo.replace(CERTIFICATION_TESTS, '                TST_CertRunUnit "SnapshotIdentity"\r\n'
+                          '                TST_CertRunUnit "TitleBarSdiIdentity"\r\n',
+                          '                TST_CertRunUnit "TitleBarSdiIdentity"\r\n'
+                          '                TST_CertRunUnit "SnapshotIdentity"\r\n')
+        self.assertFails("[unit]", "runs the units")
+
+    def test_fails_when_a_required_case_is_dropped_from_the_manifest(self) -> None:
+        manifest = json.loads(self.repo.read_text(self.MANIFEST))
+        for unit in manifest["units"]:
+            unit["cases"] = [case for case in unit["cases"] if case != "TST_Case_TitleBarFrameRefreshDebtRetried"]
+        self.repo.write(self.MANIFEST, json.dumps(manifest, indent=2) + "\n")
+        self.assertFails("TST_Case_TitleBarFrameRefreshDebtRetried is not a mandatory case of any unit")
+
+    def test_fails_when_the_registered_version_differs(self) -> None:
+        self.repo.replace(TESTS, "TEST_CERT_MANIFEST_VERSION As Long = 1", "TEST_CERT_MANIFEST_VERSION As Long = 2")
+        self.assertFails("TEST_CERT_MANIFEST_VERSION is 2, the manifest's manifest_version is 1")
+
+    def test_fails_when_the_policy_names_no_manifest(self) -> None:
+        policy = json.loads(self.repo.read_text(self.POLICY))
+        del policy["case_manifest"]
+        self.repo.write(self.POLICY, json.dumps(policy, indent=2) + "\n")
+        self.assertFails("does not name case_manifest")
+
+    def test_fails_when_the_manifest_is_not_valid(self) -> None:
+        self.repo.write(self.MANIFEST, "{}\n")
+        self.assertFails("[manifest] missing schema_version")
+
+
+class CertificationManifestSelfTest(GateTestCase):
+    check = "certification manifest self-test"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_the_fixtures_stop_detecting_a_defect(self) -> None:
+        with patch("certification_manifest.fixture_findings", return_value=[]):
+            self.assertFails("certification manifest fixture a deleted registry entry")
+
+    def test_fails_when_the_consistent_fixture_is_reported(self) -> None:
+        with patch("certification_manifest.fixture_findings", return_value=["[registry] x"]):
+            self.assertFails("the consistent fixture reports")
+
+
 class PublicApiManifest(GateTestCase):
     check = "public API manifest"
 

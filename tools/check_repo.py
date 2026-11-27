@@ -97,6 +97,8 @@ REQUIRED_FILES = REQUIRED_MODULES + [
     "tools/verify.py",
     "tools/render_docs.py",
     "tools/vba-projects.json",
+    "tools/certification_manifest.py",
+    "tools/certification-manifest.json",
     ".github/labels.json",
     ".github/excel-evidence-policy.json",
     "docs/GOVERNANCE.md",
@@ -608,6 +610,21 @@ def check_winapi_error_capture() -> None:
     for finding in run(REPO, ALL_MODULES):
         fail('WinAPI error capture', finding)
     print(f'  {count} WinAPI error-capture fixtures')
+
+
+def check_certification_manifest() -> None:
+    """Hold the VBA registry, dispatch and call sites of the mandatory cases to the manifest (#42)."""
+    from certification_manifest import run
+    for finding in run(REPO):
+        fail("certification manifest", finding)
+
+
+def check_certification_manifest_selftest() -> None:
+    from certification_manifest import selftest
+    errors, count = selftest()
+    for finding in errors:
+        fail("certification manifest self-test", finding)
+    print(f"  {count} certification manifest fixtures")
 
 
 def check_demo_cleanup() -> None:
@@ -3702,6 +3719,8 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("VBA analyzer", check_vba_analyzer),
     ("VBA analyzer self-test", check_vba_analyzer_selftest),
     ("VBA syntax", check_vba_syntax),
+    ("certification manifest", check_certification_manifest),
+    ("certification manifest self-test", check_certification_manifest_selftest),
     ("title-bar control regression", check_titlebar_control),
     ("WinAPI error capture", check_winapi_error_capture),
     ("demo cleanup regression", check_demo_cleanup),

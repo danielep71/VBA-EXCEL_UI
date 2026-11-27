@@ -221,6 +221,8 @@ Certification rules:
 - Certify on 64-bit Office, the only bitness the
   [support baseline](INSTALLATION.md) claims; 32-bit Office is not certified.
 - Treat warnings, repairs, or unexplained numerical deltas as failures.
+- Treat any case-inventory finding (`missing`, `duplicate`, `unexpected`, `noStart` or `noResult`)
+  as a failed certification, whatever the unit counters say.
 - If code changes after certification, restart static and Excel validation.
 
 ## 7. Build release artifacts
