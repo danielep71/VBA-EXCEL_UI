@@ -23,6 +23,24 @@ Option Private Module
 '   optional Booleans, diagnostics available as data, and a deterministic
 '   show-everything recovery path that is separate from snapshot restoration.
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Exposes the supported facade: selective apply (UI_SetExcelUI and its
+'     WithResult form), the hide-all and show-all wrappers, and the snapshot
+'     capture, reset, query and clear calls.
+'   - Validates every requested UIVisibility and UIWindowTargetScope value,
+'     then applies the Ribbon, the application-level elements, the
+'     window-level elements and the title bar through one shared worker.
+'   - Records an element failure and carries on with the next element, either
+'     logging it to the Immediate Window or returning it as data.
+'   - Delegates host access and diagnostics to M_EXCEL_UI_RUNTIME, the title
+'     bar to M_EXCEL_UI_TITLEBAR and snapshot state to M_EXCEL_UI_SNAPSHOT.
+'
 ' ERROR POLICY
 '   - Public entry points are fail-soft and never raise to callers.
 '   - Fire-and-forget procedures log failures to the Immediate Window.
@@ -152,7 +170,7 @@ Public Sub UI_SetExcelUI( _
         UI_TargetAllExcelWindows)
 '
 '------------------------------------------------------------------------------
-'                               UI SET EXCEL UI
+'                          APPLY EXCEL UI VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the requested visibility state to the managed Excel UI elements.
@@ -260,7 +278,7 @@ Public Sub UI_HideExcelUI()
 
 '
 '------------------------------------------------------------------------------
-'                               UI HIDE EXCEL UI
+'                          HIDE ALL MANAGED EXCEL UI
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Hides every Excel UI element managed by this package.
@@ -268,6 +286,9 @@ Public Sub UI_HideExcelUI()
 ' WHY THIS EXISTS
 '   Applying a fully constrained shell is common enough to deserve a named
 '   operation rather than eight repeated arguments at every call site.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -343,7 +364,7 @@ Public Sub UI_ShowExcelUI()
 
 '
 '------------------------------------------------------------------------------
-'                               UI SHOW EXCEL UI
+'                          SHOW ALL MANAGED EXCEL UI
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Shows every Excel UI element managed by this package.
@@ -353,6 +374,9 @@ Public Sub UI_ShowExcelUI()
 '   makes it usable when a workflow was interrupted, when the snapshot has been
 '   cleared, or when VBA project state was reset and the prior baseline is no
 '   longer available.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -441,7 +465,7 @@ Public Function UI_SetExcelUI_WithResult( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                         UI SET EXCEL UI WITH RESULT
+'                       APPLY EXCEL UI AND REPORT RESULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the requested managed UI state and returns structured diagnostics.
@@ -593,7 +617,7 @@ Public Sub UI_CaptureExcelUIState()
 
 '
 '------------------------------------------------------------------------------
-'                          UI CAPTURE EXCEL UI STATE
+'                          CAPTURE EXCEL UI SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Captures the current managed Excel UI state for later restoration.
@@ -602,6 +626,9 @@ Public Sub UI_CaptureExcelUIState()
 '   A workflow that constrains the shell should be able to hand the user back
 '   the interface they actually had, rather than a generic show-everything
 '   state. This is the fire-and-forget form of that capture.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -681,7 +708,7 @@ Public Function UI_CaptureExcelUIState_WithResult( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                    UI CAPTURE EXCEL UI STATE WITH RESULT
+'                     CAPTURE EXCEL UI SNAPSHOT AND REPORT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Captures the current managed Excel UI state and returns structured
@@ -819,7 +846,7 @@ Public Function UI_HasExcelUIStateSnapshot() _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        UI HAS EXCEL UI STATE SNAPSHOT
+'                         CHECK SNAPSHOT AVAILABILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns whether an explicit in-memory Excel UI snapshot is available.
@@ -827,6 +854,9 @@ Public Function UI_HasExcelUIStateSnapshot() _
 ' WHY THIS EXISTS
 '   Callers that offer a "restore" action need to know whether it would do
 '   anything, so the action can be disabled rather than failing when pressed.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Boolean
@@ -841,6 +871,12 @@ Public Function UI_HasExcelUIStateSnapshot() _
 '
 ' DEPENDENCIES
 '   - UI_SnapshotHasState
+'
+' NOTES
+'   The availability flag belongs to M_EXCEL_UI_SNAPSHOT; this function only
+'   forwards it. A capture that could not read every element still leaves it
+'   True, so use UI_CaptureExcelUIState_WithResult at capture time to learn
+'   which elements were missed.
 '
 ' CALLED FROM
 '   - Workbook and add-in code
@@ -866,7 +902,7 @@ Public Sub UI_ResetExcelUIToSnapshot()
 
 '
 '------------------------------------------------------------------------------
-'                        UI RESET EXCEL UI TO SNAPSHOT
+'                        RESTORE EXCEL UI FROM SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restores the managed Excel UI to the most recently captured snapshot.
@@ -875,6 +911,9 @@ Public Sub UI_ResetExcelUIToSnapshot()
 '   This returns the user to the interface they actually had, which is a
 '   different and usually better outcome than the deterministic show-everything
 '   state produced by UI_ShowExcelUI.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -953,7 +992,7 @@ Public Function UI_ResetExcelUIToSnapshot_WithResult( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                  UI RESET EXCEL UI TO SNAPSHOT WITH RESULT
+'                      RESTORE EXCEL UI AND REPORT RESULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restores the managed Excel UI to the current snapshot and returns structured
@@ -1091,7 +1130,7 @@ Public Sub UI_ClearExcelUIStateSnapshot()
 
 '
 '------------------------------------------------------------------------------
-'                       UI CLEAR EXCEL UI STATE SNAPSHOT
+'                           CLEAR EXCEL UI SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes the current in-memory Excel UI snapshot.
@@ -1100,6 +1139,9 @@ Public Sub UI_ClearExcelUIStateSnapshot()
 '   The snapshot retains live Window references for as long as it exists.
 '   Clearing it when the captured baseline is no longer needed releases those
 '   references rather than holding them until the project resets.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -1156,7 +1198,7 @@ Private Function UI_ApplyExcelUIState( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           UI APPLY EXCEL UI STATE
+'                           APPLY REQUESTED UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the requested UI state through the shared fire-and-forget and
@@ -1587,7 +1629,7 @@ Private Sub UI_ApplyWindowLevelState( _
     ByVal CaptureFailureList As Boolean)
 '
 '------------------------------------------------------------------------------
-'                         UI APPLY WINDOW LEVEL STATE
+'                          APPLY STATE TO ONE WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Applies the requested managed Window properties to one resolved Excel
@@ -1746,7 +1788,7 @@ Private Function UI_IsValidTargetScope( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           UI IS VALID TARGET SCOPE
+'                            VALIDATE TARGET SCOPE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates a UIWindowTargetScope value defensively.
@@ -1793,7 +1835,7 @@ Private Function UI_IsValidVisibility( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            UI IS VALID VISIBILITY
+'                          VALIDATE VISIBILITY VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates a UIVisibility value defensively.
@@ -1841,7 +1883,7 @@ Private Function UI_VisibilityToBoolean( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           UI VISIBILITY TO BOOLEAN
+'                        CONVERT VISIBILITY TO BOOLEAN
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Converts UI_Show or UI_Hide to a Boolean visible state.

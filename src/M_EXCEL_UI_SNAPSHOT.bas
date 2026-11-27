@@ -20,6 +20,25 @@ Option Private Module
 '   general UI application logic, and keeps all the mutable state that survives
 '   between calls in one module where its lifetime can be reasoned about.
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Capture replaces any prior snapshot. It records the application-level
+'     values, the Ribbon with the Window it was read from, the title-bar frame
+'     with its handle and Window, and each window's retained object with its
+'     managed properties, each value behind a Known flag.
+'   - Restore writes only Known values. It resolves each captured Window by
+'     its retained object, checks that it still responds, and refuses the
+'     Ribbon and the title bar unless the captured owner is still the live one.
+'   - Both passes continue after an element-level failure and report it
+'     through M_EXCEL_UI_RUNTIME.
+'   - Clear releases every retained Window reference and resets all state.
+'   - A restore keeps the snapshot, so it can be replayed.
+'
 ' ERROR POLICY
 '   - Internal entry points are fail-soft and do not raise.
 '   - Capture and restoration continue after element-level failure.
@@ -238,7 +257,7 @@ Public Function UI_SnapshotCaptureCore( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           UI SNAPSHOT CAPTURE CORE
+'                             CAPTURE UI SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Executes the shared snapshot-capture pass for both the fire-and-forget
@@ -300,6 +319,12 @@ Public Function UI_SnapshotCaptureCore( _
 '   - UI_RuntimeBuildErrorText
 '   - UI_TryGetActiveFramePair
 '   - UI_TryGetTitleBarVisibleForHwnd
+'
+' NOTES
+'   The title-bar and Ribbon identities are cleared before they are resolved,
+'   so a capture that fails part-way cannot leave a handle from an earlier
+'   snapshot for restore to write through. The snapshot is marked available
+'   only after the window pass; an unexpected error clears it again.
 '
 ' CALLED FROM
 '   - M_EXCEL_UI
@@ -561,10 +586,17 @@ Public Function UI_SnapshotHasState() _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            UI SNAPSHOT HAS STATE
+'                         REPORT SNAPSHOT AVAILABILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns whether an explicit in-memory Excel UI snapshot is available.
+'
+' WHY THIS EXISTS
+'   The availability flag is private state of this module, and the facade
+'   keeps none of its own. This accessor is how M_EXCEL_UI reads it.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Boolean
@@ -580,6 +612,10 @@ Public Function UI_SnapshotHasState() _
 '
 ' DEPENDENCIES
 '   None.
+'
+' NOTES
+'   The flag is set at the end of a capture pass by UI_SnapshotCaptureCore and
+'   reset by UI_SnapshotClear.
 '
 ' CALLED FROM
 '   - M_EXCEL_UI
@@ -605,7 +641,7 @@ Public Function UI_SnapshotRestoreCore( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           UI SNAPSHOT RESTORE CORE
+'                             RESTORE UI SNAPSHOT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Executes the shared snapshot-restoration pass for both the fire-and-forget
@@ -937,7 +973,7 @@ Public Sub UI_SnapshotClear()
 
 '
 '------------------------------------------------------------------------------
-'                              UI SNAPSHOT CLEAR
+'                             CLEAR SNAPSHOT STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes all captured state and releases every retained Window reference.
@@ -946,6 +982,9 @@ Public Sub UI_SnapshotClear()
 '   The snapshot holds live COM references. Clearing is therefore not only a
 '   logical reset but the point at which those references are released, which
 '   matters when many workbooks are opened and closed in one session.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -1036,7 +1075,7 @@ Private Function UI_SnapshotTryResolveTitleBarFrame( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                   UI SNAPSHOT TRY RESOLVE TITLE BAR FRAME
+'                       VERIFY CAPTURED TITLE BAR FRAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Confirms that the captured title-bar frame is still the frame that was
@@ -1229,7 +1268,7 @@ Private Function UI_SnapshotTryCaptureRibbon( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        UI SNAPSHOT TRY CAPTURE RIBBON
+'                         CAPTURE RIBBON AND ITS OWNER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Captures Ribbon visibility together with the Excel Window it was read from.
@@ -1269,6 +1308,11 @@ Private Function UI_SnapshotTryCaptureRibbon( _
 '   - UI_RuntimeTryGetRibbonVisible
 '   - UI_RuntimeBuildWindowLabel
 '   - UI_RuntimeBuildErrorText
+'
+' NOTES
+'   Each refusal (no active window, a zero handle, an unreadable Ribbon, a
+'   changed active window) returns False with a reason in FailMsg, which the
+'   caller records as a Ribbon failure. The Ribbon is then left unknown.
 '
 ' CALLED FROM
 '   - UI_SnapshotCaptureCore
@@ -1407,7 +1451,7 @@ Private Function UI_SnapshotTryResolveRibbonWindow( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                    UI SNAPSHOT TRY RESOLVE RIBBON WINDOW
+'                          VERIFY RIBBON OWNER WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Confirms that the Window the Ribbon value was captured from is still open
@@ -1596,7 +1640,7 @@ Private Function UI_SnapshotTryResolveWindow( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        UI SNAPSHOT TRY RESOLVE WINDOW
+'                           RESOLVE CAPTURED WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Resolves one captured Excel Window by validating and returning the retained
