@@ -1028,6 +1028,31 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- **Not yet checked on Excel.** The page-break scenarios of the demo cleanup
+  harness report a printer driver that cannot lay out a sheet as a skip, not as
+  an unexpected error
+  ([#199](https://github.com/danielep71/VBA-EXCEL_UI/issues/199)). Scenarios
+  S45-S48 of `Demo_Test_RunCleanupChecks` arrange their sheets with
+  `Range.PageBreak` and `Worksheet.DisplayPageBreaks`, which make Excel lay the
+  sheet out through the default printer driver, and a driver that cannot do it
+  makes Excel raise error 1004. That error, raised by those arrange statements
+  only, now ends the scenario with `SKIP <name>: the default printer driver
+  could not lay out the sheet (<error>)`. An error from `DEMO_Sheet_Reset`,
+  `DEMO_Sheet_BuildTemplate` or any other statement is still a failure. The
+  summary line counts `scenarios <n>, failed <f>, skipped <s>` and names the
+  skipped scenarios, and it reads `DEMO CLEANUP CHECKS: INCOMPLETE` when only
+  skips kept it from `PASS`. A skip is not a pass: the run raises an error after
+  cleanup, `Demo_Test_RunLogged` returns `RESULT: INCOMPLETE | skipped <s> of
+  <n> scenarios: <names>`, and `tools/Check-EXCEL_UI.ps1` records the step as
+  `SKIP`, ends `summary.txt` with `RESULT: INCOMPLETE` and exits with code 3,
+  not 0. The new scenario S49 injects a 1004 error and an error of another
+  number where S45 arranges, and checks the first is one skip and the second one
+  failure, so the skip path runs on a host whose printer lays sheets out; it
+  leaves the run's totals as they were. The source fixtures of the gate and the
+  tests of the script pin the arrange guard, the skip and failure paths, the
+  summary line and the verdicts, with 15 negative fixtures. Demo and tooling
+  only; no production module changed. The harness has not run on Excel since
+  this change.
 - Fixed the public API gate so it no longer normalizes the inside of a string
   literal ([#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47)).
   `tools/vba_api.py` collapsed every run of white space in a declaration to one

@@ -10,8 +10,9 @@ out on a Windows host with Excel, in one run:
   demo's title-bar check box hiding and showing the title bar.
 
 It writes everything into one bundle folder, with a `summary.txt` that has one
-line per step and a final `RESULT: PASS` or `RESULT: FAIL` line, and exits with
-a non-zero code when a step fails. Paste the summary into the pull request.
+line per step and a final `RESULT: PASS`, `RESULT: INCOMPLETE` or
+`RESULT: FAIL` line, and exits with a non-zero code when a step fails or skips
+part of its checks. Paste the summary into the pull request.
 
 The certification bundle inside it is the release evidence, as
 [EXCEL_CERTIFICATION.md](EXCEL_CERTIFICATION.md) describes. The runner and demo
@@ -200,7 +201,12 @@ cannot run because one it depends on failed is a `FAIL` that says which.
    **Debug → Compile VBAProject**.
 8. **demo-cleanup-checks.** Runs `Demo_Test_RunCleanupChecks` through
    `Demo_Test_RunLogged`, which writes its scenario lines and its
-   `DEMO CLEANUP CHECKS:` summary to `demo-cleanup-checks.log`.
+   `DEMO CLEANUP CHECKS:` summary to `demo-cleanup-checks.log`. A page-break
+   scenario (S45-S48) whose sheet the default printer driver cannot lay out is
+   skipped, not failed: the log has a `SKIP` line with Excel's error, the
+   verdict is `RESULT: INCOMPLETE | skipped <n> of <m> scenarios: <names>`, and
+   the step is `SKIP`, which is not a pass. An error from the code under test is
+   still a `FAIL`.
 9. **demo-create-sheet-1** and **demo-create-sheet-2.** Run
    `Demo_CreateDemoSheet` twice and record how long each run took. A run that
    raises is a `FAIL`; a run slower than `-SlowBuildSeconds` is a `WARN`.
@@ -279,6 +285,7 @@ RESULT: PASS
 | --- | --- |
 | `PASS` | The step passed. |
 | `WARN` | A demo build passed but took longer than `-SlowBuildSeconds`. It does not fail the run. |
+| `SKIP` | The step ran and failed nothing, but skipped part of its checks: a demo cleanup scenario the host could not arrange. It is not a pass, and the run is `INCOMPLETE`. |
 | `INFO` | A record, not a check: the default printer, and the Ribbon probe. It does not fail the run. |
 | `FAIL` | The step failed, or could not run because a step it depends on failed. |
 | `CANCELLED`, `NOT_RUN` | You cancelled the run in this step, or before this step. |
@@ -288,6 +295,7 @@ RESULT: PASS
 | `0` | Every step passed, warned or was recorded as `INFO`, and the summary ends with `RESULT: PASS`. |
 | `1` | A step failed, or the run stopped on an error. The summary ends with `RESULT: FAIL`. |
 | `2` | You cancelled the run, here or in the certification script. The summary ends with `RESULT: FAIL`. |
+| `3` | No step failed, but a step is `SKIP`. The summary ends with `RESULT: INCOMPLETE`. A run with this result is not a clean pass: skipped scenarios did not check what they check. |
 
 ## 🧾 The log sink
 
@@ -307,8 +315,11 @@ and closed for every line.
 `TST_RunRunnerWithLog` and `Demo_Test_RunLogged` set the sink, run one runner
 or demo macro, catch any error it raises, and print and log one verdict line
 last: `RESULT: PASS`, or `RESULT: FAIL | Error <n> | Source: <source> |
-<description>`. They return the same line. Catching the error keeps Excel from
-stopping on a run-time error message during an unattended run.
+<description>`. `Demo_Test_RunLogged` also returns `RESULT: INCOMPLETE |
+skipped <n> of <m> scenarios: <names>` when `Demo_Test_RunCleanupChecks`
+skipped scenarios and failed none. They return the same line. Catching the
+error keeps Excel from stopping on a run-time error message during an
+unattended run.
 
 Writing the log never fails or interrupts a runner. The first write that fails
 stops writing for that run, and the verdict the function returns ends with
