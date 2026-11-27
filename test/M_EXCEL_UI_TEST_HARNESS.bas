@@ -7856,19 +7856,52 @@ Public Function TST_TryGetWindowStyle( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                           TST TRY GET WINDOW STYLE
+'                              READ WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read GWL_STYLE through the correct Win32 API for the current Office bitness.
 '
+' WHY THIS EXISTS
+'   The harness has one GWL_STYLE read, so the Err.LastDllError capture around
+'   the call is written once (#27). Each compilation calls the API that matches
+'   its bitness.
+'
+' INPUTS
+'   hWnd
+'     ByVal. Window whose style is read. LongPtr under VBA7, Long otherwise.
+'
+'   StyleOut
+'     ByRef. Receives the style on success, and 0 otherwise.
+'
+'   FailMsg
+'     ByRef. Receives the diagnostic on failure. Empty on success.
+'
 ' RETURNS
 '   TRUE on success.
+'
+' BEHAVIOR
+'   - Clears StyleOut and FailMsg. Fails with "invalid window handle" when
+'     hWnd is 0.
+'   - Clears the thread last-error, calls GetWindowLongPtr or GetWindowLong
+'     with TST_GWL_STYLE and copies Err.LastDllError to a local at once.
+'   - A zero result with a non-zero captured error fails with the text of
+'     TST_BuildApiFailureText; otherwise StyleOut receives the result and the
+'     function returns TRUE.
 '
 ' ERROR POLICY
 '   Clears the thread last-error immediately before the call and copies the
 '   result and Err.LastDllError to locals immediately after it, with nothing
 '   in between. A zero result is a failure only when the captured error is
 '   non-zero.
+'
+' DEPENDENCIES
+'   - TST_SetLastError
+'   - TST_GetWindowLongPtr / TST_GetWindowLong
+'   - TST_BuildApiFailureText
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
@@ -7960,20 +7993,52 @@ Public Function TST_TrySetWindowStyle( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                           TST TRY SET WINDOW STYLE
+'                              WRITE WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write GWL_STYLE through the correct Win32 API for the current Office
 '   bitness.
 '
+' WHY THIS EXISTS
+'   The harness has one GWL_STYLE write, so the Err.LastDllError capture around
+'   the call is written once (#27). Each compilation calls the API that matches
+'   its bitness.
+'
+' INPUTS
+'   hWnd
+'     ByVal. Window whose style is written. LongPtr under VBA7, Long otherwise.
+'
+'   NewStyle
+'     ByVal. Style value to write, of the same type as hWnd.
+'
+'   FailMsg
+'     ByRef. Receives the diagnostic on failure. Empty on success.
+'
 ' RETURNS
 '   TRUE on success.
+'
+' BEHAVIOR
+'   - Clears FailMsg. Fails with "invalid window handle" when hWnd is 0.
+'   - Clears the thread last-error, calls SetWindowLongPtr or SetWindowLong
+'     with TST_GWL_STYLE and NewStyle, and copies Err.LastDllError to a local
+'     at once.
+'   - A zero previous style with a non-zero captured error fails with the text
+'     of TST_BuildApiFailureText; otherwise the function returns TRUE.
 '
 ' ERROR POLICY
 '   Clears the thread last-error immediately before the call and copies the
 '   result and Err.LastDllError to locals immediately after it, with nothing
 '   in between. A zero previous style is a failure only when the captured
 '   error is non-zero.
+'
+' DEPENDENCIES
+'   - TST_SetLastError
+'   - TST_SetWindowLongPtr / TST_SetWindowLong
+'   - TST_BuildApiFailureText
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
@@ -8061,17 +8126,48 @@ Public Function TST_TryRefreshWindowFrame( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                         TST TRY REFRESH WINDOW FRAME
+'                             REFRESH WINDOW FRAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Recalculate the non-client frame after an exact style restore.
 '
+' WHY THIS EXISTS
+'   TST_RestoreTitleBarStyle refreshes the frame after it writes a style back.
+'   This helper does that through SetWindowPos with SWP_FRAMECHANGED and
+'   without moving, resizing or reordering the window, and it reports this
+'   call's own error (#27).
+'
+' INPUTS
+'   hWnd
+'     ByVal. Window whose frame is refreshed. LongPtr under VBA7, Long
+'     otherwise.
+'
+'   FailMsg
+'     ByRef. Receives the diagnostic on failure. Empty on success.
+'
 ' RETURNS
 '   TRUE on success.
+'
+' BEHAVIOR
+'   - Clears FailMsg. Fails with "invalid window handle" when hWnd is 0.
+'   - Clears the thread last-error and calls SetWindowPos with
+'     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOOWNERZORDER and
+'     SWP_FRAMECHANGED, then copies Err.LastDllError to a local at once.
+'   - A zero result fails with the text of TST_BuildApiFailureText; otherwise
+'     the function returns TRUE.
 '
 ' ERROR POLICY
 '   Returns FALSE and FailMsg on failure. Err.LastDllError is captured
 '   immediately after the call, so the text reports this call's error.
+'
+' DEPENDENCIES
+'   - TST_SetLastError
+'   - TST_SetWindowPos
+'   - TST_BuildApiFailureText
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
@@ -8152,7 +8248,7 @@ Public Function TST_StyleHasCompleteCaption( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                        TST STYLE HAS COMPLETE CAPTION
+'                         CHECK COMPLETE CAPTION STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report whether a GWL_STYLE value carries a complete caption: both
@@ -8176,11 +8272,19 @@ Public Function TST_StyleHasCompleteCaption( _
 '   TRUE  => WS_BORDER and WS_DLGFRAME are both set.
 '   FALSE => either is missing.
 '
+' BEHAVIOR
+'   - Tests StyleValue against TST_WS_BORDER and against TST_WS_DLGFRAME
+'     separately.
+'   - Returns TRUE only when both bits are set.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   None.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_TryGetTitleBarVisible
@@ -8203,7 +8307,7 @@ Private Function TST_TryGetTitleBarVisible( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                        TST TRY GET TITLE BAR VISIBLE
+'                          READ TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current title-bar visibility for the Excel window
@@ -8225,9 +8329,24 @@ Private Function TST_TryGetTitleBarVisible( _
 '            only when the complete WS_CAPTION mask is set
 '   FALSE => read failed
 '
+' BEHAVIOR
+'   - Clears IsVisible and FailMsg.
+'   - Reads Application.Hwnd. Fails with "invalid Excel window handle" when it
+'     is 0.
+'   - Reads the style through TST_TryGetWindowStyle and stops with its message
+'     when that fails.
+'   - Sets IsVisible from TST_StyleHasCompleteCaption and returns TRUE.
+'
+' ERROR POLICY
+'   - Does not raise. An error is captured into FailMsg through
+'     TST_BuildRuntimeErrorText and the result is FALSE.
+'
 ' DEPENDENCIES
 '   - TST_TryGetWindowStyle
 '   - TST_StyleHasCompleteCaption
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-18 - Requires the complete caption mask (#6).
@@ -8325,7 +8444,7 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                   TST TITLE BAR VISIBLE FOR HWND OR RAISE
+'                        READ TITLE BAR OF GIVEN WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read title-bar visibility for one explicitly supplied top-level window, and
@@ -8355,12 +8474,22 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 '     set on the supplied window. A style with only one of the two is not a
 '     caption.
 '
+' BEHAVIOR
+'   - Reads the style of TargetHwnd through TST_TryGetWindowStyle, never the
+'     style of the active window.
+'   - When the read fails, raises TEST_TITLEBAR_SDI_ERR_BASE + 40, with
+'     CallerProc as the source and the reader's diagnostic in the description.
+'   - Returns TST_StyleHasCompleteCaption of the style read.
+'
 ' ERROR POLICY
 '   - Raises when the style cannot be read.
 '
 ' DEPENDENCIES
 '   - TST_TryGetWindowStyle
 '   - TST_StyleHasCompleteCaption
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
@@ -8419,7 +8548,7 @@ Public Function TST_FrameStyleOrRaise( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                           TST FRAME STYLE OR RAISE
+'                          READ FRAME STYLE OR RAISE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read the complete GWL_STYLE of one explicitly supplied top-level window,
@@ -8441,12 +8570,22 @@ Public Function TST_FrameStyleOrRaise( _
 ' RETURNS
 '   The live GWL_STYLE value.
 '
+' BEHAVIOR
+'   - Reads the style of TargetHwnd through TST_TryGetWindowStyle, never the
+'     style of the active window.
+'   - When the read fails, raises TEST_TITLEBAR_SDI_ERR_BASE + 41, with
+'     CallerProc as the source and the reader's diagnostic in the description.
+'   - Returns the style read.
+'
 ' ERROR POLICY
 '   - Raises when the style cannot be read. An unreadable frame would make the
 '     surrounding comparison meaningless.
 '
 ' DEPENDENCIES
 '   - TST_TryGetWindowStyle
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_AssertFrameUntouched
@@ -8501,7 +8640,7 @@ Public Sub TST_AssertFrameUntouched( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                          TST ASSERT FRAME UNTOUCHED
+'                         ASSERT FRAME STYLE UNCHANGED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that a frame's complete GWL_STYLE still equals the value recorded
@@ -8528,6 +8667,13 @@ Public Sub TST_AssertFrameUntouched( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Reads the live style of TargetHwnd through TST_FrameStyleOrRaise, with
+'     AssertionName as the source of a failed read.
+'   - Raises TEST_TITLEBAR_SDI_ERR_BASE + 42 when it differs from StyleBefore,
+'     naming the window, both styles, both owned-bit sets and both caption
+'     states.
+'
 ' ERROR POLICY
 '   - Raises when the style cannot be read or differs from StyleBefore. The
 '     description names the window, both styles, both owned-bit sets and both
@@ -8535,6 +8681,9 @@ Public Sub TST_AssertFrameUntouched( _
 '
 ' DEPENDENCIES
 '   - TST_FrameStyleOrRaise
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-11-06
