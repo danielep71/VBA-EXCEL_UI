@@ -59,6 +59,7 @@ unattended](#-running-unattended).
 The default runners are `Test_EXCEL_UI_RunAll`, `Test_EXCEL_UI_RunCore`,
 `Test_EXCEL_UI_RunTitleBarOnly`, `Test_EXCEL_UI_RunSnapshotIdentity`,
 `Test_EXCEL_UI_RunTitleBarSdiIdentity`,
+`Test_EXCEL_UI_RunAchievedStateVerification`,
 `Test_EXCEL_UI_RunCertificationSelfTest` and
 `Test_EXCEL_UI_RunOwnershipCleanupChecks`.
 The certification step already runs the last two, once each, as isolated units
@@ -257,13 +258,14 @@ passes looks like this, with your commit, versions, timings and printer:
 Commit: <full-sha>
 Host: Excel 16.0 build 20430, x64; Microsoft Windows 11 Pro 10.0.26100 build 26100.4349
 PASS preflight: Commit <full-sha>; Microsoft Windows 11 Pro 10.0.26100 build 26100.4349
-PASS certification: exit 0; RESULT: PASS | COMPLETE | units=5 failed=0 skipped=0 cleanup=OK [certification/session.log]
+PASS certification: exit 0; RESULT: PASS | COMPLETE | units=6 failed=0 skipped=0 cleanup=OK [certification/session.log]
 PASS open-development: Excel 16.0 build 20430, x64; process 12345
 PASS Test_EXCEL_UI_RunAll: RESULT: PASS [runner-Test_EXCEL_UI_RunAll.log]
 PASS Test_EXCEL_UI_RunCore: RESULT: PASS [runner-Test_EXCEL_UI_RunCore.log]
 PASS Test_EXCEL_UI_RunTitleBarOnly: RESULT: PASS [runner-Test_EXCEL_UI_RunTitleBarOnly.log]
 PASS Test_EXCEL_UI_RunSnapshotIdentity: RESULT: PASS [runner-Test_EXCEL_UI_RunSnapshotIdentity.log]
 PASS Test_EXCEL_UI_RunTitleBarSdiIdentity: RESULT: PASS [runner-Test_EXCEL_UI_RunTitleBarSdiIdentity.log]
+PASS Test_EXCEL_UI_RunAchievedStateVerification: RESULT: PASS [runner-Test_EXCEL_UI_RunAchievedStateVerification.log]
 PASS Test_EXCEL_UI_RunCertificationSelfTest: RESULT: PASS [runner-Test_EXCEL_UI_RunCertificationSelfTest.log]
 PASS Test_EXCEL_UI_RunOwnershipCleanupChecks: RESULT: PASS [runner-Test_EXCEL_UI_RunOwnershipCleanupChecks.log]
 PASS close-development: Workbook closed without saving; Excel quit

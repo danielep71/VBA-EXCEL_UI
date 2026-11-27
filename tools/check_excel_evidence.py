@@ -23,9 +23,15 @@ never Excel, and reports one PASS or FAIL line per check:
   that started and passed exactly once and in order, and no inventory finding.
   Unit counters and the case inventory are separate parts of the verdict, so a
   document that passes the first and lacks the second is rejected;
-- the RESULT line, the unit lines, any RECORDING line, the case inventory lines
-  and, when cleanup is itemized, the CLEANUP and UNVERIFIED lines of the text
-  report agree with the certification document;
+- when the commit's manifest has an achieved_state section (#28), the document
+  carries the achieved state: every observation the manifest lists as a verified
+  write, a verified no-op and a verified restoration (a Ribbon that could not be
+  addressed or read may be not-verifiable, with its reason), and no failed
+  observation. A write that was not read back at the requested state fails the
+  bundle, whatever the unit counters say;
+- the RESULT line, the unit lines, any RECORDING line, the case inventory lines,
+  the achieved-state lines and, when cleanup is itemized, the CLEANUP and
+  UNVERIFIED lines of the text report agree with the certification document;
 - the host record names Windows and the Excel version, build and bitness,
   agrees with the host the certification document reports, and records how
   the macros were enabled (msoAutomationSecurityByUI, or
@@ -84,12 +90,25 @@ EXPECTED_LINE = re.compile(r"^  EXPECTED  (\S+)  (\S+)[ \t]*$", re.MULTILINE)
 CASE_LINE = re.compile(r"^  CASE  (PASS|FAIL|NO-RESULT|NO-START)  (\S+)  (\S+)(?: \| (.*))?$", re.MULTILINE)
 CASES_LINE = re.compile(r"^  CASES  (.*)$", re.MULTILINE)
 INVENTORY_LINE = re.compile(r"^  INVENTORY  (.*)$", re.MULTILINE)
+OBSERVATIONS_LINE = re.compile(r"^  OBSERVATIONS  (.*)$", re.MULTILINE)
+MISMATCH_LINE = re.compile(r"^  MISMATCH  (.*)$", re.MULTILINE)
+UNVERIFIABLE_LINE = re.compile(r"^  UNVERIFIABLE  (.*)$", re.MULTILINE)
 # The fields that itemize cleanup. A runner that reports one reports all three.
 CLEANUP_FIELDS = ("cleanupFindings", "cleanupUnverified", "cleanupChecked")
 # The fields that carry the case inventory. A runner that reports one reports all.
 INVENTORY_FIELDS = ("manifestVersion", "inventory", "inventoryDetail", "expectedCases", "caseResults",
                     "inventoryFindings")
 CASE_STATUSES = ("PASS", "FAIL", "NO-RESULT", "NO-START")
+# The fields that carry the achieved state (#28). A runner that reports one reports all.
+ACHIEVED_FIELDS = ("achieved", "achievedDetail", "achievedChecked", "achievedState", "achievedMismatches",
+                   "achievedUnverifiable")
+# The outcomes of one observation: confirmed by readback, failed, or not verifiable.
+VERIFIED_OUTCOMES = ("verified-no-op", "verified-write")
+FAILED_OUTCOMES = ("write-failed", "readback-failed", "state-mismatch", "restore-failed")
+UNVERIFIABLE_OUTCOME = "not-verifiable"
+CHANGE_OPERATIONS = ("hide", "show")
+RESTORE_OPERATION = "restore"
+ENTRY_OPERATION = "entry"
 LONE_LF = re.compile(rb"(?<!\r)\n")
 
 
@@ -776,6 +795,159 @@ def inventory_state(result: dict[str, Any], label: str) -> InventoryState | None
     return InventoryState(int(version), str(status), detail, tuple(expected), tuple(results), findings)
 
 
+@dataclass(frozen=True)
+class ObservationRow:
+    """One entry of achievedState: what was requested, what was observed and how the two compared."""
+
+    element: str
+    scope: str
+    operation: str
+    requested: str
+    observed: str
+    outcome: str
+    reason: str
+
+    @property
+    def code(self) -> str:
+        return f"{self.element}.{self.scope}.{self.operation}"
+
+    @property
+    def text(self) -> str:
+        """The detail of a MISMATCH or UNVERIFIABLE entry: the outcome, the two states and the reason."""
+        return (f"{self.outcome}: requested={self.requested} observed={self.observed}"
+                + (f" | {self.reason}" if self.reason else ""))
+
+
+@dataclass(frozen=True)
+class AchievedDocument:
+    """What a document reports about the state its writes achieved."""
+
+    status: str
+    detail: str
+    checked: int
+    rows: tuple[ObservationRow, ...]
+    mismatches: tuple[tuple[str, str], ...]
+    unverifiable: tuple[tuple[str, str], ...]
+
+    @property
+    def failed(self) -> tuple[ObservationRow, ...]:
+        return tuple(row for row in self.rows if row.outcome not in VERIFIED_OUTCOMES + (UNVERIFIABLE_OUTCOME,))
+
+    @property
+    def unverified(self) -> tuple[ObservationRow, ...]:
+        return tuple(row for row in self.rows if row.outcome == UNVERIFIABLE_OUTCOME)
+
+
+def achieved_rows(result: dict[str, Any], label: str) -> tuple[ObservationRow, ...]:
+    rows = inventory_rows(result, "achievedState", label)
+    parsed = []
+    for position, item in enumerate(rows):
+        where = f"{label}: achievedState[{position}]"
+        for key in ("element", "scope", "operation", "requested", "observed", "outcome", "reason"):
+            require(isinstance(item.get(key), str), f"{where} must have {key} as text")
+        for key in ("element", "scope", "operation", "requested", "observed"):
+            require(item[key].strip() != "", f"{where} has an empty {key}")
+        outcome = item["outcome"]
+        require(outcome in VERIFIED_OUTCOMES + FAILED_OUTCOMES + (UNVERIFIABLE_OUTCOME,),
+                f"{where}: outcome {outcome!r} is not one the evidence defines")
+        if outcome not in VERIFIED_OUTCOMES:
+            require(item["reason"].strip() != "", f"{where}: outcome {outcome} has no reason")
+        parsed.append(ObservationRow(item["element"], item["scope"], item["operation"], item["requested"],
+                                     item["observed"], outcome, item["reason"]))
+    return tuple(parsed)
+
+
+def achieved_state(result: dict[str, Any], label: str) -> AchievedDocument | None:
+    """The achieved state of a document, or None when its runner did not report one.
+
+    A document without any of the achieved fields was written by a runner that
+    predates the unit and stays valid. A document with some of them is
+    malformed. The status, the count, the mismatches and the unverifiable
+    surfaces must all follow from the observations, so that no field can say
+    OK over an observation that failed.
+    """
+    present = [key for key in ACHIEVED_FIELDS if key in result]
+    if not present:
+        return None
+    missing = [key for key in ACHIEVED_FIELDS if key not in result]
+    require(not missing, f"{label}: the achieved state is itemized but has no {', '.join(missing)}")
+    status = result["achieved"]
+    require(status in ("OK", "FAILED"), f"{label}: achieved must be OK or FAILED")
+    detail = result["achievedDetail"]
+    require(isinstance(detail, str), f"{label}: achievedDetail must be text")
+    rows = achieved_rows(result, label)
+    checked = count_field(result, "achievedChecked", label)
+    require(checked == len(rows), f"{label}: achievedChecked is {checked}, but achievedState has {len(rows)} entries")
+    document = AchievedDocument(str(status), detail, checked, rows,
+                                cleanup_items(result, "achievedMismatches", label),
+                                cleanup_items(result, "achievedUnverifiable", label))
+    require(list(document.mismatches) == [(row.code, row.text) for row in document.failed],
+            f"{label}: achievedMismatches are not the failed observations of achievedState")
+    require(list(document.unverifiable) == [(row.code, row.text) for row in document.unverified],
+            f"{label}: achievedUnverifiable is not the not-verifiable observations of achievedState")
+    if status == "OK":
+        require(not document.failed, f"{label}: achieved is OK but an observation failed")
+        require(detail == "", f"{label}: achieved is OK but achievedDetail is not empty")
+    else:
+        require(document.failed or detail.strip(), f"{label}: achieved FAILED without a failed observation")
+    return document
+
+
+def achieved_requirements(manifest: manifests.Manifest, document: AchievedDocument, label: str) -> str:
+    """Hold a document's observations to the manifest's achieved_state section.
+
+    Every element and scope it lists needs, among its hide and show observations,
+    one that changed the state and one that found it already correct, and a
+    restoration that read back, each verified. not-verifiable is accepted in two
+    places only, the ones the manifest marks and the live verdict allows: an
+    observation that may be unverifiable (the Ribbon) is unverifiable for all of
+    its observations, each at the entry operation, or for none; and an observation
+    that may skip unreadable windows (a window element) may add entry observations
+    for windows that could not be read on entry. Anywhere else it fails, so a
+    Ribbon that was readable and then is not, or a title bar that could not be
+    verified, cannot pass here after failing live, or the reverse.
+    """
+    section = manifest.achieved
+    require(section is not None, "the commit's manifest has no achieved_state section")
+    assert section is not None
+    unverified = 0
+    for observation in section.observations:
+        name = f"{observation.element}.{observation.scope}"
+        rows = [row for row in document.rows if (row.element, row.scope) == (observation.element, observation.scope)]
+        require(rows, f"{label}: no observation of {name}, which the manifest requires")
+        bad = [row for row in rows if row.outcome in FAILED_OUTCOMES]
+        require(not bad, f"{label}: {name} failed: " + "; ".join(f"{row.operation} {row.text}" for row in bad))
+        operations = CHANGE_OPERATIONS + (RESTORE_OPERATION, ENTRY_OPERATION)
+        strange = [row for row in rows if row.operation not in operations]
+        for row in strange:
+            raise EvidenceError(f"{label}: {name} has an observation at the operation {row.operation!r}, "
+                                f"which is not one of {', '.join(operations)}")
+        changing = [row for row in rows if row.operation in CHANGE_OPERATIONS]
+        restoring = [row for row in rows if row.operation == RESTORE_OPERATION]
+        unreadable = [row for row in rows if row.outcome == UNVERIFIABLE_OUTCOME]
+        entry_rows = [row for row in rows if row.operation == ENTRY_OPERATION]
+        if unreadable:
+            if observation.may_be_unverifiable:
+                require(len(unreadable) == len(rows) and all(row.operation == ENTRY_OPERATION for row in rows),
+                        f"{label}: {name} was verified and then was not: not-verifiable is allowed only when "
+                        "every observation of it is not-verifiable, at the entry operation")
+                unverified += 1
+                continue
+            for row in unreadable:
+                require(observation.may_skip_unreadable_windows and row.operation == ENTRY_OPERATION,
+                        f"{label}: {name} has a not-verifiable observation, which the manifest does not allow "
+                        f"there ({row.operation}: {row.reason})")
+        require(all(row.outcome == UNVERIFIABLE_OUTCOME for row in entry_rows),
+                f"{label}: {name} has an entry observation that is not an unverifiable one")
+        for outcome, meaning in (("verified-write", "changed the state"), ("verified-no-op", "found it correct")):
+            require(any(row.outcome == outcome for row in changing),
+                    f"{label}: {name} has no hide or show observation that {meaning} and read back ({outcome})")
+        require(restoring and all(row.outcome in VERIFIED_OUTCOMES for row in restoring),
+                f"{label}: {name} has no restoration that read back as the entry state")
+    return (f"{len(section.observations)} elements and scopes, {document.checked} observations read back"
+            + (f", {unverified} not verifiable" if unverified else ""))
+
+
 def unit_results(result: dict[str, Any], label: str) -> list[tuple[str, bool]]:
     units = field(result, "unitResults", label)
     require(isinstance(units, list) and all(isinstance(item, dict) for item in units),
@@ -794,15 +966,21 @@ def check_verdict(bundle: Bundle) -> str:
     require(recording == "OK", f"{label}: {recording_detail}")
     cleanup_state(result, label)
     inventory = inventory_state(result, label)
-    # A failed cleanup or an inexact inventory fails the verdict too; say what it found, not only that it failed.
+    achieved = achieved_state(result, label)
+    # A failed cleanup, an inexact inventory or an observation that did not read back fails the verdict too;
+    # say what it found, not only that it failed.
     why = "" if result["cleanup"] == "OK" else f"; cleanup FAILED: {result.get('cleanupDetail', '')}"
     if inventory is not None and inventory.status != "OK":
         why += f"; case inventory FAILED: {inventory.detail}"
+    if achieved is not None and achieved.status != "OK":
+        why += f"; achieved state FAILED: {achieved.detail}"
     require(result["passed"] is True and result["complete"] is True,
             f"{label}: the verdict is {line.removeprefix('RESULT: ')}{why}")
     require(result["unitsFailed"] == 0, f"{label}: {result['unitsFailed']} unit(s) failed")
     require(result["skipped"] == 0, f"{label}: {result['skipped']} unit(s) skipped")
     require(result["cleanup"] == "OK", f"{label}: cleanup FAILED: {result.get('cleanupDetail', '')}")
+    require(achieved is None or achieved.status == "OK",
+            f"{label}: achieved state FAILED: {achieved.detail if achieved else ''}")
     require(field(result, "skipDetail", label) == [], f"{label}: skipDetail is not empty")
     units = unit_results(result, label)
     if policy.case_manifest is None:
@@ -852,6 +1030,44 @@ def check_inventory(bundle: Bundle) -> str:
     require(observed == wanted, f"{label}: the cases ran in another order than the manifest's")
     return (f"{len(wanted)} cases of {len(manifest.units)} units, manifest version {manifest.version}, "
             "each started once and passed")
+
+
+def check_achieved(bundle: Bundle) -> str:
+    """The document read back what every write of the achieved-state unit asked for (#28)."""
+    policy = bundle.policy
+    label = policy.certification_json
+    result = bundle.document(label)
+    if policy.case_manifest is None:
+        return "not required by this policy, which predates the achieved state"
+    manifest = case_manifest(bundle.root, bundle.sha, policy)
+    if manifest.achieved is None:
+        return "not required by the commit's manifest, which has no achieved_state section"
+    document = achieved_state(result, label)
+    require(document is not None, f"{label}: no achieved state (achieved, achievedState, achievedMismatches and "
+                                  "achievedUnverifiable); a run without one proves only that the setters returned")
+    assert document is not None
+    require(document.status == "OK", f"{label}: the achieved state is {document.status}: {document.detail}")
+    return achieved_requirements(manifest, document, label)
+
+
+def achieved_report_lines(report: str, report_label: str, label: str, document: AchievedDocument | None) -> None:
+    """The OBSERVATIONS, MISMATCH and UNVERIFIABLE lines of the report list what the document itemizes."""
+    summary = [str(item).rstrip() for item in OBSERVATIONS_LINE.findall(report)]
+    mismatches = [str(item).rstrip() for item in MISMATCH_LINE.findall(report)]
+    unverifiable = [str(item).rstrip() for item in UNVERIFIABLE_LINE.findall(report)]
+    if document is None:
+        require(not (summary or mismatches or unverifiable),
+                f"{report_label}: achieved-state lines, which {label} does not itemize")
+        return
+    failed, unverified = len(document.failed), len(document.unverified)
+    wanted = (f"checked={document.checked} verified={document.checked - failed - unverified} "
+              f"failed={failed} unverifiable={unverified} achieved={document.status}")
+    require(summary == [wanted],
+            f"{report_label}: OBSERVATIONS lines {summary} differ from {label}, which says {wanted!r}")
+    require(mismatches == CleanupState.lines(document.mismatches),
+            f"{report_label}: MISMATCH lines {mismatches} differ from {label}")
+    require(unverifiable == CleanupState.lines(document.unverifiable),
+            f"{report_label}: UNVERIFIABLE lines {unverifiable} differ from {label}")
 
 
 def inventory_report_lines(report: str, report_label: str, label: str, state: InventoryState | None) -> None:
@@ -913,6 +1129,7 @@ def check_report(bundle: Bundle) -> str:
     if state is not None:
         check_cleanup_lines(report, report_label, label, result, state)
     inventory_report_lines(report, report_label, label, inventory_state(result, label))
+    achieved_report_lines(report, report_label, label, achieved_state(result, label))
     return lines[0]
 
 
@@ -972,6 +1189,7 @@ CHECKS: tuple[tuple[str, Callable[[Bundle], str]], ...] = (
     ("workbook modules", check_components),
     ("verdict", check_verdict),
     ("case inventory", check_inventory),
+    ("achieved state", check_achieved),
     ("report", check_report),
     ("host", check_host),
     ("timing", check_timing),

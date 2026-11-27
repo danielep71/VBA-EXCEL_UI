@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "manifest_version": 1,
-  "description": "The release contract of Test_EXCEL_UI_RunReleaseCertification: the units and the mandatory cases a certification run must execute exactly once, listed in the order it executes them. A case identifier is the name of the procedure that runs it. test/M_EXCEL_UI_TEST_CERTIFICATION.bas registers the same list in TST_CertManifestCase and the run compares it with the cases that started and recorded a status; tools/certification_manifest.py, which the static gate runs, fails when the registry, the dispatch, the call sites or this file differ. docs/EXCEL_CERTIFICATION.md describes the contract.",
+  "manifest_version": 2,
+  "description": "The release contract of Test_EXCEL_UI_RunReleaseCertification: the units and the mandatory cases a certification run must execute exactly once, listed in the order it executes them. A case identifier is the name of the procedure that runs it. test/M_EXCEL_UI_TEST_CERTIFICATION.bas registers the same list in TST_CertManifestCase and the run compares it with the cases that started and recorded a status; tools/certification_manifest.py, which the static gate runs, fails when the registry, the dispatch, the call sites or this file differ. The achieved_state section lists the element and scope observations that the AchievedStateVerification unit must record, which tools/check_excel_evidence.py holds the certification document to. docs/EXCEL_CERTIFICATION.md describes the contract.",
   "units": [
     {
       "name": "CertificationSelfTest",
@@ -88,6 +88,21 @@
         "TST_Case_TitleBarPairRefusalLeavesFrameUntouched",
         "TST_Case_TitleBarClosedFrameReopenedIsRefused"
       ]
+    },
+    {
+      "name": "AchievedStateVerification",
+      "execution": "live",
+      "runner": "Test_EXCEL_UI_RunAchievedStateVerification",
+      "cases": [
+        "TST_Case_AchievedAppLevelState",
+        "TST_Case_AchievedWindowStateAllWindows",
+        "TST_Case_AchievedWindowStateActiveWindow",
+        "TST_Case_AchievedWindowStateActiveWorkbookWindows",
+        "TST_Case_AchievedTitleBarFrameState",
+        "TST_Case_AchievedRibbonOwningWindow",
+        "TST_Case_AchievedOutcomesAreDistinct",
+        "TST_Case_AchievedMismatchFailsTheUnit"
+      ]
     }
   ],
   "required_cases": [
@@ -118,6 +133,14 @@
     {
       "case": "Test_EXCEL_UI_RunOwnershipCleanupChecks",
       "note": "Named by #42: its standalone ownership and cleanup coverage stays, as a mandatory isolated unit whose nested certification runs cannot reach the live record."
+    },
+    {
+      "case": "TST_Case_AchievedMismatchFailsTheUnit",
+      "note": "Named by #28: a state mismatch fails the unit and the verdict although the production setter returned True."
+    },
+    {
+      "case": "TST_Case_AchievedOutcomesAreDistinct",
+      "note": "Named by #28: an ignored write, a failed write, a failed readback, a failed restoration and an unverifiable surface each give their own outcome and text."
     }
   ],
   "focused_cases": {},
@@ -126,5 +149,77 @@
     "Test_EXCEL_UI_RunCore": "Runs the regression pack without the title-bar cases. It records no case inventory and is not release certification.",
     "Test_EXCEL_UI_RunTitleBarOnly": "Runs the title-bar cases alone, for a quicker loop. It records no case inventory and is not release certification; every case it runs is also a mandatory case of RegressionPack.",
     "Test_EXCEL_UI_RunRibbonSdiProbe": "A characterization that asserts nothing (docs/RIBBON_SDI_BEHAVIOR.md). Not part of the release gate."
+  },
+  "achieved_state": {
+    "unit": "AchievedStateVerification",
+    "description": "Each observation is one element under one scope. A certification document must hold, for every one of them, a verified-write and a verified-no-op observation of the hide and show operations, a restore observation that read back, and no failed observation. not-verifiable is allowed in exactly two places: for an observation marked may_be_unverifiable (the Ribbon), when it is unverifiable for every one of its observations, each at the entry operation and with its reason, because the Ribbon cannot always be addressed or read, so a Ribbon that was readable and then is not is a failure; and for an observation marked may_skip_unreadable_windows (a window element), as an entry observation naming the windows that could not be read on entry and were left out of the comparison.",
+    "observations": [
+      {
+        "element": "StatusBar",
+        "scope": "Application"
+      },
+      {
+        "element": "ScrollBars",
+        "scope": "Application"
+      },
+      {
+        "element": "FormulaBar",
+        "scope": "Application"
+      },
+      {
+        "element": "Headings",
+        "scope": "AllWindows",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "Headings",
+        "scope": "ActiveWindow",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "Headings",
+        "scope": "ActiveWorkbookWindows",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "WorkbookTabs",
+        "scope": "AllWindows",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "WorkbookTabs",
+        "scope": "ActiveWindow",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "WorkbookTabs",
+        "scope": "ActiveWorkbookWindows",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "Gridlines",
+        "scope": "AllWindows",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "Gridlines",
+        "scope": "ActiveWindow",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "Gridlines",
+        "scope": "ActiveWorkbookWindows",
+        "may_skip_unreadable_windows": true
+      },
+      {
+        "element": "TitleBar",
+        "scope": "ActiveFrame"
+      },
+      {
+        "element": "Ribbon",
+        "scope": "ActiveWindow",
+        "may_be_unverifiable": true
+      }
+    ]
   }
 }

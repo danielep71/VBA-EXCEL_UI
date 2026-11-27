@@ -341,7 +341,7 @@ capture / hide / reset
 Certification is the gate. Quote its verdict line in the pull request:
 
 ```text
-RESULT: PASS | COMPLETE | units=5 failed=0 skipped=0 cleanup=OK
+RESULT: PASS | COMPLETE | units=6 failed=0 skipped=0 cleanup=OK
 ```
 
 A run reporting `INCOMPLETE`, any `skipped` count above zero, or
@@ -372,6 +372,13 @@ A case that a release needs is a mandatory case, and it must reach the verdict:
    `TST_CertDispatchCase` in `test/M_EXCEL_UI_TEST_CERTIFICATION.bas`, and raise
    `TEST_CERT_MANIFEST_VERSION` in the harness together with `manifest_version` in
    the manifest when the list of cases changes.
+
+A write that a case makes through the public API and that a release depends on
+belongs to the achieved-state unit instead: observe it with `TST_AchRunScenario`
+in `test/M_EXCEL_UI_TEST_ACHIEVED.bas`, so that it is read back and recorded,
+and list its element and scope under `achieved_state` in the manifest. The gate
+fails when the VBA no longer names a listed element or scope, and the evidence
+validator fails a document that lacks one.
 
 A case that is deliberately not mandatory goes under `focused_cases` with its
 reason, and a new public `Test_EXCEL_UI_Run*` runner under `interactive_runners`.

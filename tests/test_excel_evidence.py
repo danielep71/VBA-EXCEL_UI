@@ -48,7 +48,19 @@ CASE_MANIFEST: dict[str, Any] = {
     "required_cases": [{"case": "TST_Case_B", "note": "named by the issue"}],
     "focused_cases": {},
     "interactive_runners": {},
+    "achieved_state": {
+        "unit": "TitleBarSdiIdentity",
+        "description": "The observations of the fixture.",
+        "observations": [
+            {"element": "StatusBar", "scope": "Application"},
+            {"element": "Gridlines", "scope": "AllWindows"},
+            {"element": "Ribbon", "scope": "ActiveWindow", "may_be_unverifiable": True},
+        ],
+    },
 }
+OBSERVED = [(item["element"], item["scope"]) for item in CASE_MANIFEST["achieved_state"]["observations"]]
+ACHIEVED_KEYS = ("achieved", "achievedDetail", "achievedChecked", "achievedState", "achievedMismatches",
+                 "achievedUnverifiable")
 PAIRS = [(unit["name"], case) for unit in CASE_MANIFEST["units"] for case in unit["cases"]]
 INVENTORY_KEYS = ("manifestVersion", "inventory", "inventoryDetail", "expectedCases", "caseResults",
                   "inventoryFindings")
@@ -108,6 +120,35 @@ def make_repository(root: Path) -> str:
     return git(root, "rev-parse", "HEAD")
 
 
+def observation_rows(element: str, scope: str) -> list[dict[str, Any]]:
+    """The observations of one scenario: hide, hide again, show, show again and the restoration."""
+    steps = [("hide", "hidden", "verified-write"), ("hide", "hidden", "verified-no-op"),
+             ("show", "visible", "verified-write"), ("show", "visible", "verified-no-op"),
+             ("restore", "visible", "verified-no-op")]
+    return [{"element": element, "scope": scope, "operation": operation, "requested": state,
+             "observed": state, "outcome": outcome, "reason": ""} for operation, state, outcome in steps]
+
+
+def refresh_achieved(certification: dict[str, Any]) -> None:
+    """Derive the summary fields of the achieved state from its observations, as the workbook does."""
+    rows = certification["achievedState"]
+    failed = [row for row in rows if row["outcome"] in evidence.FAILED_OUTCOMES]
+    unverified = [row for row in rows if row["outcome"] == evidence.UNVERIFIABLE_OUTCOME]
+
+    def item(position: int, row: dict[str, Any]) -> dict[str, Any]:
+        text = f"{row['outcome']}: requested={row['requested']} observed={row['observed']}"
+        return {"seq": position, "code": f"{row['element']}.{row['scope']}.{row['operation']}",
+                "detail": text + (f" | {row['reason']}" if row["reason"] else "")}
+
+    certification["achievedState"] = [dict(row, seq=position) for position, row in enumerate(rows, 1)]
+    certification["achievedChecked"] = len(rows)
+    certification["achievedMismatches"] = [item(position, row) for position, row in enumerate(failed, 1)]
+    certification["achievedUnverifiable"] = [item(position, row) for position, row in enumerate(unverified, 1)]
+    certification["achieved"] = "FAILED" if failed else "OK"
+    certification["achievedDetail"] = "; ".join(entry["code"] + ": " + entry["detail"]
+                                                for entry in certification["achievedMismatches"])
+
+
 def result_line(result: dict[str, Any]) -> str:
     return (f"RESULT: {'PASS' if result['passed'] else 'FAIL'} | "
             f"{'COMPLETE' if result['complete'] else 'INCOMPLETE'} | units={result['units']} "
@@ -138,6 +179,13 @@ def report_text(result: dict[str, Any]) -> str:
         lines += [f"  CASE  {row['status']}  {row['unit'] or '-'}  {row['case']}"
                   + (f" | {row['detail']}" if row["detail"] else "") for row in results]
         lines += [f"  INVENTORY  {item['code']} | {item['detail']}" for item in result["inventoryFindings"]]
+    if all(key in result for key in ACHIEVED_KEYS):
+        checked = len(result["achievedState"])
+        failed, unverifiable = len(result["achievedMismatches"]), len(result["achievedUnverifiable"])
+        lines.append(f"  OBSERVATIONS  checked={checked} verified={checked - failed - unverifiable} failed={failed}"
+                     f" unverifiable={unverifiable} achieved={result['achieved']}")
+        lines += [f"  MISMATCH  {item['code']} | {item['detail']}" for item in result["achievedMismatches"]]
+        lines += [f"  UNVERIFIABLE  {item['code']} | {item['detail']}" for item in result["achievedUnverifiable"]]
     return "\r\n".join(lines) + "\r\n"
 
 
@@ -160,7 +208,9 @@ def documents(root: Path, sha: str) -> dict[str, Any]:
         "complete": True, "passed": True,
         "unitResults": [{"name": unit, "passed": True, "detail": ""} for unit in UNITS],
         "skipDetail": [],
+        "achievedState": [row for element, scope in OBSERVED for row in observation_rows(element, scope)],
     }
+    refresh_achieved(certification)
     host = {
         "schema": 1,
         "windows": {"caption": "Microsoft Windows 11 Pro", "version": "10.0.22631", "build": "22631.4460",
@@ -289,6 +339,40 @@ class PassingBundleTests(Fixture):
         self.bundle_with(earlier_runner)
         self.assertEqual(self.failed(), {})
 
+    def test_the_achieved_state_is_held_to_the_manifest(self) -> None:
+        self.assertEqual(self.outcomes(self.bundle_with())["achieved state"],
+                         (True, "3 elements and scopes, 15 observations read back"))
+
+    def test_a_ribbon_that_could_not_be_verified_is_listed_and_passes(self) -> None:
+        def unverifiable(docs: dict[str, Any]) -> None:
+            certification = docs["certification.json"]
+            rows = [row for row in certification["achievedState"] if row["element"] != "Ribbon"]
+            rows.append({"element": "Ribbon", "scope": "ActiveWindow", "operation": "entry",
+                         "requested": "not attempted", "observed": "unreadable", "outcome": "not-verifiable",
+                         "reason": "no active window can be identified as the owner of the Ribbon"})
+            certification["achievedState"] = rows
+            refresh_achieved(certification)
+        self.bundle_with(unverifiable)
+        self.assertEqual(self.failed(), {})
+        self.assertEqual(self.outcomes()["achieved state"],
+                         (True, "3 elements and scopes, 11 observations read back, 1 not verifiable"))
+        report = (self.bundle / "certification.txt").read_text(encoding="cp1252")
+        self.assertIn("  UNVERIFIABLE  Ribbon.ActiveWindow.entry | not-verifiable: requested=not attempted", report)
+
+    def test_a_manifest_without_the_section_does_not_require_the_achieved_state(self) -> None:
+        manifest = copy.deepcopy(CASE_MANIFEST)
+        del manifest["achieved_state"]
+        self.assertEqual(manifest["manifest_version"], 2)
+        policy = dataclasses.replace(evidence.default_policy(), case_manifest="tools/earlier-manifest.json")
+        (self.root / "tools" / "earlier-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "an earlier manifest")
+        later = git(self.root, "rev-parse", "HEAD")
+        self.bundle_with()
+        found = {name: detail for name, passed, detail in evidence.evaluate(self.bundle, later, self.root, policy)
+                 if name == "achieved state"}
+        self.assertIn("has no achieved_state section", found["achieved state"])
+
     def test_the_manifest_is_read_from_the_commit(self) -> None:
         manifest = evidence.case_manifest(self.root, self.sha, evidence.default_policy())
         self.assertEqual(manifest.version, 2)
@@ -337,7 +421,7 @@ class PolicyDrivenTests(Fixture):
         code, out, _ = self.run_main(str(self.bundle), "--commit", self.sha, "--policy", str(self.policy_file()))
         self.assertEqual(code, 0, out)
         self.assertEqual(out.count("  PASS  "), len(evidence.CHECKS))
-        self.assertEqual(len(evidence.CHECKS), 10)
+        self.assertEqual(len(evidence.CHECKS), 11)
 
     def test_a_bundle_follows_renamed_files_steps_schema_and_component(self) -> None:
         def contract(document: dict[str, Any]) -> None:
@@ -864,6 +948,230 @@ class InventoryTests(Fixture):
         git(self.root, "commit", "-q", "-am", "break the manifest")
         later = git(self.root, "rev-parse", "HEAD")
         self.assertIn("missing schema_version", self.failed(sha=later)["case inventory"])
+
+
+class AchievedStateTests(Fixture):
+    """A write that was not read back at the requested state fails the bundle, whatever the setter returned."""
+
+    def assert_fails(self, check: str, fragment: str) -> None:
+        failed = self.failed()
+        self.assertIn(check, failed)
+        self.assertIn(fragment, failed[check])
+
+    @staticmethod
+    def rows(docs: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = docs["certification.json"]["achievedState"]
+        return rows
+
+    def test_a_state_mismatch_fails_the_bundle_and_is_named(self) -> None:
+        def mismatch(docs: dict[str, Any]) -> None:
+            row = self.rows(docs)[0]
+            row.update(observed="visible", outcome="state-mismatch",
+                       reason="the setter returned True, but the state read back differs from the request")
+            docs["certification.json"]["passed"] = False
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(mismatch)
+        failed = self.failed()
+        self.assertIn("achieved state", failed)
+        self.assertIn("state-mismatch", failed["achieved state"])
+        self.assertIn("StatusBar.Application.hide", failed["achieved state"])
+        self.assertIn("achieved state FAILED", failed["verdict"])
+
+    def test_a_mismatch_fails_even_when_the_document_claims_a_pass(self) -> None:
+        def mismatch(docs: dict[str, Any]) -> None:
+            self.rows(docs)[1].update(observed="visible", outcome="state-mismatch", reason="not read back")
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(mismatch)
+        self.assertIn("verdict", self.failed())
+        self.assertIn("achieved state", self.failed())
+
+    def test_each_failed_outcome_fails_the_bundle(self) -> None:
+        for outcome in ("write-failed", "readback-failed", "state-mismatch", "restore-failed"):
+            with self.subTest(outcome):
+                def change(docs: dict[str, Any], outcome: str = outcome) -> None:
+                    self.rows(docs)[2].update(outcome=outcome, reason=f"{outcome} for the test")
+                    refresh_achieved(docs["certification.json"])
+                self.bundle_with(change)
+                self.assert_fails("achieved state", outcome)
+
+    def test_a_document_without_the_achieved_state_fails_when_the_manifest_requires_it(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            for key in ACHIEVED_KEYS:
+                del docs["certification.json"][key]
+        self.bundle_with(earlier_runner)
+        self.assert_fails("achieved state", "no achieved state")
+
+    def test_some_achieved_fields_without_the_others_fail(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].pop("achievedMismatches"))
+        self.assert_fails("achieved state", "has no achievedMismatches")
+
+    def test_an_observation_the_manifest_requires_but_the_run_never_made_fails(self) -> None:
+        def missing(docs: dict[str, Any]) -> None:
+            docs["certification.json"]["achievedState"] = [
+                row for row in self.rows(docs) if row["element"] != "Gridlines"]
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(missing)
+        self.assert_fails("achieved state", "no observation of Gridlines.AllWindows")
+
+    def test_an_element_that_never_changed_or_never_found_the_state_correct_fails(self) -> None:
+        for outcome, fragment in (("verified-write", "no hide or show observation that found it correct"),
+                                  ("verified-no-op", "no hide or show observation that changed the state")):
+            with self.subTest(outcome):
+                def one_path(docs: dict[str, Any], outcome: str = outcome) -> None:
+                    for row in self.rows(docs):
+                        if row["element"] == "StatusBar" and row["operation"] != "restore":
+                            row["outcome"] = outcome
+                    refresh_achieved(docs["certification.json"])
+                self.bundle_with(one_path)
+                self.assert_fails("achieved state", fragment)
+
+    def test_a_restoration_that_was_never_read_back_fails(self) -> None:
+        def no_restoration(docs: dict[str, Any]) -> None:
+            docs["certification.json"]["achievedState"] = [
+                row for row in self.rows(docs) if not (row["element"] == "StatusBar" and row["operation"] == "restore")]
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(no_restoration)
+        self.assert_fails("achieved state", "no restoration that read back")
+
+    def test_only_the_ribbon_may_be_not_verifiable(self) -> None:
+        def unverifiable(docs: dict[str, Any]) -> None:
+            for row in self.rows(docs):
+                if row["element"] == "StatusBar":
+                    row.update(outcome="not-verifiable", reason="could not be read")
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(unverifiable)
+        self.assert_fails("achieved state", "StatusBar.Application")
+
+    def test_a_title_bar_that_was_not_verified_fails_the_bundle(self) -> None:
+        """The live verdict fails a captionless entry frame, so the bundle must not accept one either."""
+        manifest = copy.deepcopy(CASE_MANIFEST)
+        manifest["achieved_state"]["observations"].append({"element": "TitleBar", "scope": "ActiveFrame"})
+        text = json.dumps(manifest, indent=2) + "\n"
+        (self.root / "tools" / "certification-manifest.json").write_text(text, encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "a manifest that lists the title bar")
+        later = git(self.root, "rev-parse", "HEAD")
+
+        def title_bar(docs: dict[str, Any]) -> None:
+            self.rows(docs).append({"element": "TitleBar", "scope": "ActiveFrame", "operation": "entry",
+                                    "requested": "not attempted", "observed": "unreadable",
+                                    "outcome": "not-verifiable", "reason": "frame has no complete caption"})
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(title_bar)
+        found = {name: detail for name, passed, detail in evidence.evaluate(self.bundle, later, self.root)
+                 if name == "achieved state" and not passed}
+        self.assertIn("TitleBar.ActiveFrame has a not-verifiable observation", found["achieved state"])
+
+    def test_a_ribbon_that_was_verified_and_then_was_not_fails(self) -> None:
+        """Only a Ribbon that is unverifiable for every observation is exempt; a mixed result is not."""
+        for operation in ("hide", "restore"):
+            with self.subTest(operation):
+                def mixed(docs: dict[str, Any], operation: str = operation) -> None:
+                    for row in self.rows(docs):
+                        if row["element"] == "Ribbon" and row["operation"] == operation:
+                            row.update(outcome="not-verifiable", reason="the Ribbon could not be read")
+                    refresh_achieved(docs["certification.json"])
+                self.bundle_with(mixed)
+                self.assert_fails("achieved state", "Ribbon.ActiveWindow was verified and then was not")
+
+    def test_a_ribbon_unverifiable_at_a_step_and_not_at_the_entry_fails(self) -> None:
+        def steps(docs: dict[str, Any]) -> None:
+            for row in self.rows(docs):
+                if row["element"] == "Ribbon":
+                    row.update(outcome="not-verifiable", reason="the Ribbon could not be read")
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(steps)
+        self.assert_fails("achieved state", "at the entry operation")
+
+    def test_an_observation_at_an_operation_the_unit_never_makes_fails(self) -> None:
+        self.bundle_with(lambda docs: self.rows(docs)[0].update(operation="toggle"))
+        self.assert_fails("achieved state", "'toggle'")
+
+    def test_an_entry_observation_that_claims_to_be_verified_fails(self) -> None:
+        def entry(docs: dict[str, Any]) -> None:
+            self.rows(docs)[0].update(operation="entry")
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(entry)
+        self.assert_fails("achieved state", "entry observation that is not an unverifiable one")
+
+    def test_an_unverifiable_observation_without_a_reason_is_malformed(self) -> None:
+        def no_reason(docs: dict[str, Any]) -> None:
+            self.rows(docs)[0].update(outcome="not-verifiable")
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(no_reason)
+        self.assert_fails("verdict", "has no reason")
+
+    def test_an_outcome_the_evidence_does_not_define_is_malformed(self) -> None:
+        def unknown(docs: dict[str, Any]) -> None:
+            self.rows(docs)[0].update(outcome="probably-fine")
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(unknown)
+        self.assert_fails("verdict", "is not one the evidence defines")
+
+    def test_an_ok_status_over_a_failed_observation_is_malformed(self) -> None:
+        def lie(docs: dict[str, Any]) -> None:
+            self.rows(docs)[0].update(outcome="state-mismatch", reason="not read back")
+            certification = docs["certification.json"]
+            refresh_achieved(certification)
+            certification["achieved"] = "OK"
+            certification["achievedDetail"] = ""
+        self.bundle_with(lie)
+        self.assert_fails("verdict", "achieved is OK but an observation failed")
+
+    def test_mismatches_that_are_not_the_failed_observations_are_malformed(self) -> None:
+        def hide(docs: dict[str, Any]) -> None:
+            self.rows(docs)[0].update(outcome="state-mismatch", reason="not read back")
+            certification = docs["certification.json"]
+            refresh_achieved(certification)
+            certification["achievedMismatches"] = []
+        self.bundle_with(hide)
+        self.assert_fails("verdict", "achievedMismatches are not the failed observations")
+
+    def test_a_count_that_is_not_the_observations_is_malformed(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(achievedChecked=3))
+        self.assert_fails("verdict", "achievedChecked is 3")
+
+    def test_an_observation_without_its_states_is_malformed(self) -> None:
+        self.bundle_with(lambda docs: self.rows(docs)[0].update(observed=""))
+        self.assert_fails("verdict", "has an empty observed")
+
+    def test_a_report_that_omits_a_mismatch_fails(self) -> None:
+        def mismatch(docs: dict[str, Any]) -> None:
+            self.rows(docs)[0].update(outcome="state-mismatch", reason="not read back")
+            refresh_achieved(docs["certification.json"])
+        docs = copy.deepcopy(self.base)
+        mismatch(docs)
+        honest = report_text(docs["certification.json"])
+        omitted = "\r\n".join(line for line in honest.split("\r\n") if not line.startswith("  MISMATCH  "))
+        self.bundle_with(mismatch, report=omitted)
+        self.assert_fails("report", "MISMATCH lines")
+
+    def test_a_report_that_omits_an_unverifiable_surface_fails(self) -> None:
+        def unverifiable(docs: dict[str, Any]) -> None:
+            for row in self.rows(docs):
+                if row["element"] == "Ribbon":
+                    row.update(outcome="not-verifiable", reason="the Ribbon could not be read")
+            refresh_achieved(docs["certification.json"])
+        docs = copy.deepcopy(self.base)
+        unverifiable(docs)
+        honest = report_text(docs["certification.json"])
+        omitted = "\r\n".join(line for line in honest.split("\r\n") if not line.startswith("  UNVERIFIABLE  "))
+        self.bundle_with(unverifiable, report=omitted)
+        self.assert_fails("report", "UNVERIFIABLE lines")
+
+    def test_a_report_whose_observation_counts_differ_fails(self) -> None:
+        honest = report_text(self.base["certification.json"])
+        self.bundle_with(report=honest.replace("checked=15 verified=15", "checked=15 verified=14"))
+        self.assert_fails("report", "OBSERVATIONS lines")
+
+    def test_an_earlier_report_with_observation_lines_is_not_read_as_clean(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            for key in ACHIEVED_KEYS:
+                del docs["certification.json"][key]
+        policy = dataclasses.replace(evidence.default_policy(), case_manifest=None)
+        self.bundle_with(earlier_runner, report=report_text(self.base["certification.json"]))
+        failed = {name for name, passed, _ in evidence.evaluate(self.bundle, self.sha, self.root, policy) if not passed}
+        self.assertEqual(failed, {"report"})
 
 
 class EarlierContractTests(Fixture):

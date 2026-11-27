@@ -607,6 +607,7 @@ test/M_EXCEL_UI_TEST_HARNESS.bas         shared assertions, cleanup and evidence
 test/M_EXCEL_UI_TEST_RUNTIME.bas         runtime cases
 test/M_EXCEL_UI_TEST_SNAPSHOT.bas        snapshot cases and the Ribbon probe
 test/M_EXCEL_UI_TEST_TITLEBAR.bas        title-bar cases
+test/M_EXCEL_UI_TEST_ACHIEVED.bas        achieved-state verification: read back after every write
 test/M_EXCEL_UI_TEST_CERTIFICATION.bas   release certification and the full pack
 ```
 
@@ -619,6 +620,7 @@ Test_EXCEL_UI_RunCore                     ' interactive, not certification
 Test_EXCEL_UI_RunTitleBarOnly             ' interactive, not certification
 Test_EXCEL_UI_RunSnapshotIdentity         ' a unit of the release gate; also runnable alone
 Test_EXCEL_UI_RunTitleBarSdiIdentity      ' a unit of the release gate; destructive: opens and closes windows
+Test_EXCEL_UI_RunAchievedStateVerification ' a unit of the release gate; destructive: toggles every managed element and reads it back
 Test_EXCEL_UI_RunRibbonSdiProbe           ' characterization, asserts nothing, not part of the gate
 Test_EXCEL_UI_RunCertificationSelfTest    ' an isolated unit of the release gate; a failed certification must re-raise
 Test_EXCEL_UI_RunOwnershipCleanupChecks   ' an isolated unit of the release gate; runner-owned snapshots are always released, and a forced cleanup failure, failed unit and inventory gap each fail certification
@@ -650,7 +652,7 @@ emits a JSON document and a text report naming the exact Excel build the verdict
 was obtained on:
 
 ```text
-RESULT: PASS | COMPLETE | units=5 failed=0 skipped=0 cleanup=OK
+RESULT: PASS | COMPLETE | units=6 failed=0 skipped=0 cleanup=OK
 ```
 
 Completeness and correctness are reported separately on purpose. A run that
@@ -660,7 +662,7 @@ finding: it reports `FAIL | INCOMPLETE`, and both documents name the recording
 failure.
 
 The unit counters and the case inventory are separate parts of the verdict.
-`units=5 failed=0 skipped=0` says how the units that were dispatched ended. It
+`units=6 failed=0 skipped=0` says how the units that were dispatched ended. It
 does not say that the cases a release needs were present, unique and executed,
 so certification also compares the cases it expected with the cases that ran
 ([What the case inventory covers](#what-the-case-inventory-covers)). A run in
@@ -674,8 +676,8 @@ raise, with the failure in the error it carries.
 
 [`tools/certification-manifest.json`](tools/certification-manifest.json) is the
 release contract: the units, in the order a run executes them, and the
-mandatory cases of each, named by the procedure that runs them. Version 1 lists
-54 cases in five units. Two of them, `CertificationSelfTest` and
+mandatory cases of each, named by the procedure that runs them. Version 2 lists
+62 cases in six units. Two of them, `CertificationSelfTest` and
 `OwnershipCleanupChecks`, are isolated units: each calls certification itself,
 so each runs once before the live record opens, with no certification active,
 and is recorded afterwards. Their nested runs cannot reach the accounting of the
@@ -711,6 +713,106 @@ to the manifest. The manifest permanently lists the cases named in
 [#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42), with one change of
 name: #32 replaced `TST_Case_TitleBarSameStyleHandleReuse`, so the manifest names
 `TST_Case_TitleBarSameHwndGenerationReuse`.
+
+<a id="what-the-achieved-state-covers"></a>
+
+### What the achieved-state verification covers
+
+The object-model and Ribbon setters are best effort. A write that raises
+nothing, and a setter that returns `True`, do not show that Excel kept the
+state that was asked for. The `AchievedStateVerification` unit checks that
+independently, for every managed element, and it is a mandatory unit of
+`Test_EXCEL_UI_RunReleaseCertification`. It is a release-certification feature.
+It adds no guarantee to the fire-and-forget API: the production setters and the
+public signatures are unchanged, and a caller still receives a best-effort write.
+
+Each observation is one write through `UI_SetExcelUI_WithResult` with one
+element and one scope, then **write, settle, read, compare**. It reads the
+state before the write, asks for the requested visibility, waits for the state
+to settle within a fixed bound, reads it back from the object model or the
+native frame (never through the production getters), and compares it with what
+the scope owes: the requested state for what the scope reaches, and the state
+before the write for everything else. Each observation records one outcome:
+
+| Outcome | Meaning |
+|---|---|
+| `verified-no-op` | the state was already the requested one, and the readback confirmed it |
+| `verified-write` | the state changed to the requested one, and the readback confirmed it |
+| `write-failed` | the setter reported a failure |
+| `readback-failed` | the state could not be read after the write |
+| `state-mismatch` | the setter returned `True`, but the state read back is not the requested one |
+| `restore-failed` | the entry state was not put back, or could not be read back |
+| `not-verifiable` | the surface could not be addressed or read; the reason is recorded |
+
+The first five fail the case, and with it the unit and the verdict, each with
+its own text. `not-verifiable` fails nothing and is never a silent pass: it is
+listed in both documents. It is allowed in two places only, and the live verdict
+and `tools/check_excel_evidence.py` accept exactly the same observations:
+
+| Element | `verified-*` | `not-verifiable` | Any other outcome |
+|---|---|---|---|
+| Status Bar, Scroll Bars, Formula Bar | hide, show, restore | never | fails |
+| Title bar | hide, show, restore | never: an entry frame with no complete caption is `readback-failed` | fails |
+| Headings, Workbook Tabs, Gridlines | hide, show, restore | only as an `entry` observation naming windows that could not be read on entry and were left out | fails |
+| Ribbon | hide, show, restore | only when it is unverifiable for every observation, that is one `entry` observation; a Ribbon that was readable and then is not, after a write or after the restoration, is `readback-failed` or `restore-failed` | fails |
+
+The live side is `TST_AchIsAllowed`, which turns any outcome not allowed at an
+element and operation into a failure, and `tests/test_achieved_contract.py`
+generates every outcome combination of every scenario for every element and
+scope of the manifest and fails if the live verdict passes what the validator
+rejects, or the reverse.
+
+| Element | Scope | What is read back |
+|---|---|---|
+| Status Bar, Scroll Bars, Formula Bar | `Application` | `DisplayStatusBar`, `DisplayScrollBars`, `DisplayFormulaBar` |
+| Headings, Workbook Tabs, Gridlines | `AllWindows`, `ActiveWindow`, `ActiveWorkbookWindows` | the property of every open window; a window in the scope must read back at the request, and every other window, whatever its workbook, unchanged |
+| Title bar | `ActiveFrame` | the `GWL_STYLE` of the frame that `UI_TryGetActiveFramePair` named before the write; the read is refused when the active frame is no longer that frame, and the frame counts as visible only when `WS_BORDER` and `WS_DLGFRAME` are both set |
+| Ribbon | `ActiveWindow` | the Ribbon, only while the window that owned it before the write is still the active window; a Ribbon that cannot be addressed or read is `not-verifiable` |
+
+A scenario makes four observations of one element under one scope, hide, hide
+again, show and show again, so that the path that changes the state and the path
+that finds it already correct are both verified, whatever the state on entry.
+It ends with a restoration of the entry state through the harness writers, never
+through the API under test, which is read back and recorded as its own
+observation. A restoration that does not read back is `restore-failed`. The
+title bar is verified against an entry frame that has a complete caption. One
+that has none, hidden or never a caption, is not the baseline the unit verifies
+against: it is `readback-failed` with a text of its own and fails the run, because
+only the Ribbon may be `not-verifiable`, which is all the manifest allows.
+
+Every wait goes through one bounded poll: at most 20 reads, 0.05 s apart, ending
+at the first read that equals the request. No case waits on its own, and
+reaching the bound is not a pass, because the readback that follows decides.
+
+Two cases prove the verification itself, with fault seams and without relying on a
+host that fails. They ask the production setter for nothing, so that it returns
+`True` and writes nothing (`state-mismatch`); give it a value no `UIVisibility`
+member names (`write-failed`); fail the readback after a write that took effect
+(`readback-failed`); skip the restoring write (`restore-failed`); and fail the
+Ribbon readback from the start (`not-verifiable`). A Ribbon that is readable and
+then fails after a write or after the restoration is `readback-failed` or
+`restore-failed`, and a captionless title-bar entry frame is `readback-failed`;
+each has its own seam. They assert each outcome and text, that the
+wait ended within its bound, that a mismatch fails the case with the setter
+having returned `True`, and that the verdict and both documents carry it. Their
+records are local, so the run that executes them records nothing from them.
+
+`certification.json` gains `achieved` (`OK`, or `FAILED` when an observation
+failed), `achievedDetail`, `achievedChecked`, `achievedState` (every observation
+with its `element`, `scope`, `operation`, `requested`, `observed`, `outcome`
+and `reason`), `achievedMismatches` and `achievedUnverifiable`.
+`certification.txt` gains an `OBSERVATIONS` line with the counts, a `MISMATCH`
+line for each failed observation and an `UNVERIFIABLE` line for each surface
+that could not be verified. The manifest's `achieved_state` section lists the
+elements and scopes that a document must hold, and
+`tools/check_excel_evidence.py` rejects one that lacks an observation, a
+verified write, a verified no-op or a verified restoration for any of them, or
+that holds a failed one.
+
+This is operation-level verification. It does not replace the cleanup baseline
+(what the host looks like after the whole run) or the case inventory (which cases
+ran). A window that cannot be read on entry is named `not-verifiable` and left out
+of the comparison, and the Ribbon of any other window is not verified.
 
 <a id="what-cleanup-ok-covers"></a>
 
