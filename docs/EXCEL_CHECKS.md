@@ -184,7 +184,7 @@ passes looks like this, with your commit, versions, timings and printer:
 Commit: <full-sha>
 Host: Excel 16.0 build 20430, x64; Microsoft Windows 11 Pro 10.0.26100 build 26100.4349
 PASS preflight: Commit <full-sha>; Microsoft Windows 11 Pro 10.0.26100 build 26100.4349
-PASS certification: exit 0; RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK [certification/session.log]
+PASS certification: exit 0; RESULT: PASS | COMPLETE | units=5 failed=0 skipped=0 cleanup=OK [certification/session.log]
 PASS open-development: Excel 16.0 build 20430, x64; process 12345
 PASS Test_EXCEL_UI_RunAll: RESULT: PASS [runner-Test_EXCEL_UI_RunAll.log]
 PASS Test_EXCEL_UI_RunCore: RESULT: PASS [runner-Test_EXCEL_UI_RunCore.log]

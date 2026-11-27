@@ -110,9 +110,12 @@ there is no interprocedural or whole-control-flow proof, cleanup proof, or
 protection against re-raise loops.
 
 Run `Debug -> Compile VBAProject` and the relevant Excel tests after VBA edits.
-Passing static analysis does not produce runtime evidence. The mandatory
-certification-manifest registration check remains dependent on #42's manifest;
-the current analyzer does not certify case completeness or execution.
+Passing static analysis does not produce runtime evidence. The analyzer does not
+certify case completeness or execution. The gate's `certification manifest`
+check (`tools/certification_manifest.py`, #42) holds the mandatory case
+identifiers of `tools/certification-manifest.json` to the registry, dispatch and
+call sites in `test/M_EXCEL_UI_TEST_CERTIFICATION.bas`; it reads source text, and
+only the certification evidence shows that a case ran.
 
 ## WinAPI error capture (#27)
 

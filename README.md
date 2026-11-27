@@ -615,15 +615,20 @@ Public runners:
 
 ```vb
 Test_EXCEL_UI_RunReleaseCertification     ' the release gate
-Test_EXCEL_UI_RunAll                      ' interactive; opens and closes temporary windows
-Test_EXCEL_UI_RunCore
-Test_EXCEL_UI_RunTitleBarOnly
-Test_EXCEL_UI_RunSnapshotIdentity
-Test_EXCEL_UI_RunTitleBarSdiIdentity      ' destructive: opens and closes windows
-Test_EXCEL_UI_RunRibbonSdiProbe           ' characterization, asserts nothing
-Test_EXCEL_UI_RunCertificationSelfTest    ' standalone: a failed certification must re-raise
-Test_EXCEL_UI_RunOwnershipCleanupChecks   ' standalone: runner-owned snapshots are always released; a forced cleanup failure fails certification
+Test_EXCEL_UI_RunAll                      ' interactive, not certification; opens and closes temporary windows
+Test_EXCEL_UI_RunCore                     ' interactive, not certification
+Test_EXCEL_UI_RunTitleBarOnly             ' interactive, not certification
+Test_EXCEL_UI_RunSnapshotIdentity         ' a unit of the release gate; also runnable alone
+Test_EXCEL_UI_RunTitleBarSdiIdentity      ' a unit of the release gate; destructive: opens and closes windows
+Test_EXCEL_UI_RunRibbonSdiProbe           ' characterization, asserts nothing, not part of the gate
+Test_EXCEL_UI_RunCertificationSelfTest    ' an isolated unit of the release gate; a failed certification must re-raise
+Test_EXCEL_UI_RunOwnershipCleanupChecks   ' an isolated unit of the release gate; runner-owned snapshots are always released, and a forced cleanup failure, failed unit and inventory gap each fail certification
 ```
+
+Only `Test_EXCEL_UI_RunReleaseCertification` is release certification. The
+interactive runners stay usable for a quicker loop; they record no case
+inventory and run neither the isolated units nor the identity units, so their
+result never stands for a release.
 
 To certify a release, run one command:
 
@@ -646,7 +651,7 @@ emits a JSON document and a text report naming the exact Excel build the verdict
 was obtained on:
 
 ```text
-RESULT: PASS | COMPLETE | units=3 failed=0 skipped=0 cleanup=OK
+RESULT: PASS | COMPLETE | units=5 failed=0 skipped=0 cleanup=OK
 ```
 
 Completeness and correctness are reported separately on purpose. A run that
@@ -654,6 +659,57 @@ skipped a mandatory unit is not a pass, whatever the assertions that did execute
 reported. Neither is a run that could not record a unit, a skip or a cleanup
 finding: it reports `FAIL | INCOMPLETE`, and both documents name the recording
 failure.
+
+The unit counters and the case inventory are separate parts of the verdict.
+`units=5 failed=0 skipped=0` says how the units that were dispatched ended. It
+does not say that the cases a release needs were present, unique and executed,
+so certification also compares the cases it expected with the cases that ran
+([What the case inventory covers](#what-the-case-inventory-covers)). A run in
+which every assertion passed is `FAIL | INCOMPLETE` when that comparison finds a
+difference, and a failed unit and an inexact inventory each make the outer call
+raise, with the failure in the error it carries.
+
+<a id="what-the-case-inventory-covers"></a>
+
+### What the case inventory covers
+
+[`tools/certification-manifest.json`](tools/certification-manifest.json) is the
+release contract: the units, in the order a run executes them, and the
+mandatory cases of each, named by the procedure that runs them. Version 1 lists
+54 cases in five units. Two of them, `CertificationSelfTest` and
+`OwnershipCleanupChecks`, are isolated units: each calls certification itself,
+so each runs once before the live record opens, with no certification active,
+and is recorded afterwards. Their nested runs cannot reach the accounting of the
+run that executes them.
+
+Every other case runs through `TST_CertRunCase`, which records its start and
+exactly one terminal status under its identifier. At the end of the run
+certification stores the cases the manifest lists as expected and compares them
+exactly with the cases that ran. Each difference is an inventory finding, named
+`<code>:<case>`:
+
+| Code | Reported when |
+|---|---|
+| `missing` | an expected case was never started, for example because an earlier case failed and its unit stopped |
+| `noStart` | a case recorded a terminal status without a start |
+| `duplicate` | a case started more than once, or recorded more statuses than starts |
+| `noResult` | a case started and recorded fewer statuses than starts |
+| `unexpected` | a case that the manifest does not list started or recorded a status |
+
+A finding, or a comparison that did not run, makes the verdict
+`FAIL | INCOMPLETE`. `certification.json` carries `manifestVersion`,
+`inventory`, `inventoryDetail`, `expectedCases`, the ordered `caseResults` and
+the `inventoryFindings`; `certification.txt` carries a `CASES` line with the
+counts, an `EXPECTED` line for each expected case, a `CASE` line for each case
+that started and an `INVENTORY` line for each finding.
+
+The static gate holds the manifest, the registry in the certification module,
+its dispatch and the `TST_CertRunCase` calls to each other, so a case cannot
+be added, removed, duplicated or left out of a pack without a reviewed change
+to the manifest. The manifest permanently lists the cases named in
+[#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42), with one change of
+name: #32 replaced `TST_Case_TitleBarSameStyleHandleReuse`, so the manifest names
+`TST_Case_TitleBarSameHwndGenerationReuse`.
 
 <a id="what-cleanup-ok-covers"></a>
 
@@ -712,8 +768,9 @@ the host that ran it, not a proof that no host state changed.
 
 `Test_EXCEL_UI_RunAll` remains the interactive runner and is **not** the release
 gate. It opens and closes temporary windows and workbooks for its targeting and
-handle-reuse cases, but it does not run the snapshot-identity and SDI identity
-units, and it produces no machine-readable evidence.
+handle-reuse cases, but it does not run the snapshot-identity, SDI identity or
+isolated units, it records no case inventory, and it produces no
+machine-readable evidence.
 
 The suite covers:
 

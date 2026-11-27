@@ -170,18 +170,59 @@ measured against that baseline.
 | Public API | Unchanged from v1.1.2, and now recorded declaration by declaration |
 | Supported API contract | Unchanged from the `[baseline v1.1.2]` facade |
 | Runtime correctness fixes | #26, #27 and #45 complete; #23 certified and open until the README and Wiki describe it; #38 certified and open until the Wiki describes it; remaining title-bar defects open |
-| Regression and certification fixes | #43, #135 and #50 complete; remaining certification gates open |
+| Regression and certification fixes | #43, #135 and #50 complete; the mandatory case inventory (#42) is implemented and not yet certified; remaining certification gates open |
 | Regression VBA | Caller-owned snapshot refusal, ownership-failure, Ribbon wrong-window refusal, WinAPI error-capture and certification unit-isolation coverage added; split into a harness and four suite modules (#90); certified |
 | Demo VBA | Template and sheet-reset cleanup corrected with its own Excel harness (#71); buttons without a macro corrected (#129); fast-mode state (#70), ActiveX check boxes (#73) and template validation (#74) corrected and checked on Excel with harness scenarios S15-S44 (2026-11-14); title-bar error capture (#144) and printer-free demo build (#187) checked on Excel with scenarios S45-S48 (2026-11-17) |
 | Repository hygiene | Strengthened on `release/v1.1.3` |
 | Governance and contributor documentation | Rebuilt on `release/v1.1.3` |
-| Static validation | `python3 tools/verify.py --ci` runs every static check, including the 37 checks of `tools/check_repo.py`; the release branch passes |
+| Static validation | `python3 tools/verify.py --ci` runs every static check, including the 39 checks of `tools/check_repo.py`; the release branch passes |
 | Wiki | Last recorded track is v1.1.2; the badge workflow runs from the default branch, with final evidence still pending under #53 |
 | Excel runtime certification | Candidate heads certified on Excel 16.0 build 20430, 64-bit (2026-11-06, 2026-11-14 and 2026-11-17); the final v1.1.3 head is not yet certified |
 | Release status | Not releasable while P1/P2 blockers remain open |
 
 ### ➕ Added
 
+- **Not yet certified.** Release certification now verifies the exact mandatory
+  case inventory, not only the outcomes of the units it dispatched
+  ([#42](https://github.com/danielep71/VBA-EXCEL_UI/issues/42),
+  `ICR-UI-112-P2-06`). A new versioned manifest,
+  **tools/certification-manifest.json**, lists the five units and their 54
+  mandatory cases in the order a run executes them; a case identifier is the
+  name of the procedure that runs it. Every mandatory case runs through
+  `TST_CertRunCase`, which records its start and exactly one terminal status
+  under its identifier and re-raises a failed case unchanged. At the end of the
+  run certification stores the expected cases in its record and compares them
+  exactly with the cases that ran: a missing, duplicate, unexpected,
+  result-less or start-less case is an inventory finding and gives
+  `FAIL | INCOMPLETE` even when every assertion passed. The unit counters and the
+  case inventory are separate parts of the verdict, and the RESULT line now reads
+  `units=5` because the self-test and the ownership checks are units.
+  `certification.json` gains `manifestVersion`, `inventory`, `inventoryDetail`,
+  `expectedCases`, the ordered `caseResults` and `inventoryFindings`, and
+  `certification.txt` gains `CASES`, `EXPECTED`, `CASE` and `INVENTORY` lines.
+  `Test_EXCEL_UI_RunCertificationSelfTest` and
+  `Test_EXCEL_UI_RunOwnershipCleanupChecks` call certification themselves, so
+  they run once, first, as isolated units: while no certification is active,
+  with their outcome held outside the record and recorded once the record is
+  open. Both stay runnable alone, and the public interactive runners
+  (`Test_EXCEL_UI_RunAll`, `Test_EXCEL_UI_RunCore`,
+  `Test_EXCEL_UI_RunTitleBarOnly`) remain usable, record no inventory and are
+  documented as not release certification. Two new run faults and two new cases
+  of the ownership checks prove that a forced failed unit, and a forced gap in
+  the inventory, each make the outer certification call raise with the failed
+  unit or the finding in its error text. A new case in the RegressionPack unit
+  injects each kind of difference into a local record. The manifest names the
+  five cases of #42; #32 replaced `TST_Case_TitleBarSameStyleHandleReuse`, so it
+  lists `TST_Case_TitleBarSameHwndGenerationReuse` in its place and says so. The
+  static gate gains the `certification manifest` check and its self-test
+  (`tools/certification_manifest.py`): it fails when the manifest, the VBA
+  registry, the dispatch or the call sites disagree, and its fixtures delete a
+  registration, duplicate a dispatch and add an unmanifested mandatory case, and
+  expect the gate to fail. `tools/check_excel_evidence.py` now rejects a bundle
+  that passes the unit counters without the case inventory; the policy key
+  `case_manifest` switches this on, and a policy without it still reads the
+  earlier contract. No production module changed and the `[supported]` facade is
+  unchanged. This was checked by the static gate only; it needs an Excel run.
 - **Not yet certified.** Release certification now judges cleanup against a
   baseline of the Excel host that it owns, not against four conditions
   ([#35](https://github.com/danielep71/VBA-EXCEL_UI/issues/35),
