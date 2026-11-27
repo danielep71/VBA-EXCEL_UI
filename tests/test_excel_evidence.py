@@ -1042,6 +1042,26 @@ class AchievedStateTests(Fixture):
         self.bundle_with(unverifiable)
         self.assert_fails("achieved state", "StatusBar.Application")
 
+    def test_a_title_bar_that_was_not_verified_fails_the_bundle(self) -> None:
+        """The live verdict fails a captionless entry frame, so the bundle must not accept one either."""
+        manifest = copy.deepcopy(CASE_MANIFEST)
+        manifest["achieved_state"]["observations"].append({"element": "TitleBar", "scope": "ActiveFrame"})
+        text = json.dumps(manifest, indent=2) + "\n"
+        (self.root / "tools" / "certification-manifest.json").write_text(text, encoding="utf-8")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "a manifest that lists the title bar")
+        later = git(self.root, "rev-parse", "HEAD")
+
+        def title_bar(docs: dict[str, Any]) -> None:
+            self.rows(docs).append({"element": "TitleBar", "scope": "ActiveFrame", "operation": "entry",
+                                    "requested": "not attempted", "observed": "unreadable",
+                                    "outcome": "not-verifiable", "reason": "frame has no complete caption"})
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(title_bar)
+        found = {name: detail for name, passed, detail in evidence.evaluate(self.bundle, later, self.root)
+                 if name == "achieved state" and not passed}
+        self.assertIn("TitleBar.ActiveFrame has no hide or show observation", found["achieved state"])
+
     def test_an_unverifiable_observation_without_a_reason_is_malformed(self) -> None:
         def no_reason(docs: dict[str, Any]) -> None:
             self.rows(docs)[0].update(outcome="not-verifiable")

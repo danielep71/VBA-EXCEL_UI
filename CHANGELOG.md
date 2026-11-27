@@ -212,7 +212,9 @@ measured against that baseline.
   the verdict although the setter returned `True`. Two cases prove the
   verification with fault seams that need no failing host: a setter asked for
   nothing, a value no member names, a failed readback, a skipped restoring write
-  and an unreadable Ribbon each give their own outcome and text, and a mismatch
+  a captionless title-bar entry frame (a failure, since only the Ribbon may be
+  not verifiable) and an unreadable Ribbon each give their own outcome and
+  text, and a mismatch
   fails the unit, the verdict and both documents. `certification.json` gains
   `achieved`, `achievedDetail`, `achievedChecked`, `achievedState` (the
   `element`, `scope`, `operation`, `requested`, `observed`, `outcome` and

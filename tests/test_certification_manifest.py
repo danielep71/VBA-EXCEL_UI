@@ -92,6 +92,17 @@ class ManifestFileTests(unittest.TestCase):
         self.assertIn(("Ribbon", "ActiveWindow"), pairs)
         self.assertEqual([item.element for item in section.observations if item.may_be_unverifiable], ["Ribbon"])
 
+    def test_the_title_bar_scenario_cannot_begin_as_not_verifiable(self) -> None:
+        """Only the Ribbon may be not-verifiable, so a captionless entry frame must fail, not be exempt."""
+        source = (ROOT / "test" / "M_EXCEL_UI_TEST_ACHIEVED.bas").read_bytes().decode("ascii").replace("\r\n", "\n")
+        begin = source[source.index("Case TEST_ACH_SURFACE_TITLEBAR\n                m_AchCount"):]
+        title_bar = begin[:begin.index("Case TEST_ACH_SURFACE_RIBBON")]
+        self.assertIn("has no complete caption", title_bar)
+        self.assertNotIn("m_AchUnverifiable", title_bar)
+        section = self.manifest.achieved
+        assert section is not None
+        self.assertEqual([item.element for item in section.observations if item.may_be_unverifiable], ["Ribbon"])
+
     def test_a_manifest_without_the_section_still_parses(self) -> None:
         doc = document()
         del doc["achieved_state"]

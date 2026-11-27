@@ -68,12 +68,13 @@ Option Private Module
 '     windows in the scope are read back at the requested state, and every other
 '     window is read back unchanged
 '   - the title bar, read back from the frame the active frame pair named
-'     before the write, which is visible only with the complete caption mask
+'     before the write, which is visible only with the complete caption mask; an
+'     entry frame without it is not the baseline this unit verifies, and fails
 '   - the Ribbon, read back only while the window that owned it before the write
 '     is still the active window; a Ribbon that cannot be addressed or read is
-'     not-verifiable
-'   - the fault seams: an ignored write, a failed write, a failed readback and a
-'     failed restoration each give their own outcome and their own text, and a
+'     not-verifiable, the only surface that is
+'   - the fault seams: an ignored write, a failed write, a failed readback, a
+'     failed restoration and a title bar with no caption on entry each give their own outcome and their own text, and a
 '     state mismatch fails the verdict whatever the setter returned
 '
 ' STATE MANAGEMENT
@@ -127,6 +128,7 @@ Option Private Module
     Private Const TEST_ACH_FAULT_WRITE_FAILED   As Long = 2 'Fault: the setter is given a value no member names, so it reports a failure
     Private Const TEST_ACH_FAULT_READBACK       As Long = 3 'Fault: the readback after the write fails
     Private Const TEST_ACH_FAULT_RESTORE        As Long = 4 'Fault: the restoration write is not made
+    Private Const TEST_ACH_FAULT_NO_CAPTION     As Long = 5 'Fault: the entry frame of a title-bar scenario reads as having no complete caption
 
     Private Const TEST_ACH_INVALID_VISIBILITY   As Long = 99    'A UIVisibility value no member names
 
@@ -688,8 +690,10 @@ Public Sub TST_Case_AchievedTitleBarFrameState()
 '
 ' BEHAVIOR
 '   - Resolves the active frame pair and reads the frame's style. A frame
-'     without the complete caption, WS_BORDER and WS_DLGFRAME both set, has no
-'     shown state to return to, so its title bar is not-verifiable.
+'     without the complete caption, WS_BORDER and WS_DLGFRAME both set, is not
+'     the baseline this case verifies a hide and a show against, so it fails
+'     with readback-failed and a text of its own. Only the Ribbon may be
+'     not-verifiable, which is all the manifest allows.
 '   - Hides, hides again, shows and shows again, reading the style of that same
 '     frame after each write and treating the frame as visible only with both
 '     component bits of the caption.
@@ -939,6 +943,9 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
 '     is spent, a restoration that writes.
 '   - Unverifiable surface: the Ribbon is read back as a failure. Expects
 '     not-verifiable, which fails nothing and is listed in both documents.
+'   - Title bar with no caption on entry: the entry frame reads as captionless.
+'     Expects readback-failed, not an exemption, because only the Ribbon may be
+'     not-verifiable.
 '   - Asserts that the five texts differ, each naming its own outcome, and that
 '     the ignored write ended within the bound of the settle.
 '   - Asserts that none of this reached the record of the run executing the
@@ -977,6 +984,7 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
     Dim WriteText   As String   'Failure text of the failed write
     Dim ReadText    As String   'Failure text of the failed readback
     Dim RestoreText As String   'Failure text of the failed restoration
+    Dim CaptionText As String   'Failure text of a title bar with no caption on entry
     Dim Elapsed     As Double   'Seconds the ignored write took to end
 
     Dim RunEntries  As Long     'Run record: entries on entry
@@ -1044,6 +1052,12 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
         RestoreText = TST_AchRestoreSeam()
 
 '------------------------------------------------------------------------------
+' A TITLE BAR WITH NO CAPTION ON ENTRY
+'------------------------------------------------------------------------------
+    'Only the Ribbon may be not-verifiable, so this fails the run
+        CaptionText = TST_AchCaptionSeam()
+
+'------------------------------------------------------------------------------
 ' A SURFACE THAT CANNOT BE VERIFIED
 '------------------------------------------------------------------------------
         TST_AchUnverifiableSeam
@@ -1073,9 +1087,17 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
             PROC_NAME & ".Text.RestoreFailed"
 
         TST_AssertTrue _
+            (InStr(1, CaptionText, TEST_ACH_OUTCOME_READ_FAILED, vbBinaryCompare) > 0) And _
+            (InStr(1, CaptionText, "has no complete caption", vbBinaryCompare) > 0) And _
+            (InStr(1, CaptionText, "not the baseline", vbBinaryCompare) > 0), _
+            PROC_NAME & ".Text.CaptionlessEntry"
+
+        TST_AssertTrue _
             (IgnoredText <> WriteText) And (IgnoredText <> ReadText) And _
             (IgnoredText <> RestoreText) And (WriteText <> ReadText) And _
-            (WriteText <> RestoreText) And (ReadText <> RestoreText), _
+            (WriteText <> RestoreText) And (ReadText <> RestoreText) And _
+            (CaptionText <> IgnoredText) And (CaptionText <> WriteText) And _
+            (CaptionText <> ReadText) And (CaptionText <> RestoreText), _
             PROC_NAME & ".Text.AllDiffer"
 
 '------------------------------------------------------------------------------
@@ -1595,6 +1617,96 @@ Private Function TST_AchRestoreSeam() _
             PROC_NAME & ".TheHostIsBack"
 
         TST_AchRestoreSeam = FailedText
+
+End Function
+
+Private Function TST_AchCaptionSeam() _
+    As String
+'
+'------------------------------------------------------------------------------
+'                      RUN A CAPTIONLESS ENTRY FRAME SEAM
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Make the entry frame of a title-bar scenario read as having no complete
+'   caption, and assert that the unit fails instead of exempting it.
+'
+' WHY THIS EXISTS
+'   A title bar that is hidden when certification starts means the host is not
+'   the baseline the unit verifies. The manifest and the evidence validator
+'   exempt only the Ribbon from verification, so a live verdict that passed
+'   here would pass a run whose bundle the validator rejects (#28).
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   String
+'     The failed observations of the scenario, as text.
+'
+' BEHAVIOR
+'   - Arms TEST_ACH_FAULT_NO_CAPTION and begins a title-bar scenario, which must
+'     not begin and must not be marked unverifiable.
+'   - Records the begin failure and asserts that its outcome is readback-failed.
+'
+' ERROR POLICY
+'   - Raises on assertion failure, or when the scenario begins.
+'
+' DEPENDENCIES
+'   - TST_AchBegin
+'   - TST_AchRecordBeginFailure
+'   - TST_AchOutcomeAt
+'
+' NOTES
+'   None
+'
+' CALLED FROM
+'   - TST_Case_AchievedOutcomesAreDistinct
+'
+' HISTORY
+'   2026-11-28 - Added (#28).
+'
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_ACHIEVED.TST_AchCaptionSeam"
+
+    Dim Why As String   'Why the scenario could not begin
+
+'------------------------------------------------------------------------------
+' BEGIN WITH A CAPTIONLESS ENTRY FRAME
+'------------------------------------------------------------------------------
+        TST_AssertBooleanEquals True, TST_CertResetRecord(m_AchLocal), _
+            PROC_NAME & ".Reset"
+
+        m_AchFault = TEST_ACH_FAULT_NO_CAPTION
+
+        If TST_AchBegin("TitleBar", "ActiveFrame", TEST_ACH_SURFACE_TITLEBAR, _
+            vbNullString, UI_TargetAllExcelWindows, Why) Then
+
+            Err.Raise TEST_ACH_ERR_BASE + TEST_ACH_ERR_SEAM, PROC_NAME, _
+                "the title-bar scenario began on a frame with no caption"
+        End If
+
+'------------------------------------------------------------------------------
+' ASSERT THE FAILURE
+'------------------------------------------------------------------------------
+        TST_AssertTrue (m_AchFault = TEST_ACH_FAULT_NONE), _
+            PROC_NAME & ".TheFaultWasUsed"
+
+        TST_AssertBooleanEquals False, m_AchUnverifiable, _
+            PROC_NAME & ".IsNotExempt"
+
+        TST_AchRecordBeginFailure m_AchLocal, Why
+
+        TST_AssertTrue _
+            (TST_AchOutcomeAt(m_AchLocal, 1) = TEST_ACH_OUTCOME_READ_FAILED), _
+            PROC_NAME & ".Outcome"
+
+        TST_AchCaptionSeam = m_AchFailText
 
 End Function
 
@@ -2395,9 +2507,10 @@ Private Sub TST_AchRecordBeginFailure( _
 '
 ' WHY THIS EXISTS
 '   A surface that cannot be addressed or read before the first write is
-'   named in the evidence, not skipped. The Ribbon, and a title bar with no
-'   caption to return to, are not-verifiable; any other surface that cannot be
-'   read is readback-failed (#28).
+'   named in the evidence, not skipped. The Ribbon alone is not-verifiable, as
+'   the manifest allows; any other surface that cannot be read, a title bar
+'   whose entry frame has no complete caption included, is readback-failed and
+'   fails the run (#28).
 '
 ' INPUTS
 '   Rec
@@ -2498,7 +2611,9 @@ Private Function TST_AchBegin( _
 '                   an entry is in the scope when it is the active window, a
 '                   window of the active workbook, or any window.
 '     title bar     the active frame pair, its handle and its entry style; a
-'                   frame with no complete caption cannot be verified.
+'                   frame with no complete caption is not the baseline and
+'                   fails (the fault TEST_ACH_FAULT_NO_CAPTION makes any frame
+'                   read so).
 '     Ribbon        the active window and its handle; none cannot be verified.
 '   - Reads the entry state of every entry.
 '
@@ -2547,6 +2662,7 @@ Private Function TST_AchBegin( _
     Dim WindowKey   As String   'Key of one window
     Dim Probe       As Boolean  'Value read while probing a window
     Dim AnyTarget   As Boolean  'TRUE when the scope holds a readable window
+    Dim Captionless As Boolean  'TRUE when the entry frame has no complete caption
     Dim Detail      As String   'Reason from a helper
 
 '------------------------------------------------------------------------------
@@ -2712,13 +2828,21 @@ Private Function TST_AchBegin( _
 
                 m_AchFrameCaptured = True
 
-            'A show restores a frame that had a caption; one that never did has
-            'no state to return to
-                If Not TST_StyleHasCompleteCaption(m_AchEntryStyle) Then
-                    m_AchUnverifiable = True
+            'A show restores a frame that had a caption. An entry frame without one
+            'is not the baseline the unit verifies against, and the manifest allows
+            'only the Ribbon to be not-verifiable, so it fails the observation
+                Captionless = Not TST_StyleHasCompleteCaption(m_AchEntryStyle)
+
+                If m_AchFault = TEST_ACH_FAULT_NO_CAPTION Then
+                    m_AchFault = TEST_ACH_FAULT_NONE
+                    Captionless = True
+                End If
+
+                If Captionless Then
                     Why = "frame " & CStr(m_AchHwnd) & " has no complete caption " & _
-                        "(WS_BORDER and WS_DLGFRAME), so there is no shown state " & _
-                        "to verify a show against"
+                        "(WS_BORDER and WS_DLGFRAME): its title bar is hidden or " & _
+                        "was never a caption, so the host is not the baseline " & _
+                        "that a hide and a show are verified against"
                     GoTo SafeExit
                 End If
 

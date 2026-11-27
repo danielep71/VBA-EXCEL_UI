@@ -761,8 +761,10 @@ that finds it already correct are both verified, whatever the state on entry.
 It ends with a restoration of the entry state through the harness writers, never
 through the API under test, which is read back and recorded as its own
 observation. A restoration that does not read back is `restore-failed`. The
-title bar is verified only when the entry frame has a complete caption; one
-without it has no shown state to return to and is `not-verifiable`.
+title bar is verified against an entry frame that has a complete caption. One
+that has none, hidden or never a caption, is not the baseline the unit verifies
+against: it is `readback-failed` with a text of its own and fails the run, because
+only the Ribbon may be `not-verifiable`, which is all the manifest allows.
 
 Every wait goes through one bounded poll: at most 20 reads, 0.05 s apart, ending
 at the first read that equals the request. No case waits on its own, and
