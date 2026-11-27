@@ -2,8 +2,14 @@
 """
 House-style reformatter for VBA .bas modules.
 
-Applies a bounded set of mechanical formatting transformations. They are
-intended to be behaviour-neutral, and the named lexical rules below are
+Two normal forms exist. ``house`` is the style of docs/VBA_HOUSE_STYLE.md and is
+built by vba_house.py. ``legacy`` is the previous normal form, described below,
+which the tree keeps while house_style.HOUSE_STYLE_ACTIVE is False. ``--style``
+picks one; without it the switch decides, so ``--check`` accepts the tree that
+exists and ``--style house`` shows what the style will change.
+
+The legacy form applies a bounded set of mechanical formatting transformations.
+They are intended to be behaviour-neutral, and the named lexical rules below are
 exercised by ``--selftest``:
 
   1. Option statements hoisted above the module header block, flush left,
@@ -41,7 +47,17 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import house_style
+import vba_house
+import vba_house_rules
 from vba_lex import LexicalError, code_only, executable_signature, protected_lines, split_code_comment, transform_code
+
+STYLES = ("legacy", "house")
+
+
+def default_style() -> str:
+    """The normal form the tree is held to: the style when it is on, else the previous one."""
+    return "house" if house_style.HOUSE_STYLE_ACTIVE else "legacy"
 
 RULE_EQ = "'" + "=" * 78
 RULE_DASH = "'" + "-" * 78
@@ -306,12 +322,40 @@ def collapse_blanks(lines: list[str]) -> list[str]:
     return out
 
 
-def reformat(path: str | Path, module_name: str) -> str:
+def reformat(path: str | Path, module_name: str, style: str | None = None) -> str:
     with open(path, encoding="latin-1") as fh:
-        return reformat_text(fh.read(), module_name)
+        return reformat_text(fh.read(), module_name, style)
 
 
-def reformat_text(text: str, module_name: str) -> str:
+def reformat_text(text: str, module_name: str, style: str | None = None) -> str:
+    """Validate, transform supported regions and verify executable equivalence."""
+    return reformat_with_todos(text, module_name, style)[0]
+
+
+def reformat_with_todos(text: str, module_name: str, style: str | None = None) -> tuple[str, list[tuple[str, str]]]:
+    """The reformatted text and, for the house style, what a person still has to settle."""
+    chosen = style or default_style()
+    if chosen not in STYLES:
+        raise ValueError(f"unknown style {chosen!r}")
+    if chosen == "house":
+        return reformat_house(text, module_name)
+    return reformat_legacy(text, module_name), []
+
+
+def reformat_house(text: str, module_name: str) -> tuple[str, list[tuple[str, str]]]:
+    """Rewrite into the style, then prove the executable tokens are the same.
+
+    Only the renames declared in house_style (error-handling labels in a label
+    or jump position, and the PROC constant) may differ.
+    """
+    result, todos = vba_house.format_module(text, module_name)
+    declared = (house_style.LABEL_RENAMES, house_style.IDENTIFIER_RENAMES)
+    if executable_signature(text, *declared) != executable_signature(result):
+        raise LexicalError("formatting would change executable tokens or statement boundaries")
+    return result, todos
+
+
+def reformat_legacy(text: str, module_name: str) -> str:
     """Validate, transform supported regions and verify executable equivalence."""
     if not text.isascii():
         raise LexicalError("non-ASCII VBA input; repository exports must be ASCII")
@@ -393,7 +437,16 @@ def module_name_of(path: str | Path) -> str | None:
     return None
 
 
-def check(paths: Sequence[str | Path]) -> int:
+def hand_edits(path: str | Path, name: str, style: str) -> str:
+    """One line naming the rules of the style that rewriting cannot settle."""
+    if style != "house":
+        return ""
+    found = vba_house_rules.findings(Path(path).read_text(encoding="ascii"), name)
+    counts = vba_house_rules.summarise(found)
+    return ", ".join(f"{rule} {count}" for rule, count in counts.items() if count)
+
+
+def check(paths: Sequence[str | Path], style: str | None = None) -> int:
     """Report which files are not already in the formatter's normal form.
 
     Exit status is the point: this is what makes a formatter gate possible.
@@ -410,9 +463,9 @@ def check(paths: Sequence[str | Path]) -> int:
             continue
 
         try:
-            expected = reformat(path, name).encode("ascii")
+            expected = reformat(path, name, style).encode("ascii")
             _, notes = protected_lines(split_lines(Path(path).read_text(encoding="ascii")))
-            if notes:
+            if notes and (style or default_style()) == "legacy":
                 print(f"note {path}: {len(notes)} conditional/continued lines preserved; "
                       f"unsupported formatting skipped")
         except (ValueError, OSError) as exc:
@@ -424,6 +477,9 @@ def check(paths: Sequence[str | Path]) -> int:
 
         if actual == expected:
             print(f"ok   {path}")
+            pending = hand_edits(path, name, style or default_style())
+            if pending:
+                print(f"note {path}: for a person to settle: {pending}")
         else:
             print(f"FAIL {path}: not in house-style normal form "
                   f"({len(actual) - len(expected):+d} bytes)")
@@ -432,7 +488,7 @@ def check(paths: Sequence[str | Path]) -> int:
     return 1 if failed else 0
 
 
-def write(paths: Sequence[str | Path]) -> int:
+def write(paths: Sequence[str | Path], style: str | None = None) -> int:
     """Preflight every input, then atomically replace each changed file."""
     prepared: list[tuple[str | Path, bytes]] = []
     try:
@@ -440,12 +496,15 @@ def write(paths: Sequence[str | Path]) -> int:
             name = module_name_of(path)
             if name is None:
                 raise LexicalError(f"{path}: no Attribute VB_Name")
-            data = reformat(path, name).encode("ascii")
+            data = reformat(path, name, style).encode("ascii")
             prepared.append((path, data))
         for path, data in prepared:
             if Path(path).read_bytes() != data:
                 atomic_write(path, data)
             print(f"ok   {path}")
+            pending = hand_edits(path, module_name_of(path) or "", style or default_style())
+            if pending:
+                print(f"note {path}: for a person to settle: {pending}")
     except (ValueError, OSError) as exc:
         print(f"FAIL {exc}")
         return 1
@@ -530,7 +589,7 @@ def selftest() -> list[str]:
 
     for label, before, after in SELFTEST_CASES:
         source = "\r\n".join(SELFTEST_HEAD + [before] + SELFTEST_TAIL) + "\r\n"
-        produced = reformat_text(source, "M_SELFTEST").split("\r\n")
+        produced = reformat_text(source, "M_SELFTEST", "legacy").split("\r\n")
 
         if after not in produced:
             got = [ln for ln in produced
@@ -543,12 +602,14 @@ def selftest() -> list[str]:
         # Idempotence is part of the contract check() relies on: a file that
         # differs from its own formatted output is said to have drifted, which
         # is only true while formatting twice equals formatting once.
-        again = reformat_text("\r\n".join(produced), "M_SELFTEST")
+        again = reformat_text("\r\n".join(produced), "M_SELFTEST", "legacy")
         if again != "\r\n".join(produced):
             failures.append(f"{label}\n      not idempotent on a second pass")
 
+    from house_format_fixtures import house_selftest
     from reformat_fixtures import extended_selftest
     failures.extend(extended_selftest())
+    failures.extend(house_selftest())
     return failures
 
 
@@ -566,25 +627,39 @@ def run_selftest() -> int:
 
 USAGE = """usage:
   reformat.py --selftest                         verify the rules themselves
-  reformat.py --check <file.bas> [file.bas ...]   report drift, exit 1 if any
-  reformat.py --write <file.bas> [file.bas ...]   normalise in place
-  reformat.py <src> <dst> <module_name>           legacy explicit form
+  reformat.py [--style S] --check <file.bas> ...  report drift, exit 1 if any
+  reformat.py [--style S] --write <file.bas> ...  normalise in place
+  reformat.py [--style S] <src> <dst> <module_name>   explicit form
+S is "house" (the style in docs/VBA_HOUSE_STYLE.md) or "legacy" (the previous
+normal form). Without --style the switch HOUSE_STYLE_ACTIVE in
+tools/house_style.py decides.
 """
 
 
-if __name__ == "__main__":
-    args = sys.argv[1:]
-
+def main(argv: list[str]) -> int:
+    args = list(argv)
+    style: str | None = None
+    if "--style" in args:
+        at = args.index("--style")
+        if at + 1 >= len(args) or args[at + 1] not in STYLES:
+            sys.stderr.write(USAGE)
+            return 2
+        style = args[at + 1]
+        del args[at:at + 2]
     if args and args[0] == "--selftest":
-        sys.exit(run_selftest())
-    elif args and args[0] == "--check":
-        sys.exit(check(args[1:]))
-    elif args and args[0] == "--write":
-        sys.exit(write(args[1:]))
-    elif len(args) == 3:
+        return run_selftest()
+    if args and args[0] == "--check":
+        return check(args[1:], style)
+    if args and args[0] == "--write":
+        return write(args[1:], style)
+    if len(args) == 3:
         src, dst, name = args
-        atomic_write(dst, reformat(src, name).encode("ascii"))
+        atomic_write(dst, reformat(src, name, style).encode("ascii"))
         print(f"wrote {dst}")
-    else:
-        sys.stderr.write(USAGE)
-        sys.exit(2)
+        return 0
+    sys.stderr.write(USAGE)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

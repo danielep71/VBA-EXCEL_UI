@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
-from gate_fixture import GateTestCase, check_repo, reformat, vba_api, wiki_badges
+from gate_fixture import GateTestCase, check_repo, house_style, reformat, vba_api, wiki_badges
 
 RUNTIME = "src/M_EXCEL_UI_RUNTIME.bas"
 TESTS = "test/M_EXCEL_UI_TEST_HARNESS.bas"
@@ -239,6 +239,16 @@ class HouseLabels(GateTestCase):
         self.repo.replace(RUNTIME, "\r\nEnd Sub\r\n", "\r\nBogus_Label:\r\nEnd Sub\r\n")
         self.assertFails("non-house label 'Bogus_Label'")
 
+    def test_fails_on_the_spelling_of_the_other_state_of_the_style(self) -> None:
+        other = house_style.labels(not house_style.HOUSE_STYLE_ACTIVE)
+        self.repo.replace(RUNTIME, "\r\nEnd Sub\r\n", f"\r\n{other.handler}:\r\nEnd Sub\r\n")
+        self.assertFails(f"non-house label '{other.handler}'")
+
+    def test_the_vocabulary_follows_the_switch(self) -> None:
+        # The tree speaks one vocabulary; the other state of the switch must reject it.
+        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", not house_style.HOUSE_STYLE_ACTIVE):
+            self.assertFails("non-house label")
+
 
 class VbaAnalyzer(GateTestCase):
     check = "VBA analyzer"
@@ -341,7 +351,7 @@ class TitleBarControlRegression(GateTestCase):
     def test_fails_when_cleanup_leaves_its_handler_armed(self) -> None:
         text = self.repo.read_bytes(TITLEBAR_TESTS).decode("ascii")
         start = text.index("Sub TST_Case_TitleBarShowRejectsCaptionlessBaseline")
-        cleanup = text.index("Safe_Exit:", start)
+        cleanup = text.index(house_style.labels().safe_exit + ":", start)
         disarm = text.index("On Error GoTo 0", cleanup)
         text = text[:disarm] + "On Error Resume Next" + text[disarm + len("On Error GoTo 0"):]
         self.repo.write(TITLEBAR_TESTS, text.encode("ascii"))
@@ -1008,6 +1018,36 @@ class HouseStyleFormatter(GateTestCase):
     def test_fails_on_formatting_drift(self) -> None:
         self.repo.append(RUNTIME, "\r\n\r\n")
         self.assertFails(f"{RUNTIME}: not in house-style normal form")
+
+    def test_holds_the_tree_to_the_form_the_switch_names(self) -> None:
+        other = not house_style.HOUSE_STYLE_ACTIVE
+        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", other):
+            self.assertFails(f"{RUNTIME}: not in house-style normal form")
+
+
+class HouseStyleRules(GateTestCase):
+    check = "house-style rules"
+
+    def test_passes_on_the_current_tree(self) -> None:
+        self.assertPasses()
+
+    def test_fails_when_a_rule_stops_detecting_its_defect(self) -> None:
+        import vba_house_rules
+        with patch.object(vba_house_rules, "COMPARE_CALL_RE", NEVER):
+            self.assertFails("InStr with two arguments")
+
+    def test_fails_on_the_modules_once_the_style_is_on(self) -> None:
+        # The tree is not yet in the style, so switching it on must report it.
+        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", True):
+            self.assertFails(f"{RUNTIME}:", "header lacks")
+
+    def test_applies_to_an_added_module_only_when_the_style_is_on(self) -> None:
+        extra = 'Attribute VB_Name = "M_EXCEL_UI_EXTRA"\r\nOption Explicit\r\n\r\nPrivate Sub P()\r\nEnd Sub\r\n'
+        self.repo.write("src/M_EXCEL_UI_EXTRA.bas", extra)
+        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", False):
+            self.assertEqual(self.findings(), [])
+        with patch.object(house_style, "HOUSE_STYLE_ACTIVE", True):
+            self.assertFails("src/M_EXCEL_UI_EXTRA.bas:", "no documentation header")
 
 
 class FormatterSelfTest(GateTestCase):

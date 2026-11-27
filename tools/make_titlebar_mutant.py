@@ -49,6 +49,8 @@ import hashlib
 import sys
 from pathlib import Path
 
+import layout_edit
+
 SOURCE = Path("src") / "M_EXCEL_UI_TITLEBAR.bas"
 SCRATCH = Path(".mutation-scratch") / "titlebar-6"
 MODULE_FILE = "M_EXCEL_UI_TITLEBAR.bas"
@@ -116,6 +118,16 @@ def _replacements(variant: str) -> tuple[tuple[str, bytes, bytes], ...]:
         raise MutantError(f"unknown variant {variant!r}; choose one of {', '.join(VARIANTS)}") from None
 
 
+def locate(data: bytes, current: bytes) -> list[tuple[int, int]]:
+    """Byte spans of the places where the lines of ``current`` stand, whatever their indentation.
+
+    The constants below are written for the layout the module has now; matching
+    by words lets the same control be made from the module in either layout.
+    """
+    text = data.decode("ascii")
+    return layout_edit.locate(text, current.decode("ascii"))
+
+
 def mutate(data: bytes, variant: str = DEFAULT_VARIANT) -> bytes:
     """Return the module with only the variant's conditions replaced."""
     replacements = _replacements(variant)
@@ -124,26 +136,28 @@ def mutate(data: bytes, variant: str = DEFAULT_VARIANT) -> bytes:
     if not data.startswith(VB_NAME_LINE):
         raise MutantError(f"{SOURCE.as_posix()} does not start with {VB_NAME_LINE.decode('ascii').strip()}")
     try:
-        data.decode("ascii")
+        text = data.decode("ascii")
     except UnicodeDecodeError as exc:
         raise MutantError(f"{SOURCE.as_posix()} is not ASCII") from exc
     for label, current, mutant in replacements:
-        found = data.count(current)
+        found = len(layout_edit.locate(text, current.decode("ascii")))
         if found != 1:
             raise MutantError(
                 f"expected the current {label} exactly once in "
                 f"{SOURCE.as_posix()}, found {found}; the worker has changed, so update "
                 f"the {variant} variant in this tool before producing a control")
-        if mutant in data:
+        if layout_edit.locate(text, mutant.decode("ascii")):
             raise MutantError(f"{SOURCE.as_posix()} already contains the {variant} {label}")
     for _label, current, mutant in replacements:
-        data = data.replace(current, mutant)
-    return data
+        changed = layout_edit.replace(text, current.decode("ascii"), mutant.decode("ascii"), unique=True)
+        assert changed is not None
+        text = changed
+    return text.encode("ascii")
 
 
 def mutated_lines(data: bytes, variant: str = DEFAULT_VARIANT) -> list[tuple[str, int]]:
     """Return each replaced condition's label and 1-based line in the source."""
-    return [(label, data[:data.index(current)].count(b"\r\n") + 1)
+    return [(label, data[:locate(data, current)[0][0]].count(b"\r\n") + 1)
             for label, current, _mutant in _replacements(variant)]
 
 

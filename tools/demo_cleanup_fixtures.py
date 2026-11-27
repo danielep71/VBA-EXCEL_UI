@@ -2,6 +2,8 @@
 import re
 from pathlib import Path
 
+import house_style
+import layout_edit
 from titlebar_control_fixtures import findings as propagation_findings
 from vba_analyze import logical_lines
 from vba_lex import code_only
@@ -27,6 +29,24 @@ CALLER_END = ('DEMO_FastMode_EndPreservingError FastModeState, SavedErrNumber, '
               'SavedErrSource, SavedErrDescription')
 
 
+def _exit() -> str:
+    """The clean-exit label of the tree's current style, lower case."""
+    return house_style.labels().clean_exit.lower()
+
+
+def _fail() -> str:
+    """The failure label of the tree's current style, lower case."""
+    return house_style.labels().clean_fail.lower()
+
+
+def _mutate(source: str, old: str, new: str, unique: bool = False) -> str | None:
+    """Replace ``old`` by ``new`` wherever it stands, whatever the indentation of its lines.
+
+    None when ``old`` is not there (or, if ``unique``, not there exactly once).
+    """
+    return layout_edit.replace(source, old, new, unique=unique)
+
+
 def _code(block: str) -> list[str]:
     lines = (re.sub(r'\s+', ' ', code_only(raw).strip().lower()) for _, raw in logical_lines(block))
     return [line for line in lines if line]
@@ -50,7 +70,7 @@ def reset_findings(source: str) -> list[str]:
         errors.append('ownership must be armed only after Unprotect returns')
     if 'if didunprotect and reprotectatend then' not in lines:
         errors.append('reprotect requires invocation ownership and opt-in')
-    cleanup = lines[lines.index('clean_exit:'):lines.index('clean_fail:')]
+    cleanup = lines[lines.index(_exit() + ':'):lines.index(_fail() + ':')]
     if cleanup.count('on error resume next') != 1 or cleanup.count('on error goto 0') != 1:
         errors.append('cleanup requires one protected attempt then disabled handling')
     protects = [line for line in cleanup if line.startswith('ws.protect ')]
@@ -84,7 +104,7 @@ def _begin_findings(begin: list[str]) -> list[str]:
     errors = []
     writes = [i for i, line in enumerate(begin) if line.startswith('application.')]
     first_write = writes[0] if writes else len(begin)
-    for armed in ('stateout.captured = true', 'on error goto clean_fail'):
+    for armed in ('stateout.captured = true', f'on error goto {_fail()}'):
         if armed not in begin or begin.index(armed) > first_write:
             errors.append(f'fast mode: {armed!r} must precede the first write')
     for name, value in FAST_MODE:
@@ -95,7 +115,7 @@ def _begin_findings(begin: list[str]) -> list[str]:
         mark = f'stateout.applied = stateout.applied or demo_fm_{name}'.lower()
         if write not in begin or begin[begin.index(write) - 1] != mark:
             errors.append(f'fast mode: {name} must be marked owned immediately before its write')
-    cleanup = begin[begin.index('clean_exit:'):] if 'clean_exit:' in begin else []
+    cleanup = begin[begin.index(_exit() + ':'):] if _exit() + ':' in begin else []
     if 'rollbackfailures = demo_fastmode_restore(stateout)' not in cleanup:
         errors.append('fast mode: a failed entry must roll back what it wrote')
     return errors
@@ -122,10 +142,11 @@ def _restore_findings(restore: list[str]) -> list[str]:
 
 def _caller_findings(caller: list[str]) -> list[str]:
     errors = []
-    if 'clean_exit:' not in caller or 'clean_fail:' not in caller:
-        return ['demo build: Clean_Exit/Clean_Fail labels missing']
-    tail = caller[caller.index('clean_exit:'):caller.index('clean_fail:')]
-    if tail[:2] != ['clean_exit:', 'on error goto 0'] or CALLER_END.lower() not in tail:
+    labels = house_style.labels()
+    if _exit() + ':' not in caller or _fail() + ':' not in caller:
+        return [f'demo build: {labels.clean_exit}/{labels.clean_fail} labels missing']
+    tail = caller[caller.index(_exit() + ':'):caller.index(_fail() + ':')]
+    if tail[:2] != [_exit() + ':', 'on error goto 0'] or CALLER_END.lower() not in tail:
         errors.append('demo build: cleanup must disable its handler, then end fast mode keeping the error')
     if any(line.startswith('application.cursor') for line in caller):
         errors.append('demo build: the cursor belongs to the fast-mode scope')
@@ -187,14 +208,14 @@ def template_findings(source: str) -> list[str]:
     find = next((i for i, line in enumerate(build) if 'demo_sheet_findworksheet(wb, ws_name,' in line), None)
     if not checks or max(checks) > build.index(reset) or find is None or find > build.index(reset):
         errors.append('template: every layout check must raise before the worksheet is reset')
-    armed = build.index('on error goto clean_fail') if 'on error goto clean_fail' in build else -1
+    armed = build.index(f'on error goto {_fail()}') if f'on error goto {_fail()}' in build else -1
     for pure in ('nameproblem = demo_sheetnameproblem(ws_name)', 'contenttext = trim$(contentcolumns)'):
         if pure not in build or build.index(pure) > armed:
             errors.append(f'template: {pure!r} must run before the workbook is touched')
     owners = [i for i, line in enumerate(build) if line == 'createdsheet = true']
     if not owners or any(build[i - 1] != 'set ws = demo_sheet_getorcreate(wb, ws_name)' for i in owners):
         errors.append('template: only a worksheet this call created may be marked as owned')
-    cleanup = build[build.index('clean_exit:'):] if 'clean_exit:' in build else []
+    cleanup = build[build.index(_exit() + ':'):] if _exit() + ':' in build else []
     guard = 'if savederrnum <> 0 and createdsheet then'
     if guard not in cleanup or cleanup[cleanup.index(guard) + 1] != 'cleanupfailures = demo_sheet_deleteowned(ws)':
         errors.append('template: a failed call must remove the worksheet it created, and only that one')
@@ -250,7 +271,10 @@ def _page_break_selftest(source: str, demo: str) -> tuple[list[str], int]:
         ('        DEMO_Sheet_Reset WS, RemovePageBreaks:=False\n', '        DEMO_Sheet_Reset WS\n'),
         ("    'Hide page-break indicators, writing the property only when they are shown\n"
          '        DEMO_Sheet_HidePageBreaks WS\n', ''),
-        ('                DEMO_Sheet_HidePageBreaks WS\n', '                WS.DisplayPageBreaks = False\n'),
+        ("            'Hide page-break indicators, writing the property only when shown\n"
+         '                DEMO_Sheet_HidePageBreaks WS\n',
+         "            'Hide page-break indicators, writing the property only when shown\n"
+         '                WS.DisplayPageBreaks = False\n'),
         ('            If Shown Then\n', '            If True Then\n'),
         ('            Shown = WS.DisplayPageBreaks\n', ''),
         ('                DEMO_CleanupProbeHit DEMO_PROBE_PAGE_BREAKS\n', ''),
@@ -258,7 +282,8 @@ def _page_break_selftest(source: str, demo: str) -> tuple[list[str], int]:
     ]
     for old, new in page_break_mutations:
         count += 1
-        if source.count(old) != 1 or not page_break_findings(source.replace(old, new), demo):
+        mutated = _mutate(source, old, new, unique=True)
+        if mutated is None or not page_break_findings(mutated, demo):
             errors.append(f'negative page-break fixture not detected: {old.strip()}')
     count += 1
     if not page_break_findings(source, demo + '    ActiveSheet.ResetAllPageBreaks\n'):
@@ -274,22 +299,23 @@ def selftest(root: str | Path) -> tuple[list[str], int]:
               + page_break_findings(source, demo))
     count = 0
     for name in PROCEDURES:
-        errors += propagation_findings(source, name, 'clean_exit', 'clean_fail')
+        errors += propagation_findings(source, name, _exit(), _fail())
+        names = house_style.labels()
         fixture = f'''Public Sub {name}()
-On Error GoTo Clean_Fail
-Clean_Exit:
+On Error GoTo {names.clean_fail}
+{names.clean_exit}:
 On Error GoTo 0
 Err.Raise savedNumber, savedSource, savedDescription
 Exit Sub
-Clean_Fail:
-Resume Clean_Exit
+{names.clean_fail}:
+Resume {names.clean_exit}
 End Sub'''
         for replacement, expected in [('On Error GoTo 0', False), ('', True),
                                       ('On Error Resume Next', True),
-                                      ('On Error GoTo Clean_Fail', True)]:
+                                      (f'On Error GoTo {names.clean_fail}', True)]:
             count += 1
-            mutated = fixture.replace('On Error GoTo 0', replacement)
-            if bool(propagation_findings(mutated, name, 'clean_exit', 'clean_fail')) != expected:
+            changed = fixture.replace('On Error GoTo 0', replacement)
+            if bool(propagation_findings(changed, name, _exit(), _fail())) != expected:
                 errors.append(f'{name}: propagation fixture {replacement!r} failed')
     mutations = [
         ('DidUnprotect And ReProtectAtEnd', 'WasProtected And ReProtectAtEnd'),
@@ -302,12 +328,13 @@ End Sub'''
                   for field in ('Number', 'Source', 'Description')]
     for old, new in mutations:
         count += 1
-        if old not in source or not reset_findings(source.replace(old, new)):
+        mutated = _mutate(source, old, new)
+        if mutated is None or not reset_findings(mutated):
             errors.append(f'negative source fixture not detected: {old}')
     fast_mutations = [
         ('        StateOut.Captured = True\n', ''),
         ('        StateOut.Cursor = Application.Cursor\n', ''),
-        ('        On Error GoTo Clean_Fail\n', ''),
+        (f'        On Error GoTo {house_style.labels().clean_fail}\n', ''),
         ('        StateOut.Applied = StateOut.Applied Or DEMO_FM_CALCULATION\n', ''),
         ('            RollbackFailures = DEMO_FastMode_Restore(StateOut)\n', ''),
         ('            FailNumber = Err.Number\n', '            FailNumber = 0\n'),
@@ -317,7 +344,8 @@ End Sub'''
     ]
     for old, new in fast_mutations:
         count += 1
-        if old not in source or not fast_mode_findings(source.replace(old, new), demo):
+        mutated = _mutate(source, old, new)
+        if mutated is None or not fast_mode_findings(mutated, demo):
             errors.append(f'negative fast-mode fixture not detected: {old.strip()}')
     demo_mutations = [
         ('        DEMO_FastMode_EndPreservingError FastModeState, SavedErrNumber, _\n'
@@ -327,7 +355,8 @@ End Sub'''
     ]
     for old, new in demo_mutations:
         count += 1
-        if old not in demo or not fast_mode_findings(source, demo.replace(old, new)):
+        mutated = _mutate(demo, old, new)
+        if mutated is None or not fast_mode_findings(source, mutated):
             errors.append(f'negative demo-build fixture not detected: {old.strip()}')
     checkbox_mutations = [
         ('                Case msoOLEControlObject\n                    Set Shp = Nothing\n', ''),
@@ -336,7 +365,8 @@ End Sub'''
     ]
     for old, new in checkbox_mutations:
         count += 1
-        if old not in source or not checkbox_findings(source.replace(old, new), demo):
+        mutated = _mutate(source, old, new)
+        if mutated is None or not checkbox_findings(mutated, demo):
             errors.append(f'negative check-box fixture not detected: {old.strip()}')
     count += 1
     if not checkbox_findings(source, demo + 'Private Function Demo_TryGetCheckBoxState()\n'):
@@ -352,7 +382,8 @@ End Sub'''
     ]
     for old, new in template_mutations:
         count += 1
-        if old not in source or not template_findings(source.replace(old, new)):
+        mutated = _mutate(source, old, new)
+        if mutated is None or not template_findings(mutated):
             errors.append(f'negative template fixture not detected: {old.strip()}')
     found, extra = _page_break_selftest(source, demo)
     return errors + found, count + extra

@@ -5,7 +5,14 @@ multiplicity is deliberately deduplicated). No fixture is allowed extra rules.
 """
 from collections.abc import Iterable
 
+import house_style
 from vba_analyze import analyze
+
+
+def relabel(text: str) -> str:
+    """Spell the labels of a fixture as the tree spells them; the analyzer reads any label."""
+    labels = house_style.labels()
+    return text.replace('Err_Handler', labels.handler).replace('Safe_Exit', labels.safe_exit)
 
 
 def selftest() -> tuple[list[str], int]:
@@ -17,6 +24,7 @@ def selftest() -> tuple[list[str], int]:
         nonlocal count
         count += 1
         sources = source if isinstance(source, dict) else {'fixture.bas': source}
+        sources = {name_: relabel(text) for name_, text in sources.items()}
         found, inventory = analyze(sources)
         actual = {(f.file, f.line, f.rule) for f in found}
         wanted = {(p, n, r) for p, n, r in expected}

@@ -134,7 +134,6 @@ VERSION_SELFTEST_CASES = [
     ("prose is rejected", "the next release\n", 1),
 ]
 
-HOUSE_LABELS = {"Safe_Exit", "Fail_Num", "Err_Handler", "Clean_Exit", "Clean_Fail"}
 
 
 RULE_RE = re.compile(r"^'(=+|-+)$")
@@ -517,14 +516,41 @@ def check_banner_rules() -> None:
 
 # --------------------------------------------------------------------------
 def check_house_labels() -> None:
-    """Retain the existing style policy separately from procedure resolution."""
+    """Hold every label to the vocabulary of the state of the house style."""
+    import house_style
     from vba_analyze import logical_lines, statements
+    allowed = house_style.labels().names()
     for rel in ALL_MODULES:
         for n, raw in logical_lines(read(rel).decode('ascii')):
             for statement in statements(raw):
                 code = code_only(statement).strip()
-                if re.fullmatch(r'\w+:', code) and code[:-1] not in HOUSE_LABELS:
+                if re.fullmatch(r'\w+:', code) and code[:-1] not in allowed:
                     fail('house-labels', f'{rel}:{n}: non-house label {code[:-1]!r}')
+
+
+def check_house_style_rules() -> None:
+    """Prove the rules that rewriting cannot settle, and apply them once the style is on.
+
+    The fixtures run on every push. The modules are read only while
+    house_style.HOUSE_STYLE_ACTIVE is True, because the tree does not yet carry
+    the header fields, the PROC_NAME constant and the sections they ask for.
+    """
+    import house_style
+    from house_rules_fixtures import rules_selftest
+    from vba_house_rules import findings
+    errors, count = rules_selftest()
+    for finding in errors:
+        fail('house-style-rules', finding)
+    print(f'  {count} house-style rule fixtures')
+    if not house_style.HOUSE_STYLE_ACTIVE:
+        print('  rules not applied to the modules: HOUSE_STYLE_ACTIVE is False')
+        return
+    for rel in ALL_MODULES:
+        if not is_standard_module(rel):
+            continue
+        name = os.path.splitext(os.path.basename(rel))[0]
+        for item in findings(read(rel).decode('ascii'), name):
+            fail('house-style-rules', f'{rel}:{item}')
 
 
 def check_vba_analyzer() -> None:
@@ -3672,6 +3698,7 @@ CHECKS: list[tuple[str, Callable[[], None]]] = [
     ("encoding and line endings", check_encoding_and_endings),
     ("banner rule widths", check_banner_rules),
     ("house labels", check_house_labels),
+    ("house-style rules", check_house_style_rules),
     ("VBA analyzer", check_vba_analyzer),
     ("VBA analyzer self-test", check_vba_analyzer_selftest),
     ("VBA syntax", check_vba_syntax),

@@ -110,12 +110,16 @@ TOKEN = re.compile(r'[A-Za-z_]\w*|\d+(?:\.\d+)?|[^\s]')
 
 
 def executable_signature(
-        text: str, label_map: dict[str, str] | None = None) -> tuple[list[list[Token]], list[list[Token]]]:
+        text: str, label_map: dict[str, str] | None = None,
+        identifier_map: dict[str, str] | None = None) -> tuple[list[list[Token]], list[list[Token]]]:
     """Token sequence including statement boundaries, opaque literal bytes,
-    directives and options; only declared house-label substitutions permitted.
-    Whitespace changes never merge two identifier tokens unnoticed.
+    directives and options; only declared substitutions permitted: labels in a
+    label or jump position, and the identifiers of ``identifier_map`` wherever
+    they stand as a name of their own. Whitespace changes never merge two
+    identifier tokens unnoticed.
     """
     label_map = label_map or {}
+    identifier_map = identifier_map or {}
     rows: list[list[Token]] = []
     options: list[list[Token]] = []
     depth, in_proc = 0, False
@@ -131,6 +135,9 @@ def executable_signature(
         if not tokens:
             continue
         for i, (kind, value) in enumerate(tokens):
+            if kind == 'code' and value in identifier_map and not (i > 0 and tokens[i-1] == ('code', '.')):
+                tokens[i] = ('code', identifier_map[value])
+                continue
             if kind != 'code' or value not in label_map:
                 continue
             is_label = i == 0 and len(tokens) > 1 and tokens[1] == ('code', ':')

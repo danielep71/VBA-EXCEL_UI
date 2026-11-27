@@ -37,9 +37,9 @@ def extended_selftest() -> list[str]:
     for name, before, expected in CASES:
         try:
             source = module(before)
-            out = f.reformat_text(source, 'M_PROBE')
+            out = f.reformat_text(source, 'M_PROBE', 'legacy')
             require(expected in out.split('\r\n'), name)
-            require(out == f.reformat_text(out, 'M_PROBE'), name + ' idempotence')
+            require(out == f.reformat_text(out, 'M_PROBE', 'legacy'), name + ' idempotence')
             require(executable_signature(source, f.LABEL_MAP) == executable_signature(out, f.LABEL_MAP), name + ' tokens')
         except Exception as exc:
             failures.append(f'{name}: {exc}')
@@ -50,9 +50,9 @@ def extended_selftest() -> list[str]:
         ('nested conditional', '#If VBA7 Then\r\n  #If Win64 Then\r\n Dim x As LongPtr   \r\n  #Else\r\n Dim x As Long\r\n  #End If\r\n#End If'),
     ]:
         source = module(fragment)
-        out = f.reformat_text(source, 'M_PROBE')
+        out = f.reformat_text(source, 'M_PROBE', 'legacy')
         require(fragment in out, name + ' byte preservation')
-        require(out == f.reformat_text(out, 'M_PROBE'), name + ' idempotence')
+        require(out == f.reformat_text(out, 'M_PROBE', 'legacy'), name + ' idempotence')
 
     for name, fragment in [
         ('unclosed quote', 'x = "GoTo Fail'),
@@ -64,7 +64,7 @@ def extended_selftest() -> list[str]:
         ('continued label rename', 'On Error GoTo _\r\n Fail'),
     ]:
         try:
-            f.reformat_text(module(fragment), 'M_PROBE')
+            f.reformat_text(module(fragment), 'M_PROBE', 'legacy')
             require(False, name + ' must reject')
         except LexicalError:
             pass
@@ -81,7 +81,7 @@ def extended_selftest() -> list[str]:
     require(executable_signature('#If X Then\nOption Explicit\n#End If') != executable_signature('Option Explicit\n#If X Then\n#End If'), 'conditional option movement rejected')
     with patch.object(f, 'align_declarations', lambda lines: [ln.replace('x = 1', 'x = 2') for ln in lines]):
         try:
-            f.reformat_text(module('x = 1'), 'M_PROBE')
+            f.reformat_text(module('x = 1'), 'M_PROBE', 'legacy')
             require(False, 'corrupt transformation must be rejected')
         except LexicalError:
             pass

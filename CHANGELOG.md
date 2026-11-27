@@ -182,6 +182,35 @@ measured against that baseline.
 
 ### ➕ Added
 
+- Added the tooling for one VBA house style
+  ([#210](https://github.com/danielep71/VBA-EXCEL_UI/issues/210)), stage A: the
+  style, the formatter that writes it, the checks that hold it and their
+  fixtures. `docs/VBA_HOUSE_STYLE.md` now defines the style (layout, banners,
+  the nine header fields, declarations, body sections, statements and names),
+  where the gate used to be its only definition. `tools/reformat.py --style
+  house` writes it with `tools/vba_house.py`: centred procedure titles and
+  `MODULE:` headers, the fields in order with `CALLED FROM` after `NOTES`, the
+  dated `UPDATED` lines moved unchanged into a `HISTORY` section and `UPDATED`
+  reduced to its latest date, `RETURNS` of a `Sub` read `Nothing`, `EXIT
+  PROCEDURE` and `ERROR HANDLER` sections, `INITIALIZE` opened at the handler
+  statement, declarations aligned on multiples of 4, statements at 8 spaces plus
+  4 per block, and the names `PROC_NAME`, `ErrorHandler`, `SafeExit`,
+  `CleanExit` and `CleanFail`. Before it writes, it still compares the ordered
+  executable tokens and statement boundaries and accepts no difference other
+  than those renames. A new *house-style rules* check
+  (`tools/vba_house_rules.py`) reports what rewriting cannot settle: missing or
+  misordered header fields, section order, `Const PROC_NAME`, a `Select Case`
+  without `Case Else`, `InStr` and `StrComp` without a compare mode, a statement
+  separator and `Next` without its counter. One constant,
+  `HOUSE_STYLE_ACTIVE` in `tools/house_style.py`, is `False` for now: the tree
+  keeps its layout, `--check` and the *house labels* check read the previous
+  spellings, and the new rules run their fixtures without reading the modules.
+  The fixtures of the formatter and of each rule run with the switch in either
+  state, the title-bar, WinAPI-capture, demo-cleanup and analyzer fixtures
+  take their label names from it, and the fixtures that plant a defect in a
+  module find its lines by their words (`tools/layout_edit.py`) instead of by
+  their indentation, so they hold in either layout. No VBA module changed; I reformat them and
+  turn the switch on in one later change.
 - Added the **VBA syntax** check to `tools/check_repo.py`, in `tools/vba_syntax.py`
   with its fixtures in `tools/vba_syntax_fixtures.py`
   ([#203](https://github.com/danielep71/VBA-EXCEL_UI/issues/203)). The gate

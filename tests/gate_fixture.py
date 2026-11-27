@@ -31,9 +31,17 @@ if str(TOOLS) not in sys.path:
 
 # Imported here, after TOOLS is on sys.path, and re-exported for the tests.
 import check_repo as check_repo  # noqa: E402
+import house_format_fixtures as house_format_fixtures  # noqa: E402
+import house_rules_fixtures as house_rules_fixtures  # noqa: E402
+import house_style as house_style  # noqa: E402
+import layout_edit as layout_edit  # noqa: E402
 import reformat as reformat  # noqa: E402
 import vba_api as vba_api  # noqa: E402
+import vba_house as vba_house  # noqa: E402
+import vba_house_rules as vba_house_rules  # noqa: E402
 import wiki_badges as wiki_badges  # noqa: E402
+from vba_lex import LexicalError as LexicalError  # noqa: E402
+from vba_lex import executable_signature as executable_signature  # noqa: E402
 
 # Fixture repositories must not depend on whoever runs the tests: a personal
 # excludesFile or attributes file would change what git check-ignore and
@@ -129,7 +137,12 @@ class Fixture:
         old_b = old.encode("utf-8") if isinstance(old, str) else old
         new_b = new.encode("utf-8") if isinstance(new, str) else new
         if old_b not in data:
-            raise AssertionError(f"{rel} does not contain {old_b!r}")
+            # The text may be right and its indentation or alignment not: look for its lines.
+            moved = layout_edit.replace(data.decode("utf-8"), old_b.decode("utf-8"), new_b.decode("utf-8"))
+            if moved is None:
+                raise AssertionError(f"{rel} does not contain {old_b!r}")
+            self.write(rel, moved.encode("utf-8"))
+            return
         self.write(rel, data.replace(old_b, new_b, count))
 
     def append(self, rel: str, data: str | bytes) -> None:
