@@ -18,8 +18,31 @@ Option Private Module
 '   convenience wrappers, the structured-result path or window-target scope.
 '   These cases detect such a regression
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Each case applies a known UI state through the public API, waits for it
+'     to settle, and asserts the host state or the structured result the call
+'     returned.
+'   - The module keeps no state; its only declarations are the constants that
+'     name the quiet-update fault kinds.
+'
+' ERROR POLICY
+'   - A failed assertion raises; no case returns a verdict.
+'   - The cases that open windows or workbooks, or arm a test seam, clean up
+'     first and then raise the failure they kept. The others have no handler.
+'   - Recording a pass or a failure is left to the pack that runs the case.
+'
 ' DEPENDENCIES
 '   - M_EXCEL_UI_TEST_HARNESS
+'
+' NOTES
+'   TEST_QUIET_FAULT_NONE, _ENTRY, _WRITE and _READBACK carry the values of the
+'   fault kinds of the quiet-update seam in M_EXCEL_UI_RUNTIME.
 '
 ' PUBLIC SURFACE
 '   None of its own. The cases are Public so that the regression pack in
@@ -90,7 +113,7 @@ Public Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                          TST CASE SHOW ALL BASELINE
+'                           VERIFY SHOW-ALL BASELINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the module can drive all managed UI elements to visible state
@@ -106,6 +129,32 @@ Public Sub TST_Case_ShowAllBaseline(ByVal IncludeTitleBarTests As Boolean)
 '
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Applies UI_Show to the Ribbon, StatusBar, ScrollBars, FormulaBar,
+'     Headings, WorkbookTabs and Gridlines, and to TitleBar when title-bar
+'     tests are included, then waits for the UI to settle.
+'   - Asserts the Ribbon, StatusBar, ScrollBars and FormulaBar visible.
+'   - Asserts Headings, WorkbookTabs and Gridlines visible on every open
+'     window, and TitleBar visible when title-bar tests are included.
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Has no handler and no cleanup: the failure reaches the caller unchanged
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   Changes the managed UI state of the host and does not restore it; the
+'   pack that runs the case restores its entry state afterwards.
 '
 ' UPDATED
 '   2026-07-25
@@ -179,7 +228,7 @@ Public Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                           TST CASE SELECTIVE HIDE
+'                            VERIFY SELECTIVE HIDE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that selective hide requests affect only the requested UI elements
@@ -196,6 +245,32 @@ Public Sub TST_Case_SelectiveHide(ByVal IncludeTitleBarTests As Boolean)
 '
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Shows every managed element as a baseline, and waits.
+'   - Hides only StatusBar and Gridlines, leaving the other arguments at
+'     their default, and waits.
+'   - Asserts StatusBar and Gridlines hidden, and the Ribbon, ScrollBars,
+'     FormulaBar, Headings and WorkbookTabs still visible.
+'   - Asserts TitleBar still visible when title-bar tests are included.
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Has no handler and no cleanup: the failure reaches the caller unchanged
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   Changes the managed UI state of the host and does not restore it; the
+'   pack that runs the case restores its entry state afterwards.
 '
 ' UPDATED
 '   2026-07-25
@@ -274,7 +349,7 @@ Public Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                           TST CASE SELECTIVE SHOW
+'                            VERIFY SELECTIVE SHOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that selective show requests affect only the requested UI elements
@@ -291,6 +366,33 @@ Public Sub TST_Case_SelectiveShow(ByVal IncludeTitleBarTests As Boolean)
 '
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Hides every managed element as a baseline, keeping TitleBar visible
+'     when title-bar tests are included, and waits.
+'   - Shows only StatusBar and WorkbookTabs, leaving the other arguments at
+'     their default, and waits.
+'   - Asserts StatusBar and WorkbookTabs visible, and the Ribbon,
+'     ScrollBars, FormulaBar, Headings and Gridlines still hidden.
+'   - Asserts TitleBar still visible when title-bar tests are included.
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Has no handler and no cleanup: the failure reaches the caller unchanged
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   Changes the managed UI state of the host and does not restore it; the
+'   pack that runs the case restores its entry state afterwards.
 '
 ' UPDATED
 '   2026-07-25
@@ -370,7 +472,7 @@ Public Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                        TST CASE NO OP LEAVE UNCHANGED
+'                       VERIFY NO-OP LEAVES UI UNCHANGED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a no-argument UI_SetExcelUI call behaves as a no-op
@@ -386,6 +488,31 @@ Public Sub TST_Case_NoOpLeaveUnchanged(ByVal IncludeTitleBarTests As Boolean)
 '
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Establishes a mixed baseline: Ribbon, ScrollBars, Headings and
+'     Gridlines shown; StatusBar, FormulaBar and WorkbookTabs hidden;
+'     TitleBar shown when title-bar tests are included.
+'   - Calls UI_SetExcelUI with no arguments, and waits.
+'   - Asserts every element still has its baseline state.
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Has no handler and no cleanup: the failure reaches the caller unchanged
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   Changes the managed UI state of the host and does not restore it; the
+'   pack that runs the case restores its entry state afterwards.
 '
 ' UPDATED
 '   2026-07-25
@@ -462,7 +589,7 @@ Public Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                        TST CASE CONVENIENCE WRAPPERS
+'                        VERIFY HIDE AND SHOW WRAPPERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_HideExcelUI and UI_ShowExcelUI drive all managed UI elements
@@ -479,6 +606,31 @@ Public Sub TST_Case_ConvenienceWrappers(ByVal IncludeTitleBarTests As Boolean)
 '
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Calls UI_HideExcelUI, waits, and asserts every managed element hidden,
+'     TitleBar included when title-bar tests are included.
+'   - Calls UI_ShowExcelUI, waits, and asserts every managed element
+'     visible, TitleBar included when title-bar tests are included.
+'
+' ERROR POLICY
+'   - Raises on assertion failure
+'   - Has no handler and no cleanup: the failure reaches the caller unchanged
+'
+' DEPENDENCIES
+'   - UI_HideExcelUI
+'   - UI_ShowExcelUI
+'   - TST_WaitUI
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   The certification pack runs this case only when title-bar tests are
+'   included, because the wrappers also act on TitleBar. It leaves the UI
+'   visible; the pack restores its entry state afterwards.
 '
 ' UPDATED
 '   2026-07-25
@@ -576,7 +728,7 @@ Public Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                       TST CASE WITH RESULT ALL SUCCESS
+'                       VERIFY STRUCTURED RESULT SUCCESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult returns a clean-success outcome when
@@ -594,8 +746,31 @@ Public Sub TST_Case_WithResult_AllSuccess(ByVal IncludeTitleBarTests As Boolean)
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Calls UI_SetExcelUI_WithResult with UI_Show for every managed
+'     element, TitleBar through TST_TitleBarMode, and waits.
+'   - Asserts the Boolean result, FailureCount and FailureList describe a
+'     clean success.
+'   - Asserts every element visible, TitleBar included when title-bar tests
+'     are included.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI_WithResult
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_AssertResultSuccess
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   Changes the managed UI state of the host and does not restore it; the
+'   pack that runs the case restores its entry state afterwards.
 '
 ' UPDATED
 '   2026-07-25
@@ -680,7 +855,7 @@ Public Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                      TST CASE WITH RESULT NO OP SUCCESS
+'                       VERIFY STRUCTURED NO-OP SUCCESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult returns a clean-success outcome when
@@ -698,8 +873,33 @@ Public Sub TST_Case_WithResult_NoOpSuccess(ByVal IncludeTitleBarTests As Boolean
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Establishes a mixed baseline with UI_SetExcelUI: Ribbon, ScrollBars,
+'     Headings and Gridlines shown; StatusBar, FormulaBar and WorkbookTabs
+'     hidden; TitleBar shown when title-bar tests are included.
+'   - Calls UI_SetExcelUI_WithResult with only FailureCount and FailureList,
+'     and waits.
+'   - Asserts a clean success, and every element still has its baseline
+'     state.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - UI_SetExcelUI_WithResult
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_AssertResultSuccess
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   Changes the managed UI state of the host and does not restore it; the
+'   pack that runs the case restores its entry state afterwards.
 '
 ' UPDATED
 '   2026-07-25
@@ -794,7 +994,7 @@ Public Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarTe
 
 '
 '------------------------------------------------------------------------------
-'              TST CASE WITH RESULT SUCCESS WITHOUT FAILURE LIST
+'                     VERIFY SUCCESS WITHOUT FAILURE LIST
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult succeeds cleanly when the caller omits
@@ -812,8 +1012,31 @@ Public Sub TST_Case_WithResult_SuccessWithoutFailureList(ByVal IncludeTitleBarTe
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Calls UI_SetExcelUI_WithResult with UI_Show for every managed
+'     element and FailureCount, but without the FailureList argument, and
+'     waits.
+'   - Asserts the Boolean result is True, FailureCount is 0, and the local
+'     FailureList variable is still Empty.
+'   - Asserts every element visible, TitleBar included when title-bar tests
+'     are included.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI_WithResult
+'   - TST_TitleBarMode
+'   - TST_WaitUI
+'   - TST_AssertRibbonVisible
+'   - TST_AssertApplicationProperty
+'   - TST_AssertAllWindowsProperty
+'   - TST_AssertTitleBarVisible
+'   - TST_Log
+'
+' NOTES
+'   The three result assertions are written inline and raise
+'   TEST_ERR_BASE + 30, + 31 and + 32.
 '
 ' HISTORY
 '   2026-11-06 - Failure messages carry the structured result (#135).
@@ -925,7 +1148,7 @@ Public Sub TST_Case_WithResult_InvalidVisibility()
 
 '
 '------------------------------------------------------------------------------
-'                   TST CASE WITH RESULT INVALID VISIBILITY
+'                      VERIFY INVALID VISIBILITY FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_SetExcelUI_WithResult reports a structured failure when an
@@ -936,11 +1159,31 @@ Public Sub TST_Case_WithResult_InvalidVisibility()
 '   success but also for deterministic failure reporting when callers pass an
 '   invalid tri-state value
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Calls UI_SetExcelUI_WithResult with Ribbon:=999, an invalid
+'     UIVisibility value, and no other element.
+'   - Asserts the Boolean result is False.
+'   - Asserts FailureCount is at least 1.
+'   - Asserts FailureList is not Empty.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI_WithResult
+'   - TST_DescribeResultBuffers
+'   - TST_Log
+'
+' NOTES
+'   The three assertions are written inline and raise TEST_ERR_BASE + 40,
+'   + 41 and + 42, each with the result buffers in the message. An invalid
+'   UIVisibility value is rejected before any host write.
 '
 ' HISTORY
 '   2026-11-06 - Failure messages carry the structured result (#135).
@@ -1013,14 +1256,52 @@ Public Sub TST_Case_TargetScope_ActiveWindow()
 
 '
 '------------------------------------------------------------------------------
-'                     TST CASE TARGET SCOPE ACTIVE WINDOW
+'                          VERIFY ACTIVE-WINDOW SCOPE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_TargetActiveWindow changes only the active Excel Window while
 '   application-level requests still apply normally.
 '
+' WHY THIS EXISTS
+'   UI_TargetActiveWindow limits window-level writes to the active window.
+'   This case pins that limit, and that an application-level request in the
+'   same call is not narrowed by it.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Activates ThisWorkbook, keeps its active window as the anchor, and
+'     saves the anchor's Headings, WorkbookTabs and Gridlines and the
+'     StatusBar.
+'   - Opens a second window of ThisWorkbook, shows Headings, WorkbookTabs
+'     and Gridlines on both windows and the StatusBar, and activates the
+'     second window.
+'   - Calls UI_SetExcelUI_WithResult hiding those four elements with
+'     TargetScope:=UI_TargetActiveWindow, over stale buffers.
+'   - Asserts a clean success, the StatusBar hidden, the second window
+'     hidden, and the anchor window still showing all three.
+'   - Cleanup: closes the second window, restores the saved values and
+'     reactivates the anchor, then raises the failure it kept.
+'
 ' ERROR POLICY
 '   - Raises after best-effort cleanup.
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertApplicationProperty
+'   - TST_AssertSnapshotWindowState
+'   - TST_SafeCloseWindow
+'   - TST_Log
+'   - ThisWorkbook.NewWindow and the window display properties
+'
+' NOTES
+'   Raises TEST_TARGET_ERR_BASE + 1 when ThisWorkbook gives no active
+'   window, and + 2 when NewWindow returns no window.
 '
 ' UPDATED
 '   2026-08-01
@@ -1172,14 +1453,49 @@ Public Sub TST_Case_TargetScope_ActiveWorkbookWindows()
 
 '
 '------------------------------------------------------------------------------
-'                TST CASE TARGET SCOPE ACTIVE WORKBOOK WINDOWS
+'                         VERIFY ACTIVE-WORKBOOK SCOPE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that UI_TargetActiveWorkbookWindows changes every Window belonging to
 '   the active workbook and leaves another workbook's Window unchanged.
 '
+' WHY THIS EXISTS
+'   UI_TargetActiveWorkbookWindows applies window-level writes to every
+'   window of the active workbook. This case pins that a second window of
+'   that workbook changes, and that a window of another workbook does not.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Remembers the active window, then creates a target workbook with a
+'     second window and a separate other workbook.
+'   - Shows Headings, WorkbookTabs and Gridlines on the three windows and
+'     activates the target workbook's first window.
+'   - Calls UI_SetExcelUI_WithResult hiding the three elements with
+'     TargetScope:=UI_TargetActiveWorkbookWindows, over stale buffers.
+'   - Asserts a clean success, both target windows hidden, and the other
+'     workbook's window still showing all three.
+'   - Cleanup: closes both temporary workbooks and reactivates the
+'     original window, then raises the failure it kept.
+'
 ' ERROR POLICY
 '   - Raises after best-effort cleanup.
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI_WithResult
+'   - TST_AssertResultSuccess
+'   - TST_AssertSnapshotWindowState
+'   - TST_SafeCloseWorkbook
+'   - TST_Log
+'   - Workbooks.Add and Workbook.NewWindow
+'
+' NOTES
+'   Raises TEST_TARGET_ERR_BASE + 3 when a temporary window cannot be
+'   created, and + 4 when the target workbook cannot be activated.
 '
 ' UPDATED
 '   2026-08-01
@@ -1333,14 +1649,48 @@ Public Sub TST_Case_TargetScope_InvalidValue()
 
 '
 '------------------------------------------------------------------------------
-'                     TST CASE TARGET SCOPE INVALID VALUE
+'                         VERIFY INVALID TARGET SCOPE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify ordered invalid-scope diagnostics, application-level continuation,
 '   and suppression of window-level writes when TargetScope is invalid.
 '
+' WHY THIS EXISTS
+'   An unknown UIWindowTargetScope value must be reported without losing
+'   the work that does not depend on it. This case pins the diagnostic,
+'   the continuation of application-level work, and the suppression of
+'   window-level writes.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Activates ThisWorkbook, keeps its active window as the anchor, saves
+'     the anchor's Headings and the StatusBar, and shows both.
+'   - Calls UI_SetExcelUI_WithResult hiding StatusBar and Headings with
+'     TargetScope 999, over stale buffers.
+'   - Asserts a False result with exactly one failure, whose entry starts
+'     with "TargetScope | invalid UIWindowTargetScope value: 999".
+'   - Asserts the StatusBar hidden and the anchor's Headings still shown.
+'   - Cleanup: restores the saved values and reactivates the anchor, then
+'     raises the failure it kept.
+'
 ' ERROR POLICY
 '   - Raises after best-effort cleanup.
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI_WithResult
+'   - TST_AssertSingleFailurePrefix
+'   - TST_AssertApplicationProperty
+'   - TST_AssertBooleanEquals
+'   - TST_Log
+'
+' NOTES
+'   Raises TEST_TARGET_ERR_BASE + 5 when ThisWorkbook gives no active
+'   window.
 '
 ' UPDATED
 '   2026-08-01
@@ -1457,7 +1807,7 @@ Public Sub TST_Case_ScreenUpdatingPreserved()
 
 '
 '------------------------------------------------------------------------------
-'                      TST CASE SCREEN UPDATING PRESERVED
+'                       VERIFY SCREENUPDATING PRESERVED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the EXCEL_UI apply path restores Application.ScreenUpdating to
@@ -1468,11 +1818,33 @@ Public Sub TST_Case_ScreenUpdatingPreserved()
 '   worksheet redraw flicker where possible, and that behavior must remain
 '   invisible to callers from a state-management perspective
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Saves Application.ScreenUpdating.
+'   - Sets it True, calls UI_SetExcelUI showing StatusBar and Gridlines,
+'     and asserts it is still True.
+'   - Sets it False, calls UI_SetExcelUI hiding StatusBar and Gridlines,
+'     and asserts it is still False.
+'   - Restores the saved value.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI
+'   - TST_AssertBooleanEquals
+'   - TST_Log
+'   - Application.ScreenUpdating
+'
+' NOTES
+'   The saved value is put back on the success path only: the case has no
+'   handler, so an assertion failure leaves ScreenUpdating as the case set
+'   it.
 '
 ' UPDATED
 '   2026-07-25
@@ -1540,7 +1912,7 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 
 '
 '------------------------------------------------------------------------------
-'                 TST CASE FAILURE ACCUMULATOR DEGRADES SAFELY
+'                     VERIFY FAILURE LIST DEGRADES SAFELY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that a failure list which cannot be grown degrades visibly instead of
@@ -1558,6 +1930,9 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 '   arrange for one entry to be recorded successfully and the NEXT one to fail,
 '   which is the sequence that exercises the truncation marker.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   Nothing
 '
@@ -1571,6 +1946,14 @@ Public Sub TST_Case_FailureAccumulatorDegradesSafely()
 '
 ' ERROR POLICY
 '   - Raises on assertion failure, after disarming the seam.
+'
+' DEPENDENCIES
+'   - UI_RuntimeHandleFailure
+'   - UI_RuntimeClearResultBuffer
+'   - UI_InternalInjectFailureListGrowthFailure
+'   - TST_AssertBooleanEquals
+'   - TST_AssertTrue
+'   - TST_Log
 '
 ' NOTES
 '   Uses the internal seam UI_InternalInjectFailureListGrowthFailure. It is
@@ -1735,7 +2118,7 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
 
 '
 '------------------------------------------------------------------------------
-'               TST CASE FIRST FAILURE ALLOCATION KEEPS CONTRACT
+'                   VERIFY FIRST ALLOCATION FAILURE CONTRACT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify the documented result contract when the FIRST failure-list entry
@@ -1748,6 +2131,9 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
 '   Empty FailureList (#38). This case pins that form, through the public
 '   facade as callers see it and through the accumulator for buffers the
 '   facade never passes.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -1767,6 +2153,18 @@ Public Sub TST_Case_FirstFailureAllocationKeepsContract()
 '
 ' ERROR POLICY
 '   - Raises on assertion failure, after disarming the seams.
+'
+' DEPENDENCIES
+'   - UI_SetExcelUI_WithResult
+'   - UI_RuntimeHandleFailure
+'   - UI_RuntimeClearResultBuffer
+'   - UI_InternalInjectFailureListFirstAllocationFailure
+'   - UI_InternalInjectFailureListGrowthFailure
+'   - TST_AssertFailureResultExact
+'   - TST_AssertResultSuccess
+'   - TST_AssertBooleanEquals
+'   - TST_AssertTrue
+'   - TST_Log
 '
 ' NOTES
 '   Uses UI_InternalInjectFailureListFirstAllocationFailure. Invalid
@@ -2039,7 +2437,7 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 
 '
 '------------------------------------------------------------------------------
-'                  TST CASE QUIET SCOPE OWNERSHIP IS VERIFIED
+'                         VERIFY QUIET SCOPE OWNERSHIP
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Verify that the quiet-update scope claims ownership only of a suppression
@@ -2056,6 +2454,9 @@ Public Sub TST_Case_QuietScopeOwnershipIsVerified()
 '   that need no seam - the ordinary path and an already-suppressed caller -
 '   are exercised directly, because they are the ones a change to this logic
 '   would break first.
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
