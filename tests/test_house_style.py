@@ -235,7 +235,7 @@ class SwitchedOn(unittest.TestCase):
                     bare += 1
                     self.assertEqual(lines[n].strip(), house_style.DELIBERATE_VALUE_COMMENT, (name, n + 1))
                     self.assertTrue(lines[n + 1].startswith("    Const PROC_NAME As String = "), (name, n + 2))
-        self.assertEqual(bare, 61)
+        self.assertEqual(bare, 64)
 
     def test_every_select_case_has_a_case_else(self) -> None:
         self.assertEqual([item for _, item in self.found() if item.rule == "select-case"], [])
