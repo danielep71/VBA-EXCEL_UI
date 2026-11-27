@@ -684,6 +684,49 @@ def refusal_failures() -> list[str]:
     return failures
 
 
+PROC_TWO = (
+    "Private Sub First()\r\n"
+    "    Const PROC As String = \"M_PROBE.First\"\r\n"
+    "    Err.Raise 5, PROC, \"a\"\r\n"
+    "End Sub\r\n"
+    "\r\n"
+    "Private Sub Second()\r\n"
+    "    Const PROC As String = \"M_PROBE.Second\"\r\n"
+    "    Err.Raise 6, PROC, \"b\"\r\n"
+    "End Sub\r\n"
+)
+
+
+def proc_scope_failures() -> list[str]:
+    """PROC is renamed inside the procedures that declare it, and nowhere else."""
+    failures: list[str] = []
+    head = 'Attribute VB_Name = "M_PROBE"\r\nOption Explicit\r\n\r\n'
+    text, _ = vba_house.format_module(head + PROC_TWO, "M_PROBE")
+    if text.count("Const PROC_NAME As String") != 2 or text.count("Err.Raise 5, PROC_NAME,") != 1 \
+            or text.count("Err.Raise 6, PROC_NAME,") != 1 or " PROC " in text or "PROC," in text:
+        failures.append("proc scope: two procedures that each declare Const PROC both move to PROC_NAME")
+    mixed = PROC_TWO.replace('Const PROC As String = "M_PROBE.Second"', 'Const PROC_NAME As String = "M_PROBE.Second"')
+    mixed = mixed.replace("Err.Raise 6, PROC,", "Err.Raise 6, PROC_NAME,")
+    text, _ = vba_house.format_module(head + mixed, "M_PROBE")
+    if text.count("Const PROC_NAME As String") != 2 or "Const PROC As" in text:
+        failures.append("proc scope: a module half moved to PROC_NAME is finished, not refused")
+    for label, extra, where in [
+        ("an unrelated Public Sub PROC", "Public Sub PROC()\r\nEnd Sub\r\n", "line 14"),
+        ("a module-level variable PROC", "Private PROC As Long\r\n", "line 4"),
+        ("a Declare named PROC", 'Private Declare PtrSafe Function PROC Lib "user32" () As Long\r\n', "line 4"),
+        ("a parameter named PROC in another procedure", "Private Sub Third(ByVal PROC As Long)\r\nEnd Sub\r\n", "line 14"),
+    ]:
+        source = head + extra + PROC_TWO if extra.startswith(("Private PROC", "Private Declare")) \
+            else head + PROC_TWO + "\r\n" + extra
+        try:
+            vba_house.format_module(source, "M_PROBE")
+            failures.append(f"proc scope: {label} must be refused")
+        except LexicalError as exc:
+            if "M_PROBE" not in str(exc) or where not in str(exc):
+                failures.append(f"proc scope: {label} is refused without module and line: {exc}")
+    return failures
+
+
 def module_failures() -> list[str]:
     failures: list[str] = []
     text, todos = vba_house.format_module(LEGACY_MODULE, "M_PROBE")
@@ -751,4 +794,4 @@ def default_failures() -> list[str]:
 def house_selftest() -> list[str]:
     """Failure descriptions of the house-style formatter; empty means every rule holds."""
     return (case_failures() + header_failures() + refusal_failures() + module_failures()
-            + cli_failures() + default_failures())
+            + cli_failures() + default_failures() + proc_scope_failures())

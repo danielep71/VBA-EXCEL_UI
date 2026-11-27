@@ -345,12 +345,11 @@ def reformat_with_todos(text: str, module_name: str, style: str | None = None) -
 def reformat_house(text: str, module_name: str) -> tuple[str, list[tuple[str, str]]]:
     """Rewrite into the style, then prove the executable tokens are the same.
 
-    Only the renames declared in house_style (error-handling labels in a label
-    or jump position, and the PROC constant) may differ.
+    Only the renames declared in house_style may differ: error-handling labels
+    in a label or jump position, and PROC inside the procedures that declare it.
     """
     result, todos = vba_house.format_module(text, module_name)
-    declared = (house_style.LABEL_RENAMES, house_style.IDENTIFIER_RENAMES)
-    if executable_signature(text, *declared) != executable_signature(result):
+    if executable_signature(vba_house.renamed_source(text, module_name)) != executable_signature(result):
         raise LexicalError("formatting would change executable tokens or statement boundaries")
     return result, todos
 

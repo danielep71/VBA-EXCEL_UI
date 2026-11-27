@@ -285,7 +285,11 @@ Statement conventions:
   variants, `LenB(x) = 0` or `Len(x) = 0` for an empty test, and `vbNullString`
   rather than `""`.
 - `InStr` and `StrComp` name their compare mode (`vbBinaryCompare` or
-  `vbTextCompare`).
+  `vbTextCompare`). It is the fourth argument of `InStr(start, string1, string2,
+  compare)` and the third of `StrComp(string1, string2, compare)`, or it is
+  given as `Compare:=`. `InStr(Text, "a", vbTextCompare)` has no compare mode:
+  its third argument is the text searched for, so write
+  `InStr(1, Text, "a", vbTextCompare)`.
 - `Next` names its counter (`Next CharIndex`).
 - One statement per line; no `:` between statements. A single-line
   `If ... Then <one statement>` is allowed for guards and `Exit`.
@@ -320,7 +324,7 @@ and refuses a module where the rewrite would be ambiguous.
 
 | Before | After |
 |---|---|
-| `Const PROC As String` and every use of `PROC` | `Const PROC_NAME As String` and `PROC_NAME` |
+| `Const PROC As String` and every use of `PROC` in the procedure that declares it | `Const PROC_NAME As String` and `PROC_NAME` |
 | `Err_Handler:`, `Fail:` | `ErrorHandler:` |
 | `Safe_Exit:` | `SafeExit:` |
 | `Clean_Exit:` | `CleanExit:` |
@@ -373,14 +377,17 @@ declarations inside one are aligned. A procedure whose block statements do not
 pair up, or that opens or closes one inside a conditional block, keeps its
 indentation and is reported. Malformed literals, interrupted or unterminated
 continuations or conditionals, non-ASCII text, an Option statement inside a
-conditional block and ambiguous renames fail before any file is written. Line
-endings normalize to CRLF.
+conditional block and ambiguous renames fail before any file is written. A
+module in which `PROC` also names a procedure, variable, parameter, `Declare` or
+type member outside the procedures that declare `Const PROC` is refused with the
+module name and the line, because renaming it would change a name that other
+code, or an `Application.Run` string, uses. Line endings normalize to CRLF.
 
 Before publication, the formatter compares ordered executable tokens and
 statement boundaries, preserving literal bytes and Option statements. Only
 the renames the house style declares are accepted as differences: the label
 names of the [table above](#names-the-style-renames) in a label or jump
-position, and the identifier `PROC` where it stands as a name of its own. Option
+position, and the identifier `PROC` inside the procedures that declare `Const PROC`. Option
 relocation is normalized. The house form never moves, adds or removes a
 statement. This bounded equivalence check is not compilation or Excel runtime
 certification. Every fixture is exercised by the existing formatter self-test in

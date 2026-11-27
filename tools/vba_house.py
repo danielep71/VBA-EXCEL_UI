@@ -169,14 +169,54 @@ def rename_labels(lines: list[str], label_map: dict[str, str]) -> list[str]:
     return out
 
 
-def rename_identifiers(lines: list[str], mapping: dict[str, str]) -> list[str]:
-    """Rename whole identifiers in code regions (never after a dot)."""
-    def one(part: str) -> str:
-        for old, new in mapping.items():
-            part = re.sub(r"(?<![\w.])" + re.escape(old) + r"(?!\w)", new, part)
-        return part
+PROC_TOKEN = re.compile(r"(?<![\w.])" + hs.PROC_CONSTANT_OLD + r"(?!\w)")
+PROC_NAME_TOKEN = re.compile(r"(?<![\w.])" + hs.PROC_CONSTANT + r"(?!\w)")
+CONST_PROC_RE = re.compile(r"\s*Const\s+" + hs.PROC_CONSTANT_OLD + r"\s+As\b", re.I)
 
-    return [transform_code(ln, one) for ln in lines]
+
+def proc_constant_scopes(raw: list[str], conditional: set[int]) -> list[tuple[int, int]]:
+    """(signature, End) of each procedure that declares its own ``Const PROC As String``."""
+    lines = [Ln(t.rstrip(), n in conditional) for n, t in enumerate(raw)]
+    return [(sig, end) for sig, end in procedure_spans(lines)
+            if any(CONST_PROC_RE.match(code_only(raw[n])) for n in range(sig, end + 1))]
+
+
+def rename_proc_constant(raw: list[str], conditional: set[int], module_name: str) -> list[str]:
+    """Rename PROC to PROC_NAME inside the procedures that declare ``Const PROC``, and only there.
+
+    A procedure's constant is local to it, so another procedure, variable,
+    parameter, Declare or type member that is also called PROC is a different
+    thing. Where one exists outside those procedures the module is refused,
+    with its line, rather than renamed along with the constant.
+    """
+    scopes = proc_constant_scopes(raw, conditional)
+    if not scopes:
+        return raw
+    inside = {n for sig, end in scopes for n in range(sig, end + 1)}
+    out = list(raw)
+    for n, line in enumerate(raw):
+        code = code_only(line)
+        if n not in inside:
+            if PROC_TOKEN.search(code):
+                raise LexicalError(
+                    f"{module_name} line {n + 1}: {hs.PROC_CONSTANT_OLD} names something other than the "
+                    f"constant of its own procedure; rename it before moving the constant to "
+                    f"{hs.PROC_CONSTANT}")
+        elif PROC_NAME_TOKEN.search(code):
+            raise LexicalError(
+                f"{module_name} line {n + 1}: {hs.PROC_CONSTANT} already stands in a procedure that "
+                f"declares {hs.PROC_CONSTANT_OLD}; ambiguous identifier mapping")
+        else:
+            out[n] = transform_code(line, lambda part: PROC_TOKEN.sub(hs.PROC_CONSTANT, part))
+    return out
+
+
+def renamed_source(text: str, module_name: str) -> str:
+    """The module as the declared renames alone would leave it: what the formatter's output must equal in tokens."""
+    raw = split_lines(text)
+    conditional = conditional_lines(raw)
+    raw = rename_labels(raw, dict(hs.LABEL_RENAMES))
+    return "\n".join(rename_proc_constant(raw, conditional, module_name))
 
 
 def check_renames(lines: list[str], label_map: dict[str, str], protected: set[int]) -> None:
@@ -192,10 +232,6 @@ def check_renames(lines: list[str], label_map: dict[str, str], protected: set[in
     for old in label_map:
         if any(re.search(r"\b" + re.escape(old) + r"\b", code_only(lines[i])) for i in protected):
             raise LexicalError(f"unsupported label {old} in preserved region")
-    for old, new in hs.IDENTIFIER_RENAMES.items():
-        if re.search(r"(?<![\w.])" + old + r"(?!\w)", code) and \
-                re.search(r"(?<![\w.])" + new + r"(?!\w)", code):
-            raise LexicalError(f"ambiguous identifier mapping {old}/{new}")
 
 
 # --------------------------------------------------------------------------
@@ -1042,8 +1078,7 @@ def format_module(text: str, module_name: str) -> tuple[str, list[Todo]]:
     label_map = dict(hs.LABEL_RENAMES)
     check_renames(raw, label_map, protected)
     raw = rename_labels(raw, label_map)
-    if any(re.match(r"\s*Const\s+PROC\s+As\b", code_only(ln)) for ln in raw):
-        raw = rename_identifiers(raw, hs.IDENTIFIER_RENAMES)
+    raw = rename_proc_constant(raw, conditional, module_name)
     todos: list[Todo] = []
     attributes, options, rest = split_preamble(raw, conditional)
     out: list[Ln] = list(attributes) + [Ln("")] + options

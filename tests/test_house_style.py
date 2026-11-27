@@ -88,19 +88,35 @@ class Fixtures(unittest.TestCase):
 
 class Comparison(unittest.TestCase):
 
+    BEFORE = ('Private Sub A()\nConst PROC As String = "PROC"\nOn Error GoTo Err_Handler\nx = PROC\n'
+              'Err_Handler:\nEnd Sub\n')
+    AFTER = ('Private Sub A()\nConst PROC_NAME As String = "PROC"\nOn Error GoTo ErrorHandler\nx = PROC_NAME\n'
+             'ErrorHandler:\nEnd Sub\n')
+
     def test_a_declared_rename_is_the_only_difference_accepted(self) -> None:
-        before = "Const PROC As String = \"PROC\"\nOn Error GoTo Err_Handler\nx = PROC\nErr_Handler:\n"
-        after = "Const PROC_NAME As String = \"PROC\"\nOn Error GoTo ErrorHandler\nx = PROC_NAME\nErrorHandler:\n"
-        declared = (house_style.LABEL_RENAMES, house_style.IDENTIFIER_RENAMES)
-        self.assertEqual(executable_signature(before, *declared), executable_signature(after))
-        for changed in (after.replace('"PROC"', '"PROC_NAME"'), after.replace("x = PROC_NAME", "x = PROC"),
-                        after.replace("GoTo ErrorHandler", "GoTo Elsewhere")):
-            self.assertNotEqual(executable_signature(before, *declared), executable_signature(changed))
+        self.assertEqual(executable_signature(vba_house.renamed_source(self.BEFORE, "M")),
+                         executable_signature(self.AFTER))
+        for changed in (self.AFTER.replace('"PROC"', '"PROC_NAME"'), self.AFTER.replace("x = PROC_NAME", "x = PROC"),
+                        self.AFTER.replace("GoTo ErrorHandler", "GoTo Elsewhere")):
+            self.assertNotEqual(executable_signature(vba_house.renamed_source(self.BEFORE, "M")),
+                                executable_signature(changed))
 
     def test_a_member_named_like_the_constant_is_not_renamed(self) -> None:
-        before = "x = Obj.PROC\n"
-        self.assertEqual(executable_signature(before, None, house_style.IDENTIFIER_RENAMES),
-                         executable_signature(before))
+        before = "Private Sub A()\nConst PROC As String = \"x\"\ny = Obj.PROC\nEnd Sub\n"
+        self.assertIn("y = Obj.PROC\n", vba_house.renamed_source(before, "M") + "\n")
+
+    def test_the_rename_stops_at_the_procedure_that_declares_the_constant(self) -> None:
+        text = (self.BEFORE + "Public Sub B()\nEnd Sub\n")
+        self.assertIn("Const PROC_NAME", vba_house.renamed_source(text, "M"))
+        with self.assertRaises(LexicalError):
+            vba_house.renamed_source(text.replace("Sub B()", "Sub PROC()"), "M")
+
+    def test_the_formatter_refuses_what_the_comparison_could_not_tell_apart(self) -> None:
+        text = ('Attribute VB_Name = "M_PROBE"\r\nOption Explicit\r\n\r\n'
+                'Private Sub A()\r\n    Const PROC As String = "x"\r\nEnd Sub\r\n\r\n'
+                "Public Sub PROC()\r\nEnd Sub\r\n")
+        with self.assertRaises(LexicalError):
+            reformat.reformat_text(text, "M_PROBE", "house")
 
 
 class LayoutEdit(unittest.TestCase):
@@ -134,8 +150,8 @@ class Tree(unittest.TestCase):
             with self.subTest(module=rel):
                 result = reformat.reformat_text(text, name, "house")
                 self.assertEqual(reformat.reformat_text(result, name, "house"), result)
-                declared = (house_style.LABEL_RENAMES, house_style.IDENTIFIER_RENAMES)
-                self.assertEqual(executable_signature(text, *declared), executable_signature(result))
+                self.assertEqual(executable_signature(vba_house.renamed_source(text, name)),
+                                 executable_signature(result))
 
     def test_what_remains_for_a_person_is_only_what_rewriting_cannot_settle(self) -> None:
         settled = {"header", "sections", "proc-name", "select-case"}

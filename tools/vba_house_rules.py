@@ -79,22 +79,23 @@ def split_arguments(masked: str, open_at: int) -> tuple[list[tuple[int, int]], i
 
 
 COMPARE_CALL_RE = re.compile(r"(?<![\w.])(?:VBA\.)?(InStr|StrComp)\s*\(", re.I)
-COMPARE_CONSTANT_RE = re.compile(r"^(?:VBA\.)?vb(?:Binary|Text|Database)Compare$", re.I)
+POSITIONAL_COMPARE = {"instr": 4, "strcomp": 3}      # the argument position of the compare mode
 
 
 def missing_compare(name: str, args: list[str]) -> bool:
-    """True when the call certainly names no compare mode; an ambiguous call is not reported."""
-    if any(re.match(r"\s*Compare\s*:=", a, re.I) for a in args):
+    """True when the call names no compare mode.
+
+    The mode is the fourth positional argument of InStr (start, string1,
+    string2, compare), the third of StrComp (string1, string2, compare), or
+    ``Compare:=`` by name. What an argument is spelled does not matter: with
+    three positional arguments InStr has a start and two strings, whatever the
+    third one looks like.
+    """
+    named = [re.match(r"\s*(\w+)\s*:=", a) for a in args]
+    if any(m and m.group(1).lower() == "compare" for m in named):
         return False
-    if name.lower() == "strcomp":
-        return len(args) == 2
-    if len(args) == 2:
-        return True
-    if len(args) == 3:
-        if COMPARE_CONSTANT_RE.match(args[2].strip()):
-            return False
-        return re.fullmatch(r"\s*\d+\s*", args[0]) is not None
-    return False
+    positional = sum(1 for m in named if m is None)
+    return positional < POSITIONAL_COMPARE[name.lower()]
 
 
 class ProcedureView(NamedTuple):
