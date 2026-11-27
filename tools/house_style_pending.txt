@@ -14,30 +14,6 @@
 # Regenerate it with:
 #   python3 tools/reformat.py --write-pending src/*.bas test/*.bas demo/*.bas
 # Once the file exists, that only removes lines; it refuses to add one.
-M_EXCEL_UI: header
-M_EXCEL_UI.UI_HideExcelUI: header
-M_EXCEL_UI.UI_ShowExcelUI: header
-M_EXCEL_UI.UI_CaptureExcelUIState: header
-M_EXCEL_UI.UI_HasExcelUIStateSnapshot: header
-M_EXCEL_UI.UI_ResetExcelUIToSnapshot: header
-M_EXCEL_UI.UI_ClearExcelUIStateSnapshot: header
-M_EXCEL_UI_RUNTIME: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeHandleFailure: proc-name
-M_EXCEL_UI_RUNTIME.UI_RuntimeClearResultBuffer: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeEndQuietUpdate: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeTrySetBooleanPropertyIfNeeded: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeTryGetBooleanProperty: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeTrySetRibbonVisible: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeTrySetBooleanProperty: proc-name
-M_EXCEL_UI_RUNTIME.UI_RuntimeTrySetBooleanProperty: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeBuildErrorText: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeBuildWindowLabel: header
-M_EXCEL_UI_RUNTIME.UI_RuntimeLogFailure: header
-M_EXCEL_UI_SNAPSHOT: header
-M_EXCEL_UI_SNAPSHOT.UI_SnapshotCaptureCore: header
-M_EXCEL_UI_SNAPSHOT.UI_SnapshotHasState: header
-M_EXCEL_UI_SNAPSHOT.UI_SnapshotClear: header
-M_EXCEL_UI_SNAPSHOT.UI_SnapshotTryCaptureRibbon: header
 M_EXCEL_UI_TITLEBAR: header
 M_EXCEL_UI_TITLEBAR.UI_TryGetActiveTitleBarHwnd: proc-name
 M_EXCEL_UI_TITLEBAR.UI_TrySetTitleBarVisibleForHwndIfNeeded: proc-name
