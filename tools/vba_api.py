@@ -40,8 +40,10 @@ is verified on every push rather than only when someone suspects it.
 import os
 import re
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
+
+from vba_lex import LexicalError, regions, split_code_comment, transform_code
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -89,22 +91,40 @@ class ApiError(Exception):
 # --------------------------------------------------------------------------
 # LEXICAL HELPERS
 # --------------------------------------------------------------------------
-def split_code_comment(line: str) -> tuple[str, str]:
-    """Split a line at the apostrophe that begins a comment, if there is one.
+def outside_literals(text: str, fn: Callable[[str], str]) -> str:
+    """Apply fn to the code of text only; literals and identifiers stay as written.
 
-    An apostrophe inside a string literal is data. This is the same rule
-    tools/reformat.py applies, kept here so the two tools cannot drift apart
-    on what counts as code.
-
-    Returns (code, comment); comment is "" when the line has none.
+    A string literal is data, and so is a bracketed identifier: the spaces,
+    case, apostrophes and underscores between the delimiters are part of the
+    contract, so no normalisation may reach them. The scan is the one of
+    tools/vba_lex.py, which the formatter and the analyzers also use, so every
+    tool agrees on what is code, a literal or a comment.
     """
-    in_literal = False
-    for i, ch in enumerate(line):
-        if ch == '"':
-            in_literal = not in_literal
-        elif ch == "'" and not in_literal:
-            return line[:i], line[i:]
-    return line, ""
+    try:
+        return transform_code(text, fn)
+    except LexicalError as exc:
+        raise ApiError(f"{exc} in {text!r}") from exc
+
+
+def squeeze_blanks(text: str) -> str:
+    """Collapse each run of white space in text to one space."""
+    return re.sub(r"\s+", " ", text)
+
+
+def code_of(line: str, number: int) -> str:
+    """Return line without its comment; an unterminated literal is a finding."""
+    try:
+        return split_code_comment(line)[0]
+    except LexicalError as exc:
+        raise ApiError(f"line {number}: {exc}") from exc
+
+
+def has_code_match(pattern: re.Pattern[str], text: str) -> bool:
+    """Return True when pattern matches text outside literals and identifiers."""
+    try:
+        return any(pattern.search(part) for kind, part in regions(text) if kind == "code")
+    except LexicalError as exc:
+        raise ApiError(f"{exc} in {text!r}") from exc
 
 
 def logical_lines(text: str) -> Iterator[tuple[int, str]]:
@@ -126,18 +146,17 @@ def logical_lines(text: str) -> Iterator[tuple[int, str]]:
             n += 1
             continue
 
-        code, _ = split_code_comment(raw[n])
-        code = code.strip()
+        code = code_of(raw[n], n + 1).strip()
 
         while code.endswith("_") and code[:-1].endswith(" "):
             n += 1
             if n >= len(raw):
                 raise ApiError(f"line {start}: continuation runs past end of file")
-            nxt, _ = split_code_comment(raw[n])
+            nxt = code_of(raw[n], n + 1)
             code = code[:-1].rstrip() + " " + nxt.strip()
 
         if code:
-            yield start, re.sub(r"\s+", " ", code).strip()
+            yield start, outside_literals(code, squeeze_blanks).strip()
         n += 1
 
 
@@ -169,9 +188,12 @@ def balanced_split(text: str, sep: str = ",") -> list[str]:
 
 def narrow_pointers(signature: str) -> str:
     """Rewrite a VBA7 signature into the declaration its #Else arm must carry."""
-    for pattern, replacement in POINTER_NARROWING:
-        signature = pattern.sub(replacement, signature)
-    return signature
+    def narrow(code: str) -> str:
+        for pattern, replacement in POINTER_NARROWING:
+            code = pattern.sub(replacement, code)
+        return code
+
+    return outside_literals(signature, narrow)
 
 
 # --------------------------------------------------------------------------
@@ -472,7 +494,7 @@ def effective_predicate(preceding: list[str], own: str | None) -> str:
 
 def normalise_predicate(text: str) -> str:
     """Collapse a conditional predicate to a comparable form."""
-    text = re.sub(r"\s+", " ", text).strip().casefold()
+    text = outside_literals(text, lambda code: squeeze_blanks(code).casefold()).strip()
     while text.startswith("(") and text.endswith(")"):
         text = text[1:-1].strip()
     return text
@@ -600,7 +622,7 @@ def fold_conditionals(
             findings.append(overlap)
             continue
 
-        pointered = [decl for decl in arms if PTR_RE.search(decl.text)]
+        pointered = [decl for decl in arms if has_code_match(PTR_RE, decl.text)]
 
         if pointered:
             widest = {decl.text for decl in pointered}
@@ -1055,6 +1077,123 @@ End Sub
 #End If
 """
 
+# String literals are data. A default or a constant that differs from another
+# only in the spaces inside its literal is a different contract, so nothing may
+# normalise, case-fold or rewrite what sits between the quotes. Every case below
+# is built from this one source, with the literal substituted for {lit}.
+LITERAL_TEMPLATE = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+Public Const UI_Sep As String = {lit}
+
+Public Function UI_Probe( _
+    Optional ByRef FailMsg As String = {lit}) _
+    As Boolean
+End Function
+"""
+
+
+def _literal_source(lit: str) -> str:
+    return LITERAL_TEMPLATE.replace("{lit}", lit)
+
+
+# (label, one literal, another literal): the constant and the default must each
+# be recorded differently for the two.
+LITERAL_DIFFERS = [
+    ("one versus two spaces inside a literal", '"a b"', '"a  b"'),
+    ("a leading space inside a literal", '" a"', '"a"'),
+    ("a trailing space inside a literal", '"a "', '"a"'),
+    ("a literal made only of spaces", '" "', '"  "'),
+    ("spaces beside a doubled-quote escape",
+     '"say ""hi"" now"', '"say  ""hi""  now"'),
+    ("spaces after an apostrophe inside a literal",
+     '"it\'s a"', '"it\'s  a"'),
+    ("spaces before a trailing underscore inside a literal",
+     '"a _"', '"a  _"'),
+    ("letter case inside a literal", '"Ab"', '"ab"'),
+]
+
+# Literals that must reach the manifest byte for byte.
+LITERAL_KEEP = [
+    ("spaces", '"a  b"'),
+    ("doubled quotes and spaces", '"say  ""hi""  now"'),
+    ("an apostrophe that is not a comment", '"it\'s  a \'quote\'  "'),
+    ("a trailing underscore that is not a continuation", '"a  _"'),
+    ("leading and trailing spaces", '"  pad  "'),
+    ("Rem inside a literal", '"Rem  not a comment"'),
+    ("brackets, a colon and Then", '"[a  b]  :  Then"'),
+    ("a lone doubled quote", '""""'),
+    ("the empty literal", '""'),
+]
+
+# (label, formatting of the declaration around the literal "a  b"). Each must
+# record exactly what the template records.
+LITERAL_NEUTRAL = [
+    ("extra spaces and tabs outside a literal",
+     [("Public Const UI_Sep As String = ",
+       "Public   Const\tUI_Sep   As  String  =    "),
+      ("Optional ByRef FailMsg As String = ",
+       "Optional\t ByRef   FailMsg   As   String   =   ")]),
+    ("a continuation line before a literal",
+     [("Public Const UI_Sep As String = \"a  b\"\n",
+       "Public Const UI_Sep As String = _\n        \"a  b\"\n")]),
+    ("a continuation line after a literal",
+     [("Optional ByRef FailMsg As String = \"a  b\") _",
+       "Optional ByRef FailMsg As String = \"a  b\" _\n    ) _")]),
+    ("keyword case outside a literal",
+     [("Optional ByRef FailMsg As String", "optional byref FailMsg as String")]),
+    ("a trailing comment after a literal",
+     [("Public Const UI_Sep As String = \"a  b\"\n",
+       "Public Const UI_Sep As String = \"a  b\"   'it's   a   comment\n")]),
+]
+
+# Pointer words and predicates are rewritten while arms are compared, which is
+# also outside the reach of a literal.
+LITERAL_POINTER_NAME = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If VBA7 Then
+Public Function UI_Tag(Optional ByVal Kind As String = "LongPtr") As Boolean
+#Else
+Public Function UI_Tag(Optional ByVal Kind As String = "Long") As Boolean
+#End If
+"""
+
+LITERAL_POINTER_NAME_KEPT = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If VBA7 Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr, _
+    Optional ByVal Kind As String = "LongPtr") As Boolean
+#Else
+Public Function UI_Frame(ByRef HwndOut As Long, _
+    Optional ByVal Kind As String = "LongPtr") As Boolean
+#End If
+"""
+
+LITERAL_COMPLEMENT = """\
+Attribute VB_Name = "M_SELFTEST"
+Option Explicit
+
+#If Mode = "A  b" Then
+Public Function UI_Frame(ByRef HwndOut As LongPtr) As Boolean
+#End If
+
+#If Not Mode = "A  b" Then
+Public Function UI_Frame(ByRef HwndOut As Long) As Boolean
+#End If
+"""
+
+LITERAL_NOT_COMPLEMENT = LITERAL_COMPLEMENT.replace(
+    'Not Mode = "A  b"', 'Not Mode = "A b"')
+
+LITERAL_NOT_COMPLEMENT_CASE = LITERAL_COMPLEMENT.replace(
+    'Not Mode = "A  b"', 'Not Mode = "a  b"')
+
+
 BREAKING_CASES = [
     ("parameter reorder",
      "ByVal Scope As UIVisibility, _\n    Optional ByRef FailMsg As String = \"\"",
@@ -1112,6 +1251,16 @@ CONDITIONAL_CASES = [
     ("an #Else arm and a separately negated block overlap",
      ELSE_AND_NEGATED_BLOCK, None, True),
     ("a three-arm block folds to one member", THREE_ARM_WIN64, 2, False),
+    ("a pointer name inside a literal is not a pointer-width variant",
+     LITERAL_POINTER_NAME, None, True),
+    ("a pointer name inside a literal is not narrowed in the other arm",
+     LITERAL_POINTER_NAME_KEPT, 1, False),
+    ("complementary predicates holding the same literal are one member",
+     LITERAL_COMPLEMENT, 1, False),
+    ("predicates whose literals differ in spaces are not complementary",
+     LITERAL_NOT_COMPLEMENT, None, True),
+    ("predicates whose literals differ in case are not complementary",
+     LITERAL_NOT_COMPLEMENT_CASE, None, True),
 ]
 
 # Arms are contract. Each case is (label, member, source, other source): the
@@ -1162,6 +1311,73 @@ NEUTRAL_CASES = [
      "Public Function UI_Probe(",
      "'   Public Sub UI_NotReal(ByVal A As Long)\n'\nPublic Function UI_Probe("),
 ]
+
+def _literal_failures() -> list[str]:  # noqa: C901 - one loop per literal fixture family
+    """Check that nothing between a pair of quotes is normalised or rewritten."""
+    failures: list[str] = []
+
+    for label, left, right in LITERAL_DIFFERS:
+        try:
+            a = _records(_literal_source(left))
+            b = _records(_literal_source(right))
+        except ApiError as exc:
+            failures.append(f"{label}\n      fixture did not parse: {exc}")
+            continue
+        for member in ("UI_Sep", "UI_Probe"):
+            a_member = [line for line in a if declares(line, member)]
+            b_member = [line for line in b if declares(line, member)]
+            if len(a_member) != 1 or len(b_member) != 1:
+                failures.append(
+                    f"{label}\n      {member} must be declared exactly once in "
+                    f"each fixture; found {len(a_member)} and {len(b_member)}"
+                )
+            elif a_member == b_member:
+                failures.append(
+                    f"{label}\n      {member} recorded identically for "
+                    f"{left} and {right}, so the gate would not see it\n"
+                    f"      records: {a_member}"
+                )
+
+    for label, lit in LITERAL_KEEP:
+        try:
+            lines = _records(_literal_source(lit))
+        except ApiError as exc:
+            failures.append(f"{label}\n      fixture did not parse: {exc}")
+            continue
+        expected = {
+            "UI_Sep": f"UI_Sep As String = {lit}",
+            "UI_Probe": f"UI_Probe(Optional ByRef FailMsg As String = {lit}) As Boolean",
+        }
+        for member, body in expected.items():
+            got = [line.split("\t")[2] for line in lines if declares(line, member)]
+            if got != [body]:
+                failures.append(
+                    f"{label}\n      {member} should record {body!r} exactly\n"
+                    f"      produced: {got}"
+                )
+
+    try:
+        kept = _records(_literal_source('"a  b"'))
+    except ApiError as exc:
+        return failures + [f"literal fixture does not parse: {exc}"]
+
+    for label, edits in LITERAL_NEUTRAL:
+        source = _literal_source('"a  b"')
+        try:
+            for old, new in edits:
+                source = _mutate(old.replace("{lit}", '"a  b"'), new, source)
+            changed = _records(source)
+        except ApiError as exc:
+            failures.append(f"{label}\n      fixture did not parse: {exc}")
+            continue
+        if changed != kept:
+            failures.append(
+                f"{label}\n      should normalise identically\n"
+                f"      expected: {kept}\n      produced: {changed}"
+            )
+
+    return failures
+
 
 def selftest() -> list[str]:  # noqa: C901 - one loop per fixture family, kept side by side
     """Return a list of failure descriptions; empty means the model holds."""
@@ -1251,6 +1467,8 @@ def selftest() -> list[str]:  # noqa: C901 - one loop per fixture family, kept s
                 f"would not see it\n      records: {a_member}"
             )
 
+    failures += _literal_failures()
+
     for label, source, expected_count, expect_finding in CONDITIONAL_CASES:
         try:
             lines, findings = records_of_text(source, "M_SELFTEST")
@@ -1285,7 +1503,8 @@ def selftest() -> list[str]:  # noqa: C901 - one loop per fixture family, kept s
 def run_selftest() -> int:
     failures = selftest()
     total = (len(BREAKING_CASES) + len(NEUTRAL_CASES)
-             + len(PROPERTY_CASES) + len(CONDITIONAL_CASES) + len(ARM_CASES))
+             + len(PROPERTY_CASES) + len(CONDITIONAL_CASES) + len(ARM_CASES)
+             + len(LITERAL_DIFFERS) + len(LITERAL_KEEP) + len(LITERAL_NEUTRAL))
     if not failures:
         print(f"ok   self-test: {total} API-contract rules hold")
         return 0
