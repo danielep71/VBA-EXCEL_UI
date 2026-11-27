@@ -955,6 +955,28 @@ measured against that baseline.
 
 ### 🐛 Fixed
 
+- Fixed the public API gate so it no longer normalizes the inside of a string
+  literal ([#47](https://github.com/danielep71/VBA-EXCEL_UI/issues/47)).
+  `tools/vba_api.py` collapsed every run of white space in a declaration to one
+  space, literals included, so an `Optional` default or a `Public Const` that
+  changed from `"a b"` to `"a  b"` produced the same manifest line and passed
+  both the manifest diff and the `[baseline]` comparison. White space is now
+  collapsed only outside literals and bracketed identifiers, using the scanner
+  in `tools/vba_lex.py` that the formatter and the analyzers already share, so
+  doubled-quote escapes, apostrophes, `Rem`, brackets and a trailing `_` inside a
+  literal reach the manifest byte for byte. The same rule now holds where the
+  gate rewrites declarations to compare them: a pointer name such as `LongPtr`
+  inside a literal is no longer narrowed to `Long` when the arms of a conditional
+  declaration are folded, and the case and spacing of a literal inside a
+  conditional-compilation predicate are no longer folded away before two
+  predicates are tested for being complements. The manifest regenerates
+  unchanged from `main` and from `release/v1.1.3`, since no declaration holds
+  such a literal. The API self-test grows from 40 to 67 rules: eight pairs that
+  differ only inside a literal, nine literals that must be recorded exactly, five
+  formatting changes outside a literal that must still normalize identically,
+  and five conditional-compilation cases. Gate tests cover a project-public
+  constant and a `[supported]` constant whose literal changes only in its
+  spaces. Tooling only; no VBA module changed.
 - **Certified on Excel 16.0 build 20430, 64-bit (2026-11-14).** Clarified and
   tested how diagnostics degrade when the
   first `FailureList` entry cannot be allocated
@@ -1569,7 +1591,7 @@ python3 tools/reformat.py --selftest
 ok   self-test: 9 historical rules and extended lexical/write fixtures hold
 
 python3 tools/vba_api.py --selftest
-ok   self-test: 40 API-contract rules hold
+ok   self-test: 67 API-contract rules hold
 
 python3 tools/wiki_badges.py --selftest
 ok   self-test: 14 wiki-badge rules hold

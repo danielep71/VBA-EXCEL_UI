@@ -994,6 +994,8 @@ Apply when module boundaries or supported surface can change.
 > tools/public_api_manifest.txt, which records the full normalised signature:
 > parameter order and names, ByVal/ByRef, types, Optional status, defaults,
 > return types and enum values. Regenerate it with tools/vba_api.py --write.
+> White space is normalised only outside string literals: a default or constant
+> that differs by one space inside its quotes is a different contract.
 >
 > Passing the manifest gate proves the declared contract matches that file. It
 > does not prove behavior. A procedure whose signature is untouched can still

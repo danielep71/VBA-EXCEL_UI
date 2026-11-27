@@ -600,11 +600,48 @@ class CertificationManifestSelfTest(GateTestCase):
             self.assertFails("the consistent fixture reports")
 
 
+FACADE = "src/M_EXCEL_UI.bas"
+MANIFEST = "tools/public_api_manifest.txt"
+
+
+def declare_constant(case: GateTestCase, rel: str, literal: str, baseline: str | None = None) -> None:
+    """Add a String constant to a production module and regenerate the manifest.
+
+    The manifest is rendered by the production code from the changed source,
+    exactly as ``python3 tools/vba_api.py --write`` does. ``baseline`` is the
+    literal the frozen [baseline] section records for that constant; without
+    it the section is left as it was.
+    """
+    case.repo.replace(rel, "Option Explicit\r\n",
+                      f'Option Explicit\r\n\r\nPublic Const UI_TestLiteral As String = {literal}\r\n')
+    root = str(case.repo.root)
+    recorded, version = vba_api.parse_manifest(str(case.repo.path(MANIFEST)))
+    sections, findings = vba_api.surface(root)
+    if findings:
+        raise AssertionError(findings)
+    frozen = list(recorded[vba_api.BASELINE_SECTION])
+    if baseline is not None:
+        module = rel.split("/")[-1][:-4]
+        frozen.append(f"{module}\tConst\tUI_TestLiteral As String = {baseline}")
+    case.repo.write(MANIFEST, vba_api.render_manifest(sections, version, sorted(frozen)))
+
+
 class PublicApiManifest(GateTestCase):
     check = "public API manifest"
 
     def test_passes_on_the_current_tree(self) -> None:
         self.assertPasses()
+
+    def test_passes_when_a_literal_with_spaces_is_recorded(self) -> None:
+        declare_constant(self, RUNTIME, '"a  b"')
+        self.assertPasses()
+
+    def test_fails_when_a_literal_changes_only_in_its_spaces(self) -> None:
+        declare_constant(self, RUNTIME, '"a b"')
+        self.repo.replace(RUNTIME, '"a b"', '"a  b"')
+        self.assertFails('[project-public] no longer declared', 'UI_TestLiteral As String = "a b"',
+                         '[project-public] declared without a manifest entry',
+                         'UI_TestLiteral As String = "a  b"')
 
     def test_fails_on_an_unrecorded_public_member(self) -> None:
         self.repo.replace(RUNTIME, "Option Private Module\r\n",
@@ -624,6 +661,10 @@ class PublicApiSelfTest(GateTestCase):
         with patch.object(vba_api, "canonical_parameter", lambda text: "x"):
             self.assertFails("produced an identical manifest")
 
+    def test_fails_when_literals_are_normalised_like_code(self) -> None:
+        with patch.object(vba_api, "outside_literals", lambda text, fn: fn(text)):
+            self.assertFails("recorded identically", "should record")
+
 
 class SupportedApiDeclaration(GateTestCase):
     check = "supported API declaration"
@@ -635,6 +676,14 @@ class SupportedApiDeclaration(GateTestCase):
     def test_fails_when_an_unchanged_facade_is_declared_changed(self) -> None:
         self.repo.replace("CHANGELOG.md", self.ROW, "| Supported API contract | Minor: adds a member |")
         self.assertFails("is identical to [baseline")
+
+    def test_fails_when_a_facade_literal_changes_only_in_its_spaces(self) -> None:
+        declare_constant(self, FACADE, '"a  b"', baseline='"a b"')
+        self.assertFails("[supported] differs from [baseline", "still claims")
+
+    def test_passes_when_a_facade_literal_matches_the_baseline_exactly(self) -> None:
+        declare_constant(self, FACADE, '"a  b"', baseline='"a  b"')
+        self.assertPasses()
 
     def test_fails_without_a_declaration_row(self) -> None:
         self.repo.replace("CHANGELOG.md", self.ROW, "")
