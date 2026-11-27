@@ -746,7 +746,21 @@ before the write for everything else. Each observation records one outcome:
 
 The first five fail the case, and with it the unit and the verdict, each with
 its own text. `not-verifiable` fails nothing and is never a silent pass: it is
-listed in both documents.
+listed in both documents. It is allowed in two places only, and the live verdict
+and `tools/check_excel_evidence.py` accept exactly the same observations:
+
+| Element | `verified-*` | `not-verifiable` | Any other outcome |
+|---|---|---|---|
+| Status Bar, Scroll Bars, Formula Bar | hide, show, restore | never | fails |
+| Title bar | hide, show, restore | never: an entry frame with no complete caption is `readback-failed` | fails |
+| Headings, Workbook Tabs, Gridlines | hide, show, restore | only as an `entry` observation naming windows that could not be read on entry and were left out | fails |
+| Ribbon | hide, show, restore | only when it is unverifiable for every observation, that is one `entry` observation; a Ribbon that was readable and then is not, after a write or after the restoration, is `readback-failed` or `restore-failed` | fails |
+
+The live side is `TST_AchIsAllowed`, which turns any outcome not allowed at an
+element and operation into a failure, and `tests/test_achieved_contract.py`
+generates every outcome combination of every scenario for every element and
+scope of the manifest and fails if the live verdict passes what the validator
+rejects, or the reverse.
 
 | Element | Scope | What is read back |
 |---|---|---|
@@ -775,7 +789,10 @@ host that fails. They ask the production setter for nothing, so that it returns
 `True` and writes nothing (`state-mismatch`); give it a value no `UIVisibility`
 member names (`write-failed`); fail the readback after a write that took effect
 (`readback-failed`); skip the restoring write (`restore-failed`); and fail the
-Ribbon readback (`not-verifiable`). They assert each outcome and text, that the
+Ribbon readback from the start (`not-verifiable`). A Ribbon that is readable and
+then fails after a write or after the restoration is `readback-failed` or
+`restore-failed`, and a captionless title-bar entry frame is `readback-failed`;
+each has its own seam. They assert each outcome and text, that the
 wait ended within its bound, that a mismatch fails the case with the setter
 having returned `True`, and that the verdict and both documents carry it. Their
 records are local, so the run that executes them records nothing from them.

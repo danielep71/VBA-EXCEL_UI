@@ -108,6 +108,7 @@ FAILED_OUTCOMES = ("write-failed", "readback-failed", "state-mismatch", "restore
 UNVERIFIABLE_OUTCOME = "not-verifiable"
 CHANGE_OPERATIONS = ("hide", "show")
 RESTORE_OPERATION = "restore"
+ENTRY_OPERATION = "entry"
 LONE_LF = re.compile(rb"(?<!\r)\n")
 
 
@@ -897,8 +898,14 @@ def achieved_requirements(manifest: manifests.Manifest, document: AchievedDocume
 
     Every element and scope it lists needs, among its hide and show observations,
     one that changed the state and one that found it already correct, and a
-    restoration that read back, each verified. The Ribbon alone may instead be
-    not-verifiable throughout, with its reasons.
+    restoration that read back, each verified. not-verifiable is accepted in two
+    places only, the ones the manifest marks and the live verdict allows: an
+    observation that may be unverifiable (the Ribbon) is unverifiable for all of
+    its observations, each at the entry operation, or for none; and an observation
+    that may skip unreadable windows (a window element) may add entry observations
+    for windows that could not be read on entry. Anywhere else it fails, so a
+    Ribbon that was readable and then is not, or a title bar that could not be
+    verified, cannot pass here after failing live, or the reverse.
     """
     section = manifest.achieved
     require(section is not None, "the commit's manifest has no achieved_state section")
@@ -910,11 +917,28 @@ def achieved_requirements(manifest: manifests.Manifest, document: AchievedDocume
         require(rows, f"{label}: no observation of {name}, which the manifest requires")
         bad = [row for row in rows if row.outcome in FAILED_OUTCOMES]
         require(not bad, f"{label}: {name} failed: " + "; ".join(f"{row.operation} {row.text}" for row in bad))
+        operations = CHANGE_OPERATIONS + (RESTORE_OPERATION, ENTRY_OPERATION)
+        strange = [row for row in rows if row.operation not in operations]
+        for row in strange:
+            raise EvidenceError(f"{label}: {name} has an observation at the operation {row.operation!r}, "
+                                f"which is not one of {', '.join(operations)}")
         changing = [row for row in rows if row.operation in CHANGE_OPERATIONS]
         restoring = [row for row in rows if row.operation == RESTORE_OPERATION]
-        if observation.may_be_unverifiable and all(row.outcome == UNVERIFIABLE_OUTCOME for row in rows):
-            unverified += 1
-            continue
+        unreadable = [row for row in rows if row.outcome == UNVERIFIABLE_OUTCOME]
+        entry_rows = [row for row in rows if row.operation == ENTRY_OPERATION]
+        if unreadable:
+            if observation.may_be_unverifiable:
+                require(len(unreadable) == len(rows) and all(row.operation == ENTRY_OPERATION for row in rows),
+                        f"{label}: {name} was verified and then was not: not-verifiable is allowed only when "
+                        "every observation of it is not-verifiable, at the entry operation")
+                unverified += 1
+                continue
+            for row in unreadable:
+                require(observation.may_skip_unreadable_windows and row.operation == ENTRY_OPERATION,
+                        f"{label}: {name} has a not-verifiable observation, which the manifest does not allow "
+                        f"there ({row.operation}: {row.reason})")
+        require(all(row.outcome == UNVERIFIABLE_OUTCOME for row in entry_rows),
+                f"{label}: {name} has an entry observation that is not an unverifiable one")
         for outcome, meaning in (("verified-write", "changed the state"), ("verified-no-op", "found it correct")):
             require(any(row.outcome == outcome for row in changing),
                     f"{label}: {name} has no hide or show observation that {meaning} and read back ({outcome})")

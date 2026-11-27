@@ -59,6 +59,7 @@ MANIFEST_KEYS = ("schema_version", "manifest_version", "description", "units", "
 OPTIONAL_MANIFEST_KEYS = ("achieved_state",)
 ACHIEVED_KEYS = ("unit", "description", "observations")
 OBSERVATION_KEYS = ("element", "scope")
+OBSERVATION_FLAGS = ("may_be_unverifiable", "may_skip_unreadable_windows")
 EXECUTIONS = ("isolated", "live")
 CASE_ID = re.compile(r"(?:TST_Case_|Test_EXCEL_UI_)[A-Za-z0-9_]+")
 IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
@@ -103,6 +104,7 @@ class Observation:
     element: str
     scope: str
     may_be_unverifiable: bool
+    may_skip_unreadable_windows: bool = False
 
 
 @dataclass(frozen=True)
@@ -255,16 +257,20 @@ def parse_achieved(value: object, unit_names: list[str]) -> AchievedState:
         here = f"{where}.observations[{index}]"
         if not isinstance(item, dict):
             raise fail(f"{here} must be an object")
-        unexpected = sorted(set(item) - set(OBSERVATION_KEYS) - {"may_be_unverifiable"})
+        unexpected = sorted(set(item) - set(OBSERVATION_KEYS) - set(OBSERVATION_FLAGS))
         absent = [key for key in OBSERVATION_KEYS if key not in item]
         if unexpected or absent:
             raise fail(f"{here}: " + "; ".join(([f"missing {', '.join(absent)}"] if absent else [])
                                                  + ([f"unknown {', '.join(unexpected)}"] if unexpected else [])))
-        flag = item.get("may_be_unverifiable", False)
-        if type(flag) is not bool:
-            raise fail(f"{here}.may_be_unverifiable must be true or false")
+        flags = {name: item.get(name, False) for name in OBSERVATION_FLAGS}
+        for name, flag in flags.items():
+            if type(flag) is not bool:
+                raise fail(f"{here}.{name} must be true or false")
+        if flags["may_be_unverifiable"] and flags["may_skip_unreadable_windows"]:
+            raise fail(f"{here}: an observation is exempt as a whole or for its unreadable windows, not both")
         observations.append(Observation(text_of(item["element"], f"{here}.element", IDENTIFIER),
-                                        text_of(item["scope"], f"{here}.scope", IDENTIFIER), flag))
+                                        text_of(item["scope"], f"{here}.scope", IDENTIFIER),
+                                        flags["may_be_unverifiable"], flags["may_skip_unreadable_windows"]))
     pairs = [(item.element, item.scope) for item in observations]
     repeated = sorted({pair for pair in pairs if pairs.count(pair) > 1})
     if repeated:

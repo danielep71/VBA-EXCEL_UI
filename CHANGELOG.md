@@ -203,8 +203,11 @@ measured against that baseline.
   `UI_TryGetActiveFramePair` named before the write, refused when the active
   frame is no longer that frame, and visible only with both `WS_BORDER` and
   `WS_DLGFRAME`. The Ribbon is read back only while the window that owned it is
-  still active, and a Ribbon that cannot be addressed or read is
-  `not-verifiable`, never a silent pass. Each element is hidden twice and shown
+  still active, and a Ribbon that cannot be addressed or read from the start is
+  `not-verifiable`, never a silent pass, while one that was readable and then
+  is not is `readback-failed` or `restore-failed`: the live verdict and the
+  evidence validator accept exactly the same outcomes per element, and a test
+  generates every outcome combination to keep them so. Each element is hidden twice and shown
   twice, so the path that changes the state and the path that finds it already
   correct are both verified, and its entry state is then restored through the
   harness writers and read back too. Every wait goes through one bounded poll of

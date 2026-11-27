@@ -239,8 +239,11 @@ unknown commit, no bundle folder or an unusable policy). It checks that:
   carries the achieved state: `achieved` is `OK`, `achievedState` lists no failed
   observation, and for every element and scope the manifest lists there is a
   hide or show that changed the state and one that found it already correct, each
-  verified by readback, and a restoration that read back. The Ribbon alone may be
-  `not-verifiable` throughout, with its reasons. `achieved`, `achievedChecked`,
+  verified by readback, and a restoration that read back. The Ribbon may be
+  `not-verifiable` only when every one of its observations is, at the entry
+  operation and with its reasons; a window element may add `entry` observations
+  that name windows that could not be read on entry; nothing else may be
+  `not-verifiable`. `achieved`, `achievedChecked`,
   `achievedMismatches` and `achievedUnverifiable` must follow from
   `achievedState`, so that no field says `OK` over an observation that failed;
 - the `RESULT:` line, the unit lines, any `RECORDING` line, the `CASES`,
@@ -370,7 +373,8 @@ and the manifest's `achieved_state` section lists the element and scope
 observations it must record: Status Bar, Scroll Bars and Formula Bar under
 `Application`, Headings, Workbook Tabs and Gridlines under `AllWindows`,
 `ActiveWindow` and `ActiveWorkbookWindows`, the title bar under `ActiveFrame` and
-the Ribbon under `ActiveWindow`, which alone may be `not-verifiable`. The gate
+the Ribbon under `ActiveWindow`, which alone may be `not-verifiable`, and only for
+every observation (the README tabulates what each element may be). The gate
 fails when the VBA module that holds the unit's runner no longer names a listed
 element or scope as a string literal of its code. The README describes the
 outcomes, the scenario and the fault seams

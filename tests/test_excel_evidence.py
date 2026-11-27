@@ -1060,7 +1060,39 @@ class AchievedStateTests(Fixture):
         self.bundle_with(title_bar)
         found = {name: detail for name, passed, detail in evidence.evaluate(self.bundle, later, self.root)
                  if name == "achieved state" and not passed}
-        self.assertIn("TitleBar.ActiveFrame has no hide or show observation", found["achieved state"])
+        self.assertIn("TitleBar.ActiveFrame has a not-verifiable observation", found["achieved state"])
+
+    def test_a_ribbon_that_was_verified_and_then_was_not_fails(self) -> None:
+        """Only a Ribbon that is unverifiable for every observation is exempt; a mixed result is not."""
+        for operation in ("hide", "restore"):
+            with self.subTest(operation):
+                def mixed(docs: dict[str, Any], operation: str = operation) -> None:
+                    for row in self.rows(docs):
+                        if row["element"] == "Ribbon" and row["operation"] == operation:
+                            row.update(outcome="not-verifiable", reason="the Ribbon could not be read")
+                    refresh_achieved(docs["certification.json"])
+                self.bundle_with(mixed)
+                self.assert_fails("achieved state", "Ribbon.ActiveWindow was verified and then was not")
+
+    def test_a_ribbon_unverifiable_at_a_step_and_not_at_the_entry_fails(self) -> None:
+        def steps(docs: dict[str, Any]) -> None:
+            for row in self.rows(docs):
+                if row["element"] == "Ribbon":
+                    row.update(outcome="not-verifiable", reason="the Ribbon could not be read")
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(steps)
+        self.assert_fails("achieved state", "at the entry operation")
+
+    def test_an_observation_at_an_operation_the_unit_never_makes_fails(self) -> None:
+        self.bundle_with(lambda docs: self.rows(docs)[0].update(operation="toggle"))
+        self.assert_fails("achieved state", "'toggle'")
+
+    def test_an_entry_observation_that_claims_to_be_verified_fails(self) -> None:
+        def entry(docs: dict[str, Any]) -> None:
+            self.rows(docs)[0].update(operation="entry")
+            refresh_achieved(docs["certification.json"])
+        self.bundle_with(entry)
+        self.assert_fails("achieved state", "entry observation that is not an unverifiable one")
 
     def test_an_unverifiable_observation_without_a_reason_is_malformed(self) -> None:
         def no_reason(docs: dict[str, Any]) -> None:

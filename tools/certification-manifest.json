@@ -152,7 +152,7 @@
   },
   "achieved_state": {
     "unit": "AchievedStateVerification",
-    "description": "Each observation is one element under one scope. A certification document must hold, for every one of them, a verified-write and a verified-no-op observation of the hide and show operations, a restore observation that read back, and no failed observation. An observation marked may_be_unverifiable may instead be not-verifiable, with its reason, because the Ribbon cannot always be addressed or read.",
+    "description": "Each observation is one element under one scope. A certification document must hold, for every one of them, a verified-write and a verified-no-op observation of the hide and show operations, a restore observation that read back, and no failed observation. not-verifiable is allowed in exactly two places: for an observation marked may_be_unverifiable (the Ribbon), when it is unverifiable for every one of its observations, each at the entry operation and with its reason, because the Ribbon cannot always be addressed or read, so a Ribbon that was readable and then is not is a failure; and for an observation marked may_skip_unreadable_windows (a window element), as an entry observation naming the windows that could not be read on entry and were left out of the comparison.",
     "observations": [
       {
         "element": "StatusBar",
@@ -168,39 +168,48 @@
       },
       {
         "element": "Headings",
-        "scope": "AllWindows"
+        "scope": "AllWindows",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "Headings",
-        "scope": "ActiveWindow"
+        "scope": "ActiveWindow",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "Headings",
-        "scope": "ActiveWorkbookWindows"
+        "scope": "ActiveWorkbookWindows",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "WorkbookTabs",
-        "scope": "AllWindows"
+        "scope": "AllWindows",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "WorkbookTabs",
-        "scope": "ActiveWindow"
+        "scope": "ActiveWindow",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "WorkbookTabs",
-        "scope": "ActiveWorkbookWindows"
+        "scope": "ActiveWorkbookWindows",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "Gridlines",
-        "scope": "AllWindows"
+        "scope": "AllWindows",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "Gridlines",
-        "scope": "ActiveWindow"
+        "scope": "ActiveWindow",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "Gridlines",
-        "scope": "ActiveWorkbookWindows"
+        "scope": "ActiveWorkbookWindows",
+        "may_skip_unreadable_windows": true
       },
       {
         "element": "TitleBar",

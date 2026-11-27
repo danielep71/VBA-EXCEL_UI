@@ -129,6 +129,16 @@ Option Private Module
     Private Const TEST_ACH_FAULT_READBACK       As Long = 3 'Fault: the readback after the write fails
     Private Const TEST_ACH_FAULT_RESTORE        As Long = 4 'Fault: the restoration write is not made
     Private Const TEST_ACH_FAULT_NO_CAPTION     As Long = 5 'Fault: the entry frame of a title-bar scenario reads as having no complete caption
+    Private Const TEST_ACH_FAULT_RESTORE_READ   As Long = 6 'Fault: the readback after the restoration fails
+
+    'What the contract allows. A verified outcome is allowed at the operations of
+    'a scenario. not-verifiable is allowed only at the entry of the surfaces the
+    'manifest exempts: the Ribbon, which is unverifiable for every observation of
+    'a scenario or for none, and the windows that could not be read on entry.
+    'tools/check_excel_evidence.py accepts exactly these, and
+    'tests/test_achieved_contract.py holds the two to each other.
+    Private Const TEST_ACH_VERIFIED_OPERATIONS  As String = "|hide|show|restore|"                                               'Operations at which a verified outcome is allowed
+    Private Const TEST_ACH_UNVERIFIABLE_ALLOWED As String = "|Ribbon.entry|Headings.entry|WorkbookTabs.entry|Gridlines.entry|"  'Element.operation pairs at which not-verifiable is allowed
 
     Private Const TEST_ACH_INVALID_VISIBILITY   As Long = 99    'A UIVisibility value no member names
 
@@ -810,9 +820,11 @@ Public Sub TST_Case_AchievedRibbonOwningWindow()
 '   The Ribbon belongs to a window, and the setter and the reader both act on
 '   the active window and accept no target. A value read back is attributable
 '   only to the window that was active when it was read, and only if that window
-'   did not change during the read. A Ribbon that cannot be addressed or read is
-'   not-verifiable: it is listed in the evidence and is never a silent pass
-'   (#28).
+'   did not change during the read. A Ribbon that cannot be addressed or read
+'   from the start is not-verifiable: it is listed in the evidence and is never a
+'   silent pass. A Ribbon that was readable and then is not, after a write or
+'   after the restoration, is a failure, because the manifest exempts only a
+'   Ribbon that is unverifiable for every observation (#28).
 '
 ' INPUTS
 '   None
@@ -828,8 +840,8 @@ Public Sub TST_Case_AchievedRibbonOwningWindow()
 '   - Puts the Ribbon back through the harness and reads it back.
 '
 ' ERROR POLICY
-'   - Raises after restoration when an observation is a failed outcome. A
-'     not-verifiable observation does not fail the case.
+'   - Raises after restoration when an observation is a failed outcome. A Ribbon
+'     that is not-verifiable from the start does not fail the case.
 '
 ' DEPENDENCIES
 '   - TST_AchRunScenario
@@ -941,8 +953,12 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
 '   - Failed restoration: the restoration write is not made while the state
 '     differs from the entry state. Expects restore-failed, then, once the seam
 '     is spent, a restoration that writes.
-'   - Unverifiable surface: the Ribbon is read back as a failure. Expects
+'   - Unverifiable surface: the Ribbon is unreadable from the start. Expects
 '     not-verifiable, which fails nothing and is listed in both documents.
+'   - Ribbon that stops being readable: the readback fails after a write and
+'     after the restoration. Expects readback-failed and restore-failed, never
+'     not-verifiable, because the manifest exempts only a Ribbon that is
+'     unverifiable for every observation.
 '   - Title bar with no caption on entry: the entry frame reads as captionless.
 '     Expects readback-failed, not an exemption, because only the Ribbon may be
 '     not-verifiable.
@@ -958,6 +974,7 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
 '   - TST_AchSeam
 '   - TST_AchRestoreSeam
 '   - TST_AchUnverifiableSeam
+'   - TST_AchRibbonMidSequenceSeam
 '   - TST_AssertTrue
 '
 ' NOTES
@@ -985,6 +1002,7 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
     Dim ReadText    As String   'Failure text of the failed readback
     Dim RestoreText As String   'Failure text of the failed restoration
     Dim CaptionText As String   'Failure text of a title bar with no caption on entry
+    Dim MidText     As String   'Failure text of a Ribbon that stops being readable
     Dim Elapsed     As Double   'Seconds the ignored write took to end
 
     Dim RunEntries  As Long     'Run record: entries on entry
@@ -1063,6 +1081,12 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
         TST_AchUnverifiableSeam
 
 '------------------------------------------------------------------------------
+' A SURFACE THAT STOPS BEING READABLE
+'------------------------------------------------------------------------------
+    'Only a Ribbon unreadable from the start is exempt; half-way it is a failure
+        MidText = TST_AchRibbonMidSequenceSeam()
+
+'------------------------------------------------------------------------------
 ' THE FOUR FAILURES ARE FOUR DIFFERENT TEXTS
 '------------------------------------------------------------------------------
     'Each text names its own outcome and the reason that belongs to it
@@ -1085,6 +1109,14 @@ Public Sub TST_Case_AchievedOutcomesAreDistinct()
             (InStr(1, RestoreText, TEST_ACH_OUTCOME_RESTORE_FAILED, vbBinaryCompare) > 0) And _
             (InStr(1, RestoreText, "entry state was not put back", vbBinaryCompare) > 0), _
             PROC_NAME & ".Text.RestoreFailed"
+
+        TST_AssertTrue _
+            (Len(MidText) = 0) Or _
+            ((InStr(1, MidText, TEST_ACH_OUTCOME_READ_FAILED, vbBinaryCompare) > 0) And _
+            (InStr(1, MidText, TEST_ACH_OUTCOME_RESTORE_FAILED, vbBinaryCompare) > 0) And _
+            (InStr(1, MidText, "could not be read after the write", vbBinaryCompare) > 0) And _
+            (InStr(1, MidText, "could not be read after it was put back", vbBinaryCompare) > 0)), _
+            PROC_NAME & ".Text.RibbonMidSequence"
 
         TST_AssertTrue _
             (InStr(1, CaptionText, TEST_ACH_OUTCOME_READ_FAILED, vbBinaryCompare) > 0) And _
@@ -1717,14 +1749,15 @@ Private Sub TST_AchUnverifiableSeam()
 '                       RUN AN UNVERIFIABLE-SURFACE SEAM
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Make the Ribbon unreadable after a write and assert not-verifiable, that it
+'   Make the Ribbon unreadable from the start and assert not-verifiable, that it
 '   fails nothing, and that both documents list it.
 '
 ' WHY THIS EXISTS
 '   A surface that cannot be addressed or read must be named, never passed in
-'   silence, and never counted as a failure of the code under test (#28). On a
-'   host whose Ribbon cannot be read at all, the scenario cannot begin and
-'   records the same outcome of its own accord.
+'   silence, and never counted as a failure of the code under test (#28). The
+'   Ribbon is the one surface the manifest exempts, and only when it is
+'   unverifiable for every observation of a scenario; a Ribbon that was readable
+'   and then is not is TST_AchRibbonMidSequenceSeam.
 '
 ' INPUTS
 '   None
@@ -1733,25 +1766,24 @@ Private Sub TST_AchUnverifiableSeam()
 '   Nothing
 '
 ' BEHAVIOR
-'   - Begins a Ribbon scenario. When it cannot begin, records the begin failure
-'     and expects not-verifiable as the first outcome.
-'   - Otherwise arms the readback fault, makes one step that owes a change,
-'     restores, and expects not-verifiable then a restoration that writes.
+'   - Arms the readback fault and begins a Ribbon scenario, which reads the
+'     entry state as a failure and so cannot begin.
+'   - Records the begin failure, which is the only observation of the scenario,
+'     and expects not-verifiable.
 '   - Asserts that no failure was recorded and that the composed documents list
 '     the Ribbon as UNVERIFIABLE and as achievedUnverifiable.
 '
 ' ERROR POLICY
-'   - Raises on assertion failure.
+'   - Raises on assertion failure, or when the scenario begins.
 '
 ' DEPENDENCIES
 '   - TST_AchBegin
-'   - TST_AchStep
-'   - TST_AchRestore
 '   - TST_AchRecordBeginFailure
 '   - TST_AchCompose
 '
 ' NOTES
-'   None
+'   On a host whose Ribbon cannot be addressed at all, the scenario cannot begin
+'   either, and records the same outcome of its own accord.
 '
 ' CALLED FROM
 '   - TST_Case_AchievedOutcomesAreDistinct
@@ -1769,43 +1801,33 @@ Private Sub TST_AchUnverifiableSeam()
     Const PROC_NAME As String = "M_EXCEL_UI_TEST_ACHIEVED.TST_AchUnverifiableSeam"
 
     Dim Why         As String   'Why the scenario could not begin
-    Dim Requested   As Boolean  'State asked for by the step
     Dim Passed      As Boolean  'Composed verdict
     Dim Verdict     As String   'Composed RESULT line
     Dim JsonText    As String   'Composed JSON evidence
     Dim ReportText  As String   'Composed text evidence
 
 '------------------------------------------------------------------------------
-' BEGIN
+' BEGIN WITH AN UNREADABLE RIBBON
 '------------------------------------------------------------------------------
         TST_AssertBooleanEquals True, TST_CertResetRecord(m_AchLocal), _
             PROC_NAME & ".Reset"
 
+        m_AchFault = TEST_ACH_FAULT_READBACK
+
         If TST_AchBegin("Ribbon", "ActiveWindow", TEST_ACH_SURFACE_RIBBON, _
             vbNullString, UI_TargetAllExcelWindows, Why) Then
 
-        'The Ribbon can be addressed: read it back as a failure after a write
-            Requested = Not m_AchEntry(1)
-
-            m_AchFault = TEST_ACH_FAULT_READBACK
-
-            TST_AchStep m_AchLocal, IIf(Requested, "show", "hide"), Requested
-
-            TST_AchRestore m_AchLocal
-
-            TST_AssertTrue _
-                (TST_AchOutcomeAt(m_AchLocal, 2) = TEST_ACH_OUTCOME_WRITE), _
-                PROC_NAME & ".TheRibbonIsBack"
-
-        Else
-
-        'The Ribbon cannot be addressed or read: say so
-            TST_AssertBooleanEquals True, m_AchUnverifiable, _
-                PROC_NAME & ".BeginFailureIsUnverifiable"
-
-            TST_AchRecordBeginFailure m_AchLocal, Why
-
+            Err.Raise TEST_ACH_ERR_BASE + TEST_ACH_ERR_SEAM, PROC_NAME, _
+                "the Ribbon scenario began although its entry state was unreadable"
         End If
+
+    'The fault stays armed when the Ribbon could not be addressed at all
+        m_AchFault = TEST_ACH_FAULT_NONE
+
+        TST_AssertBooleanEquals True, m_AchUnverifiable, _
+            PROC_NAME & ".BeginFailureIsUnverifiable"
+
+        TST_AchRecordBeginFailure m_AchLocal, Why
 
 '------------------------------------------------------------------------------
 ' ASSERT
@@ -1822,7 +1844,7 @@ Private Sub TST_AchUnverifiableSeam()
         TST_AssertBooleanEquals True, Passed, PROC_NAME & ".Verdict.Passed"
 
         TST_AssertTrue _
-            (InStr(1, ReportText, vbNewLine & "  UNVERIFIABLE  Ribbon.ActiveWindow.", _
+            (InStr(1, ReportText, vbNewLine & "  UNVERIFIABLE  Ribbon.ActiveWindow.entry", _
                 vbBinaryCompare) > 0), _
             PROC_NAME & ".Report.ListsTheSurface"
 
@@ -1834,6 +1856,156 @@ Private Sub TST_AchUnverifiableSeam()
             PROC_NAME & ".Json.ListsTheSurface"
 
 End Sub
+
+Private Function TST_AchRibbonMidSequenceSeam() _
+    As String
+'
+'------------------------------------------------------------------------------
+'                    RUN A RIBBON THAT STOPS BEING READABLE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Make the Ribbon unreadable after the scenario began, after a write and after
+'   the restoration, and assert that each is a failure and not an exemption.
+'
+' WHY THIS EXISTS
+'   The manifest exempts a Ribbon that is unverifiable for every observation,
+'   and tools/check_excel_evidence.py rejects a mixed result. A live verdict that
+'   passed a Ribbon that was readable and then was not would pass a run whose
+'   bundle the validator rejects (#28).
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   String
+'     The failed observations of the scenario, as text; empty when the Ribbon
+'     cannot be read from the start, which is the exempt case and has nothing to
+'     cut short.
+'
+' BEHAVIOR
+'   - Begins a Ribbon scenario. When it cannot begin it records the begin
+'     failure, expects not-verifiable and returns an empty text.
+'   - Otherwise fails the readback after a write (readback-failed), restores,
+'     makes a normal step, fails the readback after the restoration
+'     (restore-failed) and restores again, and asserts that no observation is
+'     not-verifiable and that the composed verdict fails.
+'
+' ERROR POLICY
+'   - Raises on assertion failure.
+'
+' DEPENDENCIES
+'   - TST_AchBegin
+'   - TST_AchStep
+'   - TST_AchRestore
+'   - TST_AchRecordBeginFailure
+'   - TST_AchCompose
+'   - TST_AchOutcomeAt
+'
+' NOTES
+'   None
+'
+' CALLED FROM
+'   - TST_Case_AchievedOutcomesAreDistinct
+'
+' HISTORY
+'   2026-11-28 - Added (#28).
+'
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_ACHIEVED.TST_AchRibbonMidSequenceSeam"
+
+    Dim Why         As String   'Why the scenario could not begin
+    Dim Position    As Long     'Cursor over the observations
+    Dim Requested   As Boolean  'State asked for by a step
+    Dim Passed      As Boolean  'Composed verdict
+    Dim Verdict     As String   'Composed RESULT line
+    Dim JsonText    As String   'Composed JSON evidence
+    Dim ReportText  As String   'Composed text evidence
+
+'------------------------------------------------------------------------------
+' BEGIN
+'------------------------------------------------------------------------------
+        TST_AssertBooleanEquals True, TST_CertResetRecord(m_AchLocal), _
+            PROC_NAME & ".Reset"
+
+        TST_AchRibbonMidSequenceSeam = vbNullString
+
+        If Not TST_AchBegin("Ribbon", "ActiveWindow", TEST_ACH_SURFACE_RIBBON, _
+            vbNullString, UI_TargetAllExcelWindows, Why) Then
+
+        'Unreadable from the start is the exemption itself
+            TST_AssertBooleanEquals True, m_AchUnverifiable, _
+                PROC_NAME & ".BeginFailureIsUnverifiable"
+
+            TST_AchRecordBeginFailure m_AchLocal, Why
+
+            TST_AssertTrue _
+                (TST_AchOutcomeAt(m_AchLocal, 1) = TEST_ACH_OUTCOME_UNVERIFIABLE), _
+                PROC_NAME & ".Unreadable.Outcome"
+
+        Else
+
+        'Readable on entry, unreadable after a write
+            Requested = Not m_AchEntry(1)
+
+            m_AchFault = TEST_ACH_FAULT_READBACK
+
+            TST_AchStep m_AchLocal, IIf(Requested, "show", "hide"), Requested
+
+            TST_AchRestore m_AchLocal
+
+        'Readable on entry, unreadable after the restoration
+            Requested = Not m_AchEntry(1)
+
+            TST_AchStep m_AchLocal, IIf(Requested, "show", "hide"), Requested
+
+            m_AchFault = TEST_ACH_FAULT_RESTORE_READ
+
+            TST_AchRestore m_AchLocal
+
+            TST_AchRestore m_AchLocal
+
+            TST_AssertTrue (m_AchFault = TEST_ACH_FAULT_NONE), _
+                PROC_NAME & ".TheFaultsWereUsed"
+
+            TST_AssertTrue _
+                (TST_AchOutcomeAt(m_AchLocal, 1) = TEST_ACH_OUTCOME_READ_FAILED), _
+                PROC_NAME & ".AfterTheWrite"
+
+            TST_AssertTrue _
+                (TST_AchOutcomeAt(m_AchLocal, 4) = TEST_ACH_OUTCOME_RESTORE_FAILED), _
+                PROC_NAME & ".AfterTheRestoration"
+
+        'Nothing was exempted halfway through the scenario
+            For Position = 1 To 5
+
+                TST_AssertTrue _
+                    (TST_AchOutcomeAt(m_AchLocal, Position) <> TEST_ACH_OUTCOME_UNVERIFIABLE), _
+                    PROC_NAME & ".NotExempt." & CStr(Position)
+
+            Next Position
+
+            TST_AssertTrue (m_AchFailCount = 2), PROC_NAME & ".TwoFailures"
+
+            TST_AchCompose Passed, Verdict, JsonText, ReportText
+
+            TST_AssertBooleanEquals False, Passed, PROC_NAME & ".Verdict.NotPassed"
+
+            TST_AssertTrue _
+                (InStr(1, ReportText, vbNewLine & "  UNVERIFIABLE  ", _
+                    vbBinaryCompare) = 0), _
+                PROC_NAME & ".Report.ListsNoExemption"
+
+            TST_AchRibbonMidSequenceSeam = m_AchFailText
+
+        End If
+
+End Function
 
 Private Sub TST_AchCompose( _
     ByRef Passed As Boolean, _
@@ -2663,6 +2835,7 @@ Private Function TST_AchBegin( _
     Dim Probe       As Boolean  'Value read while probing a window
     Dim AnyTarget   As Boolean  'TRUE when the scope holds a readable window
     Dim Captionless As Boolean  'TRUE when the entry frame has no complete caption
+    Dim EntryReadOK As Boolean  'TRUE when the entry state was read
     Dim Detail      As String   'Reason from a helper
 
 '------------------------------------------------------------------------------
@@ -2876,7 +3049,19 @@ Private Function TST_AchBegin( _
 '------------------------------------------------------------------------------
         ReDim m_AchEntry(1 To m_AchCount)
 
-        If Not TST_AchRead(m_AchEntry, Detail) Then
+    'The readback fault reaches the Ribbon here, so that it is unreadable from
+    'the start: the one case in which the Ribbon is exempt
+        If m_AchFault = TEST_ACH_FAULT_READBACK And _
+            Surface = TEST_ACH_SURFACE_RIBBON Then
+
+            m_AchFault = TEST_ACH_FAULT_NONE
+            EntryReadOK = False
+            Detail = "injected readback failure"
+        Else
+            EntryReadOK = TST_AchRead(m_AchEntry, Detail)
+        End If
+
+        If Not EntryReadOK Then
             m_AchUnverifiable = (Surface = TEST_ACH_SURFACE_RIBBON)
             Why = "the state could not be read before the first write | " & Detail
             GoTo SafeExit
@@ -2936,7 +3121,8 @@ Private Sub TST_AchStep( _
 ' BEHAVIOR
 '   - Takes the armed fault, when it applies to a step.
 '   - Reads the state before the write. When that fails the outcome is
-'     readback-failed, or not-verifiable for the Ribbon.
+'     readback-failed: the surface was readable when the scenario began, so
+'     there is no exemption mid-sequence, the Ribbon included.
 '   - Works out the state each entry must read back at, and whether any entry
 '     owes a change.
 '   - Writes through TST_AchWrite: the requested visibility, nothing for an
@@ -2944,7 +3130,7 @@ Private Sub TST_AchStep( _
 '   - Settles once when the setter reported success, then reads back, or fails
 '     the read for a readback fault.
 '   - Records write-failed when the setter reported a failure; otherwise
-'     readback-failed (not-verifiable for the Ribbon) when the read failed;
+'     readback-failed when the read failed;
 '     otherwise state-mismatch when any entry differs from what it owes;
 '     otherwise verified-write when a change was owed and verified-no-op when
 '     none was.
@@ -3087,12 +3273,9 @@ Private Sub TST_AchStep( _
 
             ElseIf Not ReadOK Then
 
-                If m_AchSurface = TEST_ACH_SURFACE_RIBBON Then
-                    Outcome = TEST_ACH_OUTCOME_UNVERIFIABLE
-                Else
-                    Outcome = TEST_ACH_OUTCOME_READ_FAILED
-                End If
-
+            'The surface was readable when the scenario began, so this is a
+            'failure of the readback, whatever the surface
+                Outcome = TEST_ACH_OUTCOME_READ_FAILED
                 Reason = "the state could not be read after the write | " & Why
 
             Else
@@ -3113,13 +3296,9 @@ Private Sub TST_AchStep( _
 
         Else
 
-        'Nothing can be said about a write whose entry state is not known
-            If m_AchSurface = TEST_ACH_SURFACE_RIBBON Then
-                Outcome = TEST_ACH_OUTCOME_UNVERIFIABLE
-            Else
-                Outcome = TEST_ACH_OUTCOME_READ_FAILED
-            End If
-
+        'Nothing can be said about a write whose entry state is not known, and
+        'the surface was readable when the scenario began
+            Outcome = TEST_ACH_OUTCOME_READ_FAILED
             Reason = "the state could not be read before the write | " & Why
 
         End If
@@ -3173,9 +3352,10 @@ Private Sub TST_AchRestore( _
 '   Nothing
 '
 ' BEHAVIOR
-'   - Takes the armed fault, when it is the restoration fault.
-'   - Reads the state. When it cannot be read the outcome is restore-failed, or
-'     not-verifiable for the Ribbon.
+'   - Takes the armed fault, when it is a restoration fault: the restoring write
+'     is not made, or the readback after it fails.
+'   - Reads the state. When it cannot be read the outcome is restore-failed,
+'     the Ribbon included: it was readable when the scenario began.
 '   - When the state differs from the entry state, or the owned frame bits do,
 '     writes the entry state back unless the restoration fault is armed, which
 '     makes no write.
@@ -3221,6 +3401,7 @@ Private Sub TST_AchRestore( _
     Dim Final()     As Boolean  'State after the restoration
     Dim Fault       As Long     'Fault taken for this restoration
     Dim Needed      As Boolean  'TRUE when the host differs from the entry state
+    Dim FinalOK     As Boolean  'TRUE when the readback after the restoration succeeded
     Dim WriteOK     As Boolean  'TRUE when every restoring write succeeded
     Dim Why         As String   'Why a read failed
     Dim WriteText   As String   'Why a restoring write failed
@@ -3258,7 +3439,14 @@ Private Sub TST_AchRestore( _
 
             TST_AchSettle m_AchEntry
 
-            If TST_AchRead(Final, Why) Then
+            If Fault = TEST_ACH_FAULT_RESTORE_READ Then
+                FinalOK = False
+                Why = "injected readback failure"
+            Else
+                FinalOK = TST_AchRead(Final, Why)
+            End If
+
+            If FinalOK Then
 
                 ObsText = TST_AchText(Final, True)
 
@@ -3282,24 +3470,16 @@ Private Sub TST_AchRestore( _
 
             Else
 
-                If m_AchSurface = TEST_ACH_SURFACE_RIBBON Then
-                    Outcome = TEST_ACH_OUTCOME_UNVERIFIABLE
-                Else
-                    Outcome = TEST_ACH_OUTCOME_RESTORE_FAILED
-                End If
-
+            'A surface that was readable and no longer is cannot be confirmed
+            'restored, and the Ribbon is no exception
+                Outcome = TEST_ACH_OUTCOME_RESTORE_FAILED
                 Reason = "the entry state could not be read after it was put back | " & Why
 
             End If
 
         Else
 
-            If m_AchSurface = TEST_ACH_SURFACE_RIBBON Then
-                Outcome = TEST_ACH_OUTCOME_UNVERIFIABLE
-            Else
-                Outcome = TEST_ACH_OUTCOME_RESTORE_FAILED
-            End If
-
+            Outcome = TEST_ACH_OUTCOME_RESTORE_FAILED
             Reason = "the entry state could not be read to put it back | " & Why
 
         End If
@@ -3838,9 +4018,16 @@ Private Function TST_AchTakeFault( _
 '------------------------------------------------------------------------------
         TST_AchTakeFault = TEST_ACH_FAULT_NONE
 
-        If ForRestore = (m_AchFault = TEST_ACH_FAULT_RESTORE) Then
-            TST_AchTakeFault = m_AchFault
-            m_AchFault = TEST_ACH_FAULT_NONE
+    'A fault of the beginning of a scenario is taken by TST_AchBegin, not here
+        If m_AchFault <> TEST_ACH_FAULT_NO_CAPTION Then
+
+            If ForRestore = ((m_AchFault = TEST_ACH_FAULT_RESTORE) Or _
+                (m_AchFault = TEST_ACH_FAULT_RESTORE_READ)) Then
+
+                TST_AchTakeFault = m_AchFault
+                m_AchFault = TEST_ACH_FAULT_NONE
+            End If
+
         End If
 
 End Function
@@ -4294,6 +4481,82 @@ Private Function TST_AchDifferences( _
 
 End Function
 
+Private Function TST_AchIsAllowed( _
+    ByVal Element As String, _
+    ByVal Operation As String, _
+    ByVal Outcome As String) _
+    As Boolean
+'
+'------------------------------------------------------------------------------
+'                 TELL WHETHER THE CONTRACT ALLOWS AN OUTCOME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Report whether an outcome may stand at an element and an operation without
+'   failing the run.
+'
+' WHY THIS EXISTS
+'   The live verdict and tools/check_excel_evidence.py must accept exactly the
+'   same observations. A verified outcome stands at a hide, a show and a
+'   restoration. not-verifiable stands only where the manifest exempts a surface
+'   (the Ribbon, and windows that could not be read on entry), and only at its
+'   entry, so a Ribbon that was readable and then is not, or a title bar that
+'   cannot be verified, is a failure and not an exemption (#28).
+'
+' INPUTS
+'   Element / Operation / Outcome
+'     What the observation names.
+'
+' RETURNS
+'   Boolean
+'     TRUE  => the outcome is a failed one, which fails the run on its own, or a
+'              verified outcome at a hide, show or restore, or a not-verifiable
+'              outcome at an element and operation the contract exempts.
+'     FALSE => any other outcome, which the caller turns into a failure.
+'
+' BEHAVIOR
+'   - Classifies the outcome with TST_CertAchievedClass and looks the operation
+'     or the element and operation up in the constants of the module.
+'
+' ERROR POLICY
+'   - Does not raise.
+'
+' DEPENDENCIES
+'   - TST_CertAchievedClass
+'
+' NOTES
+'   None
+'
+' CALLED FROM
+'   - TST_AchRecordObservation
+'
+' HISTORY
+'   2026-11-28 - Added (#28).
+'
+' UPDATED
+'   2026-11-28
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' CLASSIFY
+'------------------------------------------------------------------------------
+        Select Case TST_CertAchievedClass(Outcome)
+
+            Case TEST_ACH_CLASS_VERIFIED
+                TST_AchIsAllowed = (InStr(1, TEST_ACH_VERIFIED_OPERATIONS, _
+                    "|" & Operation & "|", vbBinaryCompare) > 0)
+
+            Case TEST_ACH_CLASS_UNVERIFIABLE
+                TST_AchIsAllowed = (InStr(1, TEST_ACH_UNVERIFIABLE_ALLOWED, _
+                    "|" & Element & "." & Operation & "|", vbBinaryCompare) > 0)
+
+            Case Else
+            'A failed outcome fails the run by itself
+                TST_AchIsAllowed = True
+
+        End Select
+
+End Function
+
 Private Sub TST_AchRecordObservation( _
     ByRef Rec As tCertRecord, _
     ByVal Operation As String, _
@@ -4336,11 +4599,15 @@ Private Sub TST_AchRecordObservation( _
 ' DEPENDENCIES
 '   - TST_CertAddAchieved
 '   - TST_CertAchievedClass
+'   - TST_AchIsAllowed
 '   - TST_CertAppendDetail
 '   - TST_Log
 '
 ' NOTES
-'   None
+'   An outcome the contract does not allow at this element and operation is
+'   recorded as readback-failed, or restore-failed for a restoration, with the
+'   reason it names, so that no observation can pass the live verdict that the
+'   evidence validator would reject.
 '
 ' CALLED FROM
 '   - TST_AchRunOn
@@ -4367,6 +4634,21 @@ Private Sub TST_AchRecordObservation( _
 '------------------------------------------------------------------------------
 ' RECORD
 '------------------------------------------------------------------------------
+    'An outcome the contract does not allow here is a failure, not an exemption:
+    'what the live verdict passes, the evidence validator must accept
+        If Not TST_AchIsAllowed(m_AchElement, Operation, Outcome) Then
+
+            Reason = "the outcome " & Outcome & " is not allowed for " & _
+                m_AchElement & " at " & Operation & " | " & Reason
+
+            If Operation = "restore" Then
+                Outcome = TEST_ACH_OUTCOME_RESTORE_FAILED
+            Else
+                Outcome = TEST_ACH_OUTCOME_READ_FAILED
+            End If
+
+        End If
+
         Code = m_AchElement & "." & m_AchScope & "." & Operation
 
         Text = Outcome & ": requested=" & RequestedText & _
