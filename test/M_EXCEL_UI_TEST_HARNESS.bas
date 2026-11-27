@@ -19,6 +19,37 @@ Option Private Module
 '   configuration constants and error-number bases, and the module-level
 '   state that more than one suite reads or writes
 '
+' INPUTS
+'   None at module level
+'
+' RETURNS
+'   Nothing at module level
+'
+' BEHAVIOR
+'   - Declares the test configuration constants, the error-number bases and
+'     the WinAPI declarations of the title-bar style helpers.
+'   - Holds the module-level state: the certification record and its faults,
+'     the post-capture fault and the log sink.
+'   - Runs no code when the module loads; the suites call its Public members.
+'
+' ERROR POLICY
+'   - Assertion helpers raise errors in the TEST_ERR_BASE,
+'     TEST_SNAPSHOT_ID_ERR_BASE and TEST_TITLEBAR_SDI_ERR_BASE ranges, with the
+'     assertion name as the source.
+'   - The reading, writing, restoring and recording helpers do not raise. They
+'     report a failure through a Boolean result, a message, a structured
+'     finding or the record's RecordFailed flag.
+'
+' DEPENDENCIES
+'   - Excel object model: Application, Window and CommandBars
+'   - user32: GetWindowLongPtr / GetWindowLong, SetWindowLongPtr /
+'     SetWindowLong and SetWindowPos; kernel32: SetLastError
+'   - M_EXCEL_UI: UI_SetExcelUI_WithResult, UI_HasExcelUIStateSnapshot and the
+'     UIVisibility enumeration
+'
+' NOTES
+'   None
+'
 ' PUBLIC SURFACE
 '   None of its own. Members that a suite module calls are Public so that the
 '   other modules of the same VBA project can reach them; Option Private
@@ -413,7 +444,7 @@ Public Sub TST_InjectPostCapture(ByVal FaultKind As Long)
 
 '
 '------------------------------------------------------------------------------
-'                           TST INJECT POST CAPTURE
+'                            ARM POST CAPTURE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot post-capture fault for the next runner that reaches its
@@ -432,8 +463,17 @@ Public Sub TST_InjectPostCapture(ByVal FaultKind As Long)
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Stores FaultKind in the module-level m_InjectFault.
+'
 ' ERROR POLICY
 '   - Cannot raise
+'
+' DEPENDENCIES
+'   None beyond the module-level m_InjectFault.
+'
+' NOTES
+'   The fault is one-shot: TST_TakePostCaptureFault returns it and disarms it.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunOwnershipCleanupChecks
@@ -450,7 +490,7 @@ Public Function TST_TakePostCaptureFault() As Long
 
 '
 '------------------------------------------------------------------------------
-'                         TST TAKE POST CAPTURE FAULT
+'                           TAKE POST CAPTURE FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the armed fault and disarm it in the same step.
@@ -460,11 +500,24 @@ Public Function TST_TakePostCaptureFault() As Long
 '   read it and then failed, and every caller reads it immediately before
 '   failing on purpose.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   The armed fault kind, or TEST_FAULT_NONE
 '
+' BEHAVIOR
+'   - Returns the value of m_InjectFault.
+'   - Sets m_InjectFault back to TEST_FAULT_NONE.
+'
 ' ERROR POLICY
 '   - Cannot raise
+'
+' DEPENDENCIES
+'   None beyond the module-level m_InjectFault.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunCertificationSelfTest
@@ -484,7 +537,7 @@ Public Sub TST_CertInjectRecordFault( _
     ByVal BufferId As Long)
 '
 '------------------------------------------------------------------------------
-'                         TST CERT INJECT RECORD FAULT
+'                         ARM RECORD ALLOCATION FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot allocation failure for the next certification record
@@ -513,8 +566,17 @@ Public Sub TST_CertInjectRecordFault( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Stores FaultKind in m_CertRecordFault.
+'   - Stores BufferId in m_CertRecordFaultBuffer.
+'   - Validates neither value; TST_CertTakeRecordFault reads both.
+'
 ' ERROR POLICY
 '   - Cannot raise.
+'
+' DEPENDENCIES
+'   None beyond the module-level m_CertRecordFault and
+'   m_CertRecordFaultBuffer.
 '
 ' NOTES
 '   The fault is consumed only by an allocation it matches: a FIRST fault is
@@ -543,7 +605,7 @@ Private Function TST_CertTakeRecordFault( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT TAKE RECORD FAULT
+'                          TAKE MATCHING RECORD FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report whether the armed record fault matches this allocation, and disarm
@@ -565,8 +627,24 @@ Private Function TST_CertTakeRecordFault( _
 '   Boolean
 '     TRUE when the allocation must fail; the fault is then disarmed.
 '
+' BEHAVIOR
+'   - Matches by allocation shape: a FIRST fault matches when Allocated is
+'     FALSE, a GROWTH fault when it is TRUE. Any other armed value, including
+'     none, does not match.
+'   - When the fault matches and names a buffer other than
+'     TEST_CERT_BUFFER_ANY, it also requires BufferId to equal that buffer.
+'   - When the fault fires, disarms both fault fields.
+'   - Returns whether the fault fired.
+'
 ' ERROR POLICY
 '   - Cannot raise.
+'
+' DEPENDENCIES
+'   None beyond the module-level m_CertRecordFault and
+'   m_CertRecordFaultBuffer.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertReserveBuffer
@@ -627,7 +705,7 @@ Public Sub TST_CertInjectRunFault( _
     ByVal FaultKind As Long)
 '
 '------------------------------------------------------------------------------
-'                          TST CERT INJECT RUN FAULT
+'                         ARM CERTIFICATION RUN FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Arm a one-shot fault for the next call of
@@ -650,8 +728,15 @@ Public Sub TST_CertInjectRunFault( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Stores FaultKind in the module-level m_CertRunFault.
+'
 ' ERROR POLICY
 '   - Cannot raise.
+'
+' DEPENDENCIES
+'   None beyond the module-level m_CertRunFault, which TST_CertTakeRunFault
+'   reads.
 '
 ' NOTES
 '   The fault is consumed by the next certification call whether or not it
@@ -676,7 +761,7 @@ Public Function TST_CertTakeRunFault() As Long
 
 '
 '------------------------------------------------------------------------------
-'                           TST CERT TAKE RUN FAULT
+'                         TAKE CERTIFICATION RUN FAULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the armed run fault and disarm it in the same step.
@@ -685,11 +770,24 @@ Public Function TST_CertTakeRunFault() As Long
 '   Reading and clearing separately would leave the fault armed on a path that
 '   read it and then failed, and the only reader acts on it at once.
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   The armed TEST_CERT_RUN_FAULT_* value, or TEST_CERT_RUN_FAULT_NONE.
 '
+' BEHAVIOR
+'   - Returns the value of m_CertRunFault.
+'   - Sets m_CertRunFault back to TEST_CERT_RUN_FAULT_NONE.
+'
 ' ERROR POLICY
 '   - Cannot raise.
+'
+' DEPENDENCIES
+'   None beyond the module-level m_CertRunFault.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -718,7 +816,7 @@ Public Sub TST_CertResetCounters()
 
 '
 '------------------------------------------------------------------------------
-'                           TST CERT RESET COUNTERS
+'                          RESET CERTIFICATION STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Clear the certification record, the leak record and the record fault
@@ -733,6 +831,9 @@ Public Sub TST_CertResetCounters()
 '   A run that follows a recording failure must also start clean: the fatal
 '   flag of the earlier run is cleared, and a record fault left armed is
 '   disarmed, so neither can decide the next verdict (#50).
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   Nothing
@@ -749,6 +850,10 @@ Public Sub TST_CertResetCounters()
 '
 ' DEPENDENCIES
 '   - TST_CertResetRecord
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body, so a failing step
+'   does not stop the steps after it.
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -787,7 +892,7 @@ Public Function TST_CertResetRecord( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT RESET RECORD
+'                          EMPTY CERTIFICATION RECORD
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Empty one certification record and verify that every buffer is released.
@@ -822,6 +927,9 @@ Public Function TST_CertResetRecord( _
 ' DEPENDENCIES
 '   - TST_CertBufferCapacity
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertResetCounters
@@ -899,7 +1007,7 @@ Public Sub TST_CertRecordSkip( _
     ByVal Reason As String)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT RECORD SKIP
+'                             RECORD SKIPPED CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Log a skipped case and, during a certification run, count it.
@@ -923,6 +1031,13 @@ Public Sub TST_CertRecordSkip( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Logs the skip through TST_Log under the tag SKIP, whether or not a
+'     certification run is active.
+'   - While m_CertActive is TRUE, stores a TEST_CERT_ENTRY_SKIP entry named
+'     CallerProc, not passed, with Reason as its detail, through
+'     TST_CertRecordEntry. When that returns FALSE it logs a RECORD FAIL line.
+'
 ' ERROR POLICY
 '   - Does not raise. A skip that cannot be stored sets
 '     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE; that flag,
@@ -930,6 +1045,9 @@ Public Sub TST_CertRecordSkip( _
 '
 ' DEPENDENCIES
 '   - TST_CertRecordEntry
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RunRegressionPack
@@ -973,7 +1091,7 @@ Public Sub TST_CertRecordUnit( _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT RECORD UNIT
+'                             RECORD UNIT OUTCOME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Append one unit outcome to the certification record.
@@ -996,6 +1114,12 @@ Public Sub TST_CertRecordUnit( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Stores a TEST_CERT_ENTRY_UNIT entry through TST_CertRecordEntry. When that
+'     returns FALSE it logs a RECORD FAIL line.
+'   - Logs the outcome through TST_Log as UNIT PASS or UNIT FAIL, with the
+'     detail appended when it is not empty.
+'
 ' ERROR POLICY
 '   - Does not raise. An outcome that cannot be stored sets
 '     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE; that flag,
@@ -1003,6 +1127,10 @@ Public Sub TST_CertRecordUnit( _
 '
 ' DEPENDENCIES
 '   - TST_CertRecordEntry
+'
+' NOTES
+'   Unlike TST_CertRecordSkip it does not test m_CertActive. On Error Resume
+'   Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertRunUnit
@@ -1041,7 +1169,7 @@ Private Function TST_CertRecordEntry( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT RECORD ENTRY
+'                          STORE CERTIFICATION ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one entry in the record of the certification run in progress, and
@@ -1125,7 +1253,7 @@ Public Function TST_CertAddFinding( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                             TST CERT ADD FINDING
+'                            STORE CLEANUP FINDING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one cleanup finding, a difference between the exit state and the
@@ -1153,11 +1281,18 @@ Public Function TST_CertAddFinding( _
 '     TRUE  => the finding is stored and counted.
 '     FALSE => it was not stored; Rec.RecordFailed is TRUE.
 '
+' BEHAVIOR
+'   - Stores a TEST_CERT_ENTRY_FINDING entry through TST_CertAddCleanupEntry
+'     and returns its result.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertAddCleanupEntry
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1182,7 +1317,7 @@ Public Function TST_CertAddUnverified( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                           TST CERT ADD UNVERIFIED
+'                           STORE UNVERIFIED SURFACE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store the name of one surface that cleanup could not compare, in a
@@ -1202,11 +1337,18 @@ Public Function TST_CertAddUnverified( _
 '     TRUE when the entry is stored; FALSE when it is not, in which case
 '     Rec.RecordFailed is TRUE.
 '
+' BEHAVIOR
+'   - Stores a TEST_CERT_ENTRY_UNVERIFIED entry through TST_CertAddCleanupEntry
+'     and returns its result.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertAddCleanupEntry
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1231,7 +1373,7 @@ Private Function TST_CertAddCleanupEntry( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT ADD CLEANUP ENTRY
+'                             STORE CLEANUP ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one finding or one unverified surface, and make sure that an entry
@@ -1252,12 +1394,23 @@ Private Function TST_CertAddCleanupEntry( _
 '   Boolean
 '     TRUE when the entry was stored and published.
 '
+' BEHAVIOR
+'   - Remembers Rec.RecordFailCount.
+'   - Replaces line breaks in Detail with spaces and stores the entry, named
+'     Code and not passed, through TST_CertTryAppendEntry.
+'   - When the entry was not stored and the failure count did not move, flags
+'     the record with TEST_CERT_RECFAIL_WRITE.
+'   - Returns whether the entry was stored.
+'
 ' ERROR POLICY
 '   - Does not raise. An error flags the record.
 '
 ' DEPENDENCIES
 '   - TST_CertTryAppendEntry
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertAddFinding
@@ -1333,7 +1486,7 @@ Public Sub TST_CertCountCheck( _
     ByRef Rec As tCertRecord)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT COUNT CHECK
+'                           COUNT CLEANUP COMPARISON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Count one comparison that cleanup completed.
@@ -1350,8 +1503,17 @@ Public Sub TST_CertCountCheck( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Adds one to Rec.CheckCount while it is below 2147483647.
+'
 ' ERROR POLICY
 '   - Does not raise. The count saturates.
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1375,7 +1537,7 @@ Public Function TST_CertEntryCodes( _
     As String
 '
 '------------------------------------------------------------------------------
-'                             TST CERT ENTRY CODES
+'                               LIST ENTRY CODES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   List the identifiers of the findings or unverified surfaces of a record, in
@@ -1398,11 +1560,20 @@ Public Function TST_CertEntryCodes( _
 '     "|code1|code2|" in recording order; "|" when there is none. When the
 '     record cannot be read, "|UNREADABLE|".
 '
+' BEHAVIOR
+'   - Returns "|UNREADABLE|" when TST_CertRecordIsConsistent rejects the
+'     record.
+'   - Otherwise starts from "|" and, for each entry of the requested kind in
+'     recording order, appends its name and a closing "|".
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertRecordIsConsistent
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1472,7 +1643,7 @@ Public Function TST_CertEntrySummary( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT ENTRY SUMMARY
+'                          JOIN ENTRIES INTO ONE LINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Join the findings or unverified surfaces of a record into one line of
@@ -1494,12 +1665,21 @@ Public Function TST_CertEntrySummary( _
 '     The items joined by " | "; empty when there is none. When the record
 '     cannot be read, "the record could not be read".
 '
+' BEHAVIOR
+'   - Returns "the record could not be read" when TST_CertRecordIsConsistent
+'     rejects the record.
+'   - Otherwise, for each entry of the requested kind in recording order,
+'     appends "name: detail" to the summary through TST_CertAppendDetail.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertRecordIsConsistent
 '   - TST_CertAppendDetail
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RecordRestoreFailure
@@ -1566,7 +1746,7 @@ Public Sub TST_CertCaseStart( _
     ByVal CaseId As String)
 '
 '------------------------------------------------------------------------------
-'                             TST CERT CASE START
+'                              RECORD CASE START
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record that one mandatory case started, under its stable identifier.
@@ -1584,6 +1764,12 @@ Public Sub TST_CertCaseStart( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - While m_CertActive is TRUE, stores a TEST_CERT_ENTRY_CASE_START entry
+'     named CaseId, not passed and with no detail, through
+'     TST_CertRecordEntry. When that returns FALSE it logs a RECORD FAIL line.
+'   - Outside a certification run it does nothing.
+'
 ' ERROR POLICY
 '   - Does not raise. A start that cannot be stored sets
 '     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE.
@@ -1592,6 +1778,9 @@ Public Sub TST_CertCaseStart( _
 '
 ' DEPENDENCIES
 '   - TST_CertRecordEntry
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertRunCase
@@ -1629,7 +1818,7 @@ Public Sub TST_CertCaseEnd( _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                              TST CERT CASE END
+'                              RECORD CASE STATUS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Record the one terminal status of a mandatory case, under its stable
@@ -1654,6 +1843,15 @@ Public Sub TST_CertCaseEnd( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - While m_CertActive is TRUE, replaces line breaks in Detail with spaces.
+'   - Stores a TEST_CERT_ENTRY_CASE_END entry named CaseId, with Passed and
+'     the cleaned detail, through TST_CertRecordEntry. When that returns FALSE
+'     it logs a RECORD FAIL line.
+'   - Logs CASE PASS or CASE FAIL through TST_Log, with the detail appended
+'     when it is not empty.
+'   - Outside a certification run it does nothing.
+'
 ' ERROR POLICY
 '   - Does not raise. A status that cannot be stored sets
 '     m_CertRecord.RecordFailed, which forces FAIL | INCOMPLETE.
@@ -1661,6 +1859,9 @@ Public Sub TST_CertCaseEnd( _
 '
 ' DEPENDENCIES
 '   - TST_CertRecordEntry
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertRunCase
@@ -1712,7 +1913,7 @@ Public Function TST_CertCarryEntries( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT CARRY ENTRIES
+'                        CARRY ENTRIES BETWEEN RECORDS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Copy the cleanup findings, and optionally the unverified surfaces and the
@@ -1745,6 +1946,20 @@ Public Function TST_CertCarryEntries( _
 '     TRUE  => every entry was stored in Target.
 '     FALSE => Target is flagged as a recording failure.
 '
+' BEHAVIOR
+'   - Flags Target with TEST_CERT_RECFAIL_INVARIANT and returns FALSE when
+'     Source fails TST_CertRecordIsConsistent.
+'   - When Source.RecordFailed is TRUE, flags Target with the failure stage and
+'     error number of Source and makes the result FALSE; copying then
+'     continues.
+'   - For each entry of Source in order, stores each finding in Target through
+'     TST_CertAddFinding, with CodePrefix before its code. When
+'     IncludeUnverified is TRUE it also stores each unverified surface through
+'     TST_CertAddUnverified. Entries of any other kind are not carried.
+'   - When IncludeUnverified is TRUE, adds Source.CheckCount to
+'     Target.CheckCount unless the sum would pass the largest Long.
+'   - Returns FALSE if any entry could not be stored.
+'
 ' ERROR POLICY
 '   - Does not raise. A Source that cannot be read, or that was itself flagged,
 '     flags Target.
@@ -1754,6 +1969,9 @@ Public Function TST_CertCarryEntries( _
 '   - TST_CertAddFinding
 '   - TST_CertAddUnverified
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -1871,7 +2089,7 @@ Public Function TST_CertAddExpected( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                            TST CERT ADD EXPECTED
+'                             STORE EXPECTED CASE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one case the manifest expects, with its unit, in a certification
@@ -1895,11 +2113,18 @@ Public Function TST_CertAddExpected( _
 '     TRUE when the entry is stored; FALSE when it is not, in which case
 '     Rec.RecordFailed is TRUE.
 '
+' BEHAVIOR
+'   - Stores a TEST_CERT_ENTRY_EXPECTED entry named CaseId, with UnitName as
+'     its detail, through TST_CertAddCleanupEntry and returns its result.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertAddCleanupEntry
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - M_EXCEL_UI_TEST_CERTIFICATION
@@ -1921,7 +2146,7 @@ Public Function TST_CertEvaluateInventory( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST CERT EVALUATE INVENTORY
+'                            COMPARE CASE INVENTORY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compare the expected cases of a certification record with the cases that
@@ -1965,6 +2190,9 @@ Public Function TST_CertEvaluateInventory( _
 '   - TST_CertIsFirstCaseEntry
 '   - TST_CertNoteInventory
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -2112,7 +2340,7 @@ Private Sub TST_CertNoteInventory( _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                           TST CERT NOTE INVENTORY
+'                           STORE INVENTORY FINDING
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one inventory finding, named "<code>:<case>".
@@ -2154,7 +2382,7 @@ Private Function TST_CertCountEntries( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                            TST CERT COUNT ENTRIES
+'                        COUNT ENTRIES BY KIND AND NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Count the entries of one kind and one name among the first entries of a
@@ -2220,7 +2448,7 @@ Private Function TST_CertIsFirstCaseEntry( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST CERT IS FIRST CASE ENTRY
+'                            CHECK FIRST CASE ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report whether no earlier case start or case status has the name of the
@@ -2285,7 +2513,7 @@ Private Function TST_CertExpectedUnit( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT EXPECTED UNIT
+'                              FIND EXPECTED UNIT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the unit the manifest lists a case under.
@@ -2350,7 +2578,7 @@ Public Function TST_CertSummarize( _
     As String
 '
 '------------------------------------------------------------------------------
-'                              TST CERT SUMMARIZE
+'                          SUMMARIZE ENTRIES BY KIND
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Join the entries of one kind into one line of "name: detail" items, in
@@ -2381,12 +2609,25 @@ Public Function TST_CertSummarize( _
 '     "(+n more)" when items were left out; empty when there is none. When the
 '     record cannot be read, "the record could not be read".
 '
+' BEHAVIOR
+'   - Returns "the record could not be read" when TST_CertRecordIsConsistent
+'     rejects the record.
+'   - Walks the entries of the requested kind in recording order, skipping the
+'     ones that passed when FailedOnly is TRUE.
+'   - Names each remaining item as "name: detail", cut to 300 characters,
+'     through TST_CertAppendDetail, until MaxItems items are named, and counts
+'     the rest.
+'   - Appends "(+n more)" when items were left out.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_CertRecordIsConsistent
 '   - TST_CertAppendDetail
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -2479,7 +2720,7 @@ Private Function TST_CertBuildInventoryLists( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        TST CERT BUILD INVENTORY LISTS
+'                         LIST CASE INVENTORY SECTIONS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read the expected cases, the case starts and statuses and the inventory
@@ -2514,6 +2755,27 @@ Private Function TST_CertBuildInventoryLists( _
 '              counts disagree with the entries; a record whose buffers
 '              disagree was flagged by TST_CertBuildEntryLists already.
 '
+' BEHAVIOR
+'   - Empties the six outputs. When TST_CertRecordIsConsistent rejects the
+'     record it returns FALSE and leaves them empty, without flagging the
+'     record again.
+'   - Reads the entries once, in recording order. An expected entry adds an
+'     expectedCases member and an EXPECTED line. A case start opens a case row.
+'     A case status fills the latest started row of that case that has no
+'     status, or becomes a NO-START row of its own. An inventory entry adds an
+'     inventoryFindings member and an INVENTORY line. Unit, skip, finding and
+'     unverified entries are left to TST_CertBuildEntryLists, and any other
+'     kind stops the pass.
+'   - Checks that the entries read match the expected, start, status and
+'     inventory counts of the record.
+'   - When the counts match, writes one caseResults member and one CASE line
+'     per row, with the unit from TST_CertExpectedUnit and the status
+'     NO-RESULT for a row that has none, and returns TRUE.
+'   - On a mismatch, flags the record with TEST_CERT_RECFAIL_INVARIANT and
+'     empties every output.
+'   - An error flags the record with TEST_CERT_RECFAIL_EVIDENCE and empties
+'     every output.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
@@ -2522,6 +2784,9 @@ Private Function TST_CertBuildInventoryLists( _
 '   - TST_CertExpectedUnit
 '   - TST_CertJsonEscape
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -2787,7 +3052,7 @@ Public Function TST_CertTryAppendEntry( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT TRY APPEND ENTRY
+'                          APPEND CERTIFICATION ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one entry in a certification record and publish it only once it is
@@ -2852,6 +3117,9 @@ Public Function TST_CertTryAppendEntry( _
 '   - TST_CertRecordIsConsistent
 '   - TST_CertReserveBuffer
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertRecordEntry
@@ -2993,7 +3261,7 @@ Private Sub TST_CertReserveBuffer( _
     ByVal Needed As Long)
 '
 '------------------------------------------------------------------------------
-'                           TST CERT RESERVE BUFFER
+'                              GROW RECORD BUFFER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make one record buffer hold at least Needed 1-based elements.
@@ -3029,6 +3297,10 @@ Private Sub TST_CertReserveBuffer( _
 ' DEPENDENCIES
 '   - TST_CertBufferCapacity
 '   - TST_CertTakeRecordFault
+'
+' NOTES
+'   PROC_NAME is deliberately the bare procedure name, without the module
+'   prefix.
 '
 ' CALLED FROM
 '   - TST_CertTryAppendEntry
@@ -3100,7 +3372,7 @@ Private Function TST_CertBufferCapacity( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                           TST CERT BUFFER CAPACITY
+'                             READ BUFFER CAPACITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report how many 1-based elements one record buffer holds.
@@ -3123,8 +3395,22 @@ Private Function TST_CertBufferCapacity( _
 '     for a buffer that is not 1-based, an unknown buffer, or a read that
 '     failed for any other reason.
 '
+' BEHAVIOR
+'   - Starts from -1.
+'   - Reads LBound and UBound of the buffer that BufferId names; an unknown
+'     BufferId leaves the result at -1.
+'   - Returns the upper bound when the lower bound is 1, otherwise -1.
+'   - On error 9, an unallocated buffer, returns 0; on any other error it
+'     returns -1.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None beyond the buffers of the record.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertReserveBuffer
@@ -3219,7 +3505,7 @@ Private Sub TST_CertMarkRecordFailure( _
     ByVal ErrorNumber As Long)
 '
 '------------------------------------------------------------------------------
-'                         TST CERT MARK RECORD FAILURE
+'                             FLAG RECORD FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Flag a certification record as incomplete.
@@ -3287,7 +3573,7 @@ Public Function TST_CertRecordIsConsistent( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        TST CERT RECORD IS CONSISTENT
+'                           CHECK RECORD INVARIANTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Check the invariants of a certification record before anything indexes
@@ -3309,11 +3595,21 @@ Public Function TST_CertRecordIsConsistent( _
 '     EntryCount, and every buffer is either unallocated with EntryCount = 0
 '     or 1-based with an upper bound of at least EntryCount.
 '
+' BEHAVIOR
+'   - Checks that no count is negative and that the eight kind counts add up
+'     to EntryCount.
+'   - When they do, checks that every buffer holds at least EntryCount
+'     elements, through TST_CertBufferCapacity.
+'   - Returns the outcome of those checks, or FALSE when an error stops them.
+'
 ' ERROR POLICY
 '   - Does not raise. A check that cannot complete returns FALSE.
 '
 ' DEPENDENCIES
 '   - TST_CertBufferCapacity
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertTryAppendEntry
@@ -3413,7 +3709,7 @@ Public Sub TST_CertComposeEvidence( _
     ByRef ReportText As String)
 '
 '------------------------------------------------------------------------------
-'                          TST CERT COMPOSE EVIDENCE
+'                        COMPOSE CERTIFICATION EVIDENCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Derive the verdict of a certification record and compose its JSON and
@@ -3483,6 +3779,9 @@ Public Sub TST_CertComposeEvidence( _
 '   - TST_CertBuildTextReport
 '   - TST_CertMarkRecordFailure
 '
+' NOTES
+'   None
+'
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '   - TST_CertCheckRecordFault
@@ -3527,7 +3826,7 @@ Public Sub TST_CertComposeEvidence( _
     Dim FailNumber      As Long     'Error number of a failure
 
 '------------------------------------------------------------------------------
-' FAIL CLOSED
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Every output starts as a failure; only a complete pass below changes it
         UnitsFailed = 0
@@ -3684,7 +3983,7 @@ Private Function TST_CertBuildEntryLists( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT BUILD ENTRY LISTS
+'                        LIST UNIT AND CLEANUP SECTIONS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read every published entry once and compose the unit, skip, finding and
@@ -3718,6 +4017,22 @@ Private Function TST_CertBuildEntryLists( _
 '     FALSE => the record is flagged, every output is empty and
 '              UnitsFailed is 0.
 '
+' BEHAVIOR
+'   - Empties every output.
+'   - Checks the record through TST_CertRecordIsConsistent; nothing is indexed
+'     before that check passes.
+'   - Reads the entries once, in recording order. A unit adds a unitResults
+'     member and a PASS or FAIL line, and counts a failed unit. A skip adds a
+'     skipDetail member and a SKIP line. A finding adds a cleanupFindings
+'     member, a CLEANUP line and its detail to FindingSummary. An unverified
+'     entry adds a cleanupUnverified member and an UNVERIFIED line. The case
+'     inventory kinds are left to TST_CertBuildInventoryLists, and any other
+'     kind stops the pass.
+'   - Checks that the entries read match the unit, skip, finding and
+'     unverified counts of the record.
+'   - On a match returns TRUE and sets UnitsFailed. Otherwise flags the record
+'     with TEST_CERT_RECFAIL_INVARIANT and empties every output.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
@@ -3726,6 +4041,9 @@ Private Function TST_CertBuildEntryLists( _
 '   - TST_CertJsonEscape
 '   - TST_CertAppendDetail
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -3955,7 +4273,7 @@ Private Function TST_CertVerdictLine( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT VERDICT LINE
+'                             COMPOSE VERDICT LINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compose the RESULT line of a certification run.
@@ -4004,7 +4322,7 @@ Private Function TST_CertRecordingDetail( _
     As String
 '
 '------------------------------------------------------------------------------
-'                          TST CERT RECORDING DETAIL
+'                          DESCRIBE RECORDING FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name a certification-recording failure from the scalar fields of the
@@ -4025,8 +4343,21 @@ Private Function TST_CertRecordingDetail( _
 '     followed by " | error <n>" when the failure raised one. When the full
 '     text cannot be composed, the first three words alone.
 '
+' BEHAVIOR
+'   - Starts the text with "certification recording FAILED".
+'   - Maps Rec.RecordFailStage to a phrase; a stage with no phrase reads
+'     "stage <n>".
+'   - Appends " | failures=<count> | first: <phrase>", then " | error <n>"
+'     when Rec.RecordFailError is not 0.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None beyond the scalar fields of the record.
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -4107,7 +4438,7 @@ Public Function TST_CertAppendDetail( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT APPEND DETAIL
+'                             JOIN DIAGNOSTIC TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Join cleanup findings into one ordered diagnostic string.
@@ -4127,8 +4458,18 @@ Public Function TST_CertAppendDetail( _
 '   String
 '     The joined findings.
 '
+' BEHAVIOR
+'   - Returns NewDetail when ExistingDetail is empty.
+'   - Otherwise returns ExistingDetail, " | " and NewDetail.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
@@ -4177,7 +4518,7 @@ Public Function TST_CertBuildJsonEvidence( _
     As String
 '
 '------------------------------------------------------------------------------
-'                         TST CERT BUILD JSON EVIDENCE
+'                            COMPOSE JSON EVIDENCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compose the machine-readable certification result.
@@ -4225,6 +4566,16 @@ Public Function TST_CertBuildJsonEvidence( _
 '     "expectedCases" (every case the manifest lists), "caseResults" (every
 '     case that started, in order, with its one terminal status) and
 '     "inventoryFindings" (every difference between the two).
+'
+' BEHAVIOR
+'   - Takes the VBA generation and the Office bitness from conditional
+'     compilation.
+'   - Writes the environment members: component, schema, local timestamp, Excel
+'     version and build, operating system, bitness and VBA generation.
+'   - Writes the counters and verdict members, including the cleanup and case
+'     inventory arrays and the recording status.
+'   - Adds the unitResults and skipDetail arrays and returns the document as
+'     one line.
 '
 ' ERROR POLICY
 '   - Does not raise. A field that cannot be read is reported as unknown.
@@ -4342,7 +4693,7 @@ Public Function TST_CertJsonEscape( _
     As String
 '
 '------------------------------------------------------------------------------
-'                             TST CERT JSON ESCAPE
+'                               ESCAPE JSON TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Escape the characters that would otherwise make the evidence document
@@ -4362,8 +4713,18 @@ Public Function TST_CertJsonEscape( _
 '   String
 '     The escaped text, without surrounding quotes.
 '
+' BEHAVIOR
+'   - Escapes the backslash first, then the double quote.
+'   - Replaces CR LF, CR and LF with \n and a tab with \t.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertBuildJsonEvidence
@@ -4414,7 +4775,7 @@ Public Function TST_CertBuildTextReport( _
     As String
 '
 '------------------------------------------------------------------------------
-'                          TST CERT BUILD TEXT REPORT
+'                             COMPOSE TEXT REPORT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compose the human-readable certification summary.
@@ -4456,8 +4817,25 @@ Public Function TST_CertBuildTextReport( _
 '     CASES summary line, then an EXPECTED line per case the manifest lists, a
 '     CASE line per case that started, and an INVENTORY line per difference.
 '
+' BEHAVIOR
+'   - Writes the heading: the title, the Excel version and build, the
+'     operating system, the local timestamp, a rule of 60 hyphens and the
+'     verdict.
+'   - When Rec.RecordFailed is TRUE, adds a RECORDING line under the verdict.
+'   - Appends the unit, skip and finding lines, a CLEANUP line for
+'     CleanupDetail when it is not empty, then the unverified lines.
+'   - Appends the CASES summary line, then the expected, case and inventory
+'     lines, and returns the report.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None beyond the Excel Application members Version, Build and
+'   OperatingSystem.
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -4546,7 +4924,7 @@ Public Function TST_CertTryWriteEvidence( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST CERT TRY WRITE EVIDENCE
+'                             WRITE EVIDENCE FILE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write one evidence document to the temporary folder.
@@ -4573,8 +4951,21 @@ Public Function TST_CertTryWriteEvidence( _
 '   Boolean
 '     TRUE when the file was written.
 '
+' BEHAVIOR
+'   - Clears PathOut and returns FALSE when the TEMP environment variable is
+'     empty.
+'   - Builds the path as <TEMP>\EXCEL_UI_certification_<yyyymmdd_hhnnss>.<ext>.
+'   - Opens the file for output, prints Content to it and closes it.
+'   - On any error returns FALSE and clears PathOut.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   - VBA Environ$, FreeFile, Open, Print and Close
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
@@ -4667,7 +5058,7 @@ Public Function TST_RestoreTitleBarStyle( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                         TST RESTORE TITLE BAR STYLE
+'                           RESTORE TITLE BAR STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write a previously captured window style back, refresh the non-client
@@ -4861,7 +5252,7 @@ Public Sub TST_RecordCleanupFailure( _
     ByRef FailDescription As String)
 '
 '------------------------------------------------------------------------------
-'                          TST RECORD CLEANUP FAILURE
+'                         RECORD STYLE RESTORE FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make a failed entry-style restoration part of the caller's result: the
@@ -4904,6 +5295,9 @@ Public Sub TST_RecordCleanupFailure( _
 ' DEPENDENCIES
 '   - TST_Log
 '
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
 '------------------------------------------------------------------------------
@@ -4943,13 +5337,35 @@ Public Sub TST_SafeCloseWorkbook(ByRef TargetWorkbook As Workbook)
 
 '
 '------------------------------------------------------------------------------
-'                           TST SAFE CLOSE WORKBOOK
+'                           CLOSE TEMPORARY WORKBOOK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Close and release one temporary workbook without saving.
 '
+' WHY THIS EXISTS
+'   A test that creates a temporary workbook needs one place that closes it
+'   without saving and drops the reference, without raising from a cleanup
+'   path.
+'
+' INPUTS
+'   TargetWorkbook
+'     ByRef. The temporary workbook to close. It is Nothing on return.
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Closes the workbook with SaveChanges:=False when it is not Nothing.
+'   - Sets TargetWorkbook to Nothing.
+'
 ' ERROR POLICY
 '   - Suppresses cleanup errors locally.
+'
+' DEPENDENCIES
+'   - Workbook.Close
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-08-01
@@ -4969,20 +5385,34 @@ Public Sub TST_SafeCloseWindow(ByRef TargetWindow As Window)
 
 '
 '------------------------------------------------------------------------------
-'                            TST SAFE CLOSE WINDOW
+'                            CLOSE TEMPORARY WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Close and release one temporary Excel Window on a best-effort basis
 '
+' WHY THIS EXISTS
+'   A test that opens a temporary window needs one place that closes it and
+'   drops the reference, without raising from a cleanup path.
+'
+' INPUTS
+'   TargetWindow
+'     ByRef. The temporary Window to close. It is Nothing on return.
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Closes the window when it is not Nothing.
+'   - Sets TargetWindow to Nothing.
 '
 ' ERROR POLICY
 '   - Suppresses cleanup errors locally
 '
-' INPUTS / OUTPUTS
-'   TargetWindow
-'     Temporary Window to close and release
+' DEPENDENCIES
+'   - Window.Close
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -5026,7 +5456,7 @@ Public Sub TST_SnapshotState( _
     ByRef TitleBarVisible As Boolean)
 '
 '------------------------------------------------------------------------------
-'                              TST SNAPSHOT STATE
+'                            CAPTURE EXCEL UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Capture the current Excel UI state before the regression harness mutates it
@@ -5035,16 +5465,50 @@ Public Sub TST_SnapshotState( _
 '   Regression tests should attempt to return the user's environment to its
 '   prior state after execution
 '
+' INPUTS
+'   RibbonKnown / RibbonVisible
+'     ByRef outputs. Whether the Ribbon state could be read, and its visibility.
+'
+'   StatusBarVisible / ScrollBarsVisible / FormulaBarVisible
+'     ByRef outputs. Application.DisplayStatusBar, DisplayScrollBars and
+'     DisplayFormulaBar.
+'
+'   WindowCount
+'     ByRef output. Application.Windows.Count.
+'
+'   HeadingsVisible() / WorkbookTabsVisible() / GridlinesVisible()
+'     ByRef outputs. Arrays sized 1 To WindowCount when at least one window
+'     exists, holding DisplayHeadings, DisplayWorkbookTabs and DisplayGridlines
+'     of each window by Application.Windows index.
+'
+'   TitleBarKnown / TitleBarVisible
+'     ByRef outputs. Whether the title-bar state could be read, and its
+'     visibility.
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Reads the three application-level properties.
+'   - Reads the Ribbon and title-bar state through the best-effort readers, and
+'     logs the reason when either state is unknown.
+'   - Reads the window count. When it is above zero, sizes the three arrays and
+'     reads the three properties of each window by index.
 '
 ' ERROR POLICY
 '   - Does NOT raise to callers
 '   - Best-effort capture; unknown Ribbon or TitleBar state is marked via flags
 '
-' INPUTS / OUTPUTS
-'   [ByRef arguments]
-'     Receive the captured application-level, window-level, and title-bar state
+' DEPENDENCIES
+'   - TST_TryGetRibbonVisible
+'   - TST_TryGetTitleBarVisible
+'   - TST_Log
+'   - Application.DisplayStatusBar, DisplayScrollBars and DisplayFormulaBar
+'   - Application.Windows, with Window.DisplayHeadings, DisplayWorkbookTabs and
+'     DisplayGridlines
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -5130,7 +5594,7 @@ Public Function TST_RestoreState( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                              TST RESTORE STATE
+'                            RESTORE EXCEL UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to restore the pre-test Excel UI state after the regression run,
@@ -5342,7 +5806,7 @@ Private Function TST_RestoreTitleBarElement( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        TST RESTORE TITLE BAR ELEMENT
+'                         RESTORE TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restore the captured title-bar visibility through the structured API and
@@ -5363,6 +5827,15 @@ Private Function TST_RestoreTitleBarElement( _
 '   Boolean
 '     TRUE when the structured call reported success.
 '
+' BEHAVIOR
+'   - Calls UI_SetExcelUI_WithResult with TitleBar:=UI_Show when
+'     TitleBarVisible is TRUE, otherwise with UI_Hide.
+'   - Returns TRUE when the call reports success.
+'   - Otherwise adds a restore.TitleBar finding that carries the failure count
+'     and list described by TST_DescribeResultBuffers.
+'   - An error adds a restore.TitleBar finding with the runtime error text and
+'     returns FALSE.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
@@ -5370,6 +5843,9 @@ Private Function TST_RestoreTitleBarElement( _
 '   - UI_SetExcelUI_WithResult
 '   - TST_DescribeResultBuffers
 '   - TST_CertAddFinding
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RestoreState
@@ -5452,7 +5928,7 @@ Private Function TST_RestoreBoolean( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                             TST RESTORE BOOLEAN
+'                           RESTORE BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write one Boolean property and read it back, reporting a write that failed
@@ -5476,6 +5952,15 @@ Private Function TST_RestoreBoolean( _
 '   Boolean
 '     TRUE when the value was written and read back as written.
 '
+' BEHAVIOR
+'   - Writes Value through TST_TrySetBooleanProperty. When that fails, logs the
+'     miss and adds a finding that says the property could not be restored.
+'   - Otherwise reads the property back through TST_TryGetBooleanProperty. A
+'     failed read adds a finding, and so does a read-back that differs from
+'     Value, naming both values.
+'   - Returns TRUE only when the value was written and read back as written.
+'   - An error adds a "restoration raised" finding and returns FALSE.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
@@ -5483,6 +5968,9 @@ Private Function TST_RestoreBoolean( _
 '   - TST_TrySetBooleanProperty
 '   - TST_TryGetBooleanProperty
 '   - TST_CertAddFinding
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RestoreState
@@ -5561,7 +6049,7 @@ Private Function TST_RestoreWindowBoolean( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST RESTORE WINDOW BOOLEAN
+'                           RESTORE WINDOW PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restore one Boolean property of the window at a collection index, and
@@ -5585,12 +6073,22 @@ Private Function TST_RestoreWindowBoolean( _
 '   Boolean
 '     TRUE when the value was written and read back as written.
 '
+' BEHAVIOR
+'   - Fetches Application.Windows(WindowIndex) and reads its Caption.
+'   - Restores the property through TST_RestoreBoolean, labelled with the
+'     window index, the caption and PropName.
+'   - An error, such as a window that no longer exists, adds a
+'     restore.<PropName> finding and returns FALSE.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_RestoreBoolean
 '   - TST_CertAddFinding
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RestoreState
@@ -5662,7 +6160,7 @@ Public Sub TST_RecordRestoreFailure( _
     ByRef FailDescription As String)
 '
 '------------------------------------------------------------------------------
-'                          TST RECORD RESTORE FAILURE
+'                         RECORD STATE RESTORE FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make a state restoration that did not complete part of the caller's
@@ -5705,6 +6203,9 @@ Public Sub TST_RecordRestoreFailure( _
 ' DEPENDENCIES
 '   - TST_CertEntrySummary
 '   - TST_Log
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RunRegressionPack
@@ -5767,7 +6268,7 @@ Public Sub TST_WaitUI(ByVal SecondsToWait As Double)
 
 '
 '------------------------------------------------------------------------------
-'                                 TST WAIT UI
+'                            WAIT FOR UI TO SETTLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Give Excel and Windows a short opportunity to settle after a UI state change
@@ -5783,8 +6284,17 @@ Public Sub TST_WaitUI(ByVal SecondsToWait As Double)
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Returns at once when SecondsToWait is not positive.
+'   - Caps the wait at TEST_WAIT_MAX_SECONDS and reads Timer as the baseline.
+'   - Calls DoEvents until TST_TimerElapsedSeconds reaches the capped wait.
+'
 ' ERROR POLICY
 '   - Does NOT raise
+'
+' DEPENDENCIES
+'   - TST_TimerElapsedSeconds
+'   - VBA Timer and DoEvents
 '
 ' NOTES
 '   - A fixed delay, not a wait for a condition. Reaching the end is never a
@@ -5857,7 +6367,7 @@ Public Sub TST_AssertBooleanEquals( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                          TST ASSERT BOOLEAN EQUALS
+'                            ASSERT BOOLEAN EQUALS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raise a descriptive assertion failure when two Boolean values differ
@@ -5879,8 +6389,20 @@ Public Sub TST_AssertBooleanEquals( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Compares Expected with Actual.
+'   - On a difference raises TEST_ERR_BASE + 1, with AssertionName as the
+'     source and "<AssertionName> expected=<Expected> actual=<Actual>" as the
+'     description.
+'
 ' ERROR POLICY
 '   - Raises on mismatch
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -5904,7 +6426,7 @@ Public Sub TST_AssertApplicationProperty( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT APPLICATION PROPERTY
+'                         ASSERT APPLICATION PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Boolean value of an Application-level property
@@ -5926,8 +6448,21 @@ Public Sub TST_AssertApplicationProperty( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Reads PropertyName from Application through TST_TryGetBooleanProperty.
+'     When the read fails it raises TEST_ERR_BASE + 2, with AssertionName as
+'     the source and the reader's diagnostic in the description.
+'   - Compares the value read with Expected through TST_AssertBooleanEquals.
+'
 ' ERROR POLICY
 '   - Raises on read failure or mismatch
+'
+' DEPENDENCIES
+'   - TST_TryGetBooleanProperty
+'   - TST_AssertBooleanEquals
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -5963,7 +6498,7 @@ Public Sub TST_AssertAllWindowsProperty( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT ALL WINDOWS PROPERTY
+'                        ASSERT PROPERTY ON ALL WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Boolean value of a Window-level property across all open
@@ -5986,8 +6521,24 @@ Public Sub TST_AssertAllWindowsProperty( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - For each window of Application.Windows, reads PropertyName through
+'     TST_TryGetBooleanProperty. When the read fails it raises
+'     TEST_ERR_BASE + 3, naming the window caption and the reader's diagnostic.
+'   - Compares each value read with Expected through TST_AssertBooleanEquals,
+'     with the window caption appended to AssertionName.
+'   - With no open window it asserts nothing.
+'
 ' ERROR POLICY
 '   - Raises on read failure or mismatch
+'
+' DEPENDENCIES
+'   - TST_TryGetBooleanProperty
+'   - TST_AssertBooleanEquals
+'   - Application.Windows
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6027,7 +6578,7 @@ Public Sub TST_AssertRibbonVisible( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                          TST ASSERT RIBBON VISIBLE
+'                           ASSERT RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Ribbon visibility
@@ -6046,8 +6597,21 @@ Public Sub TST_AssertRibbonVisible( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Reads the Ribbon visibility through TST_TryGetRibbonVisible. When the
+'     read fails it raises TEST_ERR_BASE + 4, with AssertionName as the source
+'     and the reader's diagnostic in the description.
+'   - Compares the value read with Expected through TST_AssertBooleanEquals.
+'
 ' ERROR POLICY
 '   - Raises on read failure or mismatch
+'
+' DEPENDENCIES
+'   - TST_TryGetRibbonVisible
+'   - TST_AssertBooleanEquals
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6082,7 +6646,7 @@ Public Sub TST_AssertTitleBarVisible( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                         TST ASSERT TITLE BAR VISIBLE
+'                         ASSERT TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current title-bar visibility for the Excel window represented by
@@ -6102,8 +6666,21 @@ Public Sub TST_AssertTitleBarVisible( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Reads the title-bar visibility through TST_TryGetTitleBarVisible. When
+'     the read fails it raises TEST_ERR_BASE + 5, with AssertionName as the
+'     source and the reader's diagnostic in the description.
+'   - Compares the value read with Expected through TST_AssertBooleanEquals.
+'
 ' ERROR POLICY
 '   - Raises on read failure or mismatch
+'
+' DEPENDENCIES
+'   - TST_TryGetTitleBarVisible
+'   - TST_AssertBooleanEquals
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6140,7 +6717,7 @@ Public Sub TST_AssertResultSuccess( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                          TST ASSERT RESULT SUCCESS
+'                            ASSERT RESULT SUCCESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that the standard-module result buffers represent a clean success
@@ -6166,8 +6743,18 @@ Public Sub TST_AssertResultSuccess( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_ERR_BASE + 20 when Succeeded is FALSE.
+'   - Raises TEST_ERR_BASE + 21 when FailureCount is not 0.
+'   - Raises TEST_ERR_BASE + 22 when FailureList is not Empty.
+'   - Each error has AssertionName as its source and appends the text of
+'     TST_DescribeResultBuffers.
+'
 ' ERROR POLICY
 '   - Raises on mismatch, with the failure count and list the call returned
+'
+' DEPENDENCIES
+'   - TST_DescribeResultBuffers
 '
 ' NOTES
 '   The failure list is the only record of which element failed and why.
@@ -6226,11 +6813,16 @@ Public Sub TST_AssertSingleFailurePrefix( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT SINGLE FAILURE PREFIX
+'                         ASSERT SINGLE FAILURE PREFIX
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert a structured-result failure containing exactly one ordered entry
 '   whose text begins with the expected stage prefix.
+'
+' WHY THIS EXISTS
+'   Several structured-result regressions assert the same shape of failure.
+'   One helper keeps the flag, count, list shape and entry-prefix checks
+'   identical across them.
 '
 ' INPUTS
 '   Succeeded
@@ -6248,8 +6840,23 @@ Public Sub TST_AssertSingleFailurePrefix( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_ERR_BASE + 60 when Succeeded is TRUE.
+'   - Raises TEST_ERR_BASE + 61 when FailureCount is not 1.
+'   - Raises TEST_ERR_BASE + 62 when FailureList is not an array.
+'   - Raises TEST_ERR_BASE + 63 when the list is not one 1-based entry.
+'   - Raises TEST_ERR_BASE + 64 when the entry does not begin with
+'     ExpectedPrefix.
+'   - Each error has AssertionName as its source.
+'
 ' ERROR POLICY
 '   - Raises on mismatch, with the failure count and list the call returned.
+'
+' DEPENDENCIES
+'   - TST_DescribeResultBuffers
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-06 - Messages carry the failure count and list (#135).
@@ -6312,7 +6919,7 @@ Public Sub TST_AssertFailureResultExact( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT FAILURE RESULT EXACT
+'                         ASSERT EXACT FAILURE RESULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert a failed structured result exactly: the flag, the count, the shape
@@ -6340,11 +6947,24 @@ Public Sub TST_AssertFailureResultExact( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_ERR_BASE + 90 when Succeeded is TRUE.
+'   - Raises TEST_ERR_BASE + 91 when FailureCount differs from ExpectedCount.
+'   - When ExpectedEntry is empty, raises TEST_ERR_BASE + 92 unless
+'     FailureList is Empty.
+'   - Otherwise raises TEST_ERR_BASE + 93 unless FailureList is a String
+'     array, + 94 unless it holds one 1-based entry, and + 95 when that entry
+'     differs from ExpectedEntry in a binary comparison.
+'   - Each error has AssertionName as its source.
+'
 ' ERROR POLICY
 '   - Raises on mismatch, with the failure count and list the call returned.
 '
 ' DEPENDENCIES
 '   - TST_DescribeResultBuffers
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-11-14
@@ -6416,7 +7036,7 @@ Public Function TST_DescribeResultBuffers( _
     As String
 '
 '------------------------------------------------------------------------------
-'                         TST DESCRIBE RESULT BUFFERS
+'                           DESCRIBE RESULT BUFFERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Render a structured result's failure count and failure list as one bounded
@@ -6442,6 +7062,14 @@ Public Function TST_DescribeResultBuffers( _
 '     description of a value that is not a usable array, or the entries in
 '     brackets joined by " || ". Entries are cut off after
 '     TST_RESULT_LIST_MAX_CHARS characters and the cut is marked.
+'
+' BEHAVIOR
+'   - Starts from "FailureCount=<n> | FailureList=<unreadable>".
+'   - Renders FailureList as Empty, as "<type, not an array>", as "<array
+'     without bounds>", or as its entries in brackets joined by " || ", each
+'     rendered through TST_DescribeListEntry.
+'   - Cuts the rendered entries after 1000 characters and marks the cut.
+'   - Returns "FailureCount=<n> | FailureList=<list>".
 '
 ' ERROR POLICY
 '   - Does not raise. It runs while an assertion is being raised, and must not
@@ -6553,7 +7181,7 @@ Private Function TST_DescribeListEntry( _
     As String
 '
 '------------------------------------------------------------------------------
-'                           TST DESCRIBE LIST ENTRY
+'                             DESCRIBE LIST ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Render one failure-list entry as text, whatever it holds.
@@ -6607,7 +7235,7 @@ Public Sub TST_AssertSnapshotAvailability( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT SNAPSHOT AVAILABILITY
+'                         ASSERT SNAPSHOT AVAILABILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the availability flag returned by UI_HasExcelUIStateSnapshot
@@ -6627,8 +7255,19 @@ Public Sub TST_AssertSnapshotAvailability( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Compares Expected with the value of UI_HasExcelUIStateSnapshot through
+'     TST_AssertBooleanEquals.
+'
 ' ERROR POLICY
 '   - Raises on mismatch
+'
+' DEPENDENCIES
+'   - UI_HasExcelUIStateSnapshot
+'   - TST_AssertBooleanEquals
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6652,7 +7291,7 @@ Public Sub TST_AssertRefusal( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                              TST ASSERT REFUSAL
+'                             ASSERT REFUSAL ERROR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that a destructive runner refused with the exact error it promises.
@@ -6687,8 +7326,20 @@ Public Sub TST_AssertRefusal( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Logs the observed number, source and description through TST_Log under
+'     the tag OBSERVED.
+'   - Asserts through TST_AssertTrue that the number, the source and the
+'     description each equal the expected value, under the names
+'     AssertionName & ".Number", ".Source" and ".Description". The description
+'     is compared exactly.
+'
 ' ERROR POLICY
 '   - Raises on assertion failure
+'
+' DEPENDENCIES
+'   - TST_Log
+'   - TST_AssertTrue
 '
 ' NOTES
 '   The actuals are logged before being asserted, because a failing assertion
@@ -6736,10 +7387,14 @@ Public Sub TST_AssertTrue( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                               TST ASSERT TRUE
+'                           ASSERT CONDITION IS TRUE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raise when a Boolean assertion is FALSE
+'
+' WHY THIS EXISTS
+'   Cases assert plain Boolean conditions, and a failure has to name the
+'   assertion. One helper raises the same error for all of them.
 '
 ' INPUTS
 '   ActualValue
@@ -6751,8 +7406,19 @@ Public Sub TST_AssertTrue( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Does nothing when ActualValue is TRUE.
+'   - Otherwise raises TEST_SNAPSHOT_ID_ERR_BASE + 20, with AssertionName as
+'     the source and "expected TRUE but received FALSE" as the description.
+'
 ' ERROR POLICY
 '   - Raises when ActualValue is FALSE
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6782,7 +7448,7 @@ Public Function TST_TryGetBooleanProperty( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST TRY GET BOOLEAN PROPERTY
+'                            READ BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read a Boolean property from an object using CallByName
@@ -6808,8 +7474,23 @@ Public Function TST_TryGetBooleanProperty( _
 '   TRUE  => property read succeeded
 '   FALSE => property read failed
 '
+' BEHAVIOR
+'   - Clears ValueOut and FailMsg.
+'   - Fails with a message when Target is Nothing or PropertyName is empty.
+'   - Reads the property with CallByName and VbGet, converts it with CBool and
+'     returns TRUE.
+'   - An error is captured into FailMsg through TST_BuildRuntimeErrorText and
+'     the result is FALSE.
+'
 ' ERROR POLICY
 '   - Does NOT raise to callers
+'
+' DEPENDENCIES
+'   - CallByName
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RestoreBoolean
@@ -6887,7 +7568,7 @@ Private Function TST_TrySetBooleanProperty( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST TRY SET BOOLEAN PROPERTY
+'                            WRITE BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to assign a Boolean property on an object using a common,
@@ -6921,6 +7602,10 @@ Private Function TST_TrySetBooleanProperty( _
 '   - Does NOT raise to callers
 '   - Returns FALSE and populates FailMsg on failure
 '
+' DEPENDENCIES
+'   - CallByName
+'   - TST_BuildRuntimeErrorText
+'
 ' NOTES
 '   - Intended for Application and Window Boolean property writes in this
 '     module
@@ -6928,6 +7613,11 @@ Private Function TST_TrySetBooleanProperty( _
 ' UPDATED
 '   2026-07-25
 '------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "M_EXCEL_UI_TEST_HARNESS.TST_TrySetBooleanProperty"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -6980,7 +7670,7 @@ Public Function TST_TryGetRibbonVisible( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST TRY GET RIBBON VISIBLE
+'                            READ RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current Ribbon visibility
@@ -6999,6 +7689,29 @@ Public Function TST_TryGetRibbonVisible( _
 ' RETURNS
 '   TRUE  => Ribbon visibility was read successfully
 '   FALSE => read failed
+'
+' BEHAVIOR
+'   - Clears IsVisible and FailMsg.
+'   - Reads Application.CommandBars("Ribbon").Visible. When that read does not
+'     raise, returns TRUE.
+'   - Otherwise falls back to Application.ExecuteExcel4Macro with
+'     Get.ToolBar(7,"Ribbon"), converts the result with CBool and returns TRUE.
+'   - When the fallback also raises, FailMsg holds its error number and
+'     description and the result is FALSE.
+'
+' ERROR POLICY
+'   - Does not raise. Both reads run under On Error Resume Next, with the
+'     handler armed again after each.
+'   - Any other error is captured into FailMsg through
+'     TST_BuildRuntimeErrorText and the result is FALSE.
+'
+' DEPENDENCIES
+'   - Application.CommandBars
+'   - Application.ExecuteExcel4Macro
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -7070,7 +7783,7 @@ Private Function TST_TrySetRibbonVisible( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST TRY SET RIBBON VISIBLE
+'                           WRITE RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to set Ribbon visibility from the regression harness
@@ -7089,6 +7802,23 @@ Private Function TST_TrySetRibbonVisible( _
 ' RETURNS
 '   TRUE  => Ribbon update succeeded
 '   FALSE => Ribbon update failed
+'
+' BEHAVIOR
+'   - Clears FailMsg.
+'   - Builds the macro text Show.TOOLBAR("Ribbon",True) or
+'     Show.TOOLBAR("Ribbon",False) from IsVisible.
+'   - Runs it through Application.ExecuteExcel4Macro and returns TRUE.
+'
+' ERROR POLICY
+'   - Does not raise. An error is captured into FailMsg through
+'     TST_BuildRuntimeErrorText and the result is FALSE.
+'
+' DEPENDENCIES
+'   - Application.ExecuteExcel4Macro
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -7157,19 +7887,52 @@ Public Function TST_TryGetWindowStyle( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                           TST TRY GET WINDOW STYLE
+'                              READ WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read GWL_STYLE through the correct Win32 API for the current Office bitness.
 '
+' WHY THIS EXISTS
+'   The harness has one GWL_STYLE read, so the Err.LastDllError capture around
+'   the call is written once (#27). Each compilation calls the API that matches
+'   its bitness.
+'
+' INPUTS
+'   hWnd
+'     ByVal. Window whose style is read. LongPtr under VBA7, Long otherwise.
+'
+'   StyleOut
+'     ByRef. Receives the style on success, and 0 otherwise.
+'
+'   FailMsg
+'     ByRef. Receives the diagnostic on failure. Empty on success.
+'
 ' RETURNS
 '   TRUE on success.
+'
+' BEHAVIOR
+'   - Clears StyleOut and FailMsg. Fails with "invalid window handle" when
+'     hWnd is 0.
+'   - Clears the thread last-error, calls GetWindowLongPtr or GetWindowLong
+'     with TST_GWL_STYLE and copies Err.LastDllError to a local at once.
+'   - A zero result with a non-zero captured error fails with the text of
+'     TST_BuildApiFailureText; otherwise StyleOut receives the result and the
+'     function returns TRUE.
 '
 ' ERROR POLICY
 '   Clears the thread last-error immediately before the call and copies the
 '   result and Err.LastDllError to locals immediately after it, with nothing
 '   in between. A zero result is a failure only when the captured error is
 '   non-zero.
+'
+' DEPENDENCIES
+'   - TST_SetLastError
+'   - TST_GetWindowLongPtr / TST_GetWindowLong
+'   - TST_BuildApiFailureText
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
@@ -7261,20 +8024,52 @@ Public Function TST_TrySetWindowStyle( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                           TST TRY SET WINDOW STYLE
+'                              WRITE WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write GWL_STYLE through the correct Win32 API for the current Office
 '   bitness.
 '
+' WHY THIS EXISTS
+'   The harness has one GWL_STYLE write, so the Err.LastDllError capture around
+'   the call is written once (#27). Each compilation calls the API that matches
+'   its bitness.
+'
+' INPUTS
+'   hWnd
+'     ByVal. Window whose style is written. LongPtr under VBA7, Long otherwise.
+'
+'   NewStyle
+'     ByVal. Style value to write, of the same type as hWnd.
+'
+'   FailMsg
+'     ByRef. Receives the diagnostic on failure. Empty on success.
+'
 ' RETURNS
 '   TRUE on success.
+'
+' BEHAVIOR
+'   - Clears FailMsg. Fails with "invalid window handle" when hWnd is 0.
+'   - Clears the thread last-error, calls SetWindowLongPtr or SetWindowLong
+'     with TST_GWL_STYLE and NewStyle, and copies Err.LastDllError to a local
+'     at once.
+'   - A zero previous style with a non-zero captured error fails with the text
+'     of TST_BuildApiFailureText; otherwise the function returns TRUE.
 '
 ' ERROR POLICY
 '   Clears the thread last-error immediately before the call and copies the
 '   result and Err.LastDllError to locals immediately after it, with nothing
 '   in between. A zero previous style is a failure only when the captured
 '   error is non-zero.
+'
+' DEPENDENCIES
+'   - TST_SetLastError
+'   - TST_SetWindowLongPtr / TST_SetWindowLong
+'   - TST_BuildApiFailureText
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
@@ -7362,17 +8157,48 @@ Public Function TST_TryRefreshWindowFrame( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                         TST TRY REFRESH WINDOW FRAME
+'                             REFRESH WINDOW FRAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Recalculate the non-client frame after an exact style restore.
 '
+' WHY THIS EXISTS
+'   TST_RestoreTitleBarStyle refreshes the frame after it writes a style back.
+'   This helper does that through SetWindowPos with SWP_FRAMECHANGED and
+'   without moving, resizing or reordering the window, and it reports this
+'   call's own error (#27).
+'
+' INPUTS
+'   hWnd
+'     ByVal. Window whose frame is refreshed. LongPtr under VBA7, Long
+'     otherwise.
+'
+'   FailMsg
+'     ByRef. Receives the diagnostic on failure. Empty on success.
+'
 ' RETURNS
 '   TRUE on success.
+'
+' BEHAVIOR
+'   - Clears FailMsg. Fails with "invalid window handle" when hWnd is 0.
+'   - Clears the thread last-error and calls SetWindowPos with
+'     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOOWNERZORDER and
+'     SWP_FRAMECHANGED, then copies Err.LastDllError to a local at once.
+'   - A zero result fails with the text of TST_BuildApiFailureText; otherwise
+'     the function returns TRUE.
 '
 ' ERROR POLICY
 '   Returns FALSE and FailMsg on failure. Err.LastDllError is captured
 '   immediately after the call, so the text reports this call's error.
+'
+' DEPENDENCIES
+'   - TST_SetLastError
+'   - TST_SetWindowPos
+'   - TST_BuildApiFailureText
+'   - TST_BuildRuntimeErrorText
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-06 - Captured Err.LastDllError in place of GetLastError, and
@@ -7453,7 +8279,7 @@ Public Function TST_StyleHasCompleteCaption( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                        TST STYLE HAS COMPLETE CAPTION
+'                         CHECK COMPLETE CAPTION STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report whether a GWL_STYLE value carries a complete caption: both
@@ -7477,11 +8303,19 @@ Public Function TST_StyleHasCompleteCaption( _
 '   TRUE  => WS_BORDER and WS_DLGFRAME are both set.
 '   FALSE => either is missing.
 '
+' BEHAVIOR
+'   - Tests StyleValue against TST_WS_BORDER and against TST_WS_DLGFRAME
+'     separately.
+'   - Returns TRUE only when both bits are set.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   None.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_TryGetTitleBarVisible
@@ -7504,7 +8338,7 @@ Private Function TST_TryGetTitleBarVisible( _
     ByRef FailMsg As String) As Boolean
 '
 '------------------------------------------------------------------------------
-'                        TST TRY GET TITLE BAR VISIBLE
+'                          READ TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to read current title-bar visibility for the Excel window
@@ -7526,9 +8360,24 @@ Private Function TST_TryGetTitleBarVisible( _
 '            only when the complete WS_CAPTION mask is set
 '   FALSE => read failed
 '
+' BEHAVIOR
+'   - Clears IsVisible and FailMsg.
+'   - Reads Application.Hwnd. Fails with "invalid Excel window handle" when it
+'     is 0.
+'   - Reads the style through TST_TryGetWindowStyle and stops with its message
+'     when that fails.
+'   - Sets IsVisible from TST_StyleHasCompleteCaption and returns TRUE.
+'
+' ERROR POLICY
+'   - Does not raise. An error is captured into FailMsg through
+'     TST_BuildRuntimeErrorText and the result is FALSE.
+'
 ' DEPENDENCIES
 '   - TST_TryGetWindowStyle
 '   - TST_StyleHasCompleteCaption
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-18 - Requires the complete caption mask (#6).
@@ -7626,7 +8475,7 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                   TST TITLE BAR VISIBLE FOR HWND OR RAISE
+'                        READ TITLE BAR OF GIVEN WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read title-bar visibility for one explicitly supplied top-level window, and
@@ -7656,12 +8505,22 @@ Public Function TST_TitleBarVisibleForHwndOrRaise( _
 '     set on the supplied window. A style with only one of the two is not a
 '     caption.
 '
+' BEHAVIOR
+'   - Reads the style of TargetHwnd through TST_TryGetWindowStyle, never the
+'     style of the active window.
+'   - When the read fails, raises TEST_TITLEBAR_SDI_ERR_BASE + 40, with
+'     CallerProc as the source and the reader's diagnostic in the description.
+'   - Returns TST_StyleHasCompleteCaption of the style read.
+'
 ' ERROR POLICY
 '   - Raises when the style cannot be read.
 '
 ' DEPENDENCIES
 '   - TST_TryGetWindowStyle
 '   - TST_StyleHasCompleteCaption
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_Case_TitleBarSdiRestoreTargetsCapturedFrame
@@ -7720,7 +8579,7 @@ Public Function TST_FrameStyleOrRaise( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                           TST FRAME STYLE OR RAISE
+'                          READ FRAME STYLE OR RAISE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read the complete GWL_STYLE of one explicitly supplied top-level window,
@@ -7742,12 +8601,22 @@ Public Function TST_FrameStyleOrRaise( _
 ' RETURNS
 '   The live GWL_STYLE value.
 '
+' BEHAVIOR
+'   - Reads the style of TargetHwnd through TST_TryGetWindowStyle, never the
+'     style of the active window.
+'   - When the read fails, raises TEST_TITLEBAR_SDI_ERR_BASE + 41, with
+'     CallerProc as the source and the reader's diagnostic in the description.
+'   - Returns the style read.
+'
 ' ERROR POLICY
 '   - Raises when the style cannot be read. An unreadable frame would make the
 '     surrounding comparison meaningless.
 '
 ' DEPENDENCIES
 '   - TST_TryGetWindowStyle
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_AssertFrameUntouched
@@ -7802,7 +8671,7 @@ Public Sub TST_AssertFrameUntouched( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                          TST ASSERT FRAME UNTOUCHED
+'                         ASSERT FRAME STYLE UNCHANGED
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that a frame's complete GWL_STYLE still equals the value recorded
@@ -7829,6 +8698,13 @@ Public Sub TST_AssertFrameUntouched( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Reads the live style of TargetHwnd through TST_FrameStyleOrRaise, with
+'     AssertionName as the source of a failed read.
+'   - Raises TEST_TITLEBAR_SDI_ERR_BASE + 42 when it differs from StyleBefore,
+'     naming the window, both styles, both owned-bit sets and both caption
+'     states.
+'
 ' ERROR POLICY
 '   - Raises when the style cannot be read or differs from StyleBefore. The
 '     description names the window, both styles, both owned-bit sets and both
@@ -7836,6 +8712,9 @@ Public Sub TST_AssertFrameUntouched( _
 '
 ' DEPENDENCIES
 '   - TST_FrameStyleOrRaise
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-11-06
@@ -7886,7 +8765,7 @@ Public Sub TST_AssertFailureListContainsPrefix( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                   TST ASSERT FAILURE LIST CONTAINS PREFIX
+'                        ASSERT FAILURE LIST HAS PREFIX
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert a structured result reported failure and that at least one ordered
@@ -7918,9 +8797,24 @@ Public Sub TST_AssertFailureListContainsPrefix( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_TITLEBAR_SDI_ERR_BASE + 50 when Succeeded is TRUE, + 51 when
+'     FailureCount is below 1 and + 52 when FailureList is not an array.
+'   - Scans every entry, converted with CStr, for one that begins with
+'     ExpectedPrefix.
+'   - Raises + 53 when none does.
+'   - Each error has AssertionName as its source and carries the text of
+'     TST_DescribeResultBuffers.
+'
 ' ERROR POLICY
 '   - Raises a descriptive assertion failure, with the failure count and list
 '     the call returned.
+'
+' DEPENDENCIES
+'   - TST_DescribeResultBuffers
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_Case_TitleBarCapturedFrameClosedIsReported
@@ -8004,7 +8898,7 @@ Public Sub TST_Log( _
     ByVal Detail As String)
 '
 '------------------------------------------------------------------------------
-'                                   TST LOG
+'                            WRITE DIAGNOSTIC LINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write a consistent diagnostic line to the Immediate Window for the
@@ -8028,10 +8922,22 @@ Public Sub TST_Log( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Joins "<ProcName> @ <Stage> | <Detail>".
+'   - Prints the line with Debug.Print.
+'   - Passes the line to TST_LogSinkWriteLine, which writes nothing when no
+'     sink is set.
+'
 ' ERROR POLICY
 '   - Suppresses any unexpected logging failure locally
 '   - A failed sink write is kept by TST_LogSinkWriteLine for the caller's
 '     verdict; it never reaches the caller of TST_Log
+'
+' DEPENDENCIES
+'   - TST_LogSinkWriteLine
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' HISTORY
 '   2026-11-16 - Mirrors the line to the opt-in log sink (#197).
@@ -8069,7 +8975,7 @@ Public Sub TST_LogSinkStart(ByVal LogPath As String)
 
 '
 '------------------------------------------------------------------------------
-'                              TST LOG SINK START
+'                                START LOG SINK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name the file that TST_Log mirrors its lines to from now on
@@ -8094,6 +9000,12 @@ Public Sub TST_LogSinkStart(ByVal LogPath As String)
 ' ERROR POLICY
 '   - Does not raise
 '
+' DEPENDENCIES
+'   None beyond the module-level m_LogSinkPath and m_LogSinkFailure.
+'
+' NOTES
+'   None
+'
 ' CALLED FROM
 '   - TST_RunRunnerWithLog
 '
@@ -8116,7 +9028,7 @@ Public Function TST_LogSinkStop() As String
 
 '
 '------------------------------------------------------------------------------
-'                              TST LOG SINK STOP
+'                                STOP LOG SINK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Stop mirroring TST_Log lines and report whether every write succeeded
@@ -8124,6 +9036,9 @@ Public Function TST_LogSinkStop() As String
 ' WHY THIS EXISTS
 '   A failed write must not fail or interrupt the runner being logged, but it
 '   must not be lost either: the caller puts it in its verdict
+'
+' INPUTS
+'   None
 '
 ' RETURNS
 '   String
@@ -8135,6 +9050,12 @@ Public Function TST_LogSinkStop() As String
 '
 ' ERROR POLICY
 '   - Does not raise
+'
+' DEPENDENCIES
+'   None beyond the module-level m_LogSinkPath and m_LogSinkFailure.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RunRunnerWithLog
@@ -8160,7 +9081,7 @@ Public Sub TST_LogSinkWriteLine(ByVal LineText As String)
 
 '
 '------------------------------------------------------------------------------
-'                           TST LOG SINK WRITE LINE
+'                           APPEND LINE TO LOG SINK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Append one line to the log sink as UTF-8, when a sink is set
@@ -8185,6 +9106,13 @@ Public Sub TST_LogSinkWriteLine(ByVal LineText As String)
 '   - Does not raise. The first failure is kept for TST_LogSinkStop and ends
 '     writing until the next TST_LogSinkStart, so an unwritable file costs
 '     one failed attempt, not one per line
+'
+' DEPENDENCIES
+'   - TST_LogSinkEncode
+'   - VBA FreeFile, Open, Put, LOF and Close
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_Log
@@ -8264,7 +9192,7 @@ Private Function TST_LogSinkEncode(ByVal LineText As String) As Byte()
 
 '
 '------------------------------------------------------------------------------
-'                             TST LOG SINK ENCODE
+'                           ENCODE LOG LINE AS UTF 8
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return one log line as UTF-8 bytes followed by CR LF
@@ -8283,9 +9211,22 @@ Private Function TST_LogSinkEncode(ByVal LineText As String) As Byte()
 '   The UTF-8 bytes of LineText, then CR LF. A UTF-16 surrogate that is not
 '   part of a pair is written as U+FFFD
 '
+' BEHAVIOR
+'   - Sizes the buffer at three bytes per UTF-16 code unit plus two.
+'   - Walks the code units. A high surrogate followed by a low surrogate
+'     becomes one scalar value; a lone surrogate becomes U+FFFD.
+'   - Writes each scalar value as one to four UTF-8 bytes.
+'   - Appends CR LF and trims the buffer to the bytes written.
+'
 ' ERROR POLICY
 '   - Raises only when memory runs out; TST_LogSinkWriteLine keeps that as a
 '     write failure
+'
+' DEPENDENCIES
+'   - VBA AscW
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-16 - Added for the scripted Excel checks (#197).
@@ -8379,7 +9320,7 @@ Private Function TST_TimerElapsedSeconds(ByVal TimerStart As Double) As Double
 
 '
 '------------------------------------------------------------------------------
-'                          TST TIMER ELAPSED SECONDS
+'                           COMPUTE ELAPSED SECONDS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return elapsed seconds since a Timer baseline, handling midnight rollover
@@ -8433,7 +9374,7 @@ Public Function TST_TitleBarMode( _
     ByVal RequestedMode As UIVisibility) As UIVisibility
 '
 '------------------------------------------------------------------------------
-'                              TST TITLE BAR MODE
+'                            CHOOSE TITLE BAR MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Return the effective TitleBar mode for a test case based on whether the
@@ -8455,8 +9396,18 @@ Public Function TST_TitleBarMode( _
 ' RETURNS
 '   Effective TitleBar mode for the test case
 '
+' BEHAVIOR
+'   - Returns RequestedMode when IncludeTitleBarTests is TRUE.
+'   - Otherwise returns UI_LeaveUnchanged.
+'
 ' ERROR POLICY
 '   - Does NOT raise
+'
+' DEPENDENCIES
+'   - UIVisibility and UI_LeaveUnchanged, from M_EXCEL_UI
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -8482,10 +9433,14 @@ Public Sub TST_AssertSnapshotWindowState( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT SNAPSHOT WINDOW STATE
+'                         ASSERT WINDOW MANAGED STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the three window-level Boolean properties managed by EXCEL_UI
+'
+' WHY THIS EXISTS
+'   Snapshot and restore cases check the three window-level properties that
+'   EXCEL_UI manages. One helper compares them and names the one that differs.
 '
 ' INPUTS
 '   TargetWindow
@@ -8506,8 +9461,22 @@ Public Sub TST_AssertSnapshotWindowState( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_SNAPSHOT_ID_ERR_BASE + 10 when TargetWindow is Nothing.
+'   - Compares DisplayHeadings, DisplayWorkbookTabs and DisplayGridlines with
+'     the expected values, in that order, and raises TEST_SNAPSHOT_ID_ERR_BASE
+'     + 11, + 12 or + 13 on the first one that differs. The description names
+'     the expected and the actual value.
+'   - Each error has AssertionName as its source.
+'
 ' ERROR POLICY
 '   - Raises on a missing target or property mismatch
+'
+' DEPENDENCIES
+'   - Window.DisplayHeadings, DisplayWorkbookTabs and DisplayGridlines
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -8570,7 +9539,7 @@ Public Function TST_BuildApiFailureText( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                          TST BUILD API FAILURE TEXT
+'                            BUILD API FAILURE TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build the failure text for a native call that reported an error, in the
@@ -8598,8 +9567,18 @@ Public Function TST_BuildApiFailureText( _
 ' RETURNS
 '   "<API> failed; operation=<operation>; LastDllError=<n>; hWnd=<h>"
 '
+' BEHAVIOR
+'   - Joins "<ApiName> failed; operation=<Operation>; LastDllError=<DllError>;
+'     hWnd=<TargetHwnd>".
+'
 ' ERROR POLICY
 '   - Does NOT raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-11-06
@@ -8625,7 +9604,7 @@ Public Function TST_BuildRuntimeErrorText() As String
 
 '
 '------------------------------------------------------------------------------
-'                         TST BUILD RUNTIME ERROR TEXT
+'                           BUILD RUNTIME ERROR TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Build a consistent runtime diagnostic string from the active Err object
@@ -8635,6 +9614,9 @@ Public Function TST_BuildRuntimeErrorText() As String
 '   Centralizing the formatting keeps the harness consistent and easier to
 '   maintain
 '
+' INPUTS
+'   None
+'
 ' RETURNS
 '   A formatted diagnostic string including:
 '     - Err.Number
@@ -8642,9 +9624,23 @@ Public Function TST_BuildRuntimeErrorText() As String
 '     - Err.Source, when available
 '     - Erl, when available
 '
+' BEHAVIOR
+'   - Copies Err.Number, Err.Description, Err.Source and Erl to locals before
+'     any On Error statement.
+'   - Arms On Error Resume Next.
+'   - Returns "<number>: <description>", followed by " | Source: <source>"
+'     when the source is not empty and " | Line: <n>" when Erl is not 0.
+'
 ' ERROR POLICY
 '   - Does NOT raise
 '   - Returns best-effort text
+'
+' DEPENDENCIES
+'   None beyond the Err object and Erl.
+'
+' NOTES
+'   It reads Err before any On Error statement, because every On Error
+'   statement clears it.
 '
 ' UPDATED
 '   2026-07-25
@@ -8661,7 +9657,7 @@ Public Function TST_BuildRuntimeErrorText() As String
     Dim ErrLine         As Long     'Erl captured on entry
 
 '------------------------------------------------------------------------------
-' CAPTURE ERR STATE
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Read the Err object BEFORE any On Error statement. Any form of On Error
     'resets Err, so protecting this routine first would blank the very values
@@ -8672,7 +9668,7 @@ Public Function TST_BuildRuntimeErrorText() As String
         ErrLine = Erl
 
 '------------------------------------------------------------------------------
-' INITIALIZE
+' SUPPRESS FORMATTING ERRORS
 '------------------------------------------------------------------------------
     'Protect callers from any unexpected issue while formatting the diagnostic
         On Error Resume Next
