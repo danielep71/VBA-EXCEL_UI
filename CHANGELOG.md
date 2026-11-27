@@ -298,8 +298,10 @@ measured against that baseline.
   writes one bundle with a log per runner and check, a `summary.txt` with one
   line per step and a final `RESULT: PASS` or `RESULT: FAIL` line, and a
   `session.json`, and exits non-zero when a step fails. It opens and closes
-  Excel with the certification script's own functions, never lowers macro
-  security and closes only the Excel instances it started; it needs one
+  Excel with the certification script's own functions, never changes the
+  Trust Center, the registry or a Trusted Location and closes only the Excel
+  instances it started; unless it is given `-Unattended`
+  ([#206](https://github.com/danielep71/VBA-EXCEL_UI/issues/206)) it needs one
   **Enable Content** click per workbook, and **docs/EXCEL_CHECKS.md**
   describes the trusted-location alternative. To feed it, `TST_Log` and the
   demo cleanup harness mirror each printed line to an opt-in UTF-8 log sink,
@@ -308,6 +310,29 @@ measured against that baseline.
   write is reported in that verdict and never fails the runner. With no sink
   set, the Immediate window shows what it showed before. The supported API is
   unchanged.
+- **Not yet checked on Excel.** Added an `-Unattended` switch to
+  **tools/Check-EXCEL_UI.ps1** and **tools/Certify-EXCEL_UI.ps1**
+  ([#206](https://github.com/danielep71/VBA-EXCEL_UI/issues/206)), so a run
+  needs no key press and no click from the start to the final `RESULT:` line.
+  The Check script passes the switch to the certification script. With it, each
+  Excel instance a script starts opens its workbook under
+  `msoAutomationSecurityLow`, so the macros of the workbook the tool built from
+  the checked-out commit run without **Enable Content**; no other instance is
+  touched, and the Trust Center, the registry and the Trusted Locations are
+  never written. No step prompts: the macros wait polls for at most 60 seconds,
+  and a compile command that is still enabled after 30 seconds fails the step
+  with a message that says why, instead of asking for a `Y` or `N`. Both
+  launchers skip their final `pause` when `-Unattended` is among their
+  arguments, and `tools/Check-EXCEL_UI.cmd` passes it itself, so a double-click
+  runs without input; `tools/Certify-EXCEL_UI.cmd` and both scripts stay
+  attended unless the switch is given. `host.json` and `session.json` record
+  `automation_security` as `msoAutomationSecurityLow (-Unattended)` (attended
+  runs keep `msoAutomationSecurityByUI`), and `tools/check_excel_evidence.py`
+  accepts those two values and no other. The static checks and the offline
+  tests pass; the first real run on Excel is still to be recorded.
+  **docs/EXCEL_CHECKS.md**, **docs/EXCEL_CERTIFICATION.md** and
+  **CONTRIBUTING.md** describe what the switch does and does not change. The
+  supported API is unchanged.
 - Added **tools/release.py** and the **Release** workflow
   (`.github/workflows/release.yml`). On a pushed `v*` tag, the workflow checks
   that the tag is annotated and equals `VERSION`, that `CHANGELOG.md` has a

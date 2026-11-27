@@ -454,7 +454,14 @@ On Windows, the workbook tools shorten that step:
   `Test_EXCEL_UI_Run*` runners, the demo cleanup harness and the demo build
   and title-bar checks, and writes one bundle with a log per runner and check
   and a `summary.txt` to quote in the pull request
-  ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)).
+  ([docs/EXCEL_CHECKS.md](docs/EXCEL_CHECKS.md)). It runs with `-Unattended`,
+  so it needs no key press and no click: that switch sets
+  `msoAutomationSecurityLow` on the Excel instances the scripts start and on
+  no other, never writes the Trust Center, the registry or a Trusted Location,
+  and fails a step that waits too long instead of asking
+  ([Running unattended](docs/EXCEL_CHECKS.md#-running-unattended)). Add
+  `-Unattended` to `tools\Certify-EXCEL_UI.cmd` for the same on certification;
+  without it, certification asks you to click **Enable Content**.
 
 The required job also runs `tools/check_vba_calls.py`, which resolves calls
 across the modules of each configuration

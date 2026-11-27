@@ -47,6 +47,59 @@ def git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
+class UnattendedContractTests(unittest.TestCase):
+    """What -Unattended may change, read from the script's text."""
+
+    def setUp(self) -> None:
+        self.text = SCRIPT.read_text(encoding="ascii").replace("\r\n", "\n")
+
+    def function(self, name: str) -> str:
+        match = re.search(rf"^function {re.escape(name)}\b.*?^}}$", self.text, re.M | re.S)
+        assert match is not None, name
+        return match.group(0)
+
+    def test_the_switch_exists_and_attended_stays_the_default(self) -> None:
+        param = re.search(r"(?s)\[CmdletBinding\(\)\]\nparam\((.*?)\n\)", self.text)
+        assert param is not None
+        self.assertIn("[switch]$Unattended", param.group(1))
+        self.assertEqual(SCRIPT.read_bytes().count(b"\r\n"), SCRIPT.read_bytes().count(b"\n"))
+        self.assertEqual(self.function("Get-AutomationSecurityLabel").count("msoAutomationSecurityByUI"), 1)
+
+    def test_macro_security_is_lowered_only_behind_the_switch_and_only_on_the_started_instance(self) -> None:
+        self.assertEqual(re.findall(r"\.AutomationSecurity = (\S+)", self.text),
+                         ["$MsoAutomationSecurityLow", "$MsoAutomationSecurityByUI"])
+        body = self.function("Set-ExcelAutomationSecurity")
+        self.assertRegex(body, r"if \(\$Unattended\) \{\n\s+Invoke-Excel \{ \$Excel\.AutomationSecurity = "
+                               r"\$MsoAutomationSecurityLow \}\n\s+\}\n\s+else \{")
+        # It runs on the instance this script started, before its workbook opens.
+        opened = self.text[self.text.index("New-Object -ComObject Excel.Application"):]
+        self.assertLess(opened.index("Set-ExcelAutomationSecurity $excel"), opened.index("Workbooks.Open("))
+        self.assertEqual(self.text.count("Set-ExcelAutomationSecurity $"), 1)
+        self.assertNotIn("GetActiveObject", self.text)
+        self.assertNotIn("Marshal]::GetObject", self.text)
+        # The Trust Center, the registry and the Trusted Locations are only read.
+        for pattern in (r"Set-ItemProperty", r"New-ItemProperty", r"Remove-ItemProperty",
+                        r"\breg(?:\.exe)? (?:add|delete)", r"VBAWarnings\s*=", r"AccessVBOM\s*=",
+                        r"TrustedLocations?\s*=", r"\.SetValue\("):
+            with self.subTest(pattern):
+                self.assertIsNone(re.search(pattern, self.text, re.I))
+        self.assertIn("automation_security = $automationSecurity", self.text)
+        label = self.function("Get-AutomationSecurityLabel")
+        self.assertEqual(label.count("msoAutomationSecurityLow (-Unattended)"), 1)
+
+    def test_no_prompt_is_reachable_when_unattended(self) -> None:
+        self.assertEqual(len(re.findall(r"\bRead-Host\b", self.text)), 1)
+        self.assertRegex(self.function("Read-OperatorAnswer"),
+                         r"(?s)if \(\$Unattended\) \{\n\s+throw .*?\n\s+\}\n\s+return \(Read-Host \$Prompt\)")
+        for name in ("Wait-ExcelMacros", "Resolve-CompileFallback"):
+            with self.subTest(name):
+                body = self.function(name)
+                self.assertLess(body.index("if ($Unattended) {"), body.index("Read-OperatorAnswer "))
+        # The step calls reach the prompt only through those two functions.
+        self.assertEqual(len(re.findall(r"Wait-ExcelMacros -Excel", self.text)), 1)
+        self.assertEqual(len(re.findall(r"Resolve-CompileFallback\n", self.text)), 1)
+
+
 @unittest.skipUnless(PWSH, "PowerShell 7 (pwsh) is not installed")
 class InvokeGitTests(unittest.TestCase):
     def setUp(self) -> None:
