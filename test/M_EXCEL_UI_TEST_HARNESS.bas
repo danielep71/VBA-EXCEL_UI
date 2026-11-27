@@ -5027,7 +5027,7 @@ Public Function TST_RestoreTitleBarStyle( _
 #End If
 '
 '------------------------------------------------------------------------------
-'                         TST RESTORE TITLE BAR STYLE
+'                           RESTORE TITLE BAR STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write a previously captured window style back, refresh the non-client
@@ -5221,7 +5221,7 @@ Public Sub TST_RecordCleanupFailure( _
     ByRef FailDescription As String)
 '
 '------------------------------------------------------------------------------
-'                          TST RECORD CLEANUP FAILURE
+'                         RECORD STYLE RESTORE FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make a failed entry-style restoration part of the caller's result: the
@@ -5264,6 +5264,9 @@ Public Sub TST_RecordCleanupFailure( _
 ' DEPENDENCIES
 '   - TST_Log
 '
+' NOTES
+'   None
+'
 ' UPDATED
 '   2026-11-06
 '------------------------------------------------------------------------------
@@ -5303,13 +5306,35 @@ Public Sub TST_SafeCloseWorkbook(ByRef TargetWorkbook As Workbook)
 
 '
 '------------------------------------------------------------------------------
-'                           TST SAFE CLOSE WORKBOOK
+'                           CLOSE TEMPORARY WORKBOOK
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Close and release one temporary workbook without saving.
 '
+' WHY THIS EXISTS
+'   A test that creates a temporary workbook needs one place that closes it
+'   without saving and drops the reference, without raising from a cleanup
+'   path.
+'
+' INPUTS
+'   TargetWorkbook
+'     ByRef. The temporary workbook to close. It is Nothing on return.
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   - Closes the workbook with SaveChanges:=False when it is not Nothing.
+'   - Sets TargetWorkbook to Nothing.
+'
 ' ERROR POLICY
 '   - Suppresses cleanup errors locally.
+'
+' DEPENDENCIES
+'   - Workbook.Close
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-08-01
@@ -5329,20 +5354,34 @@ Public Sub TST_SafeCloseWindow(ByRef TargetWindow As Window)
 
 '
 '------------------------------------------------------------------------------
-'                            TST SAFE CLOSE WINDOW
+'                            CLOSE TEMPORARY WINDOW
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Close and release one temporary Excel Window on a best-effort basis
 '
+' WHY THIS EXISTS
+'   A test that opens a temporary window needs one place that closes it and
+'   drops the reference, without raising from a cleanup path.
+'
+' INPUTS
+'   TargetWindow
+'     ByRef. The temporary Window to close. It is Nothing on return.
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Closes the window when it is not Nothing.
+'   - Sets TargetWindow to Nothing.
 '
 ' ERROR POLICY
 '   - Suppresses cleanup errors locally
 '
-' INPUTS / OUTPUTS
-'   TargetWindow
-'     Temporary Window to close and release
+' DEPENDENCIES
+'   - Window.Close
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -5386,7 +5425,7 @@ Public Sub TST_SnapshotState( _
     ByRef TitleBarVisible As Boolean)
 '
 '------------------------------------------------------------------------------
-'                              TST SNAPSHOT STATE
+'                            CAPTURE EXCEL UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Capture the current Excel UI state before the regression harness mutates it
@@ -5395,16 +5434,50 @@ Public Sub TST_SnapshotState( _
 '   Regression tests should attempt to return the user's environment to its
 '   prior state after execution
 '
+' INPUTS
+'   RibbonKnown / RibbonVisible
+'     ByRef outputs. Whether the Ribbon state could be read, and its visibility.
+'
+'   StatusBarVisible / ScrollBarsVisible / FormulaBarVisible
+'     ByRef outputs. Application.DisplayStatusBar, DisplayScrollBars and
+'     DisplayFormulaBar.
+'
+'   WindowCount
+'     ByRef output. Application.Windows.Count.
+'
+'   HeadingsVisible() / WorkbookTabsVisible() / GridlinesVisible()
+'     ByRef outputs. Arrays sized 1 To WindowCount when at least one window
+'     exists, holding DisplayHeadings, DisplayWorkbookTabs and DisplayGridlines
+'     of each window by Application.Windows index.
+'
+'   TitleBarKnown / TitleBarVisible
+'     ByRef outputs. Whether the title-bar state could be read, and its
+'     visibility.
+'
 ' RETURNS
 '   Nothing
+'
+' BEHAVIOR
+'   - Reads the three application-level properties.
+'   - Reads the Ribbon and title-bar state through the best-effort readers, and
+'     logs the reason when either state is unknown.
+'   - Reads the window count. When it is above zero, sizes the three arrays and
+'     reads the three properties of each window by index.
 '
 ' ERROR POLICY
 '   - Does NOT raise to callers
 '   - Best-effort capture; unknown Ribbon or TitleBar state is marked via flags
 '
-' INPUTS / OUTPUTS
-'   [ByRef arguments]
-'     Receive the captured application-level, window-level, and title-bar state
+' DEPENDENCIES
+'   - TST_TryGetRibbonVisible
+'   - TST_TryGetTitleBarVisible
+'   - TST_Log
+'   - Application.DisplayStatusBar, DisplayScrollBars and DisplayFormulaBar
+'   - Application.Windows, with Window.DisplayHeadings, DisplayWorkbookTabs and
+'     DisplayGridlines
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -5490,7 +5563,7 @@ Public Function TST_RestoreState( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                              TST RESTORE STATE
+'                            RESTORE EXCEL UI STATE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Attempt to restore the pre-test Excel UI state after the regression run,
@@ -5702,7 +5775,7 @@ Private Function TST_RestoreTitleBarElement( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        TST RESTORE TITLE BAR ELEMENT
+'                         RESTORE TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restore the captured title-bar visibility through the structured API and
@@ -5723,6 +5796,15 @@ Private Function TST_RestoreTitleBarElement( _
 '   Boolean
 '     TRUE when the structured call reported success.
 '
+' BEHAVIOR
+'   - Calls UI_SetExcelUI_WithResult with TitleBar:=UI_Show when
+'     TitleBarVisible is TRUE, otherwise with UI_Hide.
+'   - Returns TRUE when the call reports success.
+'   - Otherwise adds a restore.TitleBar finding that carries the failure count
+'     and list described by TST_DescribeResultBuffers.
+'   - An error adds a restore.TitleBar finding with the runtime error text and
+'     returns FALSE.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
@@ -5730,6 +5812,9 @@ Private Function TST_RestoreTitleBarElement( _
 '   - UI_SetExcelUI_WithResult
 '   - TST_DescribeResultBuffers
 '   - TST_CertAddFinding
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RestoreState
@@ -5812,7 +5897,7 @@ Private Function TST_RestoreBoolean( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                             TST RESTORE BOOLEAN
+'                           RESTORE BOOLEAN PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write one Boolean property and read it back, reporting a write that failed
@@ -5836,6 +5921,15 @@ Private Function TST_RestoreBoolean( _
 '   Boolean
 '     TRUE when the value was written and read back as written.
 '
+' BEHAVIOR
+'   - Writes Value through TST_TrySetBooleanProperty. When that fails, logs the
+'     miss and adds a finding that says the property could not be restored.
+'   - Otherwise reads the property back through TST_TryGetBooleanProperty. A
+'     failed read adds a finding, and so does a read-back that differs from
+'     Value, naming both values.
+'   - Returns TRUE only when the value was written and read back as written.
+'   - An error adds a "restoration raised" finding and returns FALSE.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
@@ -5843,6 +5937,9 @@ Private Function TST_RestoreBoolean( _
 '   - TST_TrySetBooleanProperty
 '   - TST_TryGetBooleanProperty
 '   - TST_CertAddFinding
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RestoreState
@@ -5921,7 +6018,7 @@ Private Function TST_RestoreWindowBoolean( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST RESTORE WINDOW BOOLEAN
+'                           RESTORE WINDOW PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Restore one Boolean property of the window at a collection index, and
@@ -5945,12 +6042,22 @@ Private Function TST_RestoreWindowBoolean( _
 '   Boolean
 '     TRUE when the value was written and read back as written.
 '
+' BEHAVIOR
+'   - Fetches Application.Windows(WindowIndex) and reads its Caption.
+'   - Restores the property through TST_RestoreBoolean, labelled with the
+'     window index, the caption and PropName.
+'   - An error, such as a window that no longer exists, adds a
+'     restore.<PropName> finding and returns FALSE.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
 ' DEPENDENCIES
 '   - TST_RestoreBoolean
 '   - TST_CertAddFinding
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RestoreState
@@ -6022,7 +6129,7 @@ Public Sub TST_RecordRestoreFailure( _
     ByRef FailDescription As String)
 '
 '------------------------------------------------------------------------------
-'                          TST RECORD RESTORE FAILURE
+'                         RECORD STATE RESTORE FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make a state restoration that did not complete part of the caller's
@@ -6065,6 +6172,9 @@ Public Sub TST_RecordRestoreFailure( _
 ' DEPENDENCIES
 '   - TST_CertEntrySummary
 '   - TST_Log
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_RunRegressionPack
@@ -6127,7 +6237,7 @@ Public Sub TST_WaitUI(ByVal SecondsToWait As Double)
 
 '
 '------------------------------------------------------------------------------
-'                                 TST WAIT UI
+'                            WAIT FOR UI TO SETTLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Give Excel and Windows a short opportunity to settle after a UI state change
@@ -6143,8 +6253,17 @@ Public Sub TST_WaitUI(ByVal SecondsToWait As Double)
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Returns at once when SecondsToWait is not positive.
+'   - Caps the wait at TEST_WAIT_MAX_SECONDS and reads Timer as the baseline.
+'   - Calls DoEvents until TST_TimerElapsedSeconds reaches the capped wait.
+'
 ' ERROR POLICY
 '   - Does NOT raise
+'
+' DEPENDENCIES
+'   - TST_TimerElapsedSeconds
+'   - VBA Timer and DoEvents
 '
 ' NOTES
 '   - A fixed delay, not a wait for a condition. Reaching the end is never a
@@ -6217,7 +6336,7 @@ Public Sub TST_AssertBooleanEquals( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                          TST ASSERT BOOLEAN EQUALS
+'                            ASSERT BOOLEAN EQUALS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raise a descriptive assertion failure when two Boolean values differ
@@ -6239,8 +6358,20 @@ Public Sub TST_AssertBooleanEquals( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Compares Expected with Actual.
+'   - On a difference raises TEST_ERR_BASE + 1, with AssertionName as the
+'     source and "<AssertionName> expected=<Expected> actual=<Actual>" as the
+'     description.
+'
 ' ERROR POLICY
 '   - Raises on mismatch
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6264,7 +6395,7 @@ Public Sub TST_AssertApplicationProperty( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT APPLICATION PROPERTY
+'                         ASSERT APPLICATION PROPERTY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Boolean value of an Application-level property
@@ -6286,8 +6417,21 @@ Public Sub TST_AssertApplicationProperty( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Reads PropertyName from Application through TST_TryGetBooleanProperty.
+'     When the read fails it raises TEST_ERR_BASE + 2, with AssertionName as
+'     the source and the reader's diagnostic in the description.
+'   - Compares the value read with Expected through TST_AssertBooleanEquals.
+'
 ' ERROR POLICY
 '   - Raises on read failure or mismatch
+'
+' DEPENDENCIES
+'   - TST_TryGetBooleanProperty
+'   - TST_AssertBooleanEquals
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6323,7 +6467,7 @@ Public Sub TST_AssertAllWindowsProperty( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT ALL WINDOWS PROPERTY
+'                        ASSERT PROPERTY ON ALL WINDOWS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Boolean value of a Window-level property across all open
@@ -6346,8 +6490,24 @@ Public Sub TST_AssertAllWindowsProperty( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - For each window of Application.Windows, reads PropertyName through
+'     TST_TryGetBooleanProperty. When the read fails it raises
+'     TEST_ERR_BASE + 3, naming the window caption and the reader's diagnostic.
+'   - Compares each value read with Expected through TST_AssertBooleanEquals,
+'     with the window caption appended to AssertionName.
+'   - With no open window it asserts nothing.
+'
 ' ERROR POLICY
 '   - Raises on read failure or mismatch
+'
+' DEPENDENCIES
+'   - TST_TryGetBooleanProperty
+'   - TST_AssertBooleanEquals
+'   - Application.Windows
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6387,7 +6547,7 @@ Public Sub TST_AssertRibbonVisible( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                          TST ASSERT RIBBON VISIBLE
+'                           ASSERT RIBBON VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current Ribbon visibility
@@ -6406,8 +6566,21 @@ Public Sub TST_AssertRibbonVisible( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Reads the Ribbon visibility through TST_TryGetRibbonVisible. When the
+'     read fails it raises TEST_ERR_BASE + 4, with AssertionName as the source
+'     and the reader's diagnostic in the description.
+'   - Compares the value read with Expected through TST_AssertBooleanEquals.
+'
 ' ERROR POLICY
 '   - Raises on read failure or mismatch
+'
+' DEPENDENCIES
+'   - TST_TryGetRibbonVisible
+'   - TST_AssertBooleanEquals
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6442,7 +6615,7 @@ Public Sub TST_AssertTitleBarVisible( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                         TST ASSERT TITLE BAR VISIBLE
+'                         ASSERT TITLE BAR VISIBILITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert the current title-bar visibility for the Excel window represented by
@@ -6462,8 +6635,21 @@ Public Sub TST_AssertTitleBarVisible( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Reads the title-bar visibility through TST_TryGetTitleBarVisible. When
+'     the read fails it raises TEST_ERR_BASE + 5, with AssertionName as the
+'     source and the reader's diagnostic in the description.
+'   - Compares the value read with Expected through TST_AssertBooleanEquals.
+'
 ' ERROR POLICY
 '   - Raises on read failure or mismatch
+'
+' DEPENDENCIES
+'   - TST_TryGetTitleBarVisible
+'   - TST_AssertBooleanEquals
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-07-25
@@ -6500,7 +6686,7 @@ Public Sub TST_AssertResultSuccess( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                          TST ASSERT RESULT SUCCESS
+'                            ASSERT RESULT SUCCESS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert that the standard-module result buffers represent a clean success
@@ -6526,8 +6712,18 @@ Public Sub TST_AssertResultSuccess( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_ERR_BASE + 20 when Succeeded is FALSE.
+'   - Raises TEST_ERR_BASE + 21 when FailureCount is not 0.
+'   - Raises TEST_ERR_BASE + 22 when FailureList is not Empty.
+'   - Each error has AssertionName as its source and appends the text of
+'     TST_DescribeResultBuffers.
+'
 ' ERROR POLICY
 '   - Raises on mismatch, with the failure count and list the call returned
+'
+' DEPENDENCIES
+'   - TST_DescribeResultBuffers
 '
 ' NOTES
 '   The failure list is the only record of which element failed and why.
@@ -6586,11 +6782,16 @@ Public Sub TST_AssertSingleFailurePrefix( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT SINGLE FAILURE PREFIX
+'                         ASSERT SINGLE FAILURE PREFIX
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert a structured-result failure containing exactly one ordered entry
 '   whose text begins with the expected stage prefix.
+'
+' WHY THIS EXISTS
+'   Several structured-result regressions assert the same shape of failure.
+'   One helper keeps the flag, count, list shape and entry-prefix checks
+'   identical across them.
 '
 ' INPUTS
 '   Succeeded
@@ -6608,8 +6809,23 @@ Public Sub TST_AssertSingleFailurePrefix( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_ERR_BASE + 60 when Succeeded is TRUE.
+'   - Raises TEST_ERR_BASE + 61 when FailureCount is not 1.
+'   - Raises TEST_ERR_BASE + 62 when FailureList is not an array.
+'   - Raises TEST_ERR_BASE + 63 when the list is not one 1-based entry.
+'   - Raises TEST_ERR_BASE + 64 when the entry does not begin with
+'     ExpectedPrefix.
+'   - Each error has AssertionName as its source.
+'
 ' ERROR POLICY
 '   - Raises on mismatch, with the failure count and list the call returned.
+'
+' DEPENDENCIES
+'   - TST_DescribeResultBuffers
+'
+' NOTES
+'   None
 '
 ' HISTORY
 '   2026-11-06 - Messages carry the failure count and list (#135).
@@ -6672,7 +6888,7 @@ Public Sub TST_AssertFailureResultExact( _
     ByVal AssertionName As String)
 '
 '------------------------------------------------------------------------------
-'                       TST ASSERT FAILURE RESULT EXACT
+'                         ASSERT EXACT FAILURE RESULT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Assert a failed structured result exactly: the flag, the count, the shape
@@ -6700,11 +6916,24 @@ Public Sub TST_AssertFailureResultExact( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   - Raises TEST_ERR_BASE + 90 when Succeeded is TRUE.
+'   - Raises TEST_ERR_BASE + 91 when FailureCount differs from ExpectedCount.
+'   - When ExpectedEntry is empty, raises TEST_ERR_BASE + 92 unless
+'     FailureList is Empty.
+'   - Otherwise raises TEST_ERR_BASE + 93 unless FailureList is a String
+'     array, + 94 unless it holds one 1-based entry, and + 95 when that entry
+'     differs from ExpectedEntry in a binary comparison.
+'   - Each error has AssertionName as its source.
+'
 ' ERROR POLICY
 '   - Raises on mismatch, with the failure count and list the call returned.
 '
 ' DEPENDENCIES
 '   - TST_DescribeResultBuffers
+'
+' NOTES
+'   None
 '
 ' UPDATED
 '   2026-11-14
@@ -6776,7 +7005,7 @@ Public Function TST_DescribeResultBuffers( _
     As String
 '
 '------------------------------------------------------------------------------
-'                         TST DESCRIBE RESULT BUFFERS
+'                           DESCRIBE RESULT BUFFERS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Render a structured result's failure count and failure list as one bounded
@@ -6802,6 +7031,14 @@ Public Function TST_DescribeResultBuffers( _
 '     description of a value that is not a usable array, or the entries in
 '     brackets joined by " || ". Entries are cut off after
 '     TST_RESULT_LIST_MAX_CHARS characters and the cut is marked.
+'
+' BEHAVIOR
+'   - Starts from "FailureCount=<n> | FailureList=<unreadable>".
+'   - Renders FailureList as Empty, as "<type, not an array>", as "<array
+'     without bounds>", or as its entries in brackets joined by " || ", each
+'     rendered through TST_DescribeListEntry.
+'   - Cuts the rendered entries after 1000 characters and marks the cut.
+'   - Returns "FailureCount=<n> | FailureList=<list>".
 '
 ' ERROR POLICY
 '   - Does not raise. It runs while an assertion is being raised, and must not
@@ -6913,7 +7150,7 @@ Private Function TST_DescribeListEntry( _
     As String
 '
 '------------------------------------------------------------------------------
-'                           TST DESCRIBE LIST ENTRY
+'                             DESCRIBE LIST ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Render one failure-list entry as text, whatever it holds.
