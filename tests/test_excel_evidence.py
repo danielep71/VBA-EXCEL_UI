@@ -44,6 +44,14 @@ RUNNER = (
 )
 RECORDING_DETAIL = ("certification recording FAILED | failures=1"
                     " | first: growing the unit-outcome buffer | error 7")
+UNVERIFIED = [
+    {"seq": 1, "code": "ribbon.scope",
+     "detail": "the Ribbon is per window and every read acts on the active window"},
+    {"seq": 2, "code": "frameRegistry.scope",
+     "detail": "the read-only seam cannot enumerate the registry entries of windows opened during the run"},
+]
+FINDING = {"seq": 1, "code": "app.DisplayStatusBar", "detail": "DisplayStatusBar changed from True to False"}
+CLEANUP_KEYS = ("cleanupFindings", "cleanupUnverified", "cleanupChecked")
 DEVELOPMENT = ["src/M_EXCEL_UI.bas", "test/M_EXCEL_UI_TEST_CERTIFICATION.bas"]
 MANIFEST = {
     "schema_version": 1,
@@ -97,8 +105,10 @@ def report_text(result: dict[str, Any]) -> str:
     lines += [f"  {'PASS' if unit['passed'] else 'FAIL'}  {unit['name']}"
               + (f" | {unit['detail']}" if unit["detail"] else "") for unit in result["unitResults"]]
     lines += [f"  SKIP  {item}" for item in result["skipDetail"]]
-    if result["cleanupDetail"]:
+    lines += [f"  CLEANUP  {item['code']} | {item['detail']}" for item in result.get("cleanupFindings", [])]
+    if result["cleanupDetail"] and not result.get("cleanupFindings"):
         lines.append(f"  CLEANUP  {result['cleanupDetail']}")
+    lines += [f"  UNVERIFIED  {item['code']} | {item['detail']}" for item in result.get("cleanupUnverified", [])]
     return "\r\n".join(lines) + "\r\n"
 
 
@@ -111,7 +121,8 @@ def documents(root: Path, sha: str) -> dict[str, Any]:
         "component": "VBA Excel UI", "schema": 1, "timestampLocal": "2026-11-06 10:03:00",
         "excelVersion": "16.0", "excelBuild": "17928", "operatingSystem": "Windows (64-bit) NT 10.00",
         "bitness": "x64", "vbaGeneration": "VBA7", "units": len(UNITS), "unitsFailed": 0, "skipped": 0,
-        "cleanup": "OK", "cleanupDetail": "", "recording": "OK", "recordingDetail": "",
+        "cleanup": "OK", "cleanupDetail": "", "cleanupFindings": [], "cleanupUnverified": copy.deepcopy(UNVERIFIED),
+        "cleanupChecked": 14, "recording": "OK", "recordingDetail": "",
         "complete": True, "passed": True,
         "unitResults": [{"name": unit, "passed": True, "detail": ""} for unit in UNITS],
         "skipDetail": [],
@@ -242,6 +253,20 @@ class PassingBundleTests(Fixture):
             del docs["certification.json"]["recording"]
             del docs["certification.json"]["recordingDetail"]
         self.bundle_with(earlier_runner)
+        self.assertEqual(self.failed(), {})
+
+    def test_a_document_without_itemized_cleanup_passes(self) -> None:
+        def earlier_runner(docs: dict[str, Any]) -> None:
+            for key in CLEANUP_KEYS:
+                del docs["certification.json"][key]
+        self.bundle_with(earlier_runner)
+        self.assertNotIn("UNVERIFIED", (self.bundle / "certification.txt").read_text(encoding="cp1252"))
+        self.assertEqual(self.failed(), {})
+
+    def test_unverified_surfaces_do_not_fail_a_clean_cleanup(self) -> None:
+        self.bundle_with()
+        report = (self.bundle / "certification.txt").read_text(encoding="cp1252")
+        self.assertIn("  UNVERIFIED  ribbon.scope | ", report)
         self.assertEqual(self.failed(), {})
 
     def test_an_ansi_report_with_a_non_ascii_detail_is_read(self) -> None:
@@ -407,6 +432,79 @@ class NegativeTests(Fixture):
             docs["certification.json"].update(cleanup="FAILED", cleanupDetail="workbook count 2, expected 1")
         self.bundle_with(leaked)
         self.assert_fails("verdict", "cleanup FAILED: workbook count 2")
+
+    @staticmethod
+    def leaked_status_bar(docs: dict[str, Any]) -> None:
+        docs["certification.json"].update(
+            passed=False, cleanup="FAILED", cleanupDetail=FINDING["detail"], cleanupFindings=[dict(FINDING)])
+
+    def test_an_itemized_cleanup_failure_fails_and_names_the_finding(self) -> None:
+        self.bundle_with(self.leaked_status_bar)
+        failures = self.failed()
+        self.assertIn("cleanup FAILED: DisplayStatusBar changed from True to False", failures["verdict"])
+        self.assertNotIn("report", failures)
+
+    def test_a_clean_cleanup_that_holds_a_finding_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(cleanupFindings=[dict(FINDING)]))
+        self.assert_fails("verdict", "cleanup is OK but cleanupFindings is not empty")
+
+    def test_a_clean_cleanup_that_compared_nothing_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(cleanupChecked=0))
+        self.assert_fails("verdict", "compared nothing")
+
+    def test_a_failed_cleanup_without_a_finding_or_detail_fails(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].update(passed=False, cleanup="FAILED"))
+        self.assert_fails("verdict", "cleanup FAILED without a finding or a cleanupDetail")
+
+    def test_some_cleanup_fields_without_the_others_fail(self) -> None:
+        self.bundle_with(lambda docs: docs["certification.json"].pop("cleanupChecked"))
+        self.assert_fails("verdict", "cleanup is itemized but has no cleanupChecked")
+
+    def test_a_finding_that_is_not_numbered_in_order_fails(self) -> None:
+        def second(docs: dict[str, Any]) -> None:
+            self.leaked_status_bar(docs)
+            docs["certification.json"]["cleanupFindings"][0]["seq"] = 2
+        self.bundle_with(second)
+        self.assert_fails("verdict", "cleanupFindings[0] must have seq 1")
+
+    def test_a_finding_without_a_code_or_a_detail_fails(self) -> None:
+        def codeless(docs: dict[str, Any]) -> None:
+            self.leaked_status_bar(docs)
+            docs["certification.json"]["cleanupFindings"][0]["code"] = " "
+        self.bundle_with(codeless)
+        self.assert_fails("verdict", "cleanupFindings[0] has no code")
+
+        def detailless(docs: dict[str, Any]) -> None:
+            self.leaked_status_bar(docs)
+            docs["certification.json"]["cleanupFindings"][0]["detail"] = ""
+        self.bundle_with(detailless)
+        self.assert_fails("verdict", "cleanupFindings[0] has no detail")
+
+    def test_a_report_that_omits_a_finding_fails(self) -> None:
+        result = copy.deepcopy(self.base)
+        self.leaked_status_bar(result)
+        report = report_text(result["certification.json"]).replace(
+            f"  CLEANUP  {FINDING['code']} | {FINDING['detail']}\r\n", "")
+        self.bundle_with(self.leaked_status_bar, report=report)
+        self.assert_fails("report", "do not begin with the findings")
+
+    def test_a_clean_report_with_a_cleanup_line_fails(self) -> None:
+        lines = report_text(self.base["certification.json"]).split("\r\n")
+        lines.insert(6, "  CLEANUP  app.DisplayStatusBar | DisplayStatusBar changed from True to False")
+        self.bundle_with(report="\r\n".join(lines))
+        self.assert_fails("report", "CLEANUP lines")
+
+    def test_a_report_that_omits_an_unverified_surface_fails(self) -> None:
+        report = report_text(self.base["certification.json"]).replace(
+            f"  UNVERIFIED  {UNVERIFIED[0]['code']} | {UNVERIFIED[0]['detail']}\r\n", "")
+        self.bundle_with(report=report)
+        self.assert_fails("report", "UNVERIFIED lines")
+
+    def test_a_report_with_an_extra_unverified_surface_fails(self) -> None:
+        lines = report_text(self.base["certification.json"]).split("\r\n")
+        lines.insert(6, "  UNVERIFIED  ribbon.exit | not compared")
+        self.bundle_with(report="\r\n".join(lines))
+        self.assert_fails("report", "UNVERIFIED lines")
 
     @staticmethod
     def recording_failed(docs: dict[str, Any]) -> None:

@@ -45,13 +45,19 @@ Option Private Module
 ' OWNERSHIP MODEL
 '   This module claims exactly five GWL_STYLE bits and nothing else:
 '
-'       WS_CAPTION      &HC00000    caption bar
+'       WS_CAPTION      &HC00000    caption bar (WS_BORDER Or WS_DLGFRAME)
 '       WS_SYSMENU      &H80000     system menu
 '       WS_THICKFRAME   &H40000     sizing frame
 '       WS_MINIMIZEBOX  &H20000     minimize box
 '       WS_MAXIMIZEBOX  &H10000     maximize box
 '
 '   Their union is TITLEBAR_OWNED_STYLE_MASK (&HCF0000).
+'
+'   WS_CAPTION is a composite: WS_BORDER (&H800000) Or WS_DLGFRAME (&H400000).
+'   A title bar is visible only when BOTH bits are set. A style carrying just
+'   one of them is a plain border or a dialog frame, not a caption, so every
+'   visibility decision in this module tests the complete mask,
+'   (style And WS_CAPTION) = WS_CAPTION, and never "any caption bit".
 '
 '   Restoring a whole previously captured GWL_STYLE value would overwrite
 '   unrelated style changes made later by Excel, another add-in or caller code.
@@ -188,6 +194,12 @@ Option Private Module
 '     drift apart.
 '
 ' UPDATED
+'   2026-11-18 - Every title-bar visibility decision now tests the complete
+'                WS_CAPTION mask, (style And WS_CAPTION) = WS_CAPTION: the
+'                visibility reader, the show fallback condition and both show
+'                readbacks. A baseline or frame that carries only WS_BORDER or
+'                only WS_DLGFRAME is no longer taken for a visible caption
+'                (#6).
 '   2026-11-16 - Replaced the UI_InternalSimulateFrameHandleReuse seam, which
 '                also changed the stored hWnd, with
 '                UI_InternalSimulateFrameGenerationReuse, which keeps the hWnd
@@ -788,7 +800,8 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
 '     Top-level window to read.
 '
 '   IsVisible
-'     ByRef. Receives True when WS_CAPTION is set.
+'     ByRef. Receives True when the complete WS_CAPTION mask is set, that is
+'     when both WS_BORDER and WS_DLGFRAME are set.
 '
 '   FailMsg
 '     ByRef diagnostic message. Empty on success.
@@ -801,7 +814,9 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
 ' BEHAVIOR
 '   - Rejects a handle that no longer refers to a window.
 '   - Reads GWL_STYLE using the API matching the host bitness.
-'   - Reports visibility from the WS_CAPTION bit alone.
+'   - Reports visibility from the complete WS_CAPTION mask:
+'     (style And WS_CAPTION) = WS_CAPTION. A style with only WS_BORDER or only
+'     WS_DLGFRAME reports False.
 '
 ' ERROR POLICY
 '   - Does not raise.
@@ -817,10 +832,11 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
 '   - UI_TryGetTitleBarVisible
 '
 ' NOTES
-'   WS_CAPTION is the visibility signal; the other four owned bits travel with
-'   it but do not participate in this decision.
+'   The complete WS_CAPTION mask is the visibility signal; the other four owned
+'   bits travel with it but do not participate in this decision.
 '
 ' UPDATED
+'   2026-11-18 - Tests the complete mask instead of any caption bit (#6).
 '   2026-08-19
 '==============================================================================
 '
@@ -867,8 +883,9 @@ Public Function UI_TryGetTitleBarVisibleForHwnd( _
 '------------------------------------------------------------------------------
 ' RETURN RESULT
 '------------------------------------------------------------------------------
-    'Visibility is carried by the caption bit alone
-        IsVisible = ((StyleValue And WS_CAPTION) <> 0)
+    'Visibility requires the complete caption mask. WS_CAPTION is WS_BORDER Or
+    'WS_DLGFRAME, and a style carrying only one of the two is not a caption.
+        IsVisible = ((StyleValue And WS_CAPTION) = WS_CAPTION)
         UI_TryGetTitleBarVisibleForHwnd = True
 
 '------------------------------------------------------------------------------
@@ -908,7 +925,8 @@ Public Function UI_TryGetTitleBarVisible( _
 '
 ' INPUTS
 '   IsVisible
-'     ByRef. Receives True when WS_CAPTION is set on the active window.
+'     ByRef. Receives True when the complete WS_CAPTION mask is set on the
+'     active window.
 '
 '   FailMsg
 '     ByRef diagnostic message. Empty on success.
@@ -1959,7 +1977,16 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 '   - Refreshes the baseline from the live style while this component does not
 '     own a hidden state for the window.
 '   - Hiding supplies zero owned bits; showing supplies the stored baseline.
+'   - A show uses the stored baseline only when one was captured and it
+'     carries the complete WS_CAPTION mask. A missing baseline, an all-zero
+'     one, a non-zero one without a caption and one with only WS_BORDER or only
+'     WS_DLGFRAME all fall back to the full owned frame, merged into the live
+'     style so every unrelated bit is preserved.
 '   - Short-circuits when no owned bit would change and nothing is owed.
+'   - Confirms every show, including the short circuit, from a live style
+'     readback that carries the complete WS_CAPTION mask. A show whose
+'     readback lacks it returns False with a TitleBar diagnostic, whatever the
+'     merge computed.
 '   - Records the owned bits left behind wherever it adopts ownership, whether
 '     it wrote them or found them already in place, so the registry can later
 '     prove the entry against the window.
@@ -1985,10 +2012,12 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 ' NOTES
 '   Registry state lives only in module memory. A VBA project reset discards it
 '   while the window styles themselves survive in the running Excel process, so
-'   the two can disagree after a reset. The zero-baseline fallback below is what
-'   keeps a show a real recovery path in that situation.
+'   the two can disagree after a reset. The visible-baseline fallback below is
+'   what keeps a show a real recovery path in that situation.
 '
 ' UPDATED
+'   2026-11-18 - The fallback condition and both readbacks test the complete
+'                WS_CAPTION mask instead of any caption bit (#6).
 '   2026-08-21 - Recorded the owned bits behind every adoption of ownership.
 '   2026-08-19
 '==============================================================================
@@ -2095,14 +2124,18 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
     'the helper preserves every unrelated bit from CurrentStyle.
         If IsVisible Then
 
-            'A show must never re-apply an all-zero baseline. That happens when
-            'the first title-bar call after a VBA project reset is a show while
-            'the frame is already hidden: the capture above then records zero
-            'owned bits, the merge becomes a no-op, and the short circuit below
-            'reports success while the title bar stays hidden. Falling back to
-            'the full owned frame keeps UI_ShowExcelUI a real recovery path.
+            'A show must never re-apply a baseline that is not a visible frame.
+            'That happens when the first title-bar call after a VBA project
+            'reset is a show while the frame is already hidden: the capture
+            'above then records zero owned bits, the merge becomes a no-op,
+            'and the short circuit below would report success while the title
+            'bar stays hidden. A non-zero baseline without the caption, and
+            'one with only WS_BORDER or only WS_DLGFRAME, fail the same way.
+            'WS_CAPTION is a composite, so the baseline is usable only when
+            'the complete mask is present. Falling back to the full owned
+            'frame keeps UI_ShowExcelUI a real recovery path.
                 If Not m_FrameStates(Slot).HasBaseline _
-                   Or (RestoreBits And WS_CAPTION) = 0 Then
+                   Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then
                     RestoreBits = TITLEBAR_DEFAULT_STYLE_BITS
                 End If
 
@@ -2132,7 +2165,8 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
                 m_FrameStates(Slot).ComponentHidden = Not IsVisible
 
             'A style-equality no-op is not proof that a show achieved a visible
-            'caption. Read the live frame again before reporting success.
+            'caption. Read the live frame again and require the complete
+            'WS_CAPTION mask before reporting success.
                 If IsVisible Then
                     If Not UI_TryGetWindowStyle( _
                         TargetHwnd, VerifiedStyle, FailMsg) Then
@@ -2140,7 +2174,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
                         GoTo Safe_Exit
                     End If
 
-                    If (VerifiedStyle And WS_CAPTION) = 0 Then
+                    If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then
                         FailMsg = _
                             "title-bar show completed without a visible caption"
                         GoTo Safe_Exit
@@ -2183,7 +2217,8 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
 ' VERIFY SHOW RESULT
 '------------------------------------------------------------------------------
     'A successful API write and repaint still do not prove the requested state.
-    'Confirm WS_CAPTION from the live frame before publishing success.
+    'Confirm the complete WS_CAPTION mask from the live frame before
+    'publishing success.
         If IsVisible Then
             If Not UI_TryGetWindowStyle( _
                 TargetHwnd, VerifiedStyle, FailMsg) Then
@@ -2191,7 +2226,7 @@ Private Function UI_TrySetTitleBarVisibleForHwndWorker( _
                 GoTo Safe_Exit
             End If
 
-            If (VerifiedStyle And WS_CAPTION) = 0 Then
+            If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then
                 FailMsg = "title-bar show did not produce a visible caption"
                 GoTo Safe_Exit
             End If

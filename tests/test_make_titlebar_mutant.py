@@ -1,9 +1,11 @@
-"""The #6 title-bar negative control that tools/make_titlebar_mutant.py writes (#66).
+"""The #6 title-bar negative controls that tools/make_titlebar_mutant.py writes (#66).
 
-The control must differ from src/M_EXCEL_UI_TITLEBAR.bas in the captionless
-fallback condition and nowhere else, keep the module identity and line
+Each control must differ from src/M_EXCEL_UI_TITLEBAR.bas in the conditions
+its variant names and nowhere else, keep the module identity and line
 endings the synchronizer relies on, land only in the ignored scratch folder,
-and refuse loudly when it cannot be produced exactly.
+and refuse loudly when it cannot be produced exactly. The any-bit controls
+put (style And WS_CAPTION) <> 0 back for the complete-mask test, and a small
+model of the show decision records which fixture each control gets wrong.
 """
 
 import difflib
@@ -41,7 +43,7 @@ class MutantContent(unittest.TestCase):
         self.assertEqual(tag, "replace")
         self.assertEqual(lines(self.source)[a0:a1], [
             "                If Not m_FrameStates(Slot).HasBaseline _",
-            "                   Or (RestoreBits And WS_CAPTION) = 0 Then",
+            "                   Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then",
         ])
         self.assertEqual(lines(self.control)[b0:b1], ["                If RestoreBits = 0 Then"])
 
@@ -120,6 +122,178 @@ class MutantFile(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("exactly once", err)
         self.assertFalse((self.repo / ".mutation-scratch").exists())
+
+
+class VariantContent(unittest.TestCase):
+    """Each variant replaces exactly the conditions it names, and no others."""
+
+    EXPECTED = {
+        "v112": [
+            ["                If Not m_FrameStates(Slot).HasBaseline _",
+             "                   Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then"],
+        ],
+        "fallback": [["                   Or (RestoreBits And WS_CAPTION) <> WS_CAPTION Then"]],
+        "reader": [["        IsVisible = ((StyleValue And WS_CAPTION) = WS_CAPTION)"]],
+        "readbacks": [
+            ["                    If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then"],
+            ["            If (VerifiedStyle And WS_CAPTION) <> WS_CAPTION Then"],
+        ],
+    }
+
+    def setUp(self) -> None:
+        self.source = SOURCE.read_bytes()
+
+    def changes(self, variant: str) -> list[tuple[list[str], list[str]]]:
+        control = mutant.mutate(self.source, variant)
+        matcher = difflib.SequenceMatcher(a=lines(self.source), b=lines(control), autojunk=False)
+        return [(lines(self.source)[a0:a1], lines(control)[b0:b1])
+                for tag, a0, a1, b0, b1 in matcher.get_opcodes() if tag != "equal"]
+
+    def test_each_variant_changes_only_its_conditions(self) -> None:
+        for variant, expected in self.EXPECTED.items():
+            with self.subTest(variant=variant):
+                self.assertEqual([old for old, _ in self.changes(variant)], expected)
+
+    def test_the_any_bit_controls_put_the_any_bit_test_back(self) -> None:
+        for variant in ("fallback", "reader", "readbacks"):
+            for _old, new in self.changes(variant):
+                with self.subTest(variant=variant):
+                    self.assertEqual(len(new), 1)
+                    self.assertRegex(new[0], r"\(\w+ And WS_CAPTION\) (= 0|<> 0)")
+
+    def test_anybit_is_the_union_of_the_three_any_bit_variants(self) -> None:
+        union = [pair for variant in ("fallback", "reader", "readbacks") for pair in self.changes(variant)]
+        self.assertCountEqual(self.changes("anybit"), union)
+
+    def test_every_variant_keeps_identity_and_line_endings(self) -> None:
+        for variant in mutant.VARIANTS:
+            with self.subTest(variant=variant):
+                control = mutant.mutate(self.source, variant)
+                self.assertTrue(control.startswith(b'Attribute VB_Name = "M_EXCEL_UI_TITLEBAR"\r\n'))
+                self.assertEqual(control.count(b"\n"), control.count(b"\r\n"))
+                control.decode("ascii")
+                self.assertNotEqual(control, self.source)
+
+    def test_every_replaced_condition_is_in_its_own_procedure(self) -> None:
+        text = self.source.decode("ascii")
+        reader = text[text.index("Public Function UI_TryGetTitleBarVisibleForHwnd("):]
+        reader = reader[:reader.index("End Function")]
+        worker = text[text.index("Private Function UI_TrySetTitleBarVisibleForHwndWorker("):]
+        worker = worker[:worker.index("End Function")]
+        self.assertIn(mutant.READER_CURRENT.decode("ascii"), reader)
+        for current in (mutant.FALLBACK_CURRENT, mutant.NOOP_CURRENT, mutant.WRITE_CURRENT):
+            self.assertIn(current.decode("ascii"), worker)
+
+    def test_an_unknown_variant_is_refused(self) -> None:
+        with self.assertRaisesRegex(mutant.MutantError, "unknown variant"):
+            mutant.mutate(self.source, "nope")
+
+    def test_each_variant_reports_a_line_for_every_condition(self) -> None:
+        for variant, replacements in mutant.VARIANTS.items():
+            with self.subTest(variant=variant):
+                found = mutant.mutated_lines(self.source, variant)
+                self.assertEqual(len(found), len(replacements))
+                self.assertTrue(all(line > 0 for _label, line in found))
+
+    def test_a_partly_missing_variant_is_refused(self) -> None:
+        changed = self.source.replace(mutant.WRITE_CURRENT, b"")
+        with self.assertRaisesRegex(mutant.MutantError, "post-write readback exactly once"):
+            mutant.mutate(changed, "readbacks")
+
+
+class ShowDecisionModel(unittest.TestCase):
+    """A model of the show decision, to record what each control gets wrong.
+
+    This is a Python model of the predicates in UI_TrySetTitleBarVisibleForHwndWorker
+    and UI_TryGetTitleBarVisibleForHwnd, not Excel. The fixtures are the live
+    owned bits the Excel cases write; the expectations are from the contract:
+    a show succeeds only with a complete caption on the frame afterwards.
+    """
+
+    BORDER, DLGFRAME, CAPTION, OWNED = 0x800000, 0x400000, 0xC00000, 0xCF0000
+    UNRELATED = 0x16000000
+    FIXTURES = {
+        "ZeroBaseline": 0,
+        "CaptionlessBaseline": 0x40000,
+        "BorderOnly": BORDER,
+        "DlgFrameOnly": DLGFRAME,
+        "VisibleNoOp": OWNED,
+        "ForeignCaption": 0xC80000,
+    }
+    ANY_BIT = {
+        "fallback": {"fallback"},
+        "reader": {"reader"},
+        "readbacks": {"noop", "write"},
+        "anybit": {"fallback", "reader", "noop", "write"},
+    }
+
+    def has_caption(self, style: int, any_bit: bool) -> bool:
+        masked = style & self.CAPTION
+        return masked != 0 if any_bit else masked == self.CAPTION
+
+    def show(self, owned: int, any_bit: set[str]) -> tuple[bool, int, str]:
+        """Return success, the live style afterwards and the diagnostic."""
+        current = self.UNRELATED | owned
+        restore = current & self.OWNED
+        if not self.has_caption(restore, "fallback" in any_bit):
+            restore = self.OWNED
+        new = (current & ~self.OWNED) | restore
+        if new == current:
+            if not self.has_caption(new, "noop" in any_bit):
+                return False, new, "title-bar show completed without a visible caption"
+            return True, new, ""
+        if not self.has_caption(new, "write" in any_bit):
+            return False, new, "title-bar show did not produce a visible caption"
+        return True, new, ""
+
+    def wrong(self, variant: str | None) -> dict[str, str]:
+        any_bit = self.ANY_BIT.get(variant or "", set())
+        out: dict[str, str] = {}
+        for name, owned in self.FIXTURES.items():
+            success, live, message = self.show(owned, any_bit)
+            if not success:
+                out[name] = f"reported failure: {message}"
+            elif not self.has_caption(live, False):
+                out[name] = "false success over a partial caption"
+            elif (live & ~self.OWNED) != self.UNRELATED:
+                out[name] = "changed an unrelated bit"
+        return out
+
+    def test_the_complete_mask_is_right_for_every_fixture(self) -> None:
+        self.assertEqual(self.wrong(None), {})
+
+    def test_foreign_and_visible_frames_are_left_as_found(self) -> None:
+        for name in ("VisibleNoOp", "ForeignCaption"):
+            owned = self.FIXTURES[name]
+            self.assertEqual(self.show(owned, set())[1] & self.OWNED, owned)
+
+    def test_a_partial_mask_fails_the_any_bit_fallback_loudly(self) -> None:
+        wrong = self.wrong("fallback")
+        self.assertEqual(sorted(wrong), ["BorderOnly", "DlgFrameOnly"])
+        for message in wrong.values():
+            self.assertEqual(message, "reported failure: title-bar show completed without a visible caption")
+
+    def test_the_full_any_bit_state_reports_success_over_a_partial_caption(self) -> None:
+        wrong = self.wrong("anybit")
+        self.assertEqual(wrong, {"BorderOnly": "false success over a partial caption",
+                                 "DlgFrameOnly": "false success over a partial caption"})
+
+    def test_the_readbacks_alone_are_defence_in_depth(self) -> None:
+        # With the fallback condition right, a show merges the full frame, so
+        # neither readback can see a partial caption: no fixture separates them.
+        self.assertEqual(self.wrong("readbacks"), {})
+
+    def test_the_any_bit_reader_reports_a_partial_mask_as_visible(self) -> None:
+        for owned in (self.BORDER, self.DLGFRAME):
+            self.assertTrue(self.has_caption(self.UNRELATED | owned, True))
+            self.assertFalse(self.has_caption(self.UNRELATED | owned, False))
+
+    def test_the_two_bit_harness_predicate_agrees_with_the_mask_test(self) -> None:
+        # The harness decides visibility from WS_BORDER and WS_DLGFRAME
+        # separately; it must agree with (style And WS_CAPTION) = WS_CAPTION.
+        for style in range(0, 0x1000000, 0x10000):
+            two_bit = bool(style & self.BORDER) and bool(style & self.DLGFRAME)
+            self.assertEqual(two_bit, self.has_caption(style, False), hex(style))
 
 
 class ScratchFolder(unittest.TestCase):
