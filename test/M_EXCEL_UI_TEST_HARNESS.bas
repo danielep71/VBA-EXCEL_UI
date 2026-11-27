@@ -2689,7 +2689,7 @@ Private Function TST_CertBuildInventoryLists( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        TST CERT BUILD INVENTORY LISTS
+'                         LIST CASE INVENTORY SECTIONS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read the expected cases, the case starts and statuses and the inventory
@@ -2724,6 +2724,27 @@ Private Function TST_CertBuildInventoryLists( _
 '              counts disagree with the entries; a record whose buffers
 '              disagree was flagged by TST_CertBuildEntryLists already.
 '
+' BEHAVIOR
+'   - Empties the six outputs. When TST_CertRecordIsConsistent rejects the
+'     record it returns FALSE and leaves them empty, without flagging the
+'     record again.
+'   - Reads the entries once, in recording order. An expected entry adds an
+'     expectedCases member and an EXPECTED line. A case start opens a case row.
+'     A case status fills the latest started row of that case that has no
+'     status, or becomes a NO-START row of its own. An inventory entry adds an
+'     inventoryFindings member and an INVENTORY line. Unit, skip, finding and
+'     unverified entries are left to TST_CertBuildEntryLists, and any other
+'     kind stops the pass.
+'   - Checks that the entries read match the expected, start, status and
+'     inventory counts of the record.
+'   - When the counts match, writes one caseResults member and one CASE line
+'     per row, with the unit from TST_CertExpectedUnit and the status
+'     NO-RESULT for a row that has none, and returns TRUE.
+'   - On a mismatch, flags the record with TEST_CERT_RECFAIL_INVARIANT and
+'     empties every output.
+'   - An error flags the record with TEST_CERT_RECFAIL_EVIDENCE and empties
+'     every output.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
@@ -2732,6 +2753,9 @@ Private Function TST_CertBuildInventoryLists( _
 '   - TST_CertExpectedUnit
 '   - TST_CertJsonEscape
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -2997,7 +3021,7 @@ Public Function TST_CertTryAppendEntry( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT TRY APPEND ENTRY
+'                          APPEND CERTIFICATION ENTRY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Store one entry in a certification record and publish it only once it is
@@ -3062,6 +3086,9 @@ Public Function TST_CertTryAppendEntry( _
 '   - TST_CertRecordIsConsistent
 '   - TST_CertReserveBuffer
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertRecordEntry
@@ -3203,7 +3230,7 @@ Private Sub TST_CertReserveBuffer( _
     ByVal Needed As Long)
 '
 '------------------------------------------------------------------------------
-'                           TST CERT RESERVE BUFFER
+'                              GROW RECORD BUFFER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Make one record buffer hold at least Needed 1-based elements.
@@ -3239,6 +3266,10 @@ Private Sub TST_CertReserveBuffer( _
 ' DEPENDENCIES
 '   - TST_CertBufferCapacity
 '   - TST_CertTakeRecordFault
+'
+' NOTES
+'   PROC_NAME is deliberately the bare procedure name, without the module
+'   prefix.
 '
 ' CALLED FROM
 '   - TST_CertTryAppendEntry
@@ -3310,7 +3341,7 @@ Private Function TST_CertBufferCapacity( _
     As Long
 '
 '------------------------------------------------------------------------------
-'                           TST CERT BUFFER CAPACITY
+'                             READ BUFFER CAPACITY
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Report how many 1-based elements one record buffer holds.
@@ -3333,8 +3364,22 @@ Private Function TST_CertBufferCapacity( _
 '     for a buffer that is not 1-based, an unknown buffer, or a read that
 '     failed for any other reason.
 '
+' BEHAVIOR
+'   - Starts from -1.
+'   - Reads LBound and UBound of the buffer that BufferId names; an unknown
+'     BufferId leaves the result at -1.
+'   - Returns the upper bound when the lower bound is 1, otherwise -1.
+'   - On error 9, an unallocated buffer, returns 0; on any other error it
+'     returns -1.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None beyond the buffers of the record.
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertReserveBuffer
@@ -3429,7 +3474,7 @@ Private Sub TST_CertMarkRecordFailure( _
     ByVal ErrorNumber As Long)
 '
 '------------------------------------------------------------------------------
-'                         TST CERT MARK RECORD FAILURE
+'                             FLAG RECORD FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Flag a certification record as incomplete.
@@ -3497,7 +3542,7 @@ Public Function TST_CertRecordIsConsistent( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                        TST CERT RECORD IS CONSISTENT
+'                           CHECK RECORD INVARIANTS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Check the invariants of a certification record before anything indexes
@@ -3519,11 +3564,21 @@ Public Function TST_CertRecordIsConsistent( _
 '     EntryCount, and every buffer is either unallocated with EntryCount = 0
 '     or 1-based with an upper bound of at least EntryCount.
 '
+' BEHAVIOR
+'   - Checks that no count is negative and that the eight kind counts add up
+'     to EntryCount.
+'   - When they do, checks that every buffer holds at least EntryCount
+'     elements, through TST_CertBufferCapacity.
+'   - Returns the outcome of those checks, or FALSE when an error stops them.
+'
 ' ERROR POLICY
 '   - Does not raise. A check that cannot complete returns FALSE.
 '
 ' DEPENDENCIES
 '   - TST_CertBufferCapacity
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertTryAppendEntry
@@ -3623,7 +3678,7 @@ Public Sub TST_CertComposeEvidence( _
     ByRef ReportText As String)
 '
 '------------------------------------------------------------------------------
-'                          TST CERT COMPOSE EVIDENCE
+'                        COMPOSE CERTIFICATION EVIDENCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Derive the verdict of a certification record and compose its JSON and
@@ -3693,6 +3748,9 @@ Public Sub TST_CertComposeEvidence( _
 '   - TST_CertBuildTextReport
 '   - TST_CertMarkRecordFailure
 '
+' NOTES
+'   None
+'
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
 '   - TST_CertCheckRecordFault
@@ -3737,7 +3795,7 @@ Public Sub TST_CertComposeEvidence( _
     Dim FailNumber      As Long     'Error number of a failure
 
 '------------------------------------------------------------------------------
-' FAIL CLOSED
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Every output starts as a failure; only a complete pass below changes it
         UnitsFailed = 0
@@ -3894,7 +3952,7 @@ Private Function TST_CertBuildEntryLists( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                          TST CERT BUILD ENTRY LISTS
+'                        LIST UNIT AND CLEANUP SECTIONS
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Read every published entry once and compose the unit, skip, finding and
@@ -3928,6 +3986,22 @@ Private Function TST_CertBuildEntryLists( _
 '     FALSE => the record is flagged, every output is empty and
 '              UnitsFailed is 0.
 '
+' BEHAVIOR
+'   - Empties every output.
+'   - Checks the record through TST_CertRecordIsConsistent; nothing is indexed
+'     before that check passes.
+'   - Reads the entries once, in recording order. A unit adds a unitResults
+'     member and a PASS or FAIL line, and counts a failed unit. A skip adds a
+'     skipDetail member and a SKIP line. A finding adds a cleanupFindings
+'     member, a CLEANUP line and its detail to FindingSummary. An unverified
+'     entry adds a cleanupUnverified member and an UNVERIFIED line. The case
+'     inventory kinds are left to TST_CertBuildInventoryLists, and any other
+'     kind stops the pass.
+'   - Checks that the entries read match the unit, skip, finding and
+'     unverified counts of the record.
+'   - On a match returns TRUE and sets UnitsFailed. Otherwise flags the record
+'     with TEST_CERT_RECFAIL_INVARIANT and empties every output.
+'
 ' ERROR POLICY
 '   - Does not raise.
 '
@@ -3936,6 +4010,9 @@ Private Function TST_CertBuildEntryLists( _
 '   - TST_CertJsonEscape
 '   - TST_CertAppendDetail
 '   - TST_CertMarkRecordFailure
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -4165,7 +4242,7 @@ Private Function TST_CertVerdictLine( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT VERDICT LINE
+'                             COMPOSE VERDICT LINE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compose the RESULT line of a certification run.
@@ -4214,7 +4291,7 @@ Private Function TST_CertRecordingDetail( _
     As String
 '
 '------------------------------------------------------------------------------
-'                          TST CERT RECORDING DETAIL
+'                          DESCRIBE RECORDING FAILURE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Name a certification-recording failure from the scalar fields of the
@@ -4235,8 +4312,21 @@ Private Function TST_CertRecordingDetail( _
 '     followed by " | error <n>" when the failure raised one. When the full
 '     text cannot be composed, the first three words alone.
 '
+' BEHAVIOR
+'   - Starts the text with "certification recording FAILED".
+'   - Maps Rec.RecordFailStage to a phrase; a stage with no phrase reads
+'     "stage <n>".
+'   - Appends " | failures=<count> | first: <phrase>", then " | error <n>"
+'     when Rec.RecordFailError is not 0.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None beyond the scalar fields of the record.
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -4317,7 +4407,7 @@ Public Function TST_CertAppendDetail( _
     As String
 '
 '------------------------------------------------------------------------------
-'                            TST CERT APPEND DETAIL
+'                             JOIN DIAGNOSTIC TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Join cleanup findings into one ordered diagnostic string.
@@ -4337,8 +4427,18 @@ Public Function TST_CertAppendDetail( _
 '   String
 '     The joined findings.
 '
+' BEHAVIOR
+'   - Returns NewDetail when ExistingDetail is empty.
+'   - Otherwise returns ExistingDetail, " | " and NewDetail.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - TST_CertEvaluateCleanup
@@ -4387,7 +4487,7 @@ Public Function TST_CertBuildJsonEvidence( _
     As String
 '
 '------------------------------------------------------------------------------
-'                         TST CERT BUILD JSON EVIDENCE
+'                            COMPOSE JSON EVIDENCE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compose the machine-readable certification result.
@@ -4435,6 +4535,16 @@ Public Function TST_CertBuildJsonEvidence( _
 '     "expectedCases" (every case the manifest lists), "caseResults" (every
 '     case that started, in order, with its one terminal status) and
 '     "inventoryFindings" (every difference between the two).
+'
+' BEHAVIOR
+'   - Takes the VBA generation and the Office bitness from conditional
+'     compilation.
+'   - Writes the environment members: component, schema, local timestamp, Excel
+'     version and build, operating system, bitness and VBA generation.
+'   - Writes the counters and verdict members, including the cleanup and case
+'     inventory arrays and the recording status.
+'   - Adds the unitResults and skipDetail arrays and returns the document as
+'     one line.
 '
 ' ERROR POLICY
 '   - Does not raise. A field that cannot be read is reported as unknown.
@@ -4552,7 +4662,7 @@ Public Function TST_CertJsonEscape( _
     As String
 '
 '------------------------------------------------------------------------------
-'                             TST CERT JSON ESCAPE
+'                               ESCAPE JSON TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Escape the characters that would otherwise make the evidence document
@@ -4572,8 +4682,18 @@ Public Function TST_CertJsonEscape( _
 '   String
 '     The escaped text, without surrounding quotes.
 '
+' BEHAVIOR
+'   - Escapes the backslash first, then the double quote.
+'   - Replaces CR LF, CR and LF with \n and a tab with \t.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertBuildJsonEvidence
@@ -4624,7 +4744,7 @@ Public Function TST_CertBuildTextReport( _
     As String
 '
 '------------------------------------------------------------------------------
-'                          TST CERT BUILD TEXT REPORT
+'                             COMPOSE TEXT REPORT
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Compose the human-readable certification summary.
@@ -4666,8 +4786,25 @@ Public Function TST_CertBuildTextReport( _
 '     CASES summary line, then an EXPECTED line per case the manifest lists, a
 '     CASE line per case that started, and an INVENTORY line per difference.
 '
+' BEHAVIOR
+'   - Writes the heading: the title, the Excel version and build, the
+'     operating system, the local timestamp, a rule of 60 hyphens and the
+'     verdict.
+'   - When Rec.RecordFailed is TRUE, adds a RECORDING line under the verdict.
+'   - Appends the unit, skip and finding lines, a CLEANUP line for
+'     CleanupDetail when it is not empty, then the unverified lines.
+'   - Appends the CASES summary line, then the expected, case and inventory
+'     lines, and returns the report.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   None beyond the Excel Application members Version, Build and
+'   OperatingSystem.
+'
+' NOTES
+'   On Error Resume Next stays in force for the whole body.
 '
 ' CALLED FROM
 '   - TST_CertComposeEvidence
@@ -4756,7 +4893,7 @@ Public Function TST_CertTryWriteEvidence( _
     As Boolean
 '
 '------------------------------------------------------------------------------
-'                         TST CERT TRY WRITE EVIDENCE
+'                             WRITE EVIDENCE FILE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Write one evidence document to the temporary folder.
@@ -4783,8 +4920,21 @@ Public Function TST_CertTryWriteEvidence( _
 '   Boolean
 '     TRUE when the file was written.
 '
+' BEHAVIOR
+'   - Clears PathOut and returns FALSE when the TEMP environment variable is
+'     empty.
+'   - Builds the path as <TEMP>\EXCEL_UI_certification_<yyyymmdd_hhnnss>.<ext>.
+'   - Opens the file for output, prints Content to it and closes it.
+'   - On any error returns FALSE and clears PathOut.
+'
 ' ERROR POLICY
 '   - Does not raise.
+'
+' DEPENDENCIES
+'   - VBA Environ$, FreeFile, Open, Print and Close
+'
+' NOTES
+'   None
 '
 ' CALLED FROM
 '   - Test_EXCEL_UI_RunReleaseCertification
